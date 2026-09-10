@@ -73,11 +73,14 @@ serve:
   # complete replica. Measured on this QB2, 64-token completions:
   #
   #     lanes (dies)      1        2        4
-  #     aggregate     20.97    41.80    79.07 tok/s
-  #     per stream    20.97    20.93    19.85 tok/s
+  #     aggregate     21.95    43.85    80.49 tok/s
+  #     per stream    21.95    21.98    20.29 tok/s
   #
-  # 3.77x at four dies with per-stream latency flat, which is the whole reason the
-  # experts are replicated instead of expert-parallel (see the model's model_config.py).
+  # 3.67x at four dies with per-stream latency flat, which is the whole reason the
+  # experts are replicated instead of expert-parallel. It is also the ONLY way extra
+  # dies help: decode is dispatch-bound at ~8.4 us per program regardless of tensor
+  # size, so tensor parallelism would run the same op count on smaller data and add
+  # collectives. See "Why decode costs what it does" in the model README.
   max_num_seqs: 1
   block_size: 64
   additional_config:
@@ -118,7 +121,7 @@ serve_profiles:
   # opens a 1x1 mesh (1 chips) but hardware 'p300' implies 2"), and all three were run
   # on hardware. But a single instance is a single replica no matter how many dies it
   # opens, so ON A MULTI-DIE BOARD THE HIGHER-THROUGHPUT DEPLOYMENT IS N INSTANCES OF
-  # THE p150 PROFILE, one per die -- 79.07 tok/s aggregate on four dies against 23.38
+  # THE p150 PROFILE, one per die -- 80.49 tok/s aggregate on four dies against 25.62
   # for one four-die instance. The per-profile numbers below are per stream.
   #
   # The whole thing is ~18.2 GB (17.1 GB of bfp4 routed experts, which are 92.5% of
@@ -146,7 +149,7 @@ serve_profiles:
   # alongside a run that shows the profile serving at the new length.
   - name: p150
     hardware: p150                # 1 chip -- the unit a lane is made of
-    mesh_device: P150             # verified: 384.3 ms TTFT, 24.22 tok/s
+    mesh_device: P150             # verified: 378.8 ms TTFT, 25.38 tok/s
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b
@@ -154,7 +157,7 @@ serve_profiles:
 
   - name: p300
     hardware: p300                # 1 dual-chip board = 2 chips
-    mesh_device: P300             # on the host: 385.6 ms TTFT, 24.18 tok/s (one replica)
+    mesh_device: P300             # on the host: 380.9 ms TTFT, 25.65 tok/s (one replica)
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b
@@ -170,7 +173,7 @@ serve_profiles:
 
   - name: p300x2
     hardware: p300x2              # 2 boards = 4 chips (a QB2)
-    mesh_device: P150x4           # verified: 386.4 ms TTFT, 23.38 tok/s (one replica)
+    mesh_device: P150x4           # verified: 388.9 ms TTFT, 25.62 tok/s (one replica)
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b

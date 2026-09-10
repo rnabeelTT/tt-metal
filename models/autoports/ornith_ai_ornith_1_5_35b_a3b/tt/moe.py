@@ -54,6 +54,18 @@ from models.common.modules.moe.tt_moe_gate_config import TTMoEGateConfig
 CLUSTER_AXIS = 1
 
 
+def _reshape(t, shape):
+    """ttnn.reshape, skipped when the tensor already has that shape.
+
+    A no-op reshape is not free: it dispatches a ReshapeViewDeviceOperation like any
+    other program, and decode pays ~8.4 us per program whatever it does. Three of these
+    per layer are no-ops at batch 1 (the gather output is already [1, k, 1, H], and the
+    ids and activation already carry the target shape), which is 120 programs across the
+    model for nothing.
+    """
+    return t if list(t.shape) == list(shape) else ttnn.reshape(t, shape)
+
+
 def _expert_compute_config(device, fidelity=ttnn.MathFidelity.LoFi):
     """Compute config for the expert matmuls.
 
@@ -442,9 +454,9 @@ class _SparseExperts:
         outs = []
         for u in range(T):
             ids_u = ids_u16 if T == 1 else ttnn.slice(ids_u16, [u, 0, 0, 0], [u + 1, 1, 1, k])
-            ids_u = ttnn.reshape(ids_u, (1, 1, 1, k))
+            ids_u = _reshape(ids_u, (1, 1, 1, k))
             x_u = x4 if T == 1 else ttnn.slice(x4, [0, 0, u, 0], [1, 1, u + 1, H])
-            x_u = ttnn.reshape(x_u, (1, 1, 1, H))
+            x_u = _reshape(x_u, (1, 1, 1, H))
 
             fused = ttnn.sparse_matmul(
                 x_u,
@@ -483,7 +495,7 @@ class _SparseExperts:
                 scores if T == 1 else ttnn.slice(scores, [u, 0, 0, 0], [u + 1, 1, 1, k]),
                 (1, k, 1, 1),
             )
-            st = ttnn.multiply(ttnn.reshape(down, (1, k, 1, H)), sc_u)
+            st = ttnn.multiply(_reshape(down, (1, k, 1, H)), sc_u)
             ttnn.deallocate(down)
             # ttnn.sum, not fast_reduce_nc: the latter pads the reduced M axis up to a
             # full tile and returns [1,1,32,H] for a one-token step, which then fails

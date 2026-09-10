@@ -58,12 +58,14 @@ Blackhole P150 (stage 11 PASS).
 
 | mesh | experts | MoE block | TTFT @128 | prefill | decode |
 |---|---|---|---|---|---|
-| P150 (1 chip) | bfp4 | 5/5 | 384.3 ms | 333.1 tok/s | 24.22 tok/s |
-| P300 (2 chips) | bfp4 | 5/5 | 385.6 ms | 331.9 tok/s | 24.18 tok/s |
-| P150x4 (4 chips) | bfp4 | 5/5 | 386.4 ms | 331.2 tok/s | 23.38 tok/s |
+| P150 (1 chip) | bfp4 | 5/5 | 378.8 ms | 337.9 tok/s | 25.38 tok/s |
+| P300 (2 chips) | bfp4 | 5/5 | 380.9 ms | 336.0 tok/s | 25.65 tok/s |
+| P150x4 (4 chips) | bfp4 | 5/5 | 388.9 ms | 329.2 tok/s | 25.62 tok/s |
 
 Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
-each die runs a complete independent copy.
+each die runs a complete independent copy. Decode is also independent of context length
+(24.1 tok/s at ISL 2048 on the pre-optimization build), which is what a 3:1
+linear-attention stack should give.
 
 **Accuracy, stated honestly: top-1 agrees on 3/3 prompts, logit PCC does not clear the
 gate.** Against the HF reference on P150 at bfp4: PCC 0.968 / 0.942 / 0.934 with 6/8 of
@@ -76,20 +78,20 @@ in the routed experts:
   moves PCC *within noise* -- 0.935 / 0.963 / 0.936, one prompt better and one worse --
   for 6 GB of DRAM.
 
-So the error accumulates in the non-MoE path (GDN, attention, norms), which this round
-did not touch. bfp4 is kept because the higher-precision recipe buys nothing measurable.
-Whether ~0.94 PCC with exact top-1 is acceptable is a product call, not a bug.
+So the error accumulates in the non-MoE path (GDN, attention, norms). Every optimization
+in this round left the logits BIT-IDENTICAL, so none of it moved accuracy.
 
 **Extra dies buy concurrency, and it scales.** One instance per die, 64-token
 completions, measured on this QB2:
 
 | lanes (dies) | 1 | 2 | 4 |
 |---|---|---|---|
-| aggregate | 20.97 tok/s | 41.80 tok/s | **79.07 tok/s** |
-| per stream | 20.97 | 20.93 | 19.85 |
+| aggregate | 21.95 tok/s | 43.85 tok/s | **80.49 tok/s** |
+| per stream | 21.95 | 21.98 | 20.29 |
 
-3.77x at four dies with per-stream latency flat. That is the payoff for choosing data
-parallelism over expert parallelism.
+3.67x at four dies with per-stream latency flat. That is the payoff for choosing data
+parallelism over expert parallelism -- and, per the cost model below, the only way
+extra dies can help this model at all.
 
 Decode is context-independent, which is what a 3:1 linear-attention stack should give:
 
@@ -152,26 +154,62 @@ these were fields declared from arithmetic rather than from a run:
 Each was a flag typed by hand to make the host server work and never carried into the
 manifest, so the package described a configuration nobody had run.
 
-## What decode costs now, and why the next step is op count
+## Why decode costs what it does, and what would actually make it faster
 
-Decode is 36.4 ms/token of DEVICE time on P150. Three measurements separate the
-possible causes, and they rule out everything except op count:
+Decode is **dispatch-bound**. One program costs ~8.4 us no matter what it computes, so
+decode time is essentially `op_count x 8.4 us` and nothing else. Three independent
+measurements say so:
 
-| | tok/s | ms/token |
-|---|---|---|
-| traced, logits read back to host | 24.2 | 41.3 |
-| traced, no readback | 27.5 | 36.4 |
-| pure `ttnn.execute_trace`, no host work at all | 27.5 | 36.4 |
+* **Size does not matter.** A `multiply` on the 1 MB recurrent state and a `multiply`
+  on an 8 KB row both measure ~24 us eager (24.22 vs 24.01). A `reshape` that is only
+  a view still costs 7.79 us.
+* **Marginal cost is flat.** Building partial models, 12 GDN layers cost 12.456 ms and
+  24 cost 23.315 -- 8.41 us per program across the 1291 programs each layer adds.
+* **Issue configuration is irrelevant.** One command queue against two: 36.38 vs
+  36.39 ms.
 
-The last two being identical is the finding: host-side input prep costs nothing, and
-pulling the full `[1, 1, 248320]` logits over PCIe every step is worth only 1.14x. The
-device really does take 36 ms. Under the device profiler one decode forward is **485
-programs**, and they split about evenly between work and overhead: 7.11 ms of kernel
-time against 7.56 ms of inter-program gaps, ~15.6 us per launch.
+Where the time goes, from models built out of layer subsets (`tools/layer_sweep.py`):
 
-So the remaining decode lever is FEWER PROGRAMS, not faster ones -- op fusion, sharded
-norms, DRAM-sharded projections. Making any individual kernel faster is capped at the
-7 ms half. The MoE is no longer the problem: 40 layers x 79 us is 3.2 ms of the 36.
+| | per layer | x count | share |
+|---|---|---|---|
+| GDN (linear-attention) layers | 905 us | 30 -> 27.15 ms | 74.6% |
+| full-attention layers | 764 us | 10 -> 7.64 ms | 21.0% |
+| fixed (lm_head + embedding + final norm) | | 1.59 ms | 4.4% |
+
+That model predicts 36.38 ms against 36.38 measured, and two independent fits agree on
+the 1.59 ms intercept.
+
+### What this rules out
+
+**Tensor parallelism cannot help single-stream latency on this model.** TP divides the
+DATA per op, not the NUMBER of ops, and cost here is independent of data size -- so
+four dies would run the same ~4300 programs, each no cheaper, plus collectives. This is
+why extra dies serve extra USERS instead (see the lane table above). It is also why
+Ornith is not comparable to a dense-attention MoE like Qwen3-Coder, whose decode is
+made of a few large matmuls per layer rather than ~111 small ops.
+
+Also ruled out, each with a measurement rather than an opinion: raising expert
+precision (bfp8 down projection moved PCC within noise), cutting prefill op count
+(prefill is compute-bound -- fusing its SwiGLU changed TTFT by less than 1%), and
+command-queue tuning.
+
+### What is left
+
+`tools/op_profile.py --sequence` prints the ordered device-op sequence. After the conv
+fix a GDN layer is **111 programs**: BinaryNg 24, Slice 17, ReshapeView 16, Unary 11,
+Matmul 10.5, Copy 9, LayerNorm 5.5.
+
+The `ReshapeView`s are not free views. TILE layout pads the last two dims, so moving the
+head axis from position 2 to position 1 -- `[1,1,32,128]` to `[1,32,1,128]`, which the
+delta rule does for q, k and v -- turns 1x4 tiles into 32x4 and is a real copy. They are
+structural to expressing a per-head recurrence as batched matmuls.
+
+**The step change would be a fused GDN decode kernel.** tt-metal has fused kernels for
+the CHUNKED prefill variant (`gated_delta_attn_seq`, `chunk_gated_delta_rule`) but none
+for the T=1 recurrence, so the decode path is ~111 Python-composed ops per layer where a
+kernel would be a handful. At 8.4 us per program, collapsing the GDN attention's ~58
+programs to ~10 would take decode from 34.3 ms to roughly 22 ms (~45 tok/s) -- and it
+would help every mesh equally, since none of this is a parallelism problem.
 
 ## Measured negatives (do not re-try these without new information)
 
