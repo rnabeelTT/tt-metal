@@ -17,12 +17,27 @@ from .ttnn_delta_rule_ops import (
 )
 from .ttnn_delta_rule_seq import chunk_gated_delta_rule_seq_adapter
 
-_L1_SEQ_THRESHOLD = 512
+# The bound is BYTES, not tokens. These intermediates are [B, T, num_v_heads *
+# head_v_dim], so a wide GDN blows the budget at a token count a narrow one handles
+# comfortably, and a token-only threshold silently mis-sizes for the wide one. The
+# budget is set to reproduce the old 512-token threshold at a 2048-wide GDN exactly,
+# so nothing narrower changes behaviour.
+#
+# Getting this wrong does not fail here. Ornith-1.5-35B-A3B is 32 v-heads x 128 = 4096
+# wide, where T=512 is 4 MB per tensor and ~27 MB live -- which FITS L1 interleaved
+# (about 250 KB of each bank's 1.4 MB), so every allocation succeeds. It fails several
+# ops later inside the GDN prefill kernel, whose ~1.36 MB of statically allocated
+# circular buffers no longer have room: "statically allocated circular buffers clash
+# with L1 buffers on core range [0-0 - 3-1]". 512 was the worst possible value -- the
+# largest sequence still forced into L1. Measured: ISL 128 fits, ISL 512 did not.
+_L1_SEQ_BYTE_BUDGET = 512 * 2048 * 2
+_DEFAULT_GDN_WIDTH = 2048
 
 
-def _seq_memory_config(seq_len):
-    """L1 for short sequences (faster), DRAM for long (avoids OOM)."""
-    return ttnn.L1_MEMORY_CONFIG if seq_len <= _L1_SEQ_THRESHOLD else None
+def _seq_memory_config(seq_len, width=_DEFAULT_GDN_WIDTH):
+    """L1 for small activations (faster), DRAM for large (leaves room for the prefill
+    kernel's circular buffers)."""
+    return ttnn.L1_MEMORY_CONFIG if seq_len * width * 2 <= _L1_SEQ_BYTE_BUDGET else None
 
 
 def rms_norm_gated_ttnn(x, gate, weight, eps=1e-5, memory_config=None):
@@ -408,7 +423,7 @@ def gated_deltanet_forward_ttnn(
     B = hidden_states.shape[0]
     T = hidden_states.shape[1]
     # valid_len path forces DRAM (bucket 512 hits L1 CB clash on _seq_memory_config threshold)
-    mc = None if valid_len is not None else _seq_memory_config(T)
+    mc = None if valid_len is not None else _seq_memory_config(T, num_v_heads * head_v_dim)
 
     ckc = compute_kernel_config
 

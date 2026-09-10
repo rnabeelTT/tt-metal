@@ -1,0 +1,229 @@
+# tt-model v5.1 container package for Ornith-1.5-35B-A3B on Blackhole.
+#
+# One package, three serve profiles -- not three packages. mesh_device and the routed
+# expert dtype are the only things that differ per board, and v5.1 profiles express
+# exactly that, so a consumer picks their board at serve time from one image.
+#
+#   tt-model package --container tt-model.yaml
+#   tt-model serve   build/ornith-1.5-35b-a3b/tt_kernel_manifest.json --profile p300x2
+#   tt-model push    build/ornith-1.5-35b-a3b --private
+schema: "5.1"
+repo: PLACEHOLDER/ornith-1.5-35b-a3b     # set before `push`; built and verified locally first
+name: ornith-1.5-35b-a3b
+
+# A pointer, pinned. The revision is the one every PCC and accuracy number in this
+# bring-up was measured against; leaving it floating would let a consumer serve weights
+# nobody validated.
+weights:
+  repo: ornith-ai/Ornith-1.5-35B-A3B
+  revision: 10fbf86fed7ecee4a061f8b499a618f46001cac1
+
+kind: vllm-plugin
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal
+  # An allowlist: exactly what ships. Under-listing fails the image's own build-time
+  # import check on this machine rather than at a consumer's first serve.
+  #
+  #   models/autoports/...      this model
+  #   models/demos/blackhole/qwen36   the Qwen3.5 hybrid layer it subclasses
+  #   models/experimental/gated_attention_gated_deltanet   the GDN kernels qwen36 calls
+  #   models/tt_transformers    ModelArgs, RoPE, CCL, the generator base
+  #   models/common             RMSNorm and the shared MoE modules
+  #   models/tt_dit             prepare_for_fused_swiglu, pulled in by qwen36's MLP
+  #   models/demos/qwen3_vl     imported by qwen36's vision path
+  code:
+    # The PARENT, because runtime.extra_models_dir points here: the plugin scans this
+    # directory's subfolders for vllm_metadata.json, so it has to be inside the image.
+    # It holds only this model (308 KB), so nothing extra ships.
+    - models/autoports
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tt_dit
+  ubuntu: "22.04"     # glibc 2.35: one image runs on both 22.04 and 24.04 hosts
+  python: "3.12"      # must match the interpreter the ttnn extension is built against
+
+runtime:
+  vllm:
+    # Must match what vllm-tt-plugin's docs/install-vllm-tt.sh pins -- the plugin is
+    # written against this vLLM's platform-plugin API, and a mismatch fails at import.
+    version: "0.26.0"
+  plugin:
+    path: /home/raahem/vllm-tt-plugin
+  # EXTRA_MODELS_DIR is the PARENT of per-model bundle folders, not the bundle itself:
+  # the plugin lists subdirectories looking for vllm_metadata.json in each.
+  extra_models_dir: models/autoports
+
+# Defaults every profile inherits. max_num_seqs and block_size are required after merge:
+# the TT backend rejects vLLM's own defaults.
+serve:
+  port: 8000
+  # 1, and it is a hard limit, not a tuning choice. qwen36 keeps the Gated DeltaNet
+  # recurrent state in external buffers on its single-device path and
+  # `set_external_state` asserts a batch-1 shape, so a wider batch dies at engine init:
+  #   "recurrent_state shape mismatch: [4, 32, 128, 128] != [1, 32, 128, 128]"
+  # (measured with --max-num-seqs 4). Only the tensor-parallel path keeps that state in
+  # the module and batches, and this model replicates rather than shards.
+  #
+  # CONCURRENCY COMES FROM LANES, NOT FROM THIS NUMBER. One instance per die, each a
+  # complete replica. Measured on this QB2, 64-token completions:
+  #
+  #     lanes (dies)      1        2        4
+  #     aggregate     20.97    41.80    79.07 tok/s
+  #     per stream    20.97    20.93    19.85 tok/s
+  #
+  # 3.77x at four dies with per-stream latency flat, which is the whole reason the
+  # experts are replicated instead of expert-parallel (see the model's model_config.py).
+  max_num_seqs: 1
+  block_size: 64
+  additional_config:
+    tt:
+      # The plugin defaults this to 50 MB; a 40-layer decode trace does not fit
+      # ("get_trace_buffers_size() <= trace_region_size").
+      trace_region_size: 1073741824
+  capabilities:
+    # Field names are `reasoning_parser` and `tool_parser` -- ContainerCapabilities sets
+    # extra="forbid" specifically so a typo here fails at load rather than shipping a
+    # model whose tool calls silently come back as prose.
+    reasoning_parser: qwen3       # the model emits <think>...</think> traces
+    tool_parser: hermes           # XML-formatted function calls
+  env:
+    # NO FABRIC. The model runs zero collectives: experts are replicated per die and
+    # attention/GDN are replicated too, so nothing crosses a chip boundary. Requesting
+    # a fabric that is never used is not free -- a cold multi-chip open trains ethernet
+    # links and fails often enough to need a warm-up retry, and a half-configured
+    # fabric resurfaces later as "Unsupported fabric config" from ccl_common.
+    # Set to DISABLED, not "" -- an empty string is not a valid fabric selector and
+    # the container dies in fabric_firmware_initializer.cpp during engine init.
+    TT_METAL_FABRIC_CONFIG: DISABLED
+    # NOT set here, deliberately: TT_MESH_GRAPH_DESC_PATH is per-LANE, not per-package.
+    # To run one instance per die (the throughput deployment -- see serve_profiles),
+    # each instance needs BOTH of these, and only then:
+    #   TT_VISIBLE_DEVICES=<die>
+    #   TT_MESH_GRAPH_DESC_PATH=/opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto
+    # A single die is a PARTIAL p300 board, so pinning one with TT_VISIBLE_DEVICES alone
+    # makes tt-metal classify the QB2 as a CUSTOM cluster and refuse to start ("Custom
+    # fabric mesh graph descriptor path must be specified for CUSTOM cluster type");
+    # the stock single-chip Blackhole descriptor makes a one-die cluster legal. Setting
+    # it package-wide would instead make the WHOLE system look like one chip, which
+    # breaks the p300 and p300x2 profiles' own mesh_device.
+
+serve_profiles:
+  # THIS IS A SINGLE-CHIP MODEL. Every profile below opens the whole board it names,
+  # because tt-model requires mesh_device to match `hardware` ("mesh_device 'P150'
+  # opens a 1x1 mesh (1 chips) but hardware 'p300' implies 2"), and all three were run
+  # on hardware. But a single instance is a single replica no matter how many dies it
+  # opens, so ON A MULTI-DIE BOARD THE HIGHER-THROUGHPUT DEPLOYMENT IS N INSTANCES OF
+  # THE p150 PROFILE, one per die -- 79.07 tok/s aggregate on four dies against 23.38
+  # for one four-die instance. The per-profile numbers below are per stream.
+  #
+  # The whole thing is ~18.2 GB (17.1 GB of bfp4 routed experts, which are 92.5% of
+  # 34.8B parameters, plus ~1.1 GB of bf8 everything else) against ~30 GB usable per
+  # Blackhole die, so one die holds a complete copy. Splitting it across dies was tried
+  # and abandoned: `ttnn.sparse_matmul` in gather mode costs the same 79 us per expert
+  # pair whether a die owns 64 experts or 256, because only the routed top-8 are ever
+  # visited, so expert parallelism bought no speed -- only an all-reduce per layer, and
+  # the collectives were where both multi-chip meshes were failing.
+  #
+  # Extra dies therefore serve extra USERS. Run one instance per die (each pinned with
+  # TT_VISIBLE_DEVICES; the TT_MESH_GRAPH_DESC_PATH above is what makes a single die a
+  # legal cluster on a p300 board) and aggregate throughput scales 3.77x on four dies
+  # with per-stream latency flat -- see the table under `max_num_seqs`.
+  #
+  # All three profiles are otherwise identical and all three were run on hardware. They
+  # differ only in `hardware`, which is how tt-model states the device requirement; a
+  # p300x2 box should not have to read "p150" and infer that one die is enough.
+  #
+  # max_model_len is what has been VERIFIED to serve, not what the KV arithmetic allows.
+  # The hybrid stack makes long context cheap on paper -- only 10 of 40 layers hold a KV
+  # cache, so ~20 KB/token and 128K is ~2.7 GB -- but declaring 131072 previously made
+  # the engine fail at startup on a 4.3 GB allocation. Prefill is measured flat at
+  # ~335 tok/s out to 2048 tokens with no cliff, so raising this is plausible; do it
+  # alongside a run that shows the profile serving at the new length.
+  - name: p150
+    hardware: p150                # 1 chip -- the unit a lane is made of
+    mesh_device: P150             # verified: 384.3 ms TTFT, 24.22 tok/s
+    max_model_len: 4096
+    additional_config:
+      routed_expert_dtype: bfloat4_b
+      kv_cache_dtype: bfloat8_b
+
+  - name: p300
+    hardware: p300                # 1 dual-chip board = 2 chips
+    mesh_device: P300             # on the host: 385.6 ms TTFT, 24.18 tok/s (one replica)
+    max_model_len: 4096
+    additional_config:
+      routed_expert_dtype: bfloat4_b
+      kv_cache_dtype: bfloat8_b
+    env:
+      # Per-PROFILE (ServeProfile inherits env from ServeSettings), because it must not
+      # apply to p150 or p300x2. A 2-chip mesh on a 4-chip QB2 is a subset, and unless
+      # tt-metal is told which 2-chip topology that is, engine init dies in
+      # fabric_firmware_initializer.cpp. The same open succeeds on the bare host, where
+      # nothing is subsetting the cluster -- so this is a container-allocation detail,
+      # not a model problem.
+      TT_MESH_GRAPH_DESC_PATH: /opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p300_mesh_graph_descriptor.textproto
+
+  - name: p300x2
+    hardware: p300x2              # 2 boards = 4 chips (a QB2)
+    mesh_device: P150x4           # verified: 386.4 ms TTFT, 23.38 tok/s (one replica)
+    max_model_len: 4096
+    additional_config:
+      routed_expert_dtype: bfloat4_b
+      kv_cache_dtype: bfloat8_b
+
+# The best-quality configuration is the default. A QB2 is the box this was developed and
+# measured on, and it is the only profile that runs bf16 experts.
+default_profile: p300x2
+
+# Run inside the finished image, on top of the launcher's own import checks.
+# Run inside the finished image, on top of the launcher's own import checks.
+#
+# Located through importlib, NOT a relative path: `source.code` is staged under `code/`
+# in the image, so a host-shaped path like
+# "models/autoports/.../vllm_metadata.json" is a FileNotFoundError at build step 21.
+# Nothing here touches the weights -- they are a pointer, fetched at pull, so they do
+# not exist while the image is building.
+verify:
+  - |
+    # The plugin resolves the model through this metadata file, and a mistake in it
+    # fails at a consumer's first serve rather than at build time. Its schema is
+    # {"arch": <HFArch>, "main_class": "module:Class"}; a mapping of arch -> class is
+    # silently SKIPPED by the plugin's bundle scanner, which is the failure this guards.
+    import importlib.util, json, pathlib
+    spec = importlib.util.find_spec("models.autoports.ornith_ai_ornith_1_5_35b_a3b")
+    md = json.loads(
+        (pathlib.Path(spec.origin).parent / "vllm_metadata.json").read_text()
+    )
+    assert md["arch"] == "Qwen3_5MoeForConditionalGeneration", md
+    assert md["main_class"].endswith(":OrnithForConditionalGeneration"), md
+  - |
+    # The adapter and the model must import cleanly with only what the image ships --
+    # this is what catches an under-listed source.code allowlist.
+    from models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.ornith_vllm import (
+        OrnithForConditionalGeneration,
+    )
+    from models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.model import OrnithModel
+    from models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.model_config import (
+        MESH_PRECISION,
+    )
+    assert set(MESH_PRECISION) == {"P150", "P300", "P150x4"}, MESH_PRECISION
+
+card:
+  quickstart: |
+    ## Ornith-1.5-35B-A3B on Tenstorrent Blackhole
+
+    A 256-expert / top-8 MoE with a hybrid attention stack: 30 Gated DeltaNet layers and
+    10 gated full-attention layers. Only the full-attention layers hold a KV cache
+    (20 KB/token), so 256K context costs 5.4 GB rather than the ~21 GB a dense model of
+    this size would need.
+
+    ```bash
+    tt-model pull  <repo>
+    tt-model serve <repo>                 # default profile: p300x2 (4 chips, bf16 experts)
+    tt-model serve <repo> --profile p150  # single chip, bfp4 experts
+    ```

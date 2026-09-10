@@ -1,0 +1,335 @@
+# Ornith-1.5-35B-A3B on Tenstorrent Blackhole (QB2, 2× p300c)
+
+Bring-up of `ornith-ai/Ornith-1.5-35B-A3B` — a 256-expert / top-8 MoE with a hybrid
+attention stack — onto tt-metal, packaged for `tt-model` v5.1 container serving.
+
+## Running it
+
+```bash
+./run.sh                 # every stage that has not passed, detached in tmux 'ornith'
+./run.sh --from 05       # start at a stage
+./run.sh --only 06 --force
+./status.sh              # dashboard, safe any time
+tmux attach -t ornith    # watch; Ctrl-b d to leave it running
+```
+
+Stages are `scripts/NN-*.sh`; each writes `status/NN-*` and `logs/NN-*.log`.
+
+## What the model is
+
+| | |
+|---|---|
+| 40 layers | **30 Gated DeltaNet + 10 gated full attention** (every 4th) |
+| MoE | 256 routed experts, **top-8**, `moe_intermediate=512`, + 1 gated shared expert |
+| Attention | 16 q / 2 kv heads, `head_dim=256`, partial RoPE 0.25, m-RoPE, output gate |
+| Context | 262144 — cheap here: only 10 of 40 layers hold a KV cache, so **20 KB/token** |
+
+Built on `models/demos/blackhole/qwen36` (the Qwen3.5/3.6 hybrid port), which supplies
+everything except the MoE. The autoport is thin: a layer subclass that swaps the feed
+forward, a model subclass that names it, the MoE itself, and a weight remap.
+
+## Design decisions that are not obvious
+
+**The fused `moe_compute` pipeline is unusable on 4 chips.** It targets Galaxy meshes —
+every shipped config is 8×4/16×4/16×8, and its own test skips with *"FABRIC_1D only valid
+for (8,1) BH LB mesh"*. Measured here with random weights: ~FLT_MAX garbage on (1,4) and
+(4,1), and an unsupported `ND_SHARDED` reduce-scatter on (2,2). So the experts run
+unfused. That turned out to *help* precision: the fused path stores weights in a packed
+ring layout costing a measured **1.9×** (bfp4 0.53×, bfp8 1.01×, bf16 1.90× of raw bf16
+bytes), which is what would have put bf16 out of reach on every board.
+
+**Multi-chip is expert-parallel, not tensor-parallel.** qwen36's TP path assumes the
+dense Qwen3.5 weight layout; this checkpoint ships q with its output gate pre-fused as
+one `[8192, 2048]` tensor and stores GDN's `qkv` separately from `z`/`a`/`b` where the TP
+fusions want a folded `qkvzab`. Attention+GDN are 1.03B of 34.8B parameters, so TP was
+saving ~1.5 GB/chip. They are **replicated** instead and expert parallelism — 92.5% of
+the weights — carries the memory win alone.
+
+**Experts are batched, not looped.** Decode was dispatch-bound: 3492 ms/token over
+~30,700 op dispatches is ~114 µs each, with the devices idle at 59 W. Concatenating
+gate/up on the output dim and running down as one batched matmul gives ~12 ops per layer
+instead of ~768 → TTFT 3292→543 ms, decode 0.29→3.44 tok/s. `ORNITH_MOE_KERNEL=loop`
+selects the per-expert reference the batched path was validated against.
+
+## Measured
+
+**The model serves.** vLLM 0.26.0 + the Tenstorrent plugin, OpenAI-compatible, on one
+Blackhole P150 (stage 11 PASS).
+
+| mesh | experts | MoE block | TTFT @128 | prefill | decode |
+|---|---|---|---|---|---|
+| P150 (1 chip) | bfp4 | 5/5 | 384.3 ms | 333.1 tok/s | 24.22 tok/s |
+| P300 (2 chips) | bfp4 | 5/5 | 385.6 ms | 331.9 tok/s | 24.18 tok/s |
+| P150x4 (4 chips) | bfp4 | 5/5 | 386.4 ms | 331.2 tok/s | 23.38 tok/s |
+
+Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
+each die runs a complete independent copy.
+
+**Accuracy, stated honestly: top-1 agrees on 3/3 prompts, logit PCC does not clear the
+gate.** Against the HF reference on P150 at bfp4: PCC 0.968 / 0.942 / 0.934 with 6/8 of
+the reference top-8 surviving, against `test_model.py`'s 0.95 bar for this dtype. That
+test has never passed at bfp4 (there is no `status/10-full-model`), and the loss is NOT
+in the routed experts:
+
+* the MoE block itself measures **0.99976** PCC against a 0.99978 ceiling, and
+* raising the down projection to bfp8 (`bfloat4_bfloat8`, 23.9 GB, still one chip)
+  moves PCC *within noise* -- 0.935 / 0.963 / 0.936, one prompt better and one worse --
+  for 6 GB of DRAM.
+
+So the error accumulates in the non-MoE path (GDN, attention, norms), which this round
+did not touch. bfp4 is kept because the higher-precision recipe buys nothing measurable.
+Whether ~0.94 PCC with exact top-1 is acceptable is a product call, not a bug.
+
+**Extra dies buy concurrency, and it scales.** One instance per die, 64-token
+completions, measured on this QB2:
+
+| lanes (dies) | 1 | 2 | 4 |
+|---|---|---|---|
+| aggregate | 20.97 tok/s | 41.80 tok/s | **79.07 tok/s** |
+| per stream | 20.97 | 20.93 | 19.85 |
+
+3.77x at four dies with per-stream latency flat. That is the payoff for choosing data
+parallelism over expert parallelism.
+
+Decode is context-independent, which is what a 3:1 linear-attention stack should give:
+
+| ISL | TTFT | prefill | decode |
+|---|---|---|---|
+| 128 | 380 ms | 336.8 tok/s | 24.22 tok/s |
+| 512 | 1368 ms | 374.2 tok/s | 24.19 tok/s |
+| 2048 | 5392 ms | 379.8 tok/s | 24.11 tok/s |
+
+The 3.45 -> 24.2 tok/s decode is `ttnn.sparse_matmul` in INDEXED/GATHER mode; the
+543 -> 380 ms TTFT is the prefill mask fix. Both are in `src/tt/moe.py`, whose class
+docstring carries the measurements. Prefill throughput is flat in prompt length, so
+TTFT is linear with no cliff out to 2048.
+
+Served through vLLM (one lane, `max_num_seqs=1`): 417 ms median TTFT, 23.9 tok/s per
+stream. Sending 2 requests to ONE lane still queues them (1909 ms TTFT, flat aggregate)
+because `max_num_seqs` is pinned to 1 by the GDN external-state assert -- concurrency
+comes from lanes, not from that number, and the lane table above is what scales.
+
+**The tt-model v5.1 package is built and all three profiles answer** (`p150`, `p300`,
+`p300x2`), verified by stage 12 against the real container image.
+
+Running lanes by hand, one per die:
+
+    TT_VISIBLE_DEVICES=<die> \
+    TT_MESH_GRAPH_DESC_PATH=$TT_METAL_HOME/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto \
+    vllm serve <weights> --max-num-seqs 1 --block-size 64 --max-model-len 4096 \
+      --additional-config '{"tt": {"trace_region_size": 1073741824}}' --port 810<die>
+
+The descriptor is not optional: one die is a PARTIAL p300 board, so `TT_VISIBLE_DEVICES`
+alone makes tt-metal call the QB2 a CUSTOM cluster and refuse to start.
+
+## Packaging (tt-model v5.1)
+
+`tt-model package --container` builds an OCI image (Ubuntu 22.04, Python 3.12, the
+tt-metal tree, vLLM 0.26.0 empty-target, the plugin, and this model's code) and
+`tt-model serve` runs it. Verified per profile by sending a real completion:
+
+| profile | chips | verdict |
+|---|---|---|
+| **p150** | 1 | **ANSWERED** -- the package serves |
+| p300 | 2 | fails at `fabric_firmware_initializer.cpp:271` |
+| p300x2 | 4 | fails in a slice: "Ends 2048 must be <= the shape of the tensor 32" |
+
+p300's failure is the per-process fabric link training documented above: the host tests
+absorb it with an in-process warm-up, and the plugin's device-open path does not. That
+is plausibly a small fix (warm the full mesh before the plugin opens its own), and is
+separate from -- and hit BEFORE -- the replicated-attention dispatch cost that makes
+4-chip prefill impractical.
+
+**Profile values must be MEASURED, not derived.** All three container failures before
+these were fields declared from arithmetic rather than from a run:
+
+| field | declared | verified | failure |
+|---|---|---|---|
+| `max_model_len` | 131072 | 4096 | OOM on a 4.3 GB allocation |
+| `max_num_seqs` | 32 | 1 | `recurrent_state shape mismatch: [32,...] != [1,...]` |
+| `trace_region_size` | default 50 MB | 1 GB | trace buffers do not fit |
+
+Each was a flag typed by hand to make the host server work and never carried into the
+manifest, so the package described a configuration nobody had run.
+
+## What decode costs now, and why the next step is op count
+
+Decode is 36.4 ms/token of DEVICE time on P150. Three measurements separate the
+possible causes, and they rule out everything except op count:
+
+| | tok/s | ms/token |
+|---|---|---|
+| traced, logits read back to host | 24.2 | 41.3 |
+| traced, no readback | 27.5 | 36.4 |
+| pure `ttnn.execute_trace`, no host work at all | 27.5 | 36.4 |
+
+The last two being identical is the finding: host-side input prep costs nothing, and
+pulling the full `[1, 1, 248320]` logits over PCIe every step is worth only 1.14x. The
+device really does take 36 ms. Under the device profiler one decode forward is **485
+programs**, and they split about evenly between work and overhead: 7.11 ms of kernel
+time against 7.56 ms of inter-program gaps, ~15.6 us per launch.
+
+So the remaining decode lever is FEWER PROGRAMS, not faster ones -- op fusion, sharded
+norms, DRAM-sharded projections. Making any individual kernel faster is capped at the
+7 ms half. The MoE is no longer the problem: 40 layers x 79 us is 3.2 ms of the 36.
+
+## Measured negatives (do not re-try these without new information)
+
+- **Tracing does not speed up decode**: 3.40 tok/s traced vs 3.45 eager. Decode is
+  sparsity-bound (all 256 local experts read per step, 62 GB/s effective, ~12% of peak),
+  not dispatch-bound. Batching the experts had already removed the op-count problem.
+- **The GDN decode L1 footprint does not scale with batch**: module-managed state needs
+  1,684,608 B of circular buffers against a 1,572,864 B L1, IDENTICALLY at batch 4 and
+  batch 8. So batching is blocked by that kernel's footprint, not by the batch size.
+  `ORNITH_BATCHED_GDN=1` enables the batched-state path -- it gets as far as GDN decode
+  at batch 8, where the stock path cannot even allocate, but does not fit L1.
+- **An early "3.44 tok/s decode" figure was a one-token PREFILL.** Without a paged KV
+  cache the attention module silently takes its concat-prefill branch for T=1.
+
+The MoE block matches the HF module to **PCC 0.99976**, against a measured bf16 ceiling
+of 0.99978 -- the port is essentially exact, and the whole-model figures above are
+accumulated bf16/bfp4 error across 40 layers, not a defect.
+
+4-chip prefill is dominated by small attention/RoPE ops dispatching to four devices,
+because attention is replicated. Correct, but not practical without tracing or a
+different split.
+
+## Changes OUTSIDE this model that ship with the image
+
+Four, all in trees the package already carries (`source.code` covers the tt-metal ones;
+`runtime.plugin.path` carries the plugin). Each is a general fix, not an Ornith hack.
+
+**tt-metal**
+
+* `models/demos/blackhole/qwen36/tt/model.py` -- take the parallelism width from
+  `args.num_devices` instead of `mesh_device.get_num_devices()`. A REPLICATED model on a
+  multi-die mesh has `args.num_devices == 1`, and reading the mesh directly sharded the
+  embedding and vocab-split the LM head anyway; the resulting all-gathers then died in
+  `control_plane.cpp` ("Trying to get un-initialized fabric context"). Unchanged for a
+  tensor-parallel model, where the two agree.
+* `models/experimental/gated_attention_gated_deltanet/tt/ttnn_gated_deltanet.py` --
+  `_seq_memory_config` now budgets BYTES rather than sequence length. Calibrated to
+  reproduce the old 512-token threshold exactly at a 2048-wide GDN, so nothing narrower
+  changes; Ornith is 4096 wide, where the old rule put ISL 512 in L1 and broke prefill.
+
+**vllm-tt-plugin**
+
+* `platform.py` -- the "TT standard DP does not support MoE models yet" guard is now
+  opt-in via `model_capabilities['supports_standard_dp']`. The guard protects SHARDED
+  MoE models, whose experts no single rank could hold; a replicated one is not that
+  case, and standard DP is how it uses extra dies.
+* `model_runner.py` -- `_kv_cache_shape` no longer divides `num_kv_heads` by the device
+  count for models declaring `model_capabilities['kv_heads_replicated']`. Replicated
+  attention puts every KV head on every die, and the mismatch surfaced far away as
+  `paged_fill_cache geometry mismatch: cache has kv_heads=1 ... input view is kv_heads=2`.
+
+Both plugin flags are declared in `src/tt/ornith_vllm.py`.
+
+## Hardware and framework gotchas found here
+
+### ttnn.sparse_matmul (the MoE path) -- five ways to lose
+
+1. **A wrong `nnz` is a DEVICE HANG, not an error.** It is a compile-time arg: the
+   in0-mcast receivers loop exactly `nnz` times while the sender multicasts once per
+   *actual* non-zero sparsity entry, so any mismatch deadlocks in `noc_semaphore_wait`,
+   silently, unless the watcher is on (tt-metal #45943, #45052). You cannot compute a
+   safe static value for decode: routing weights are a softmax over top-k and the small
+   ones FLUSH TO ZERO in bfloat16, so the true count is often < top_k. Pass `nnz=None`
+   or use gather, which has no nnz at all.
+2. **`in0_block_w=1` costs 6.7x** and is what every upstream caller ships (gemma4,
+   gpt_oss, and the Qwen3-Coder reference on this box). Measured at gate_up's decode
+   shape: 489.7 us at 1, 257.9 at 2, 104.6 at 8, **73.4 at 64**. Snap it to a divisor
+   of Kt -- the kernel asserts `Kt % in0_block_w == 0`.
+3. **`num_blocks_total <= num_cores_available` has nothing to do with experts.** It is
+   `ceil(Mt/per_core_M) * ceil(Nt/per_core_N)` -- M and N tiles only; the expert axis
+   is a batch loop. 256 experts on a 64-core grid is fine, and chunking to "fix" this
+   solves a problem that does not exist.
+4. **`out_subblock_w` must divide `out_block_w`**, or the kernel bakes
+   `in1_num_subblocks == 0`, never pushes cb_out, and the in1 writer parks forever on
+   `cb_out.wait_front()`. Another silent hang. `per_core_N` also needs CEILING
+   division. Both are documented in `models/demos/gpt_oss/tt/experts/config.py`.
+5. **INDEXED/GATHER mode (`indices=`) is 10x the sparsity scan and flat in expert
+   count** -- 79 us per expert pair at 64, 128 or 256 experts/die, against 260/439/800
+   for the scan. It exists in current tt-metal and not in the reference image, whose
+   tt-metal predates it (that image's ABI also differs: its sparsity is `[1,1,batch,E]`
+   with `nnz = top_k*batch > E`, which the current contract forbids -- do not port its
+   call shapes verbatim). Gather on ONE die beats the scan on FOUR.
+
+### Two things that look like hangs and are not
+
+* **A cold kernel compile.** The first `sparse_matmul` of a given shape on an empty
+  `TT_METAL_CACHE` took over 7 minutes at 100% host CPU, and 0.4 s once warm. Budget
+  for it in timeouts before reaching for the watcher.
+* **`ttnn.experimental.fast_reduce_nc` pads the reduced M axis to a full tile.** It
+  returns `[1,1,32,H]` for a one-token step, so the next reshape back to `[1,1,T,H]`
+  fails a volume check somewhere unrelated. `ttnn.sum(..., keepdim=True)` gives the
+  clean shape. Prefill never notices because its T is already a multiple of 32.
+
+### L1 exhaustion surfaces several ops away from its cause
+
+ttnn defaults to L1, and a big interleaved tensor SUCCEEDS there: `[1, 256, 32, 2048]`
+is 32 MB, which is only ~300 KB of each bank's 1.4 MB spread over 110 banks. Nothing
+complains. What breaks is the *next* op that needs statically allocated circular
+buffers -- for the GDN prefill kernel, ~1.36 MB of them in a 1.5 MB L1 -- which dies
+with `statically allocated circular buffers clash with L1 buffers on core range
+[0-0 - 3-1]`. Dumping L1 with `ttnn.dump_device_memory_state` between stages shows it
+completely free, because the offender is transient inside one forward pass. Place large
+intermediates in DRAM explicitly.
+
+Same class of bug upstream: `_seq_memory_config` in
+`models/experimental/gated_attention_gated_deltanet` thresholded on SEQUENCE LENGTH
+(`<= 512 -> L1`), which mis-sizes for a wide GDN -- Ornith is 32 v-heads x 128 = 4096
+wide, so ISL **512 was the worst possible case**, the largest sequence still forced
+into L1. Changed to a BYTE budget calibrated to reproduce the old threshold exactly at
+2048 width, so narrower models are unaffected. Before: ISL 128 worked, 512 died.
+
+
+- **A mesh-sharded ttnn tensor keeps its GLOBAL logical shape.** Only *non-sharded* dims
+  can be indexed uniformly across devices. Bit twice: chunking the weight packer, and
+  indexing experts.
+- **The first multi-chip fabric open in each PROCESS fails** ethernet router sync; the
+  next succeeds. It is link training, does not survive process exit (so a preflight
+  script cannot fix it), and warming the **full** mesh is what trains every link — a
+  2-chip warm-up only trains that pair.
+- **`ttnn.all_reduce` returns full width; `tt_all_reduce` reduce-scatters** on a (1,N)
+  mesh. Same name, different contract.
+- **The weight cache ignores the mesh mapper on reload** — change a sharding decision and
+  you must delete the cache, or `as_tensor` silently replays the old layout.
+- **`ttnn.reshape` returns a view sharing its source buffer**; deallocating it frees the
+  source.
+- **`ttnn.linear` defaults to L1.** A couple of unfreed L1 tensors per layer starves the
+  GDN op, which needs ~1.36 MB of the 1.5 MB L1 for circular buffers — and it fails in
+  the *next* layer's attention, naming neither the leak nor the module.
+- **`TTMoEGate` preallocates per-core L1 buffers.** One gate per layer is fine at 8
+  layers and fatal by 16; only the router weight is per-layer, so one gate is shared.
+- **The GDN chunk-prefill kernel needs T ≥ 128, and T a multiple of 32.** Below that the
+  single-device path is *silently wrong* while the TP path errors out.
+- `l1_small_size`, `num_command_queues: 2` and `trace_region_size` are required device
+  params, not tuning. Without a trace region, trace capture fails and traced decode
+  silently falls back to eager.
+- **A hard-killed process leaves a UMD chip lock held by a dead PID** in
+  `/dev/shm/TT_UMD_LOCK.CHIP_IN_USE_*`, and the next run blocks forever with no timeout.
+  The preflight clears them when no device job is running.
+- **`ttnn.all_reduce` deadlocks** in the full model on a (1,4) mesh (40 collectives per
+  forward) while passing an isolated one-collective test. All-gather + local sum is the
+  reliable equivalent.
+- **Replicating attention across a mesh costs 4x dispatch for identical work.** Fine for
+  memory, bad for latency: multi-chip prefill is dominated by small attention/RoPE ops,
+  not by the MoE.
+
+## Layout
+
+```
+env.sh            paths, HF token from the `hf auth login` cache
+run.sh status.sh  pipeline driver and dashboard
+src/              authored model code, rsynced into tt-metal by stage 03
+  tt/moe.py           the MoE seam (batched + loop kernels)
+  tt/model_config.py  per-mesh precision and parallelism policy
+  tt/weight_mapping.py  MoE→qwen36 checkpoint remap
+  tt/layer.py tt/model.py  6-line subclasses
+  tt-model.yaml       v5.1 container package: one package, three serve profiles
+  tests/              MoE block, layer, full model
+scripts/lib/      reference generation, benchmarks, dtype decision, preflight
+references/       cached HF reference (generated once; a 35B reference costs ~70 GB RAM)
+artifacts/        per-stage evidence, perf tables
+```

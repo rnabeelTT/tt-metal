@@ -61,6 +61,25 @@ class GDNWeights:
     chunk_seq_masks_long: object
 
 
+def _host_copy(t):
+    """`ttnn.to_torch` for a tensor that may live on a multi-device mesh.
+
+    These call sites pre-compute fused weights on the host, and their inputs are
+    REPLICATED -- every device holds the same bytes -- so device 0's copy is the answer.
+    Plain `ttnn.to_torch` refuses a multi-device tensor outright ("supply a mesh composer
+    to concatenate multi-device shards"), which makes an otherwise single-device-only
+    code path fail on a mesh even when nothing about it is actually distributed.
+    """
+    device = t.device()
+    try:
+        num = device.get_num_devices()
+    except AttributeError:
+        num = 1
+    if num <= 1:
+        return ttnn.to_torch(t)
+    return ttnn.to_torch(t, mesh_composer=ttnn.ConcatMeshToTensor(device, dim=0))[: t.padded_shape[0]]
+
+
 def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_path=None) -> GDNWeights:
     """Load + precompute all device weights for one Gated DeltaNet layer.
 
@@ -160,7 +179,7 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
     def _precompute_weight_taps(conv_weight):
         """Pre-slice conv weight [D, 1, K] into K device tensors [1, 1, D] for FIR decode."""
 
-        weight_torch = ttnn.to_torch(conv_weight)
+        weight_torch = _host_copy(conv_weight)
         D = weight_torch.shape[0]
         taps = []
         for k in range(conv_kernel_size):
@@ -173,16 +192,16 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         if conv_bias is None:
             return None
 
-        bias_torch = ttnn.to_torch(conv_bias)
+        bias_torch = _host_copy(conv_bias)
         D = bias_torch.numel()
         bias_reshaped = bias_torch.reshape(1, 1, D).contiguous()
         return ttnn.from_torch(bias_reshaped, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device)
 
     def _precompute_fused_weight_taps():
         """Pre-concatenate Q+K+V conv weight taps into fused taps [1, 1, D_total]."""
-        q_w = ttnn.to_torch(q_conv_weight)  # [D_q, 1, K]
-        k_w = ttnn.to_torch(k_conv_weight)  # [D_k, 1, K]
-        v_w = ttnn.to_torch(v_conv_weight)  # [D_v, 1, K]
+        q_w = _host_copy(q_conv_weight)  # [D_q, 1, K]
+        k_w = _host_copy(k_conv_weight)  # [D_k, 1, K]
+        v_w = _host_copy(v_conv_weight)  # [D_v, 1, K]
         # Concatenate along D dimension: [D_total, 1, K]
         fused_w = torch.cat([q_w, k_w, v_w], dim=0)
         D_total = fused_w.shape[0]
@@ -197,7 +216,7 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         parts = []
         for bias in [q_conv_bias, k_conv_bias, v_conv_bias]:
             if bias is not None:
-                parts.append(ttnn.to_torch(bias))
+                parts.append(_host_copy(bias))
             else:
                 return None  # If any is None, skip fused bias
         fused = torch.cat(parts, dim=0)
@@ -207,8 +226,8 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
 
     def _precompute_fused_ab_weight():
         """Pre-concatenate a_proj + b_proj weights into [4096, 64] for fused matmul."""
-        a_w = ttnn.to_torch(a_proj_weight)  # [4096, 32]
-        b_w = ttnn.to_torch(b_proj_weight)  # [4096, 32]
+        a_w = _host_copy(a_proj_weight)  # [4096, 32]
+        b_w = _host_copy(b_proj_weight)  # [4096, 32]
         fused = torch.cat([a_w, b_w], dim=1).contiguous()  # [4096, 64]
         return ttnn.from_torch(fused, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, device=mesh_device)
 
@@ -220,10 +239,10 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         """
         if qkv_proj_weight is None:
             return None
-        qkv_w = ttnn.to_torch(qkv_proj_weight)  # [4096, 8192]
-        a_w = ttnn.to_torch(a_proj_weight)  # [4096, 32]
-        b_w = ttnn.to_torch(b_proj_weight)  # [4096, 32]
-        g_w = ttnn.to_torch(g_proj_weight)  # [4096, 4096]
+        qkv_w = _host_copy(qkv_proj_weight)  # [4096, 8192]
+        a_w = _host_copy(a_proj_weight)  # [4096, 32]
+        b_w = _host_copy(b_proj_weight)  # [4096, 32]
+        g_w = _host_copy(g_proj_weight)  # [4096, 4096]
         fused = torch.cat([qkv_w, a_w, b_w, g_w], dim=1).contiguous()
         return ttnn.from_torch(fused, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, device=mesh_device)
 

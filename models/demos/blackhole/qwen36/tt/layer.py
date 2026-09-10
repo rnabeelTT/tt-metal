@@ -104,9 +104,20 @@ class Qwen36DecoderLayer:
             gdn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
             self.attention = Qwen36GatedDeltaNet(mesh_device, GDNConfig.from_args(args), gdn_state, gdn_cache)
 
+        self.feed_forward = self._build_feed_forward(
+            mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl
+        )
+
+    def _build_feed_forward(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
+        """Build this layer's feed-forward block.
+
+        A hook so a checkpoint whose FF is not a dense SwiGLU can substitute its own
+        without forking the layer: Qwen3.5-MoE replaces every MLP with a 256-expert
+        block. Whatever it returns must expose `forward(x, mode=...)`.
+        """
         mlp_state = substate(state_dict, f"layers.{layer_num}.mlp")
         mlp_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
-        self.feed_forward = Qwen36MLP(mesh_device, mlp_state, mlp_cache, args=args, tt_ccl=tt_ccl)
+        return Qwen36MLP(mesh_device, mlp_state, mlp_cache, args=args, tt_ccl=tt_ccl)
 
     def _make_norm(
         self,
@@ -249,7 +260,7 @@ class Qwen36DecoderLayer:
 
         ff_input = self.ffn_norm(h, mode=_norm_mode, norm_config=_ff_norm_config)
 
-        ff_output = self.feed_forward.forward(ff_input)
+        ff_output = self.feed_forward.forward(ff_input, mode=mode)
         ttnn.deallocate(ff_input)
 
         output = ttnn.add(h, ff_output)

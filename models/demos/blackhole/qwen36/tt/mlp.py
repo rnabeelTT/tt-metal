@@ -188,7 +188,9 @@ class Qwen36MLP:
             math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, packer_l1_acc=True
         )
 
-    def forward(self, x):
+    def forward(self, x, mode=None):
+        """`mode` is accepted for interface parity with MoE feed-forwards, which need it;
+        this MLP infers prefill vs decode from the input shape and ignores it."""
         if self.num_devices > 1:
             return self._forward_tp(x)
         w = self.weights

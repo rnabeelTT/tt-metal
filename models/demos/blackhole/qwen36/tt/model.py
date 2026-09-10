@@ -24,11 +24,22 @@ from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in
 class Qwen36Model:
     """Qwen3.5-9B text LM on Blackhole P150. HF_MODEL env var selects checkpoint."""
 
+    # Overridable so a variant of this architecture can supply its own layer without
+    # forking the model assembly (Qwen3.5-MoE swaps the dense MLP for an expert block).
+    DECODER_LAYER_CLS = Qwen36DecoderLayer
+
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None):
         self.args = args
         self.device = mesh_device
         self.mesh_device = mesh_device  # Generator reads model.mesh_device
-        self.num_devices = mesh_device.get_num_devices()
+        # Take the PARALLELISM width from the config, not from the hardware. They are
+        # the same thing for a tensor-parallel model, but a model can be deliberately
+        # REPLICATED across a mesh (one whole copy per die, dies serving independent
+        # users), and then `args.num_devices == 1` on a 2- or 4-chip mesh. Reading the
+        # mesh directly here would shard the embedding and vocab-split the LM head
+        # anyway, and the resulting all-gathers fail in control_plane.cpp with "Trying
+        # to get un-initialized fabric context" -- a replicated model opens no fabric.
+        self.num_devices = getattr(args, "num_devices", None) or mesh_device.get_num_devices()
         # CCL for multi-device all-reduce; None on single device (ops no-op).
         if self.num_devices > 1:
             from models.tt_transformers.tt.ccl import TT_CCL
@@ -91,7 +102,7 @@ class Qwen36Model:
         logger.info(f"Loading {len(self.layer_indices)} transformer layers (indices={self.layer_indices})...")
         self.layers = []
         for i in tqdm(self.layer_indices, desc="Loading layers"):
-            layer = Qwen36DecoderLayer(mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl)
+            layer = self.DECODER_LAYER_CLS(mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl)
             self.layers.append(layer)
 
         # Framework RMSNorm (add_unit_offset=True). Single device: is_distributed=None.
