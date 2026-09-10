@@ -30,11 +30,25 @@ def recurrent_forward(gdn, x, mode="recurrent", chunk_size=None, valid_len=None)
 
     T = x.shape[1]
 
-    # After prefill, fuse separate conv states into one for efficient decode
-    if T == 1 and gdn.fused_conv_state is None and gdn.conv_state_q is not None:
-        gdn.fused_conv_state = ttnn.concat([gdn.conv_state_q, gdn.conv_state_k, gdn.conv_state_v], dim=2)
-        gdn.fused_conv_state = ttnn.to_layout(gdn.fused_conv_state, ttnn.TILE_LAYOUT)
-        split_fused_conv_state(gdn)
+    # After prefill, fuse separate conv states into one, then SPLIT it per tap for decode.
+    #
+    # The split is what keeps the decode conv cheap. Without it the conv reads each tap
+    # as `conv_state[:, k:k+1, :]`, and because the state is tiled that slice costs an
+    # untilize + slice + tilize ROUND TRIP per tap, plus another untilize/concat/tilize
+    # to shift the window -- measured at ~18 device ops per layer against 11 for the
+    # split path, on a model where every op costs ~8.4 us regardless of size.
+    #
+    # The rebuild is deliberately lazy (model.py drops split_conv_state on every state
+    # reset and comments "rebuilt lazily on first decode"), but it used to be gated on
+    # `fused_conv_state is None`, which is never true once the model installs EXTERNAL
+    # state buffers for trace-stable addresses -- so the traced decode path, the only
+    # one that matters for throughput, always took the slow branch.
+    if T == 1 and getattr(gdn, "split_conv_state", None) is None:
+        if gdn.fused_conv_state is None and gdn.conv_state_q is not None:
+            gdn.fused_conv_state = ttnn.concat([gdn.conv_state_q, gdn.conv_state_k, gdn.conv_state_v], dim=2)
+            gdn.fused_conv_state = ttnn.to_layout(gdn.fused_conv_state, ttnn.TILE_LAYOUT)
+        if gdn.fused_conv_state is not None:
+            split_fused_conv_state(gdn)
 
     # Chunk-parallel prefill via the C++ gated_delta_attn_seq kernel (float32, chunk_size=128).
     seq_masks = w.chunk_seq_masks_long

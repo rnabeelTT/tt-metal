@@ -328,8 +328,12 @@ class _SparseExperts:
 
         # gate and up packed on the output dim: the program config parallelises only
         # over N, so N tiles cap the usable cores. Packing doubles gate/up's core count.
-        gate_up = torch.cat([w0, w1], dim=-1)  # [1, E, H, 2*inter]
-        self.gate_up_proj = upload(gate_up, gate_up_dt, "gate_up", (1, epd, H, 2 * N))
+        # UP first, GATE second. ttnn.swiglu computes `first * silu(second)`, and the
+        # activation belongs on the gate, so the pack order is what makes one fused op
+        # replace slice + slice + silu + multiply. Packing gate-first and calling swiglu
+        # would compute gate * silu(up): same shapes, same cost, silently wrong.
+        up_gate = torch.cat([w1, w0], dim=-1)  # [1, E, H, 2*inter]
+        self.up_gate_proj = upload(up_gate, gate_up_dt, "up_gate", (1, epd, H, 2 * N))
         # NOT chunked over the expert axis. An earlier port split this at 64 experts to
         # satisfy "num_blocks_total <= num_cores_available"; that check is computed from
         # the M and N TILE counts only (sparse_matmul_multicore_reuse_mcast_1d_optimized
@@ -396,13 +400,23 @@ class _SparseExperts:
         out = self._reduce(out, H)
         return out if rank == 4 else ttnn.reshape(out, (1, T, out.shape[-1]))
 
-    def _swiglu(self, fused, lead, half):
-        """Split the packed [.., 2*inter] gate/up result and apply SwiGLU (silu, not
-        gelu -- Ornith is hidden_act='silu'; the gelu variant runs fine and is wrong)."""
-        gate = ttnn.slice(fused, [0, 0, 0, 0], [1, lead, 1, half])
-        up = ttnn.slice(fused, [0, 0, 0, half], [1, lead, 1, 2 * half])
+    def _swiglu(self, fused, lead, half, memory_config=None):
+        """SwiGLU over the packed [.., 2*inter] projection, for DECODE (M=1).
+
+        Four ops where `ttnn.swiglu` would be one, and that is deliberate: at M=1 the
+        fused op PADS the row axis to a full tile, returning [1, k, 32, inter] instead
+        of [1, k, 1, inter]. The values on the real row are right (max abs err 0.017 vs
+        torch), but the shape then drives 32 rows through the down projection. Prefill,
+        whose M is already 32, uses the fused op -- see _prefill.
+        """
+        # UP is the FIRST half and GATE the second -- the pack order the fused
+        # ttnn.swiglu in _prefill requires (`first * silu(second)`). Slicing these the
+        # other way round still runs and still produces plausible logits; that is what
+        # test_gate_up_halves_are_not_swapped exists to catch.
+        up = ttnn.slice(fused, [0, 0, 0, 0], [1, lead, 1, half], memory_config=memory_config)
+        gate = ttnn.slice(fused, [0, 0, 0, half], [1, lead, 1, 2 * half], memory_config=memory_config)
         ttnn.deallocate(fused)
-        out = ttnn.multiply(ttnn.silu(gate), up)
+        out = ttnn.multiply(ttnn.silu(gate, memory_config=memory_config), up, memory_config=memory_config)
         ttnn.deallocate(gate)
         ttnn.deallocate(up)
         return out
@@ -434,7 +448,7 @@ class _SparseExperts:
 
             fused = ttnn.sparse_matmul(
                 x_u,
-                self.gate_up_proj,
+                self.up_gate_proj,
                 sparsity=self.sparsity_base,
                 indices=ids_u,
                 is_input_a_sparse=False,
@@ -501,7 +515,7 @@ class _SparseExperts:
         sp_gu = ttnn.to_layout(ttnn.reshape(routing, (1, T, 1, epd)), ttnn.ROW_MAJOR_LAYOUT)
         fused = ttnn.sparse_matmul(
             x_b,
-            self.gate_up_proj,
+            self.up_gate_proj,
             sparsity=sp_gu,
             nnz=None,
             memory_config=l1,
@@ -593,7 +607,7 @@ class _SparseExperts:
             )
             fused = ttnn.sparse_matmul(
                 x_c,
-                self.gate_up_proj,
+                self.up_gate_proj,
                 sparsity=sp_c,
                 nnz=None,
                 memory_config=dram,
@@ -604,14 +618,11 @@ class _SparseExperts:
             )
             ttnn.deallocate(x_c)
             width = fused.shape[-1]
-            half = width // 2
             fused = ttnn.reshape(fused, (1, epd, C, width))
-            gate = ttnn.slice(fused, [0, 0, 0, 0], [1, epd, C, half], memory_config=dram)
-            up = ttnn.slice(fused, [0, 0, 0, half], [1, epd, C, width], memory_config=dram)
+            # Fused: prefill's M is CHUNK=32, already a whole tile, so swiglu returns
+            # [1, E, 32, inter] unpadded. Replaces slice + slice + silu + multiply.
+            din = ttnn.swiglu(fused, memory_config=dram)
             ttnn.deallocate(fused)
-            din = ttnn.multiply(ttnn.silu(gate, memory_config=dram), up, memory_config=dram)
-            ttnn.deallocate(gate)
-            ttnn.deallocate(up)
 
             down = ttnn.sparse_matmul(
                 din,

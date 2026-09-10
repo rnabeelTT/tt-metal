@@ -919,15 +919,29 @@ class Qwen36Model:
         x = self.embd(token_ids_ttnn)
         ttnn.deallocate(token_ids_ttnn)
 
+        # `current_pos` is either a scalar (every user in lockstep) or a [B] tensor (each
+        # user at its own position, which is what continuous batching produces). Both are
+        # legal inputs; torch.full only accepts the scalar, so a tensor used to fail here
+        # with "full() received an invalid combination of arguments ... got (tuple,
+        # Tensor)" -- the whole eager decode path was unreachable for per-user positions.
+        cur_pos_t = (
+            current_pos.reshape(-1).to(torch.long)
+            if torch.is_tensor(current_pos)
+            else torch.full((B,), int(current_pos), dtype=torch.long)
+        )
+        assert cur_pos_t.shape[0] == B, f"current_pos has {cur_pos_t.shape[0]} entries, batch is {B}"
+
         # RoPE position is offset by rope_delta for a multimodal request (image tokens compress the
         # position space); the KV/cache position (cur_pos_tensor below) stays the true sequence pos.
-        position_ids = torch.full((B, 1), current_pos + self.rope.rope_delta, dtype=torch.long)
+        position_ids = (cur_pos_t + self.rope.rope_delta).reshape(B, 1)
         cos, sin = self.rope.get_rot_mats(position_ids)
 
         # cur_pos for SDPA decode + paged_update_cache ([B*n_kv] after cache reshape).
         n_kv = self.args.n_kv_heads
         cur_pos_tensor = ttnn.from_torch(
-            torch.full((B * n_kv,), current_pos, dtype=torch.int32),
+            # [B*n_kv], user-major: paged_update_cache indexes the reshaped cache by
+            # (user, kv_head), so each user's position repeats n_kv times.
+            cur_pos_t.repeat_interleave(n_kv).to(torch.int32),
             dtype=ttnn.int32,
             layout=ttnn.ROW_MAJOR_LAYOUT,
             device=self.device,

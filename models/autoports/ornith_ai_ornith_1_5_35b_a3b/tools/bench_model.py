@@ -49,7 +49,9 @@ def main() -> int:
     # trace region the capture cannot allocate and traced decode silently falls back.
     params = {
         "l1_small_size": GDN_CONV1D_L1_SMALL_SIZE,
-        "num_command_queues": 2,
+        # Decode is dispatch-bound (marginal 8.41 us per program in the traced model),
+        # so how programs are ISSUED matters more than what they compute. Overridable.
+        "num_command_queues": int(os.environ.get("ORNITH_CQS", "2")),
         "trace_region_size": 1024 * 1024 * 1024,
     }
     # Fabric ONLY under expert parallelism. With replicated experts (the default) the
