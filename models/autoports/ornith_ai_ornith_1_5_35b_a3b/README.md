@@ -58,9 +58,9 @@ Blackhole P150 (stage 11 PASS).
 
 | mesh | experts | MoE block | TTFT @128 | prefill | decode |
 |---|---|---|---|---|---|
-| P150 (1 chip) | bfp4 | 5/5 | 378.8 ms | 337.9 tok/s | 25.38 tok/s |
-| P300 (2 chips) | bfp4 | 5/5 | 380.9 ms | 336.0 tok/s | 25.65 tok/s |
-| P150x4 (4 chips) | bfp4 | 5/5 | 388.9 ms | 329.2 tok/s | 25.62 tok/s |
+| P150 (1 chip) | bfp4 | 5/5 | 362.1 ms | 353.5 tok/s | 27.00 tok/s |
+| P300 (2 chips) | bfp4 | 5/5 | 361.3 ms | 354.3 tok/s | 26.87 tok/s |
+| P150x4 (4 chips) | bfp4 | 5/5 | 375.3 ms | 341.1 tok/s | 26.73 tok/s |
 
 Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
 each die runs a complete independent copy. Decode is also independent of context length
@@ -86,8 +86,8 @@ completions, measured on this QB2:
 
 | lanes (dies) | 1 | 2 | 4 |
 |---|---|---|---|
-| aggregate | 21.95 tok/s | 43.85 tok/s | **80.49 tok/s** |
-| per stream | 21.95 | 21.98 | 20.29 |
+| aggregate | 23.37 tok/s | 46.33 tok/s | **85.73 tok/s** |
+| per stream | 23.37 | 23.25 | 21.51 |
 
 3.67x at four dies with per-stream latency flat. That is the payoff for choosing data
 parallelism over expert parallelism -- and, per the cost model below, the only way
@@ -160,9 +160,14 @@ Decode is **dispatch-bound**. One program costs ~8.4 us no matter what it comput
 decode time is essentially `op_count x 8.4 us` and nothing else. Three independent
 measurements say so:
 
-* **Size does not matter.** A `multiply` on the 1 MB recurrent state and a `multiply`
-  on an 8 KB row both measure ~24 us eager (24.22 vs 24.01). A `reshape` that is only
-  a view still costs 7.79 us.
+* **A program has a floor, and it is most of the cost.** Traced, a `multiply` costs
+  5.45 us at 8 KB, 5.46 at 64 KB, 6.36 at 512 KB -- flat until the tensor gets large.
+  (An earlier eager measurement suggested size never matters at all; that was wrong,
+  because eager time is dominated by host dispatch, which is size-independent by
+  construction. The traced numbers above are the real ones.)
+* **Size matters only at the top end.** The 1 MB GDN recurrent state costs 10.35 us
+  per elementwise op; a quarter of it, which is what TP=4 would give each die, costs
+  5.50 -- back at the floor.
 * **Marginal cost is flat.** Building partial models, 12 GDN layers cost 12.456 ms and
   24 cost 23.315 -- 8.41 us per program across the 1291 programs each layer adds.
 * **Issue configuration is irrelevant.** One command queue against two: 36.38 vs
@@ -181,9 +186,16 @@ the 1.59 ms intercept.
 
 ### What this rules out
 
-**Tensor parallelism cannot help single-stream latency on this model.** TP divides the
-DATA per op, not the NUMBER of ops, and cost here is independent of data size -- so
-four dies would run the same ~4300 programs, each no cheaper, plus collectives. This is
+**Tensor parallelism buys very little here.** TP divides the DATA per op, not the
+NUMBER of ops. Only a handful of ops per layer are big enough for size to matter (the
+1 MB state ops, ~6 of 109), so TP would shave those from 10.35 to 5.50 us and leave the
+other hundred at the floor -- while adding two all-reduces per layer. The per-op excess
+over the floor is mostly op TYPE (matmul, layernorm, tilize) and CORE UTILISATION, and
+neither is something another die fixes. This is also why Ornith-1.5 is not comparable to
+the dense 30-35B models in the fleet table: those read tens of GB per token and are
+bandwidth-bound, so TP scales them nearly linearly (ornith-1.0: 11.6 -> 33.3 -> 43.0
+tok/s on 1/2/4 chips). An A3B activates ~3B parameters and runs out of ops, not
+bandwidth. This is
 why extra dies serve extra USERS instead (see the lane table above). It is also why
 Ornith is not comparable to a dense-attention MoE like Qwen3-Coder, whose decode is
 made of a few large matmuls per layer rather than ~111 small ops.
