@@ -569,7 +569,17 @@ class Qwen36Model:
         if mesh_shape[cluster_axis] == 1:
             return logits
         logits = ttnn.to_memory_config(logits, ttnn.DRAM_MEMORY_CONFIG)
-        return ttnn.experimental.all_gather_async(
+        # KNOWN BROKEN in-model, which is why ORNITH_SHARD_LM_HEAD defaults to off.
+        # Standalone on a [1, 4] mesh this exact call is correct and cheap -- 0.3-0.5 ms
+        # warm, [1,1,62080] -> [1,1,248320] -- at every rank (3 and 4), dtype (bf16 and
+        # bfp8) and M (1/32/128) tried. Inside the model the first prefill never
+        # returns: the host parks in FDMeshCommandQueue::wait_for_outstanding_reads, a
+        # device-side hang, not a compile (no kernel-cache writes, 110-160% CPU
+        # polling). Ruled out: rank, dtype, M, and command-queue count (ORNITH_CQS=1
+        # hangs identically). The remaining suspect is buffer lifetime -- TT_CCL
+        # allocates its global semaphores at model-init, before 40 layers of weights
+        # and activations claim memory -- but that is unproven.
+        gathered = ttnn.experimental.all_gather_async(
             logits,
             persistent_output_buffer=None,
             dim=len(logits.shape) - 1,
@@ -582,6 +592,7 @@ class Qwen36Model:
             num_workers_per_link=2,
             num_buffers_per_channel=2,
         )
+        return gathered
 
     def _final_norm_decode(self, x):
         """Final RMSNorm before the LM head (TP decode).
