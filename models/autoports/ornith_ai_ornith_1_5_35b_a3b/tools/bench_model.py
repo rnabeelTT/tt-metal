@@ -132,6 +132,41 @@ def main() -> int:
         ttnn.synchronize_device(mesh)
         ttft = time.perf_counter() - t0
 
+        if a.batch > 1:
+            # Prefill here runs ONE sequence, and the GDN state handoff replaces the
+            # externally allocated [B, ...] buffers with the [1, ...] ones it just
+            # produced -- after which a batch-B decode dies in a copy with
+            # "Input tensor shape [4, 1, 8192] does not match output [1, 1, 8192]".
+            # Real serving prefills each user into its own slot; this bench does not,
+            # so reinstall zeroed batch-B state and measure decode alone. TTFT above is
+            # still the single-sequence number.
+            # Only the GDN state needs reinstalling; the paged KV caches were already
+            # sized for a.batch above and prefill did not resize them.
+            for _layer in model.layers:
+                if getattr(_layer, "is_full_attention", False):
+                    continue
+                _dn = _layer.attention
+                _rec = ttnn.from_torch(
+                    torch.zeros(a.batch, _dn.num_v_heads, _dn.head_k_dim, _dn.head_v_dim, dtype=torch.bfloat16),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh,
+                )
+                _conv = ttnn.from_torch(
+                    torch.zeros(
+                        a.batch,
+                        _dn.conv_kernel_size - 1,
+                        _dn.cfg.q_dim + _dn.cfg.k_dim + _dn.cfg.v_dim,
+                        dtype=torch.bfloat16,
+                    ),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh,
+                )
+                _dn.split_conv_state = None  # force the lazy per-tap rebuild at the new batch
+                _dn.conv_state_q = _dn.conv_state_k = _dn.conv_state_v = None
+                _dn.set_external_state(_rec, _conv)
+
         # Decode, eager and traced.
         #
         # Tracing is the second half of the dispatch story: batching the experts cut the

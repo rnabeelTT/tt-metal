@@ -541,9 +541,11 @@ class _SparseExperts:
 
     def forward(self, x, scores, indices, layer_id: int):
         """x: [1,1,T,H] or [B,T,H]; scores/indices [T,1,1,k] -> x's rank."""
-        rank = len(x.shape)
-        T, H = x.shape[-2], x.shape[-1]
-        x4 = x if rank == 4 else ttnn.reshape(x, (1, 1, T, H))
+        orig = list(x.shape)
+        H = orig[-1]
+        # Same rule as _run_blocks: tokens are every leading dim multiplied together.
+        T = math.prod(orig[:-1])
+        x4 = x if len(orig) == 4 and orig[-2] == T else ttnn.reshape(x, (1, 1, T, H))
         decode = T == 1 or T < self.CHUNK
         if decode and self.use_gather:
             out = self._decode_gather(x4, scores, indices, T, H)
@@ -552,7 +554,10 @@ class _SparseExperts:
             out = self._decode_scan(x4, routing, T, H) if decode else self._prefill(x4, routing, T, H)
             ttnn.deallocate(routing)
         out = self._reduce(out, H)
-        return out if rank == 4 else ttnn.reshape(out, (1, T, out.shape[-1]))
+        # Back to the caller's shape, not a canonical one: at batch > 1 decode the layer
+        # passes [B, 1, H], and returning [1, B, H] made the shared-expert add fail with
+        # a binary_ng shape error two calls later.
+        return out if list(out.shape) == orig else ttnn.reshape(out, orig)
 
     def _swiglu(self, fused, lead, half, memory_config=None):
         """SwiGLU over the packed [.., 2*inter] projection, for DECODE (M=1).
@@ -1066,7 +1071,12 @@ class OrnithMoE:
         sparse path is a matmul loop with no such constraint, and blocking it only adds
         ops.
         """
-        return self._run_bank(x, x.shape[-2])
+        # Token count is the product of EVERY leading dim, not shape[-2]. The decoder
+        # hands decode a [B, T, H] tensor, so at batch 1 shape[-2] is the token count by
+        # coincidence and at batch 4 it is 1 while there are 4 tokens -- which showed up
+        # as a reshape volume error inside the router, not here.
+        n_tokens = math.prod(list(x.shape)[:-1])
+        return self._run_bank(x, n_tokens)
 
     def _forward_prefill(self, x):
         """x: [1, 1, seq, hidden] -> [1, 1, seq, hidden].

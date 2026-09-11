@@ -223,6 +223,35 @@ kernel would be a handful. At 8.4 us per program, collapsing the GDN attention's
 programs to ~10 would take decode from 34.3 ms to roughly 22 ms (~45 tok/s) -- and it
 would help every mesh equally, since none of this is a parallelism problem.
 
+## Batch > 1 decode: three of four blockers cleared, one left
+
+This is the biggest unused resource on a multi-die board. Per-stream decode is
+dispatch-bound and does not improve with more dies, so what extra silicon can buy is
+more USERS -- and today that is one sequence per die (`max_num_seqs: 1`), four on a QB2.
+Batch 4 on a single die already measured **8.84 tok/s per user eager against 14.47 at
+batch 1**, i.e. ~2.4x the aggregate, so the payoff is real.
+
+Cleared:
+
+* **The batch-1 assert in `set_external_state`** hardcoded a leading 1 and rejected a
+  perfectly good `[B, ...]` state (`recurrent_state shape mismatch: [4, 32, 128, 128] !=
+  [1, 32, 128, 128]`). Everything downstream reads B off the tensor -- the delta rule is
+  `B = q.shape[0]` throughout -- so only the assert required batch 1. Trailing dims are
+  still checked.
+* **The MoE token count** was `x.shape[-2]`, which is T. The decoder hands decode a
+  `[B, T, H]` tensor, so at batch 1 that equals the token count by coincidence and at
+  batch 4 it is 1 while there are 4 tokens. Now the product of every leading dim.
+* **The MoE output shape** was normalised to `[1, T, H]` instead of the caller's
+  `[B, 1, H]`, which made the shared-expert add fail two calls later.
+
+Left: a **`[B, T, H]` vs `[1, B, H]` convention collision**. One layer's attention output
+comes back transposed against its residual, and the add broadcasts `[4,1,H]` against
+`[1,4,H]` into `[4,4,H]`; the next layer's attention then reads `T = x.shape[1] = 4`,
+decides it is a prefill, and dies in a concat. The MoE is not the source -- it receives
+and returns `[4,4,H]` consistently. Fixing it means settling that convention across the
+GDN module, the full-attention module and the layer, which is a shared-code change that
+needs per-user numerical validation and vLLM slot management behind it.
+
 ## Measured negatives (do not re-try these without new information)
 
 ### ttnn.experimental.moe_compute (the fused MoE op) is correct here but ~3x slower

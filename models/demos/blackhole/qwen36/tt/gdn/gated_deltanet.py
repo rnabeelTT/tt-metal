@@ -75,10 +75,17 @@ class Qwen36GatedDeltaNet:
         Sets use_inplace_state=True so all forward passes write state inplace (preserving buffer addresses).
         Does NOT create split_conv_state — that happens after prefill when there is real data to split.
         """
-        expected_rec = [1, self.num_v_heads, self.head_k_dim, self.head_v_dim]
+        # The batch dim is whatever the caller allocated. Everything downstream reads it
+        # off the tensor (`B = q.shape[0]` in the delta rule, likewise the conv), so the
+        # only thing that ever required batch 1 here was this assert -- it hardcoded a
+        # leading 1 and rejected a perfectly good [B, ...] state with
+        # "recurrent_state shape mismatch: [4, 32, 128, 128] != [1, 32, 128, 128]".
+        # The trailing three dims are the real contract and are still checked.
+        got = list(recurrent_state.shape)
+        expected_tail = [self.num_v_heads, self.head_k_dim, self.head_v_dim]
         assert (
-            list(recurrent_state.shape) == expected_rec
-        ), f"recurrent_state shape mismatch: {list(recurrent_state.shape)} != {expected_rec}"
+            len(got) == 4 and got[1:] == expected_tail and got[0] >= 1
+        ), f"recurrent_state shape mismatch: {got} != [B, {', '.join(map(str, expected_tail))}]"
         assert (
             conv_state.shape[1] == self.conv_kernel_size - 1
         ), f"conv_state dim 1 mismatch: {conv_state.shape[1]} != {self.conv_kernel_size - 1}"
