@@ -58,9 +58,9 @@ Blackhole P150 (stage 11 PASS).
 
 | mesh | experts | MoE block | TTFT @128 | prefill | decode |
 |---|---|---|---|---|---|
-| P150 (1 chip) | bfp4 | 5/5 | 362.1 ms | 353.5 tok/s | 27.00 tok/s |
-| P300 (2 chips) | bfp4 | 5/5 | 361.3 ms | 354.3 tok/s | 26.87 tok/s |
-| P150x4 (4 chips) | bfp4 | 5/5 | 375.3 ms | 341.1 tok/s | 26.73 tok/s |
+| P150 (1 chip) | bfp4 | 5/5 | 363.7 ms | 352.0 tok/s | 29.48 tok/s |
+| P300 (2 chips) | bfp4 | 5/5 | 365.0 ms | 350.7 tok/s | 28.91 tok/s |
+| P150x4 (4 chips) | bfp4 | 5/5 | 370.0 ms | 346.0 tok/s | 28.78 tok/s |
 
 Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
 each die runs a complete independent copy. Decode is also independent of context length
@@ -86,8 +86,8 @@ completions, measured on this QB2:
 
 | lanes (dies) | 1 | 2 | 4 |
 |---|---|---|---|
-| aggregate | 23.37 tok/s | 46.33 tok/s | **85.73 tok/s** |
-| per stream | 23.37 | 23.25 | 21.51 |
+| aggregate | 25.22 tok/s | 49.86 tok/s | **94.50 tok/s** |
+| per stream | 25.22 | 25.06 | 23.71 |
 
 3.67x at four dies with per-stream latency flat. That is the payoff for choosing data
 parallelism over expert parallelism -- and, per the cost model below, the only way

@@ -73,8 +73,8 @@ serve:
   # complete replica. Measured on this QB2, 64-token completions:
   #
   #     lanes (dies)      1        2        4
-  #     aggregate     23.37    46.33    85.73 tok/s
-  #     per stream    23.37    23.25    21.51 tok/s
+  #     aggregate     25.22    49.86    94.50 tok/s
+  #     per stream    25.22    25.06    23.71 tok/s
   #
   # 3.67x at four dies with per-stream latency flat, which is the whole reason the
   # experts are replicated instead of expert-parallel. It is also the ONLY way extra
@@ -88,6 +88,17 @@ serve:
       # The plugin defaults this to 50 MB; a 40-layer decode trace does not fit
       # ("get_trace_buffers_size() <= trace_region_size").
       trace_region_size: 1073741824
+      # NOT set: sample_on_device_mode would be worth ~5 ms/token (dropping the full
+      # [1, 1, 248320] logits readback and its sync every step) but the plugin refuses
+      # it here:
+      #   "on-device sampling requires a certified TP topology (1x4 or 1x8) with at
+      #    most 65536 logits/device; got mesh=(1, 1), vocab=248320"
+      # The bound is per DIE, so it needs the LM head vocab-sharded: 248320/4 = 62080
+      # fits. This model replicates instead (see serve_profiles), so every die holds the
+      # whole head. Sharding just the LM head on the 4-die profile would unlock both
+      # this and ~1.15 ms of its own compute (540 MB -> 135 MB per die, 1538 -> ~385 us)
+      # -- the one place extra dies clearly pay for this model. It needs working
+      # collectives for the logit all-gather, which is why it is not done here.
   capabilities:
     # Field names are `reasoning_parser` and `tool_parser` -- ContainerCapabilities sets
     # extra="forbid" specifically so a typo here fails at load rather than shipping a
@@ -121,7 +132,7 @@ serve_profiles:
   # opens a 1x1 mesh (1 chips) but hardware 'p300' implies 2"), and all three were run
   # on hardware. But a single instance is a single replica no matter how many dies it
   # opens, so ON A MULTI-DIE BOARD THE HIGHER-THROUGHPUT DEPLOYMENT IS N INSTANCES OF
-  # THE p150 PROFILE, one per die -- 85.73 tok/s aggregate on four dies against 26.73
+  # THE p150 PROFILE, one per die -- 94.50 tok/s aggregate on four dies against 28.78
   # for one four-die instance. The per-profile numbers below are per stream.
   #
   # The whole thing is ~18.2 GB (17.1 GB of bfp4 routed experts, which are 92.5% of
@@ -149,7 +160,7 @@ serve_profiles:
   # alongside a run that shows the profile serving at the new length.
   - name: p150
     hardware: p150                # 1 chip -- the unit a lane is made of
-    mesh_device: P150             # verified: 362.1 ms TTFT, 27.00 tok/s
+    mesh_device: P150             # verified: 363.7 ms TTFT, 29.48 tok/s
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b
@@ -157,7 +168,7 @@ serve_profiles:
 
   - name: p300
     hardware: p300                # 1 dual-chip board = 2 chips
-    mesh_device: P300             # on the host: 361.3 ms TTFT, 26.87 tok/s (one replica)
+    mesh_device: P300             # on the host: 365.0 ms TTFT, 28.91 tok/s (one replica)
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b
@@ -173,7 +184,7 @@ serve_profiles:
 
   - name: p300x2
     hardware: p300x2              # 2 boards = 4 chips (a QB2)
-    mesh_device: P150x4           # verified: 375.3 ms TTFT, 26.73 tok/s (one replica)
+    mesh_device: P150x4           # verified: 370.0 ms TTFT, 28.78 tok/s (one replica)
     max_model_len: 4096
     additional_config:
       routed_expert_dtype: bfloat4_b
