@@ -40,8 +40,19 @@ class Qwen36Model:
         # anyway, and the resulting all-gathers fail in control_plane.cpp with "Trying
         # to get un-initialized fabric context" -- a replicated model opens no fabric.
         self.num_devices = getattr(args, "num_devices", None) or mesh_device.get_num_devices()
+
+        # The LM head can be vocab-sharded even when the MODEL is replicated, and it is
+        # the one place on a replicated mesh where extra dies clearly pay: it is the
+        # single largest read in a decode step (540 MB at bfloat8_b, 1538 us traced) and
+        # sharding it 4 ways cuts that to ~135 MB per die. It is also the precondition
+        # for on-device sampling, which the vLLM plugin refuses above 65536 logits per
+        # die and accepts at 248320/4 = 62080. Costs one all-gather of the logit row
+        # (~124 KB/die), so it needs a fabric -- which a replicated model otherwise
+        # never opens. Opt in with ORNITH_SHARD_LM_HEAD=1.
+        mesh_n = mesh_device.get_num_devices()
+        self._lm_shard_n = mesh_n if os.environ.get("ORNITH_SHARD_LM_HEAD") == "1" else self.num_devices
         # CCL for multi-device all-reduce; None on single device (ops no-op).
-        if self.num_devices > 1:
+        if self.num_devices > 1 or self._lm_shard_n > 1:
             from models.tt_transformers.tt.ccl import TT_CCL
 
             self.tt_ccl = TT_CCL(mesh_device)
@@ -132,18 +143,19 @@ class Qwen36Model:
         # M=1 decode is weight-read-bound (~1.3GB/token), so sharding cuts bandwidth;
         # gather moves only the logit row. REPLICATED fallback if vocab indivisible.
         lm_head_weight = state_dict["output.weight"].T.contiguous()  # [dim, vocab_size]
-        self._lmhead_vocab_sharded = self.num_devices > 1 and lm_head_weight.shape[-1] % self.num_devices == 0
-        if self.num_devices > 1 and not self._lmhead_vocab_sharded:
+        _lm_n = self._lm_shard_n
+        self._lmhead_vocab_sharded = _lm_n > 1 and lm_head_weight.shape[-1] % _lm_n == 0
+        if _lm_n > 1 and not self._lmhead_vocab_sharded:
             logger.warning(
-                f"LM-head vocab {lm_head_weight.shape[-1]} not divisible by num_devices "
-                f"{self.num_devices}; falling back to replicated LM head."
+                f"LM-head vocab {lm_head_weight.shape[-1]} not divisible by {_lm_n}; "
+                f"falling back to replicated LM head."
             )
         if self._lmhead_vocab_sharded:
             # Separate cache (.vshard): as_tensor ignores mesh_mapper on reload.
             lm_mapper = ttnn.ShardTensorToMesh(mesh_device, dim=-1)
             lm_cache = tensor_cache_path / "output.weight.vshard" if tensor_cache_path else None
         else:
-            lm_mapper = ttnn.ReplicateTensorToMesh(mesh_device) if self.num_devices > 1 else None
+            lm_mapper = ttnn.ReplicateTensorToMesh(mesh_device) if mesh_n > 1 else None
             lm_cache = tensor_cache_path / "output.weight" if tensor_cache_path else None
         # lm_head is the single largest read in a decode step: 2048 x 248320 is 540 MB at
         # bfloat8_b and measures 1538 us traced (351 GB/s, near this board's practical
@@ -517,13 +529,23 @@ class Qwen36Model:
         if self._lmhead_vocab_sharded:
             from models.tt_transformers.tt.ccl import tt_all_gather
 
+            # A tensor-parallel model gathers with cluster_axis=None, which derives the
+            # device count from the input TENSOR's topology. That is correct for TP and
+            # wrong for a REPLICATED model with only its LM head sharded: the activation
+            # reports one device even on a 4-die mesh ("all_gather_async op will only
+            # work for num_devices > 1, but has 1"), so that case names the axis and
+            # takes the mesh-device API path. See ORNITH_SHARD_LM_HEAD, which is off by
+            # default -- naming the axis gets past the op, but the host read then
+            # composes a single shard (62080 of 248320), so the path is not finished.
+            _replicated_lm_shard = self.num_devices == 1
+            _mesh_shape = list(self.mesh_device.shape)
             logits = tt_all_gather(
                 logits,
                 self.mesh_device,
                 self.tt_ccl,
-                cluster_axis=None,
+                cluster_axis=(1 if _mesh_shape[0] == 1 else 0) if _replicated_lm_shard else None,
                 dim=len(logits.shape) - 1,
-                topology=self.args.ccl_topology(),
+                topology=ttnn.Topology.Linear if _replicated_lm_shard else self.args.ccl_topology(),
             )
         return logits
 

@@ -58,7 +58,9 @@ def main() -> int:
     # model runs no collectives on any mesh, and requesting an unused fabric costs a
     # fragile cold ethernet-link training on P300 plus an "Unsupported fabric config"
     # throw from ccl_common if anything does reach a collective.
-    if rows * cols > 1 and os.environ.get("ORNITH_MOE_EP") == "1":
+    # A fabric is needed by anything that runs a collective: expert parallelism, or the
+    # vocab-sharded LM head's logit all-gather.
+    if rows * cols > 1 and (os.environ.get("ORNITH_MOE_EP") == "1" or os.environ.get("ORNITH_SHARD_LM_HEAD") == "1"):
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
         # Cold multi-chip opens fail ethernet router sync once per process; absorb it.
         try:
