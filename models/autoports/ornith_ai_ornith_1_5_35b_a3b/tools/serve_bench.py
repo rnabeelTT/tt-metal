@@ -65,7 +65,12 @@ def one_request(base, model, out, idx, max_tokens):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8000")
+    # Several bases = several LANES. This model is replicated, one complete copy per
+    # die, so aggregate throughput comes from running a replica per die and spreading
+    # requests over them -- not from raising max_num_seqs, which the GDN external-state
+    # assert pins to 1. Requests are dealt round-robin, so concurrency C over L lanes
+    # puts C/L streams on each. One base behaves exactly as before.
+    ap.add_argument("--base", nargs="+", default=["http://127.0.0.1:8000"])
     ap.add_argument("--model", default="ornith-1.5-35b-a3b")
     ap.add_argument("--mesh", required=True)
     ap.add_argument("--concurrency", type=int, nargs="+", default=[1, 8, 32])
@@ -73,11 +78,17 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
-    report = {"mesh": a.mesh, "model": a.model, "levels": []}
+    report = {"mesh": a.mesh, "model": a.model, "lanes": len(a.base), "bases": a.base, "levels": []}
+    if len(a.base) > 1:
+        print(f"{len(a.base)} lanes: {' '.join(a.base)}")
     for c in a.concurrency:
         results = [None] * c
         threads = [
-            threading.Thread(target=one_request, args=(a.base, a.model, results, i, a.max_tokens)) for i in range(c)
+            threading.Thread(
+                target=one_request,
+                args=(a.base[i % len(a.base)], a.model, results, i, a.max_tokens),
+            )
+            for i in range(c)
         ]
         t0 = time.perf_counter()
         for t in threads:

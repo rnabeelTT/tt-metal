@@ -81,17 +81,28 @@ in the routed experts:
 So the error accumulates in the non-MoE path (GDN, attention, norms). Every optimization
 in this round left the logits BIT-IDENTICAL, so none of it moved accuracy.
 
-**Extra dies buy concurrency, and it scales.** One instance per die, 64-token
-completions, measured on this QB2:
+**Extra dies buy concurrency, and it scales.** One instance per die -- launch them
+with `tools/serve_lanes.sh start 4`. End to end through vLLM, one stream per lane,
+256-token completions, measured on this QB2:
 
 | lanes (dies) | 1 | 2 | 4 |
 |---|---|---|---|
-| aggregate | 25.22 tok/s | 49.86 tok/s | **94.50 tok/s** |
-| per stream | 25.22 | 25.06 | 23.71 |
+| aggregate | 26.07 tok/s | 54.47 tok/s | **91.24 tok/s** |
+| per stream | 29.05 | 28.40 | 25.89 |
+| TTFT (median) | 397 ms | 404 ms | 420 ms |
 
-3.75x at four dies with per-stream latency flat. That is the payoff for choosing data
-parallelism over expert parallelism -- and, per the cost model below, the only way
-extra dies can help this model at all.
+3.50x at four dies. That is the payoff for choosing data parallelism over expert
+parallelism -- and, per the cost model below, the only way extra dies can help this
+model at all.
+
+Two caveats worth carrying into any quote of these numbers. Aggregate is total tokens
+over wall clock, so it includes TTFT and comes in under per-stream x lanes; the same
+four lanes measure 80.63 tok/s at 64-token completions, where a fixed ~400 ms prefill
+is amortized over a quarter as many tokens. And per-stream decays 29.05 -> 25.89 as
+lanes are added. That is HOST contention between four vLLM processes, not the dies,
+which are independent -- and it is proportionally worse than the 25.22 -> 23.71 this
+table recorded before this round of optimization, because the device got faster while
+the host did not. A host with more cores should recover most of it.
 
 Decode is context-independent, which is what a 3:1 linear-attention stack should give:
 
@@ -114,15 +125,44 @@ comes from lanes, not from that number, and the lane table above is what scales.
 **The tt-model v5.1 package is built and all three profiles answer** (`p150`, `p300`,
 `p300x2`), verified by stage 12 against the real container image.
 
-Running lanes by hand, one per die:
+### Running lanes
+
+    source ~/ornith-bringup/env.sh; activate_venv
+    export ORNITH_WEIGHTS=<weights>
+    tools/serve_lanes.sh start 4      # one replica per die, ports 8100..8103
+    tools/serve_lanes.sh wait  4      # blocks until every lane answers /v1/models
+    tools/serve_lanes.sh status
+    tools/serve_lanes.sh stop
+
+Lane `i` serves on port `8100 + i` (`LANE_BASE_PORT` to move them); logs and pidfiles
+go to `/tmp/ornith-lanes` (`LANE_RUN_DIR`). There is deliberately no load balancer in
+the script -- put your own in front, or fan out client-side the way the bench does:
+
+    tools/serve_bench.py --mesh p150x4 --concurrency 4 --max-tokens 256 \
+      --base $(tools/serve_lanes.sh urls 4) --out lanes.json
+
+Three things the script handles that are easy to miss by hand, each of which is a
+hard startup failure rather than a slowdown:
+
+* **The single-die mesh descriptor is mandatory.** One die is a PARTIAL p300 board, so
+  `TT_VISIBLE_DEVICES` alone makes tt-metal call the QB2 a CUSTOM cluster and refuse to
+  start. `TT_MESH_GRAPH_DESC_PATH` must name `p150_mesh_graph_descriptor.textproto`.
+* **`EXTRA_MODELS_DIR` must point at the PARENT of this bundle** (`models/autoports`),
+  because the plugin discovers models by listing subdirectories for a
+  `vllm_metadata.json`. `tt-model` sets it from the manifest; a bare `vllm serve` does
+  not, and fails with "No TT model architecture is registered for model: <path>".
+* **Stopping cleanly matters.** A half-closed process leaves `/dev/shm/tt_device_*`
+  behind and the next open dies with "Sysmem mapped at unexpected NOC address"; `stop`
+  waits for the processes to actually go away.
+
+The equivalent by hand, per die, is:
 
     TT_VISIBLE_DEVICES=<die> \
     TT_MESH_GRAPH_DESC_PATH=$TT_METAL_HOME/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto \
-    vllm serve <weights> --max-num-seqs 1 --block-size 64 --max-model-len 4096 \
+    EXTRA_MODELS_DIR=$TT_METAL_HOME/models/autoports \
+    vllm serve <weights> --served-model-name ornith-1.5-35b-a3b \
+      --max-num-seqs 1 --block-size 64 --max-model-len 4096 \
       --additional-config '{"tt": {"trace_region_size": 1073741824}}' --port 810<die>
-
-The descriptor is not optional: one die is a PARTIAL p300 board, so `TT_VISIBLE_DEVICES`
-alone makes tt-metal call the QB2 a CUSTOM cluster and refuse to start.
 
 ## Packaging (tt-model v5.1)
 
