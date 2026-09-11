@@ -5,6 +5,13 @@ The device profiler records per-dispatch timings with no module or op identity, 
 ablation inside a captured trace deadlocks. Graph capture carries the op names, so this
 is the one view that says which ttnn op to attack rather than which module.
 
+There is no source attribution here: graph capture on this build records only `name` in
+each node's params (node keys: arguments, connections, counter, duration_ns,
+input_tensors, node_type, params, stacking_level), and neither
+ttnn.graph.enable_python_stack_traces() nor CONFIG.enable_graph_python_stack_traces
+populates a traceback -- so which Python line emitted a program has to be read off the
+ORDERED sequence (--sequence) against the code, not looked up.
+
 Build with --spec gdn to isolate the Gated DeltaNet layers, which the layer sweep showed
 are 74.6% of decode (905 us/layer x 30 against 764 us x 10 for full attention).
 """
