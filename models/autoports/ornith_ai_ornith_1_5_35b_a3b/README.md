@@ -292,6 +292,113 @@ and returns `[4,4,H]` consistently. Fixing it means settling that convention acr
 GDN module, the full-attention module and the layer, which is a shared-code change that
 needs per-user numerical validation and vLLM slot management behind it.
 
+## The batch>=4 cross-user failure is not a batching bug
+
+`tools/bench_model.py --batch B` feeds every user the same token from the same zeroed
+state and asserts every user's logits are IDENTICAL. It fails from B=4. The failure is
+real but the diagnosis "batched decode is wrong" is not: the decode graph is not
+bit-reproducible, and the cross-user check is simply the first thing that notices.
+
+Five identical runs on P150, same token, same position, GDN recurrent + conv state and
+paged KV freed and reallocated (i.e. zeroed) before each run:
+
+| batch | cross-user max\|logit diff\| per run            | same step re-run |
+|-------|-------------------------------------------------|------------------|
+| 1     | n/a                                             | **1.0156**       |
+| 2     | 0, 0, **1.508**, **0.579**, 0                   | **1.5078**       |
+| 4     | **0.598, 1.062, 1.031, 0.940, 0.804**           | **1.3750**       |
+
+The right-hand column is the one that settles it. At **batch 1** -- the configuration
+that ships -- running the SAME decode step five times from a freshly zeroed state gives
+logits up to 1.0156 apart and flips the argmax (8,8,8,8,25). Nothing is batched there
+and nothing is compared across users, so nothing catches it. Batch 2 is not "correct"
+either; it is clean in 3 of 5 runs. Batch 4 fails in 5 of 5 because a batch-B step makes
+B sequentially different expert calls per layer instead of one.
+
+The same batch-4 configuration is clean on one mesh and dirty on another in the same
+sitting -- P300 measured 0.000e+00 and P150x4 measured 7.188e-01 on the runs recorded
+here -- which is the same stochastic behaviour, not a per-die difference: the model is
+replicated, so each die runs the identical graph with a different allocation history.
+
+### Where it enters
+
+A per-layer probe (`attention_norm`, attention, recurrent state, MoE, residual, per user)
+puts the first divergence in the **MoE feed-forward, always**. Up to that layer every
+attention output, every GDN recurrent state and every norm output is bit-identical across
+users; the MoE output differs by ~1 ULP and the residual stream carries it from there
+(layer 27 `ff`=2.4e-4 -> layer 39 out=1.4e-1 -> logits ~1).
+
+Inside `_decode_gather`, at the first diverging call, `x_u` and `ids_u` read back
+bit-identical for all four users and the FIRST `ttnn.sparse_matmul` (gate_up) already
+differs -- user 0 alone, users 1..B-1 identical to each other. Against an fp32 torch
+reference built from the same eight expert weight blocks, both answers are accurate and
+about one ULP apart:
+
+    u0:       mean err 0.006729   PCC 0.999825358
+    u1,u2,u3: mean err 0.006538   PCC 0.999846578
+
+So this is rounding, not corruption. The `argmax` 25-vs-8 in the harness output is a
+bf16 tie: users 1..3 get logit[8] == logit[25] == 11.0 and `argmax` returns the lower id,
+user 0 gets 11.5 vs 10.8125. The top-5 ids are the same set for every user.
+
+### What it is not (each ruled out by measurement, not by reading)
+
+* **Not stale GDN state, and not prefill.** It reproduces with NO prefill at all, with
+  every layer's recurrent state and fused conv state read back as exactly 0.0 before the
+  step. `--batch 4` diverges from a cold, verified-zero state.
+* **Not the sdpa_decode Q layout or the page table.** The harness' cross-user check runs
+  the EAGER, non-paged decode; the attention layers' outputs are bit-identical across
+  users at and before the first diverging layer.
+* **Not `ttnn.sparse_matmul`.** A plain `ttnn.matmul` against a fixed persistent weight,
+  called at the same point in the same loop, shows the same cross-user spread
+  (4.297e-02 where the sparse one showed 4.297e-02).
+* **Not the operands.** Rebuilding `x_u` and `ids_u` through the host, explicitly zeroing
+  the input's implicit tile padding, and pinning every operand AND the output to the same
+  tensor objects for all B iterations each still diverge, bit-for-bit as before.
+* **Not dispatch or the program cache.** `ORNITH_CQS=1`, a `synchronize_device` before
+  every call, a DRAM instead of L1 output, and `disable_and_clear_program_cache()` all
+  leave it in place.
+
+What DOES move it is allocation history. Reversing the per-user loop order, running the
+MoE twice per layer, or adding one warm-up batch-1 pass each give exactly 0.0, and the
+first diverging layer walks (20 -> 23 -> 27 -> 36) with the op sequence. The model is
+deterministic for a FIXED allocation sequence -- two `pytest` processes produce the same
+PCC to 16 digits -- and varies when that sequence changes, which is what a free/allocate
+between runs and what B sequential expert calls per layer both do.
+
+That places the remaining fault below this model, in how a matmul's result depends on
+device state that is not its operands. Do not "fix" it here by reordering the user loop
+or inserting warm-up calls: those are the perturbations above, they hide the cross-user
+check without making the arithmetic reproducible, and batch 1 stays as unreproducible as
+it is today.
+
+### One real bug found on the way, and fixed
+
+`Qwen36GatedDeltaNet.set_external_state` installed fresh recurrent and conv buffers but
+left `split_conv_state` -- the per-tap decode conv window DERIVED from the previous
+buffers -- in place, and `free_kv_caches` never released it. `gdn/decode.py` rebuilds
+that window only "when it is None", so after the documented new-generation reset
+(`free_kv_caches()` + `allocate_kv_caches()`) the recurrent and fused conv states read
+back as exactly zero while **all 30 GDN layers still held the previous sequence's conv
+window** (absmax ~30), and one split conv state per layer leaked per generation. Now
+dropped in `drop_derived_conv_state()`, which the three sites that already did this by
+hand share. Verified: 30 stale layers before, 0 after. This is NOT the cause of the
+cross-user failure -- that reproduces with no prefill and a verified-zero state -- but it
+is a real cross-sequence state leak in the serving path.
+
+### Throughput, P150, ISL 128, pure `execute_trace`
+
+| batch | ms/token | steps/s | aggregate tok/s | with host readback |
+|-------|----------|---------|-----------------|--------------------|
+| 1     | 29.03    | 34.45   | 34.5            | 29.30 tok/s        |
+| 2     | 44.07    | 22.69   | 45.4            | 16.29 steps/s      |
+| 4     | 73.12    | 13.68   | 54.7            | 9.25 steps/s       |
+| 8     | 131.64   | 7.60    | 60.8            | 5.10 steps/s       |
+
+Aggregate rises with batch and per-user rate falls faster than linearly, because the
+gather path bills per (user, expert) slot -- each slot is its own M=1 matmul and nothing
+amortises across users. Unchanged by the conv-state fix.
+
 ## Measured negatives (do not re-try these without new information)
 
 ### ttnn.experimental.moe_compute (the fused MoE op) is correct here but ~3x slower

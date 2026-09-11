@@ -1206,13 +1206,7 @@ class Qwen36Model:
             dn = layer.attention
             dn.recurrent_state = ext_rec
             dn.fused_conv_state = ext_conv
-            dn.conv_state_q = None
-            dn.conv_state_k = None
-            dn.conv_state_v = None
-            if dn.split_conv_state is not None:
-                for buf in dn.split_conv_state:
-                    ttnn.deallocate(buf)
-                dn.split_conv_state = None
+            dn.drop_derived_conv_state()
             dn._chunk_inplace_state = True
         self._init_dn_zero_buffers()
 
@@ -2756,10 +2750,7 @@ class Qwen36Model:
             ttnn.copy(self._dn_zero_recurrent, dn.recurrent_state)
             ttnn.copy(self._dn_zero_conv, dn.fused_conv_state)
             # split_conv_state rebuilt lazily on first decode.
-            if dn.split_conv_state is not None:
-                for buf in dn.split_conv_state:
-                    ttnn.deallocate(buf)
-                dn.split_conv_state = None
+            dn.drop_derived_conv_state()
 
     def _init_dn_zero_buffers(self):
         """Allocate shared zero buffers for DN recurrent and conv shapes."""
@@ -2840,6 +2831,16 @@ class Qwen36Model:
         if getattr(self, "_chunked_trace_id", None) is not None:
             ttnn.release_trace(self.device, self._chunked_trace_id)
             self._chunked_trace_id = None
+        # Drop the conv state DERIVED from these buffers before releasing them. It is not
+        # in _deltanet_external_states (the layer builds it lazily on the first decode), so
+        # it used to outlive every free/allocate cycle -- both a leak of one split conv
+        # state per GDN layer per generation and, because gdn/decode.py rebuilds it only
+        # "when it is None", a carry of the previous sequence's conv window into the next.
+        for layer in self.layers:
+            if not layer.is_full_attention:
+                drop = getattr(layer.attention, "drop_derived_conv_state", None)
+                if drop is not None:
+                    drop()
         for rec, conv in self._deltanet_external_states:
             ttnn.deallocate(rec)
             ttnn.deallocate(conv)

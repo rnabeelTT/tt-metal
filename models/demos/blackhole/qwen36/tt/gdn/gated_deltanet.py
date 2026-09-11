@@ -89,9 +89,35 @@ class Qwen36GatedDeltaNet:
         assert (
             conv_state.shape[1] == self.conv_kernel_size - 1
         ), f"conv_state dim 1 mismatch: {conv_state.shape[1]} != {self.conv_kernel_size - 1}"
+        # The caller is installing FRESH state buffers, so every view derived from the
+        # PREVIOUS ones is stale and must go with them. The decode conv reads
+        # `split_conv_state` and gdn/decode.py only rebuilds it "when it is None", so a
+        # leftover split state silently carries the last sequence's conv window into the
+        # next one: after the documented free_kv_caches() + allocate_kv_caches() reset the
+        # recurrent and fused conv states read back as exactly zero while all 30 GDN
+        # layers still held a split state with absmax ~30. free_kv_caches never released
+        # those buffers either, so they also leaked one conv state per layer per
+        # generation. Dropping them here is what _reset_dn_state_inplace already does for
+        # the in-place trace path ("rebuilt lazily on first decode").
+        self.drop_derived_conv_state()
         self.recurrent_state = recurrent_state
         self.fused_conv_state = conv_state
         self.use_inplace_state = True
+
+    def drop_derived_conv_state(self):
+        """Release the conv state derived from a previous fused/per-stream buffer.
+
+        `split_conv_state` owns its buffers (gdn/state.py clones them), so they are
+        deallocated; the per-stream conv states are views handed back by the forward and
+        are only dropped. Both are rebuilt lazily on the next decode.
+        """
+        if self.split_conv_state is not None:
+            for buf in self.split_conv_state:
+                ttnn.deallocate(buf)
+            self.split_conv_state = None
+        self.conv_state_q = None
+        self.conv_state_k = None
+        self.conv_state_v = None
 
     def _restore_split_conv_from_fused(self):
         """Copy fused_conv_state slices into existing split_conv_state buffers.
@@ -105,8 +131,5 @@ class Qwen36GatedDeltaNet:
             init_recurrent_state(self, batch_size)
         else:
             self.recurrent_state = None
-        self.conv_state_q = None
-        self.conv_state_k = None
-        self.conv_state_v = None
+        self.drop_derived_conv_state()
         self.fused_conv_state = None
-        self.split_conv_state = None
