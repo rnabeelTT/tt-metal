@@ -140,13 +140,98 @@ def _sparse_matmul_config(m: int, n: int, in0_block_w: int = 1):
     )
 
 
-def _tuned_sparse_matmul_config(m: int, n: int, k: int, target_blk: int):
-    """`_sparse_matmul_config` with the inner block width clamped to a divisor of k."""
-    k_tiles = max(1, k // 32)
-    blk = min(target_blk, k_tiles)
-    while blk > 1 and k_tiles % blk:
-        blk -= 1
-    return _sparse_matmul_config(m, n, in0_block_w=blk)
+def _largest_divisor_at_most(n: int, cap: int) -> int:
+    """Largest d <= cap with n % d == 0 (at least 1)."""
+    d = max(1, min(cap, n))
+    while d > 1 and n % d:
+        d -= 1
+    return d
+
+
+# Core count for a routed sparse matmul.
+#
+# The Ornith-1.0 port sizes this from how many experts the call can ACTIVATE (its op does
+# `active_experts` K-sweeps per output block) and measured 8 cores with a wide output
+# block about 40% FASTER than the 32/64-core per_core_N=1 form at 8 active experts.
+# That does not transfer to this port and the sweep says so plainly -- decode, P150,
+# pure execute_trace, one knob driving both phases:
+#
+#     cores      8        16       32       64
+#     decode   38.60 ms 35.44    34.28    34.21
+#     TTFT    464.2 ms  376.9    359.4    373.1
+#
+# The reason is the path, not the tuning: Ornith-1.0 scans the sparsity, so its decode op
+# really does sweep every expert slot and narrow-and-wide pays. This port takes the
+# INDEXED/gather path, where the op visits only the top-8 and the output group axis is
+# already compact, so there is no slot scan left to trade against -- what remains wants
+# the widest grid it can fill. Decode therefore keeps the divisor-of-Nt form, and only
+# PREFILL, whose ~162-expert union does scan, takes the active-expert rule (which lands
+# it on 32 cores and is worth ~5% of TTFT over the previous 64).
+SPARSE_CORES_PER_ACTIVE = {"gate_up": 2, "down": 4}
+SPARSE_MIN_CORES = 8
+SPARSE_MAX_CORES = 32
+#: Decode fills the grid instead: the largest divisor of Nt at or below this.
+SPARSE_DECODE_CORES = 64
+# in0_block_w cap for the packed gate/up matmul, keyed on whether the call got more than
+# the minimum core count. At 8 active experts a 32-tile inner block beats the whole tiled
+# K; at a prefill group's ~162 the whole K wins by a wider margin. One value cannot serve
+# both, and the bound that picks the core count picks this too.
+SPARSE_GATE_UP_IN0_BLOCK_W = {False: 32, True: 64}
+
+
+def _sparse_cores(role: str, active_experts: int | None) -> int:
+    """Target cores. `active_experts=None` means decode: fill the grid."""
+    override = os.environ.get("ORNITH_SPARSE_CORES")
+    if override:
+        return int(override)
+    if active_experts is None:
+        return SPARSE_DECODE_CORES
+    per = SPARSE_CORES_PER_ACTIVE[role]
+    return max(SPARSE_MIN_CORES, min(SPARSE_MAX_CORES, active_experts // per))
+
+
+def _tuned_sparse_matmul_config(m, n, k, role, active_experts, grid_y=8):
+    """Sparse-matmul program config sized from the ACTIVE expert bound.
+
+    The sparse factory requires mcast_in0, `Kt % in0_block_w == 0`, and output blocks that
+    exactly tile a rectangle of the grid -- so the core count must divide Nt exactly. Both
+    the core count and in0_block_w are targets, reduced to the largest legal divisor.
+    """
+    n_tiles = max(1, math.ceil(n / 32))
+    k_tiles = max(1, math.ceil(k / 32))
+    m_tiles = max(1, math.ceil(m / 32))
+
+    cores = _largest_divisor_at_most(n_tiles, max(1, _sparse_cores(role, active_experts)))
+    per_core_n = n_tiles // cores
+    # Fill one grid axis first (a 1 x cores column), widening only when cores exceeds it.
+    cy = min(cores, grid_y)
+    while cores % cy:
+        cy -= 1
+    cx = cores // cy
+
+    block_w = per_core_n
+    sub_w = _largest_divisor_at_most(block_w, 8)  # dst register file: h*w <= 8
+    sub_h = _largest_divisor_at_most(m_tiles, max(1, 8 // sub_w))
+    want = (
+        SPARSE_GATE_UP_IN0_BLOCK_W[cores > SPARSE_MIN_CORES]
+        if role == "gate_up" and active_experts is not None
+        else k_tiles
+    )
+    in0_block_w = _largest_divisor_at_most(k_tiles, max(1, want))
+
+    return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
+        compute_with_storage_grid_size=ttnn.CoreCoord(cx, cy),
+        in0_block_w=in0_block_w,
+        out_subblock_h=sub_h,
+        out_subblock_w=sub_w,
+        out_block_h=m_tiles,
+        out_block_w=block_w,
+        per_core_M=m_tiles,
+        per_core_N=per_core_n,
+        fuse_batch=False,
+        fused_activation=None,
+        mcast_in0=True,
+    )
 
 
 _RECIPES = {
@@ -282,6 +367,13 @@ class _SparseExperts:
     # into M, so a larger chunk grows num_blocks_y and can overflow the core grid.
     CHUNK = 32
 
+    #: dtype of the routed-expert intermediates (the packed gate/up result and the down
+    #: output). Ornith-1.0's precision policy ships BFP8 here. Traced op cost is flat up
+    #: to ~256 KB and rises after, so halving these only pays where they are large.
+    ACT_DTYPE = {"bfloat16": ttnn.bfloat16, "bfloat8_b": ttnn.bfloat8_b}[
+        os.environ.get("ORNITH_EXPERT_ACT", "bfloat16")
+    ]
+
     def __init__(self, mesh_device, args, w0, w1, w2, cluster_axis, cache=None, tt_ccl=None):
         self.mesh_device = mesh_device
         self.cluster_axis = cluster_axis
@@ -373,10 +465,13 @@ class _SparseExperts:
         )
         self.compute_config = _expert_compute_config(mesh_device)
         # k is the inner dim: H for gate/up, `inter` for down.
-        self.gate_up_cfg_decode = _tuned_sparse_matmul_config(1, 2 * N, H, 64)
-        self.down_cfg_decode = _tuned_sparse_matmul_config(1, H, N, 16)
-        self.gate_up_cfg_prefill = _tuned_sparse_matmul_config(self.CHUNK, 2 * N, H, 64)
-        self.down_cfg_prefill = _tuned_sparse_matmul_config(self.CHUNK, H, N, 16)
+        self.gate_up_cfg_decode = _tuned_sparse_matmul_config(1, 2 * N, H, "gate_up", None)
+        self.down_cfg_decode = _tuned_sparse_matmul_config(1, H, N, "down", None)
+        # A 32-token chunk draws 32 x top_k times from E experts; the expected distinct
+        # union is what the prefill config should be sized for, not top_k.
+        union = int(epd * (1.0 - (1.0 - 1.0 / epd) ** (self.CHUNK * self.top_k)))
+        self.gate_up_cfg_prefill = _tuned_sparse_matmul_config(self.CHUNK, 2 * N, H, "gate_up", union)
+        self.down_cfg_prefill = _tuned_sparse_matmul_config(self.CHUNK, H, N, "down", union)
         self.tile = ttnn.Tile([32, 32])
         logger.debug(
             f"sparse experts: {epd}/device x {nd} devices, {args.routed_expert_dtype}, "
@@ -469,7 +564,7 @@ class _SparseExperts:
                 output_tile=self.tile,
                 program_config=self.gate_up_cfg_decode,
                 compute_kernel_config=self.compute_config,
-                dtype=ttnn.bfloat16,
+                dtype=self.ACT_DTYPE,
             )
             # [.., k, 1, 2*inter] compact -> [1, k, 1, 2*inter]
             din = self._swiglu(ttnn.reshape(fused, (1, k, 1, 2 * N)), k, N)
@@ -486,7 +581,7 @@ class _SparseExperts:
                 output_tile=self.tile,
                 program_config=self.down_cfg_decode,
                 compute_kernel_config=self.compute_config,
-                dtype=ttnn.bfloat16,
+                dtype=self.ACT_DTYPE,
             )
             ttnn.deallocate(din)
             # Scale each expert by ITS OWN routing weight before summing. Scaling the

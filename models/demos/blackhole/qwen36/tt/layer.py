@@ -6,6 +6,8 @@ Dispatches to either Gated DeltaNet (linear attention) or Gated Full Attention
 based on the layer index. Both share the same RMSNorm + residual pattern and MLP.
 """
 
+import os
+
 import ttnn
 from models.common.rmsnorm import RMSNorm
 from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
@@ -193,9 +195,22 @@ class Qwen36DecoderLayer:
         else:
             # In decode the norm output stays in L1 (as the old rms_norm_ttnn(memory_config=L1) did);
             # in prefill the framework RMSNorm returns interleaved DRAM (matches the old None default).
-            _attn_norm_config = _ff_norm_config = (
-                {"output_mem_config": ttnn.L1_MEMORY_CONFIG} if mode == "decode" else None
-            )
+            #
+            # Decode norms are WIDTH-SHARDED. ttnn.rms_norm parallelises over ROWS, and a
+            # decode activation is a single tile of rows, so the interleaved form ran the
+            # whole `dim`-wide norm on ONE core; the sharded program config spreads it over
+            # the attention input grid. Measured on Ornith-1.5, P150, pure execute_trace:
+            # 34.21 -> 32.14 ms, with logits BIT-IDENTICAL (PCC 0.96809/0.94212/0.93442
+            # either way). The logit check matters here rather than a latency check alone:
+            # a sharded norm output feeding a projection that reads only the core count out
+            # of the shard spec can silently read the wrong cores, which the Ornith-1.0 port
+            # hit and paid for in PCC with no error raised. ORNITH_SHARDED_NORM=0 reverts.
+            if mode == "decode" and os.environ.get("ORNITH_SHARDED_NORM", "1") == "1":
+                _attn_norm_config = _ff_norm_config = self.args.get_norm_config("attn", Mode.DECODE)
+            else:
+                _attn_norm_config = _ff_norm_config = (
+                    {"output_mem_config": ttnn.L1_MEMORY_CONFIG} if mode == "decode" else None
+                )
         attn_input = self.attention_norm(x, mode=_norm_mode, norm_config=_attn_norm_config)
 
         if self.num_devices > 1:
