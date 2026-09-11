@@ -381,7 +381,13 @@ def gated_attention_forward_ttnn(
             paged_kv_cache_value, v_sharded, update_idxs_tensor=cur_pos_tensor, page_table=page_table
         )
         # Paged SDPA decode
-        q_decode = ttnn.transpose(query_states, 1, 2)  # [B, H_q, 1, D] -> [B, 1, H_q, D] = [1, B, H_q, D] for B=1
+        # sdpa_decode wants Q as [T, B, H_q, D]. query_states is [B, H_q, T, D], and
+        # transpose(1, 2) gives [B, T, H_q, D] -- which is the SAME tensor only when
+        # B == 1, as the old comment here said. At B > 1 it silently feeds the op a
+        # batch-major Q, and the mis-shaped result surfaces layers later as a residual
+        # add broadcasting [B,1,H] against [1,B,H] into [B,B,H]. permute is the shape
+        # this needs at any batch and is identical to the transpose at B=1.
+        q_decode = ttnn.permute(query_states, (2, 0, 1, 3))  # [B,H,T,D] -> [T,B,H,D]
         # paged_scaled_dot_product_attention_decode requires Q in DRAM when not sharded
         # (sdpa_decode_device_operation.cpp:89). transpose preserves L1 layout from query_states.
         q_decode = ttnn.to_memory_config(q_decode, ttnn.DRAM_MEMORY_CONFIG)
@@ -397,7 +403,8 @@ def gated_attention_forward_ttnn(
                 device, paged_kv_cache_key.shape[0] * paged_kv_cache_key.shape[2]
             ),
         )
-        attn_output = ttnn.transpose(attn_output, 1, 2)  # back to [B, H_q, 1, D]
+        # [T, B, H_q, D] -> [B, H_q, T, D]; the inverse of the permute above.
+        attn_output = ttnn.permute(attn_output, (1, 2, 0, 3))
         new_key = paged_kv_cache_key
         new_value = paged_kv_cache_value
         _paged_sdpa_done = True  # Skip the bottom SDPA section (attn_output already computed)
@@ -541,9 +548,9 @@ def gated_attention_forward_ttnn(
         pass  # attn_output already set by paged SDPA decode path
     elif _use_sdpa_decode:
         # Decode-optimized SDPA: reads cache[:, :, :cur_pos+1, :] internally.
-        # sdpa_decode expects Q as [1, B, H, D] (not [B, H, 1, D] like regular SDPA).
-        # Transpose from [B=1, H, T=1, D] → [T=1, B=1, H, D].
-        q_decode = ttnn.transpose(query_states, 1, 2)  # [1, 1, 16, 256]
+        # sdpa_decode expects Q as [T, B, H, D] (not [B, H, T, D] like regular SDPA).
+        # See the paged path above: transpose(1, 2) only coincides with this at B == 1.
+        q_decode = ttnn.permute(query_states, (2, 0, 1, 3))  # [B,H,T,D] -> [T,B,H,D]
         # cur_pos_tensor has B*H_kv elements; sdpa_decode needs B elements.
         sdpa_pos = cur_pos_tensor[:B] if cur_pos_tensor.shape[0] > B else cur_pos_tensor
         attn_output = ttnn.transformer.scaled_dot_product_attention_decode(
@@ -555,8 +562,8 @@ def gated_attention_forward_ttnn(
             program_config=_get_sdpa_program_config(device, S_total, q_seq_len=T),
             compute_kernel_config=_get_sdpa_compute_kernel_config(),
         )
-        # Transpose back to [B, H, T, D] for head concatenation
-        attn_output = ttnn.transpose(attn_output, 1, 2)
+        # Back to [B, H, T, D] for head concatenation; inverse of the permute above.
+        attn_output = ttnn.permute(attn_output, (1, 2, 0, 3))
     else:
         if trace_new_k_buf is not None:
             _attn_mask = trace_attn_mask

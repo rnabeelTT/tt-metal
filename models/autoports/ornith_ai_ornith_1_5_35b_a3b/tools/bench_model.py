@@ -140,32 +140,17 @@ def main() -> int:
             # Real serving prefills each user into its own slot; this bench does not,
             # so reinstall zeroed batch-B state and measure decode alone. TTFT above is
             # still the single-sequence number.
-            # Only the GDN state needs reinstalling; the paged KV caches were already
-            # sized for a.batch above and prefill did not resize them.
-            for _layer in model.layers:
-                if getattr(_layer, "is_full_attention", False):
-                    continue
-                _dn = _layer.attention
-                _rec = ttnn.from_torch(
-                    torch.zeros(a.batch, _dn.num_v_heads, _dn.head_k_dim, _dn.head_v_dim, dtype=torch.bfloat16),
-                    dtype=ttnn.bfloat16,
-                    layout=ttnn.TILE_LAYOUT,
-                    device=mesh,
-                )
-                _conv = ttnn.from_torch(
-                    torch.zeros(
-                        a.batch,
-                        _dn.conv_kernel_size - 1,
-                        _dn.cfg.q_dim + _dn.cfg.k_dim + _dn.cfg.v_dim,
-                        dtype=torch.bfloat16,
-                    ),
-                    dtype=ttnn.bfloat16,
-                    layout=ttnn.TILE_LAYOUT,
-                    device=mesh,
-                )
-                _dn.split_conv_state = None  # force the lazy per-tap rebuild at the new batch
-                _dn.conv_state_q = _dn.conv_state_k = _dn.conv_state_v = None
-                _dn.set_external_state(_rec, _conv)
+            # Free and reallocate EVERYTHING at batch B: the GDN state and the paged KV
+            # caches. Resetting only the GDN state leaves user 0 holding the KV this
+            # prefill just wrote while users 1..B-1 hold zeros, which makes the
+            # cross-user check below compare users that are not actually in the same
+            # state -- it reads as a batching bug and is not one.
+            model.free_kv_caches()
+            model.allocate_kv_caches(
+                [num_blocks, args.n_local_kv_heads, BLOCK_SIZE, args.head_dim],
+                ttnn.bfloat16,
+                batch_size=a.batch,
+            )
 
         # Decode, eager and traced.
         #
@@ -175,6 +160,22 @@ def main() -> int:
         # they attack the same bottleneck from different sides.
         tok = torch.full((a.batch, 1), 1234, dtype=torch.long)
         pos = lambda p: torch.full((a.batch,), p, dtype=torch.long)
+
+        if a.batch > 1:
+            # Correctness invariant for batched decode: every user starts from the same
+            # (zeroed) state and is fed the same token, so every user's logits must be
+            # IDENTICAL. This catches a batch axis that is being read as time, or users
+            # bleeding into each other -- neither of which changes any tensor's shape.
+            _lg = model.decode(tok, pos(isl))
+            ttnn.synchronize_device(mesh)
+            _lt = ttnn.to_torch(_lg).float().reshape(a.batch, -1)
+            _dev = max((_lt[u] - _lt[0]).abs().max().item() for u in range(1, a.batch))
+            _amax = [int(_lt[u].argmax()) for u in range(a.batch)]
+            print(
+                f"  batch {a.batch} cross-user check: max|logit diff|={_dev:.3e} "
+                f"argmax={'same' if len(set(_amax)) == 1 else f'DIFFER {_amax}'}",
+                flush=True,
+            )
         dec = dec_traced = None
         try:
             model.decode(tok, pos(isl))  # warm / compile
@@ -213,6 +214,13 @@ def main() -> int:
                     )
                 ttnn.synchronize_device(mesh)
                 dec_traced = (time.perf_counter() - t0) / a.decode_steps
+                if a.batch > 1:
+                    print(
+                        f"  batch {a.batch}: {1/dec_traced:.2f} steps/s -> "
+                        f"{a.batch/dec_traced:.2f} tok/s aggregate, "
+                        f"{1/dec_traced:.2f} tok/s per user",
+                        flush=True,
+                    )
 
                 # Same replay, WITHOUT pulling logits back to host. read_from_device
                 # ships the full [batch, 1, 248320] logits over PCIe and syncs every
