@@ -140,6 +140,53 @@ def _sparse_matmul_config(m: int, n: int, in0_block_w: int = 1):
     )
 
 
+def _decode_matmul_config(k: int, n: int, max_cores: int = 64, in0_cap: int = 8):
+    """Tuned 1D-mcast config for a skinny (M=1) decode projection.
+
+    ttnn's heuristic picks in0_block_w=1 for these, which feeds the inner dimension one
+    tile at a time. Measured on Blackhole, bfloat8_b weights, traced, against the
+    heuristic:
+
+        shared gate/up [2048 x 512]   28.97 -> 11.53 us   (16 cores, in0_block_w 8)
+        shared down    [512 x 2048]   11.54 ->  6.07 us   (64 cores, in0_block_w 8)
+        GDN o_proj     [4096 x 2048]  73.75 -> 32.61 us   (64 cores, in0_block_w 8)
+
+    Returns None when no grid of at least 8 cores divides Nt; the caller then keeps the
+    heuristic, which is the right answer for the shapes that land there (the fused GDN
+    projection at Nt=386 already runs at 345 GB/s, and lm_head's heuristic beat every
+    config in the sweep).
+    """
+    nt, kt = max(1, n // 32), max(1, k // 32)
+    cores = min(max_cores, nt)
+    while cores > 1 and nt % cores:
+        cores -= 1
+    if cores < 8:
+        return None
+    ibw = min(in0_cap, kt)
+    while ibw > 1 and kt % ibw:
+        ibw -= 1
+    per_core_n = nt // cores
+    cy = min(cores, 8)
+    while cores % cy:
+        cy -= 1
+    sub_w = min(per_core_n, 8)
+    while per_core_n % sub_w:
+        sub_w -= 1
+    return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
+        compute_with_storage_grid_size=ttnn.CoreCoord(cores // cy, cy),
+        in0_block_w=ibw,
+        out_subblock_h=1,
+        out_subblock_w=sub_w,
+        out_block_h=1,
+        out_block_w=sub_w,
+        per_core_M=1,
+        per_core_N=per_core_n,
+        fuse_batch=False,
+        fused_activation=None,
+        mcast_in0=True,
+    )
+
+
 def _largest_divisor_at_most(n: int, cap: int) -> int:
     """Largest d <= cap with n % d == 0 (at least 1)."""
     d = max(1, min(cap, n))
@@ -584,18 +631,23 @@ class _SparseExperts:
                 dtype=self.ACT_DTYPE,
             )
             ttnn.deallocate(din)
-            # Scale each expert by ITS OWN routing weight before summing. Scaling the
-            # input instead costs ~2% PCC uniformly, because SwiGLU is not homogeneous.
+            # Scale each expert by ITS OWN routing weight, then sum over the k of them.
+            # Scaling here rather than on the expert INPUT is deliberate: SwiGLU is not
+            # homogeneous, so scaling the input costs ~2% PCC uniformly; after the down
+            # projection it is exact, because that projection is linear.
+            #
+            # Tried and reverted: folding the scale and the sum into one matmul,
+            # [1,1,1,k] @ [1,1,k,H]. It is four programs as written (the multiply, then
+            # FillPad + FastReduceNC for the reduce, then a slice) and would be two. Both
+            # ways of getting `down` into [1,1,k,H] SEGFAULT -- reshape because that axis
+            # move changes the PADDED shape ([1,k,32,H] vs [1,1,32,H]) rather than being a
+            # view, and permute because the resulting matmul has K=8, below one tile.
             sc_u = ttnn.reshape(
                 scores if T == 1 else ttnn.slice(scores, [u, 0, 0, 0], [u + 1, 1, 1, k]),
                 (1, k, 1, 1),
             )
             st = ttnn.multiply(_reshape(down, (1, k, 1, H)), sc_u)
             ttnn.deallocate(down)
-            # ttnn.sum, not fast_reduce_nc: the latter pads the reduced M axis up to a
-            # full tile and returns [1,1,32,H] for a one-token step, which then fails
-            # the volume check on any reshape back to [1,1,T,H]. Prefill gets away with
-            # it only because its T is already a multiple of 32.
             outs.append(ttnn.sum(st, dim=1, keepdim=True))  # [1,1,1,H]
             ttnn.deallocate(st)
             if T != 1:
@@ -888,6 +940,12 @@ class OrnithMoE:
         )
 
         self._shared = self._upload_shared_expert(sh0, sh1, sh2, tensor_cache_path)
+        # Built once: the shapes are fixed by the config, and building a program config
+        # per forward would put host work in the decode path.
+        self._sh_pc = {
+            "gate_up": _decode_matmul_config(self.hidden_size, args.shared_expert_intermediate_size),
+            "down": _decode_matmul_config(args.shared_expert_intermediate_size, self.hidden_size),
+        }
 
     def _upload_shared_expert(self, sh0, sh1, sh2, cache):
         """Upload ONLY the shared expert.
@@ -941,10 +999,16 @@ class OrnithMoE:
         w = self._shared
         ckc = _hifi()
         dram = ttnn.DRAM_MEMORY_CONFIG
-        g = ttnn.linear(x, w["sh0"], compute_kernel_config=ckc, memory_config=dram)
-        u = ttnn.linear(x, w["sh1"], compute_kernel_config=ckc, memory_config=dram)
+        # Explicit program configs at M=1. These three are 2.5x, 2.5x and 1.9x off the
+        # heuristic respectively -- see _decode_matmul_config. Only for a single-token
+        # step: prefill's M is tall and the heuristic is not the loser there.
+        decode = x.shape[-2] == 1
+        pc0 = self._sh_pc["gate_up"] if decode else None
+        pc2 = self._sh_pc["down"] if decode else None
+        g = ttnn.linear(x, w["sh0"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
+        u = ttnn.linear(x, w["sh1"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
         act = ttnn.multiply(ttnn.silu(g), u, memory_config=dram)
-        y = ttnn.linear(act, w["sh2"], compute_kernel_config=ckc, memory_config=dram)
+        y = ttnn.linear(act, w["sh2"], compute_kernel_config=ckc, memory_config=dram, program_config=pc2)
         for t in (g, u, act):
             ttnn.deallocate(t)
         return y

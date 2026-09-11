@@ -34,6 +34,53 @@ _L1_SEQ_BYTE_BUDGET = 512 * 2048 * 2
 _DEFAULT_GDN_WIDTH = 2048
 
 
+def _decode_1d_matmul_config(k: int, n: int, max_cores: int = 64, in0_cap: int = 8):
+    """Tuned 1D-mcast config for a skinny (M=1) decode projection.
+
+    ttnn's heuristic is a poor fit for these. Measured on Blackhole for the GDN output
+    projection [4096 x 2048], bfloat8_b weights, traced:
+
+        heuristic                          73.75 us   121 GB/s
+        cores=32 in0_block_w=4             34.88      256
+        cores=64 in0_block_w=8             32.61      273
+
+    2.26x, and the shape is unchanged -- the default simply picks in0_block_w=1, which
+    feeds the inner dimension one tile at a time. Returns None when no legal grid
+    divides Nt, in which case the caller should keep the heuristic (the fused QKV
+    projection lands there: Nt=386 has no divisor near the grid, and it already runs at
+    345 GB/s).
+    """
+    nt, kt = max(1, n // 32), max(1, k // 32)
+    cores = min(max_cores, nt)
+    while cores > 1 and nt % cores:
+        cores -= 1
+    if cores < 8:
+        return None
+    ibw = min(in0_cap, kt)
+    while ibw > 1 and kt % ibw:
+        ibw -= 1
+    per_core_n = nt // cores
+    cy = min(cores, 8)
+    while cores % cy:
+        cy -= 1
+    sub_w = min(per_core_n, 8)
+    while per_core_n % sub_w:
+        sub_w -= 1
+    return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
+        compute_with_storage_grid_size=ttnn.CoreCoord(cores // cy, cy),
+        in0_block_w=ibw,
+        out_subblock_h=1,
+        out_subblock_w=sub_w,
+        out_block_h=1,
+        out_block_w=sub_w,
+        per_core_M=1,
+        per_core_N=per_core_n,
+        fuse_batch=False,
+        fused_activation=None,
+        mcast_in0=True,
+    )
+
+
 def _seq_memory_config(seq_len, width=_DEFAULT_GDN_WIDTH):
     """L1 for small activations (faster), DRAM for large (leaves room for the prefill
     kernel's circular buffers)."""
@@ -773,6 +820,9 @@ def gated_deltanet_forward_ttnn(
     o = ttnn.reshape(o, [B, T, num_v_heads * head_v_dim], memory_config=mc)
     if mc is not None:
         o = ttnn.to_memory_config(o, mc)
-    o = ttnn.linear(o, o_proj_weight, memory_config=mc, compute_kernel_config=ckc)
+    # Decode (M=1) gets an explicit program config; prefill keeps the heuristic, which
+    # is tuned for the tall shapes and is not the loser there.
+    _o_pc = _decode_1d_matmul_config(o_proj_weight.shape[-2], o_proj_weight.shape[-1]) if T == 1 else None
+    o = ttnn.linear(o, o_proj_weight, memory_config=mc, compute_kernel_config=ckc, program_config=_o_pc)
 
     return o, new_state, new_conv_q, new_conv_k, new_conv_v, new_fused_conv_state
