@@ -89,7 +89,7 @@ completions, measured on this QB2:
 | aggregate | 25.22 tok/s | 49.86 tok/s | **94.50 tok/s** |
 | per stream | 25.22 | 25.06 | 23.71 |
 
-3.67x at four dies with per-stream latency flat. That is the payoff for choosing data
+3.75x at four dies with per-stream latency flat. That is the payoff for choosing data
 parallelism over expert parallelism -- and, per the cost model below, the only way
 extra dies can help this model at all.
 

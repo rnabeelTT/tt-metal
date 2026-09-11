@@ -76,7 +76,7 @@ serve:
   #     aggregate     25.22    49.86    94.50 tok/s
   #     per stream    25.22    25.06    23.71 tok/s
   #
-  # 3.67x at four dies with per-stream latency flat, which is the whole reason the
+  # 3.75x at four dies with per-stream latency flat, which is the whole reason the
   # experts are replicated instead of expert-parallel. It is also the ONLY way extra
   # dies help: decode is dispatch-bound at ~8.4 us per program regardless of tensor
   # size, so tensor parallelism would run the same op count on smaller data and add
@@ -145,7 +145,7 @@ serve_profiles:
   #
   # Extra dies therefore serve extra USERS. Run one instance per die (each pinned with
   # TT_VISIBLE_DEVICES; the TT_MESH_GRAPH_DESC_PATH above is what makes a single die a
-  # legal cluster on a p300 board) and aggregate throughput scales 3.77x on four dies
+  # legal cluster on a p300 board) and aggregate throughput scales 3.75x on four dies
   # with per-stream latency flat -- see the table under `max_num_seqs`.
   #
   # All three profiles are otherwise identical and all three were run on hardware. They
