@@ -527,27 +527,61 @@ class Qwen36Model:
         Single device: plain matmul."""
         logits = ttnn.linear(x, self.lm_head_weight)
         if self._lmhead_vocab_sharded:
-            from models.tt_transformers.tt.ccl import tt_all_gather
+            if self.num_devices > 1:
+                # Tensor-parallel: the activation is already distributed, so the op can
+                # derive its device count from the input tensor's own topology.
+                from models.tt_transformers.tt.ccl import tt_all_gather
 
-            # A tensor-parallel model gathers with cluster_axis=None, which derives the
-            # device count from the input TENSOR's topology. That is correct for TP and
-            # wrong for a REPLICATED model with only its LM head sharded: the activation
-            # reports one device even on a 4-die mesh ("all_gather_async op will only
-            # work for num_devices > 1, but has 1"), so that case names the axis and
-            # takes the mesh-device API path. See ORNITH_SHARD_LM_HEAD, which is off by
-            # default -- naming the axis gets past the op, but the host read then
-            # composes a single shard (62080 of 248320), so the path is not finished.
-            _replicated_lm_shard = self.num_devices == 1
-            _mesh_shape = list(self.mesh_device.shape)
-            logits = tt_all_gather(
-                logits,
-                self.mesh_device,
-                self.tt_ccl,
-                cluster_axis=(1 if _mesh_shape[0] == 1 else 0) if _replicated_lm_shard else None,
-                dim=len(logits.shape) - 1,
-                topology=ttnn.Topology.Linear if _replicated_lm_shard else self.args.ccl_topology(),
-            )
+                logits = tt_all_gather(
+                    logits,
+                    self.mesh_device,
+                    self.tt_ccl,
+                    cluster_axis=None,
+                    dim=len(logits.shape) - 1,
+                    topology=self.args.ccl_topology(),
+                )
+            else:
+                logits = self._gather_replicated_lm_logits(logits)
         return logits
+
+    def _gather_replicated_lm_logits(self, logits):
+        """All-gather vocab-sharded logits on a model that is otherwise REPLICATED.
+
+        This cannot go through tt_transformers' tt_all_gather. Two of its assumptions
+        only hold for a tensor-parallel model:
+
+          - cluster_axis=None makes the op read its device count off the input TENSOR
+            (get_topological_dimension). A replicated activation reports one device
+            even on a 4-die mesh -> "all_gather_async op will only work for
+            num_devices > 1, but has 1". So the axis has to be named explicitly, which
+            reads the count off the mesh instead.
+
+          - naming the axis then trips tt_all_gather's own early-out,
+                if mesh_shape == [1, 1] or (cluster_axis == 1 and 1 in mesh_device.shape)
+            which asks whether ANY axis is singleton rather than whether the GATHER
+            axis is. On a [1, 4] mesh gathering along axis 1, `1 in [1, 4]` is true
+            because axis 0 has extent 1, so it returns the input untouched -- a silent
+            no-op that hands back one 62080-wide shard where the caller expects the
+            full 248320 vocab. Hence the op is called directly here.
+        """
+        mesh_shape = list(self.mesh_device.shape)
+        cluster_axis = 1 if mesh_shape[0] == 1 else 0
+        if mesh_shape[cluster_axis] == 1:
+            return logits
+        logits = ttnn.to_memory_config(logits, ttnn.DRAM_MEMORY_CONFIG)
+        return ttnn.experimental.all_gather_async(
+            logits,
+            persistent_output_buffer=None,
+            dim=len(logits.shape) - 1,
+            multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(cluster_axis),
+            num_links=self.tt_ccl.get_num_links(cluster_axis),
+            cluster_axis=cluster_axis,
+            topology=ttnn.Topology.Linear,
+            barrier_semaphore=self.tt_ccl.get_and_cycle_barrier_semaphore_handle(cluster_axis),
+            chunks_per_sync=10,
+            num_workers_per_link=2,
+            num_buffers_per_channel=2,
+        )
 
     def _final_norm_decode(self, x):
         """Final RMSNorm before the LM head (TP decode).

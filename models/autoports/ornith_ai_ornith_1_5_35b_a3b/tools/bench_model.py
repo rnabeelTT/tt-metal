@@ -67,6 +67,11 @@ def main() -> int:
             ttnn.close_mesh_device(ttnn.open_mesh_device(ttnn.MeshShape(1, 4)))
         except Exception:
             pass
+        # close_mesh_device RESETS the fabric config to DISABLED, so the warm-up above
+        # silently undoes the line above it and the real mesh then opens with no fabric
+        # -- which surfaces much later as "Unsupported fabric config" from ccl_common
+        # the first time a collective actually runs. Re-assert it after the warm-up.
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(rows, cols), **params)
 
     weights = pathlib.Path(a.weights)
