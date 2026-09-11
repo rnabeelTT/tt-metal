@@ -145,9 +145,16 @@ class Qwen36Model:
         else:
             lm_mapper = ttnn.ReplicateTensorToMesh(mesh_device) if self.num_devices > 1 else None
             lm_cache = tensor_cache_path / "output.weight" if tensor_cache_path else None
+        # lm_head is the single largest read in a decode step: 2048 x 248320 is 540 MB at
+        # bfloat8_b and measures 1538 us traced (351 GB/s, near this board's practical
+        # DRAM ceiling -- every program config in the sweep lost to the heuristic). The
+        # only lever left on it is the dtype, and it halves the bytes.
+        _lm_dtype = {"bfloat8_b": ttnn.bfloat8_b, "bfloat4_b": ttnn.bfloat4_b}[
+            os.environ.get("ORNITH_LM_HEAD_DTYPE", "bfloat8_b")
+        ]
         self.lm_head_weight = ttnn.as_tensor(
             lm_head_weight,
-            dtype=ttnn.bfloat8_b,
+            dtype=_lm_dtype,
             layout=ttnn.TILE_LAYOUT,
             device=mesh_device,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,

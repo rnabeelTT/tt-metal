@@ -225,6 +225,46 @@ would help every mesh equally, since none of this is a parallelism problem.
 
 ## Measured negatives (do not re-try these without new information)
 
+### ttnn.experimental.moe_compute (the fused MoE op) is correct here but ~3x slower
+
+Re-tested after single-device support landed. It WORKS at this model's shape, which is
+worth saying because that shape is far outside the one the upstream tests cover -- every
+single-card config there uses 16 experts per device, and this model replicates all 256
+on one die:
+
+    experts/device 256, hidden 2048, intermediate 512, top-8, tokens 1 and 32
+    -> passes, combine PCC ~0.991, on Blackhole
+    (tests/ttnn/nightly/.../test_moe_compute_single_card.py, 35/35 also pass as shipped)
+
+But it is not faster for this deployment. Measured at 256 experts/device, 1 token:
+
+    moe_compute (fused, eager+synced)                        257.9 us
+    this port's WHOLE MoE block, 35 ops, traced              217.0 us
+    the routed-expert part it would replace (2 sparse_matmul) 79.0 us
+
+~3x, and the reason is structural rather than a tuning gap: `moe_compute` is built for
+expert-parallel meshes where a die owns ~16 experts and the kernel sweeps them, whereas
+`sparse_matmul` in INDEXED/gather mode visits exactly the 8 experts the token selected
+no matter how many are resident. A single die holding all 256 is the worst case for the
+former and the best case for the latter. It should win back its advantage on a mesh
+where experts are actually sharded -- which is not how this model is deployed (see the
+serve profiles).
+
+### Quantising further does not pay
+
+The routed experts are already bfp4, which is more aggressive than the Qwen3-Coder
+precision policy (bfp8 dense + bfp4 routed). Going further was measured, not assumed:
+
+* **lm_head bfp4**: 28.99 -> 28.56 ms, 1.5%, for PCC 0.968/0.942/0.934 ->
+  0.960/0.934/0.927. The head is already at 351 GB/s, so halving the bytes does not
+  halve the time, and PCC is the thing this model has least of. Rejected; the knob is
+  `ORNITH_LM_HEAD_DTYPE` if the trade is ever worth it.
+* **bfloat8_b expert activations** (which Ornith-1.0's policy ships): slightly SLOWER,
+  32.52 vs 32.14 ms. Those intermediates are 8-32 KB and traced op cost is flat below
+  ~256 KB, so halving them buys nothing and costs a conversion.
+
+
+
 - **Tracing does not speed up decode**: 3.40 tok/s traced vs 3.45 eager. Decode is
   sparsity-bound (all 256 local experts read per step, 62 GB/s effective, ~12% of peak),
   not dispatch-bound. Batching the experts had already removed the op-count problem.
