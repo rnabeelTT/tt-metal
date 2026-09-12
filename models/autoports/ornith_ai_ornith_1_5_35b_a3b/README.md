@@ -3,6 +3,15 @@
 Bring-up of `ornith-ai/Ornith-1.5-35B-A3B` — a 256-expert / top-8 MoE with a hybrid
 attention stack — onto tt-metal, packaged for `tt-model` v5.1 container serving.
 
+> **OPEN BLOCKER: decode is not reproducible.** At temperature 0 the same prompt
+> returns a different completion most runs (8 runs → 6 distinct answers, one
+> degenerate). A routed expert bank returns a different result from bitwise-identical
+> activations, routing weights and expert indices; the router and everything upstream
+> are exact. Not a batching bug — batch 1 is affected, and batch 1 is what ships.
+> See [NONDETERMINISM.md](NONDETERMINISM.md) and
+> `tools/repro_nondeterminism.py`. **Do not advertise reproducible greedy output
+> until this is fixed.**
+
 ## Running it
 
 ```bash

@@ -1,5 +1,12 @@
 # tt-model v5.1 container package for Ornith-1.5-35B-A3B on Blackhole.
 #
+# OPEN BLOCKER: decode is NOT reproducible. At temperature 0 the same prompt returns a
+# different completion most runs. A routed expert bank returns a different result from
+# bitwise-identical inputs (activation, routing weights AND expert indices all compare
+# exactly equal). Affects batch 1, which is what these profiles serve. See
+# NONDETERMINISM.md and tools/repro_nondeterminism.py before quoting any accuracy or
+# determinism claim from this package.
+#
 # One package, three serve profiles -- not three packages. mesh_device and the routed
 # expert dtype are the only things that differ per board, and v5.1 profiles express
 # exactly that, so a consumer picks their board at serve time from one image.
