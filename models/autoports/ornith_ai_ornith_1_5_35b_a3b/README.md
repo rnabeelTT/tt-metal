@@ -366,13 +366,28 @@ the gap is single-stream decode, not batching alone.
 
 `max_num_seqs` still ships at 1 because the SERVING path is not finished:
 
-* **It hangs after a batch condense.** Concurrency 2 works in ISOLATION (2 ok / 0
+* **It DEADLOCKS after a batch condense.** Concurrency 2 works in ISOLATION (2 ok / 0
   failed, at both max_num_seqs 4 and 8). Run concurrency 1 first against the same
-  server and the next level times out with no server-side exception -- the engine stops
-  responding and tears down. A request completing frees a slot, vLLM condenses the
-  batch and calls the slot remap, and the next batch never returns. This is almost
-  certainly the same fault behind the board wedging below. Not yet root-caused: it
-  needs a stack from the hung engine, which py-spy would not produce here.
+  server and the next concurrent pair never returns -- **900 s of client patience, 0
+  bytes received**, so this is a deadlock and not a slow first compile. No server-side
+  exception; the engine simply stops responding, and this is what also leaves the board
+  at `Read 0xffffffff` afterwards.
+
+  Located, not yet fixed. Attach with `sudo py-spy dump` to the EngineCore CHILD (not
+  the API server, and ptrace_scope=1 means plain py-spy is refused):
+
+        ttnn/decorators.py:1106                 <- inside a ttnn op, 235% host CPU
+        _decode_gather            moe.py:663    <- ttnn.concat(outs, dim=2)
+        _forward_prefill          moe.py:1100
+        prefill_paged             model.py:3380
+        prefill_paged_slots_replicated  model.py:1946
+
+  So it is the SECOND prefill, on the per-token gather path, that never completes. Note
+  short prompts reach `_decode_gather` at all because the dispatch is
+  `decode = T == 1 or T < self.CHUNK`. Forcing multi-token prefills onto the fixed-shape
+  `_prefill` path instead (`decode = T == 1`) was tried and does NOT fix it, so the
+  data-dependent shapes are not the cause; that change was reverted rather than shipped
+  on a guess, since padding short prompts to CHUNK costs TTFT.
 
 * Non-streaming requests are correct at concurrency 1 and 2 (checked by hand).
 * `serve_bench.py`, which streams, fails at concurrency >= 2. Streaming at
