@@ -347,6 +347,11 @@ served fluent garbage rather than failing).
 * Non-streaming requests are correct at concurrency 1 and 2 (checked by hand).
 * `serve_bench.py`, which streams, fails at concurrency >= 2. Streaming at
   max_num_seqs > 1 is the next thing to debug.
+* **It wedges the board on shutdown.** After a `max_num_seqs=4` serving run the next
+  device open fails with `Read 0xffffffff over PCIe ID 0: the board should be reset`,
+  with no process holding `/dev/tenstorrent/*`. Recovery is `tt-smi -r`. Seen twice,
+  both times immediately after a batched serving run and never after a batch-1 one, so
+  budget a reset before trusting any measurement that follows one.
 * Decode bucketing has to be off (`TT_DECODE_BUCKETING=0`) or the width-1 bucket runs
   against [B, ...] GDN state and dies in the conv shift
   (`ttnn_gated_deltanet.py:145`, "[1,1,8192] does not match [4,1,8192]"). With it off
