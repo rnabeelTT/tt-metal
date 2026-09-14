@@ -65,11 +65,37 @@ selects the per-expert reference the batched path was validated against.
 **The model serves.** vLLM 0.26.0 + the Tenstorrent plugin, OpenAI-compatible, on one
 Blackhole P150 (stage 11 PASS).
 
-| mesh | experts | MoE block | TTFT @128 | prefill | decode |
-|---|---|---|---|---|---|
-| P150 (1 chip) | bfp4 | 5/5 | 363.7 ms | 352.0 tok/s | 29.48 tok/s |
-| P300 (2 chips) | bfp4 | 5/5 | 365.0 ms | 350.7 tok/s | 28.91 tok/s |
-| P150x4 (4 chips) | bfp4 | 5/5 | 370.0 ms | 346.0 tok/s | 28.78 tok/s |
+### Final numbers, per hardware type
+
+The number to quote depends on what you are selling. Per-stream latency is flat across
+all three because the model is replicated; throughput is what scales with dies.
+
+| hardware | dies | best deployment | aggregate | per stream | TTFT | batch |
+|---|---|---|---|---|---|---|
+| **p150** | 1 | 1 instance | **26.07 tok/s** | 29.05 tok/s | 397 ms | 1 |
+| **p300** | 2 | `serve_lanes.sh start 2` | **54.47 tok/s** | 28.40 tok/s | 404 ms | 1 |
+| **p300x2** | 4 | `serve_lanes.sh start 4` | **91.24 tok/s** | 25.89 tok/s | 420 ms | 1 |
+
+Served end to end through vLLM, one stream per lane, 256-token completions; 3.50x at
+four dies. Aggregate carries TTFT, so it sits under per-stream x lanes -- the same four
+lanes measure 80.63 at 64-token completions, where a fixed ~400 ms prefill is amortised
+over a quarter as many tokens. Quote the completion length with the number.
+
+Running ONE instance that opens the whole board instead of one per die gives a single
+replica and no throughput gain -- that is what the `p300`/`p300x2` tt-model profiles do,
+and it is why `tools/serve_lanes.sh` exists.
+
+### Device-level numbers (same on every mesh)
+
+| mesh | experts | MoE block | TTFT @128 | prefill | decode (traced) | decode (pure trace) |
+|---|---|---|---|---|---|---|
+| P150 (1 chip) | bfp4 | 5/5 | 364.1 ms | 351.6 tok/s | 29.41 tok/s | 34.45 tok/s (29.03 ms) |
+| P300 (2 chips) | bfp4 | 5/5 | 368.7 ms | 347.2 tok/s | 29.07 tok/s | 34.51 tok/s (28.98 ms) |
+| P150x4 (4 chips) | bfp4 | 5/5 | 368.3 ms | 347.6 tok/s | 28.37 tok/s | 34.52 tok/s (28.97 ms) |
+
+Three numbers, three measurement points: `pure execute_trace` is device only, `traced`
+adds the host readback, and the per-stream figure in the table above is end to end
+through vLLM. The served one is the honest one to advertise.
 
 Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
 each die runs a complete independent copy. Decode is also independent of context length
@@ -293,13 +319,36 @@ Cleared:
 * **The MoE output shape** was normalised to `[1, T, H]` instead of the caller's
   `[B, 1, H]`, which made the shared-expert add fail two calls later.
 
-Left: a **`[B, T, H]` vs `[1, B, H]` convention collision**. One layer's attention output
-comes back transposed against its residual, and the add broadcasts `[4,1,H]` against
-`[1,4,H]` into `[4,4,H]`; the next layer's attention then reads `T = x.shape[1] = 4`,
-decides it is a prefill, and dies in a concat. The MoE is not the source -- it receives
-and returns `[4,4,H]` consistently. Fixing it means settling that convention across the
-GDN module, the full-attention module and the layer, which is a shared-code change that
-needs per-user numerical validation and vLLM slot management behind it.
+* **The `[B, T, H]` vs `[1, B, H]` convention collision** -- the `sdpa_decode` Q layout,
+  which is `[T, B, H, D]`. Fixed by permuting in and back out, in both the paged and
+  non-paged decode paths.
+
+Left: **per-slot GDN state writeback on the replicated path.** Serving at
+`--max-num-seqs 4` now gets past engine init and dies later, in the prefill state
+writeback:
+
+    TT_FATAL: Input tensor shape Shape([1, 1, 8192]) does not match
+              output tensor shape Shape([4, 1, 8192])
+
+vLLM prefills ONE sequence at a time into its decode slot, so the conv state coming back
+is `[1, 1, 8192]` while the external buffer is `[B, 1, 8192]`. `gdn/decode.py`'s
+in-place branch reshapes the recurrent state to match but copies the conv state whole,
+over every row. The fix is a single-row edit that preserves the other (live) rows;
+`gdn/tp.py` already implements exactly this for the TP path (`_slice_along`,
+`_write_recurrent_state_prefix`, rebuild-by-slice+concat then `ttnn.copy` back to
+preserve the trace's baked address), so the pattern exists and needs porting to
+`Qwen36GatedDeltaNet`. Batched prefill is also still gated on `num_devices > 1`
+(`qwen36_vllm.py:206`), which a replicated model never satisfies.
+
+Worth it: per-die aggregate, pure `execute_trace`, measured -- B=1 34.5, B=2 45.4,
+B=4 54.7, B=8 60.8 tok/s. That is +32% to +76% per die, and it multiplies with lanes.
+
+Note the cross-user check failing at B>=4 is NOT a reason to hold this: it is the same
+non-determinism that already affects batch 1 (see NONDETERMINISM.md), same magnitudes,
+same intermittency. Batching does not make quality worse than what ships today. What
+does need real validation before enabling it is cross-user ISOLATION -- that one
+sequence's state cannot leak into another's slot -- which is a functional check
+(different prompts, coherent independent answers) rather than a bitwise one.
 
 ## The batch>=4 cross-user failure is not a batching bug
 
