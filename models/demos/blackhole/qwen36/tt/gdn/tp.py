@@ -215,7 +215,17 @@ class TPGatedDeltaNet:
         self._zero_rec = None
         self._pending = []  # per-user (rec, conv) states collected during batched per-user prefill
 
-    def reset_state(self):
+    def reset_state(self, batch_size=None):
+        # batch_size is accepted so this matches Qwen36GatedDeltaNet.reset_state, which
+        # Qwen36Model.reset_state calls uniformly across both classes. TP fixes its batch
+        # at construction (self.B), so a value that disagrees is a caller bug, not a
+        # resize request.
+        if batch_size is not None and int(batch_size) != int(self.B):
+            raise ValueError(
+                f"TPGatedDeltaNet is built for batch {self.B}; reset_state({batch_size}) "
+                "cannot resize it. Rebuild the model with max_batch_size={batch_size}."
+            )
+
         def z(shape):
             return ttnn.from_torch(
                 torch.zeros(*shape, dtype=torch.bfloat16),

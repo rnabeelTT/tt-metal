@@ -173,7 +173,16 @@ class OrnithModelArgs(Qwen36ModelArgs):
         # qwen36 modules replicate (an upload with no mesh mapper replicates across a
         # MeshDevice -- verified on this box).
         self.mesh_devices = mesh_device.get_num_devices() if mesh_device is not None else 1
-        if self.mesh_devices > 1:
+        # ORNITH_TP=1 keeps the REAL device count, i.e. tensor-parallel attention + GDN
+        # instead of replication. Replication is the default because TP buys nothing on
+        # single-stream decode (dispatch-bound: the same op count on smaller tensors,
+        # plus collectives). The reason to want TP anyway is BATCH: the per-slot serving
+        # machinery -- prefill_paged_slots, _write_gdn_slot, _remap_gdn_slots -- is
+        # implemented against TPGatedDeltaNet and gated on num_devices > 1, so a
+        # replicated model cannot reach max_num_seqs > 1 at all. Concurrency on a
+        # replicated model comes from lanes instead (tools/serve_lanes.sh).
+        self.tensor_parallel = os.environ.get("ORNITH_TP") == "1" and self.mesh_devices > 1
+        if self.mesh_devices > 1 and not self.tensor_parallel:
             self.num_devices = 1
             # cluster_shape has to agree. It is read INDEPENDENTLY of num_devices -- the
             # embedding shards its weight on the hidden dim via

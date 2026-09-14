@@ -323,9 +323,39 @@ Cleared:
   which is `[T, B, H, D]`. Fixed by permuting in and back out, in both the paged and
   non-paged decode paths.
 
-Left: **per-slot GDN state writeback on the replicated path.** Serving at
-`--max-num-seqs 4` now gets past engine init and dies later, in the prefill state
-writeback:
+**Per-slot GDN state writeback on the replicated path -- DONE.** Batch 4 runs, with
+verified cross-user isolation. Four different prompts prefilled into four slots, then
+decoded together:
+
+| slot | prompt | continuation |
+|---|---|---|
+| 0 | `Count upward: 1, 2, 3, 4, 5, 6,` | ` 7, 8, 9, 10` |
+| 1 | `The letters in order are: A, B, C, D, E, F,` | ` G, H, I, J, K, L, M` |
+| 2 | `Days of the week: Monday, Tuesday, Wednesday,` | ` Thursday, Friday, Saturday, Sunday.` |
+| 3 | `Colours of the rainbow: red, orange, yellow,` | ` green, blue, indigo, violet.` |
+
+Each continues its OWN prompt: no state leaks between slots. Reproduce with
+`tools/repro_batch_isolation.py`. Five real bugs had to be fixed to get there, each
+listed in the commit: prefill writing its B=1 state over every row, decode_paged
+accepting only a scalar position, the shared DN zero buffers caching the first shape
+they saw, the prefill-trace capture binding batched buffers, and the rebind
+deallocating split conv buffers the decode trace had baked addresses for (that last one
+served fluent garbage rather than failing).
+
+`max_num_seqs` still ships at 1 because the SERVING path is not finished:
+
+* Non-streaming requests are correct at concurrency 1 and 2 (checked by hand).
+* `serve_bench.py`, which streams, fails at concurrency >= 2. Streaming at
+  max_num_seqs > 1 is the next thing to debug.
+* Decode bucketing has to be off (`TT_DECODE_BUCKETING=0`) or the width-1 bucket runs
+  against [B, ...] GDN state and dies in the conv shift
+  (`ttnn_gated_deltanet.py:145`, "[1,1,8192] does not match [4,1,8192]"). With it off
+  every step computes all B slots, so one active user pays 4x: 9.4 tok/s per stream
+  against 29. Slicing GDN state per bucket width is what removes that.
+
+So the model-level win is real and measured -- per-die aggregate, pure `execute_trace`:
+B=1 34.5, B=2 45.4, B=4 54.7, B=8 60.8 tok/s -- but it is not yet collectable through
+the server. Historical note, the blocker that started this:
 
     TT_FATAL: Input tensor shape Shape([1, 1, 8192]) does not match
               output tensor shape Shape([4, 1, 8192])

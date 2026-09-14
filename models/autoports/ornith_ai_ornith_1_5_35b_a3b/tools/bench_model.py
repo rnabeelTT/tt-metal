@@ -60,11 +60,13 @@ def main() -> int:
     # throw from ccl_common if anything does reach a collective.
     # A fabric is needed by anything that runs a collective: expert parallelism, or the
     # vocab-sharded LM head's logit all-gather.
-    if rows * cols > 1 and (os.environ.get("ORNITH_MOE_EP") == "1" or os.environ.get("ORNITH_SHARD_LM_HEAD") == "1"):
+    if rows * cols > 1 and any(
+        os.environ.get(v) == "1" for v in ("ORNITH_MOE_EP", "ORNITH_SHARD_LM_HEAD", "ORNITH_TP")
+    ):
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
         # Cold multi-chip opens fail ethernet router sync once per process; absorb it.
         try:
-            ttnn.close_mesh_device(ttnn.open_mesh_device(ttnn.MeshShape(1, 4)))
+            ttnn.close_mesh_device(ttnn.open_mesh_device(ttnn.MeshShape(rows, cols)))
         except Exception:
             pass
         # close_mesh_device RESETS the fabric config to DISABLED, so the warm-up above

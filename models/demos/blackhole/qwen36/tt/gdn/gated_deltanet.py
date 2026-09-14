@@ -8,7 +8,12 @@ kernel into a module that manages weight tensors, recurrent state, and conv stat
 import ttnn
 from models.demos.blackhole.qwen36.tt.gdn.config import GDNConfig
 from models.demos.blackhole.qwen36.tt.gdn.decode import recurrent_forward
-from models.demos.blackhole.qwen36.tt.gdn.state import init_recurrent_state, restore_split_conv_from_fused
+from models.demos.blackhole.qwen36.tt.gdn.state import (
+    gather_indices,
+    init_recurrent_state,
+    restore_split_conv_from_fused,
+    write_index,
+)
 from models.demos.blackhole.qwen36.tt.gdn.weights import load_gdn_weights
 
 
@@ -118,6 +123,49 @@ class Qwen36GatedDeltaNet:
         self.conv_state_q = None
         self.conv_state_k = None
         self.conv_state_v = None
+
+    def write_slot(self, slot, rec, conv, consume=False):
+        """Write ONE sequence's B=1 state into decode row `slot`, leaving the live rows alone.
+
+        vLLM prefills a new request while the other slots are mid-decode, so the state a
+        B=1 prefill produces has to land in one row of the batched [B, ...] buffers rather
+        than replace them. This is the replicated-path analogue of
+        TPGatedDeltaNet.write_slot; the buffers differ (recurrent_state [B,Nv,Dk,Dv] and
+        fused_conv_state [B,K-1,D], both sliced on dim 0, where TP carries conv as
+        [1,B,D] and slices on dim 1).
+
+        consume=False so the caller may keep using `rec`/`conv` -- the prefill scratch is
+        reused by the next request.
+        """
+        assert self.recurrent_state is not None, "batched GDN state not allocated"
+        B = self.recurrent_state.shape[0]
+        assert 0 <= slot < B, f"slot {slot} out of range [0,{B})"
+        rec_src = rec if rec.dtype == self.recurrent_state.dtype else ttnn.typecast(rec, self.recurrent_state.dtype)
+        write_index(self.recurrent_state, rec_src, slot, dim=0, consume_src=consume or rec_src is not rec)
+        if conv is not None and self.fused_conv_state is not None:
+            c_src = (
+                conv if conv.dtype == self.fused_conv_state.dtype else ttnn.typecast(conv, self.fused_conv_state.dtype)
+            )
+            write_index(self.fused_conv_state, c_src, slot, dim=0, consume_src=consume or c_src is not conv)
+        # split_conv_state is DERIVED from fused_conv_state and is now stale for this row.
+        # gdn/decode.py only rebuilds it when it is None, so dropping it is what makes the
+        # next decode see the row we just wrote.
+        self.drop_derived_conv_state()
+
+    def remap_slots(self, remap):
+        """Reindex the batched state after a vLLM batch condense: row i takes what was at
+        remap[i]. The paged KV half needs nothing -- it follows the page table, which vLLM
+        permutes itself. In place, so the decode trace's baked addresses survive."""
+        if self.recurrent_state is None:
+            return
+        B = self.recurrent_state.shape[0]
+        idx = [int(remap[i]) for i in range(B)]
+        if all(idx[i] == i for i in range(B)):
+            return
+        gather_indices(self.recurrent_state, idx, dim=0)
+        if self.fused_conv_state is not None:
+            gather_indices(self.fused_conv_state, idx, dim=0)
+        self.drop_derived_conv_state()
 
     def _restore_split_conv_from_fused(self):
         """Copy fused_conv_state slices into existing split_conv_state buffers.

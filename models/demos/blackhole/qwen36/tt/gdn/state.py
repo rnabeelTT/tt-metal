@@ -48,3 +48,59 @@ def restore_split_conv_from_fused(gdn):
         s_k = ttnn.to_layout(s_k, ttnn.TILE_LAYOUT)
         ttnn.copy(s_k, gdn.split_conv_state[k])
         ttnn.deallocate(s_k)
+
+
+def slice_along(buf, dim, lo, hi):
+    """ttnn.slice of `buf` along `dim` for [lo, hi), other dims kept full."""
+    start = [0] * len(buf.shape)
+    end = list(buf.shape)
+    start[dim] = lo
+    end[dim] = hi
+    return ttnn.slice(buf, tuple(start), tuple(end))
+
+
+def write_index(buf, src, idx, dim, consume_src=False):
+    """Replace slice `idx` of `buf` along `dim` with `src`, preserving every other slice.
+
+    ttnn has no in-place row write, so the buffer is rebuilt by slice+concat and copied
+    back -- the copy is what preserves `buf`'s address, which a captured decode trace has
+    baked in. `src` must match `buf`'s dtype and have extent 1 along `dim`.
+
+    consume_src=False leaves `src` alive, so a caller may write the same source into
+    several buffers (or keep a scratch buffer it is about to reuse).
+    """
+    n = buf.shape[dim]
+    if n == 1:
+        ttnn.copy(src, buf)
+        if consume_src:
+            ttnn.deallocate(src)
+        return
+    parts, temps = [], []
+    if idx > 0:
+        head = slice_along(buf, dim, 0, idx)
+        parts.append(head)
+        temps.append(head)
+    parts.append(src)
+    if idx < n - 1:
+        tail = slice_along(buf, dim, idx + 1, n)
+        parts.append(tail)
+        temps.append(tail)
+    new = ttnn.concat(parts, dim=dim)
+    ttnn.copy(new, buf)
+    ttnn.deallocate(new)
+    for t in temps:
+        ttnn.deallocate(t)
+    if consume_src:
+        ttnn.deallocate(src)
+
+
+def gather_indices(buf, idx, dim):
+    """Reindex `buf` along `dim` so position i takes what was at idx[i], in place."""
+    if all(idx[i] == i for i in range(len(idx))):
+        return
+    parts = [slice_along(buf, dim, j, j + 1) for j in idx]
+    new = ttnn.concat(parts, dim=dim)
+    ttnn.copy(new, buf)
+    ttnn.deallocate(new)
+    for p in parts:
+        ttnn.deallocate(p)

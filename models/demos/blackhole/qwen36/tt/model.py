@@ -181,6 +181,7 @@ class Qwen36Model:
         # Positions in self.layers of full-attn layers (not checkpoint indices); drives KV cache bind.
         self._attention_layer_indices = [pos for pos, layer in enumerate(self.layers) if layer.is_full_attention]
         self._deltanet_external_states = None  # (recurrent, conv) tuples; set by allocate_kv_caches
+        self._gdn_prefill_scratch_rep = None  # persistent B=1 prefill scratch (replicated batched)
         # Shared zero buffers for in-place DN reset between traced replays.
         self._dn_zero_recurrent = None
         self._dn_zero_conv = None
@@ -1889,6 +1890,147 @@ class Qwen36Model:
             self._write_gdn_slot(int(empty_slots[u]), per_user_rec[u], per_user_conv[u])
         return host_logits
 
+    def prefill_paged_slots_replicated(self, token_ids_list, page_table, empty_slots, valid_lens=None):
+        """Per-slot prefill for the REPLICATED (num_devices == 1) path.
+
+        The counterpart of prefill_paged_slots, which is TP-only because it reaches for
+        TPGatedDeltaNet's rec_state/conv_states. Without this a replicated model cannot
+        serve max_num_seqs > 1 at all: vLLM prefills one request at a time into the slot
+        it assigned, and the single-device path copies the B=1 state it produced over
+        EVERY row of the batched buffer --
+            "Input tensor shape [1, 1, 8192] does not match output tensor shape [4, 1, 8192]"
+        -- which is where serving at --max-num-seqs 4 dies today.
+
+        Unlike the TP version this needs no host round-trip. That one snapshots each
+        user's state to host because it prefills every user before writing any of them
+        back, so the next user's reset would clobber the shared scratch first. Writing
+        each user into its slot immediately after its own prefill keeps everything on
+        device.
+
+        token_ids_list: N torch [1, T_u].   page_table: torch [N, max_blocks], row u = request u.
+        empty_slots:    N ints, request u's persistent decode slot.
+        Returns N host logits [1, 1, vocab] in call order.
+        """
+        assert self.num_devices == 1, "replicated path only; TP uses prefill_paged_slots"
+        N = len(token_ids_list)
+        assert len(empty_slots) == N, "one slot per request"
+        pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+        dn_layers = [layer.attention for layer in self.layers if not layer.is_full_attention]
+        saved = [(dn.recurrent_state, dn.fused_conv_state) for dn in dn_layers]
+        assert all(r is not None for r, _ in saved), "call allocate_kv_caches(batch_size=B) first"
+        B = saved[0][0].shape[0]
+        for u in range(N):
+            assert 0 <= int(empty_slots[u]) < B, f"slot {empty_slots[u]} out of range [0,{B})"
+
+        # The prefill-trace capture leaves _chunk_inplace_state set, which makes the GDN
+        # write its chunk result straight into the bound buffer. That is wrong here twice
+        # over: the bound buffer is [B, ...] while this prefill is B=1, and prefill_paged's
+        # own reset_state(1) has just set fused_conv_state to None, so the in-place branch
+        # dies in ttnn.copy with a TypeError before the shape even matters. Clear it for
+        # the loop and let prefill hand back fresh B=1 tensors, which state_slot then
+        # writes into the right row.
+        prev_inplace = [getattr(dn, "_chunk_inplace_state", False) for dn in dn_layers]
+        # Hold on to the split conv buffers rather than letting prefill drop them: the
+        # decode trace replays against these exact addresses.
+        prev_split = [getattr(dn, "split_conv_state", None) for dn in dn_layers]
+        for dn in dn_layers:
+            dn._chunk_inplace_state = False
+            dn.split_conv_state = None  # prefill must not touch the decode buffers
+
+        host_logits = []
+        try:
+            for u in range(N):
+                toks = token_ids_list[u]
+                assert toks.shape[0] == 1, f"request {u}: token_ids must be [1, T_u]"
+                actual = int(valid_lens[u]) if valid_lens is not None else toks.shape[1]
+                lg = self.prefill_paged(
+                    toks[:, :actual], pt[u : u + 1], valid_len=actual, state_slot=int(empty_slots[u])
+                )
+                host_logits.append(ttnn.to_torch(lg).reshape(-1, self.args.vocab_size)[:1].float().view(1, 1, -1))
+                ttnn.deallocate(lg)
+        finally:
+            # prefill_paged's own reset_state(batch_size=1) leaves each layer pointing at the
+            # B=1 state it just built, so rebind the batched buffers before decode reads them.
+            # set_external_state also drops the split conv view derived from the B=1 state,
+            # which is what makes decode see the rows just written.
+            for dn, (bat_rec, bat_conv), inpl, split in zip(dn_layers, saved, prev_inplace, prev_split):
+                # NOT set_external_state: it calls drop_derived_conv_state(), which
+                # DEALLOCATES the split conv buffers. The captured decode trace has their
+                # addresses baked in, so freeing and lazily reallocating them makes the
+                # replay read whatever now lives there -- the model serves fluent-looking
+                # garbage rather than failing. Rebind by hand and refresh the split view
+                # in place instead; _restore_split_conv_from_fused preserves addresses.
+                dn.recurrent_state = bat_rec
+                dn.fused_conv_state = bat_conv
+                dn.use_inplace_state = True
+                dn._chunk_inplace_state = inpl
+                dn.split_conv_state = split
+                if split is not None:
+                    dn._restore_split_conv_from_fused()
+        return host_logits
+
+    def _ensure_gdn_prefill_scratch_replicated(self):
+        """Allocate (once) a persistent B=1 GDN state per layer for the replicated path."""
+        if getattr(self, "_gdn_prefill_scratch_rep", None) is not None:
+            return
+        assert self._deltanet_external_states is not None, "Call allocate_kv_caches first"
+        scratch = []
+        for rec, conv in self._deltanet_external_states:
+            scratch.append(
+                (
+                    ttnn.from_torch(
+                        torch.zeros(1, *list(rec.shape)[1:], dtype=torch.bfloat16),
+                        dtype=rec.dtype,
+                        layout=ttnn.TILE_LAYOUT,
+                        device=self.mesh_device,
+                    ),
+                    ttnn.from_torch(
+                        torch.zeros(1, *list(conv.shape)[1:], dtype=torch.bfloat16),
+                        dtype=conv.dtype,
+                        layout=ttnn.TILE_LAYOUT,
+                        device=self.mesh_device,
+                    ),
+                )
+            )
+        self._gdn_prefill_scratch_rep = scratch
+
+    def _bind_gdn_prefill_scratch_replicated(self):
+        """Point the GDN layers (and _deltanet_external_states) at the B=1 prefill scratch.
+
+        Prefill always runs one sequence. With batched serving the external buffers are
+        [B, ...], and the prefill-trace capture binds them and then writes its B=1 result
+        straight in ("Input tensor shape [1, 1, 8192] does not match output tensor shape
+        [4, 1, 8192]" at engine init). The TP path avoids that with a B=1 scratch; this is
+        the replicated equivalent. _deltanet_external_states is swapped too because the
+        capture path rebinds the layers FROM it.
+        """
+        self._ensure_gdn_prefill_scratch_replicated()
+        dn_layers = [layer.attention for layer in self.layers if not layer.is_full_attention]
+        prev = (self._deltanet_external_states, [(dn.recurrent_state, dn.fused_conv_state) for dn in dn_layers])
+        self._deltanet_external_states = list(self._gdn_prefill_scratch_rep)
+        for dn, (rec, conv) in zip(dn_layers, self._gdn_prefill_scratch_rep):
+            dn.set_external_state(rec, conv)
+        return prev
+
+    def _unbind_gdn_prefill_scratch_replicated(self, prev):
+        """Rebind the batched buffers saved by _bind_gdn_prefill_scratch_replicated.
+        Does NOT free the scratch -- it persists for the next prefill."""
+        ext, bindings = prev
+        self._deltanet_external_states = ext
+        dn_layers = [layer.attention for layer in self.layers if not layer.is_full_attention]
+        for dn, (rec, conv) in zip(dn_layers, bindings):
+            if rec is not None:
+                dn.set_external_state(rec, conv)
+
+    def _remap_gdn_slots_replicated(self, remap):
+        """vLLM batch-condense reindex for the replicated path (see TPGatedDeltaNet.remap_slots)."""
+        moved = 0
+        for layer in self.layers:
+            if not layer.is_full_attention:
+                layer.attention.remap_slots(remap)
+                moved += 1
+        return moved
+
     def _write_gdn_slot(self, slot, rec_snap, conv_snap):
         """Upload one request's B=1 GDN state snapshot (host torch, per GDN layer) and write it
         into decode `slot` of the batched buffers via TPGatedDeltaNet.write_slot (preserving the
@@ -2753,13 +2895,30 @@ class Qwen36Model:
             dn.drop_derived_conv_state()
 
     def _init_dn_zero_buffers(self):
-        """Allocate shared zero buffers for DN recurrent and conv shapes."""
-        if self._dn_zero_recurrent is not None:
-            return
+        """Allocate shared zero buffers for DN recurrent and conv shapes.
+
+        Keyed on the CURRENT binding's shape, not merely "already allocated". Batched
+        serving binds a B=1 prefill scratch for the prefill-trace capture, and this runs
+        inside that capture: caching those B=1 zeros unconditionally meant the later
+        in-place decode reset copied a [1, ...] zero into the [B, ...] decode buffer and
+        the engine died at init with "Input tensor shape [1, 1, 8192] does not match
+        output tensor shape [4, 1, 8192]".
+        """
         # First DN layer defines shared zero-buffer shapes.
         first_dn = next(layer.attention for layer in self.layers if not layer.is_full_attention)
         rec_shape = list(first_dn.recurrent_state.shape)
         conv_shape = list(first_dn.fused_conv_state.shape)
+        if (
+            self._dn_zero_recurrent is not None
+            and list(self._dn_zero_recurrent.shape) == rec_shape
+            and self._dn_zero_conv is not None
+            and list(self._dn_zero_conv.shape) == conv_shape
+        ):
+            return
+        for stale in (self._dn_zero_recurrent, self._dn_zero_conv):
+            if stale is not None:
+                ttnn.deallocate(stale)
+        self._dn_zero_recurrent = self._dn_zero_conv = None
         self._dn_zero_recurrent = ttnn.zeros(
             rec_shape,
             dtype=ttnn.bfloat16,
@@ -3180,7 +3339,7 @@ class Qwen36Model:
                 attn.past_key = None
                 attn.past_value = None
 
-    def prefill_paged(self, token_ids, page_table, valid_len=None, vision_tokens=None):
+    def prefill_paged(self, token_ids, page_table, valid_len=None, vision_tokens=None, state_slot=None):
         """Prefill using paged attention for long sequences, concat for short.
 
         For T > 1024: uses paged prefill (paged_fill_cache + chunked_sdpa)
@@ -3240,15 +3399,30 @@ class Qwen36Model:
                     dn.fused_conv_state = ttnn.to_layout(dn.fused_conv_state, ttnn.TILE_LAYOUT)
 
         # Copy DeltaNet state into external pre-allocated buffers.
+        #
+        # state_slot selects ONE row instead of the whole buffer. Prefill always runs a
+        # single sequence, so with batched serving (max_num_seqs > 1) the external buffer
+        # is [B, ...] while this state is [1, ...]: the unconditional whole-buffer copy
+        # below both fails outright --
+        #   "Input tensor shape [1, 32, 128, 128] does not match output tensor shape [4, ...]"
+        # -- and, where the shapes happened to agree, would wipe the other slots' live
+        # state. Pass the slot vLLM assigned the request and only its row is written.
         if self._deltanet_external_states is not None:
+            from models.demos.blackhole.qwen36.tt.gdn.state import write_index
+
             dn_idx = 0
             for layer in self.layers:
                 if not layer.is_full_attention:
                     dn = layer.attention
                     ext_rec, ext_conv = self._deltanet_external_states[dn_idx]
-                    ttnn.copy(dn.recurrent_state, ext_rec)
-                    if dn.fused_conv_state is not None:
-                        ttnn.copy(dn.fused_conv_state, ext_conv)
+                    if state_slot is None:
+                        ttnn.copy(dn.recurrent_state, ext_rec)
+                        if dn.fused_conv_state is not None:
+                            ttnn.copy(dn.fused_conv_state, ext_conv)
+                    else:
+                        write_index(ext_rec, dn.recurrent_state, int(state_slot), dim=0)
+                        if dn.fused_conv_state is not None:
+                            write_index(ext_conv, dn.fused_conv_state, int(state_slot), dim=0)
                     dn_idx += 1
 
         return logits
@@ -3264,13 +3438,23 @@ class Qwen36Model:
         x = self.embd(token_ids_ttnn)
         ttnn.deallocate(token_ids_ttnn)
 
+        # current_pos may be a scalar (every row at the same position) or a [B] tensor.
+        # Batched serving needs the latter: prompts differ in length, so each slot decodes
+        # at its own position. torch.full() silently accepted only the scalar form.
+        cur_pos_t = (
+            current_pos.reshape(-1).to(torch.long)
+            if torch.is_tensor(current_pos)
+            else torch.full((B,), int(current_pos), dtype=torch.long)
+        )
+        assert cur_pos_t.numel() == B, f"current_pos has {cur_pos_t.numel()} entries for batch {B}"
+
         # RoPE position offset by rope_delta for multimodal (KV position stays the true seq pos).
-        position_ids = torch.full((B, 1), current_pos + self.rope.rope_delta, dtype=torch.long)
+        position_ids = (cur_pos_t + self.rope.rope_delta).reshape(B, 1)
         cos, sin = self.rope.get_rot_mats(position_ids)
 
         # cur_pos [B] for paged ops (not [B*n_kv] like non-paged decode).
         cur_pos_tensor = ttnn.from_torch(
-            torch.full((B,), current_pos, dtype=torch.int32),
+            cur_pos_t.to(torch.int32),
             dtype=ttnn.int32,
             layout=ttnn.ROW_MAJOR_LAYOUT,
             device=self.device,

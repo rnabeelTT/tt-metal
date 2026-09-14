@@ -203,7 +203,9 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
         """All prefill is model-owned (Generator drives decode only)."""
         model = self.model[0]
-        if model.num_devices > 1 and model.args.max_batch_size > 1:
+        # Batched serving is no longer TP-only: the replicated path has its own per-slot
+        # prefill (prefill_paged_slots_replicated). Gate on the batch, not the topology.
+        if model.args.max_batch_size > 1:
             # Batched text prefill into decode slots (MM is B=1). Require real visual data, not a
             # non-None empty pixel_values placeholder from vLLM on text requests.
             assert not self._has_visual(kwargs, "pixel_values") and not self._has_visual(
@@ -269,7 +271,12 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         return logits, torch.zeros(1, dtype=torch.long)
 
     def _prefill_forward_tp_batched(self, model, tokens, page_table, prompt_lens, empty_slots):
-        """TP batched (max_num_seqs>1) prefill: prefill each request in this step into its decode slot.
+        """Batched (max_num_seqs>1) prefill: prefill each request in this step into its decode slot.
+
+        Works on both topologies -- TP via prefill_paged_slots, replicated via
+        prefill_paged_slots_replicated. The replicated model is the one this package
+        ships, and before it had a per-slot path it could not serve max_num_seqs > 1 at
+        all.
 
         vLLM prefills new requests while other slots decode, so each user's B=1 state is written into
         row empty_slots[u] of the batched GDN buffers without disturbing the live rows (model-owned,
@@ -289,7 +296,10 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         token_ids_list = [tokens[u : u + 1, : plens[u]].to(torch.int32) for u in range(N)]
         pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
         logger.info(f"Prefilling {N} user(s) into slots {empty_slots} (TP batched masked-bucket)")
-        host_logits = model.prefill_paged_slots(token_ids_list, pt, empty_slots, valid_lens=plens)
+        if model.num_devices > 1:
+            host_logits = model.prefill_paged_slots(token_ids_list, pt, empty_slots, valid_lens=plens)
+        else:
+            host_logits = model.prefill_paged_slots_replicated(token_ids_list, pt, empty_slots, valid_lens=plens)
         logits = torch.cat([hl.reshape(1, 1, -1) for hl in host_logits], dim=0)  # [N, 1, vocab]
         logger.info(f"Finished batched prefill of {N} user(s), starting decode...")
         return logits, torch.zeros(N, dtype=torch.long)
@@ -305,10 +315,13 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # BEFORE the decode trace reads it. The plugin remaps its own buffers (and the seed RNG via
         # super().decode_forward), but GDN state is model-internal, so mirror the same reindex here.
         # slot_remap is passed through unchanged so the seed-RNG remap inside super() still runs.
-        if model.num_devices > 1 and model.args.max_batch_size > 1:
+        if model.args.max_batch_size > 1:
             slot_remap = kwargs.get("slot_remap")
             if slot_remap is not None:
-                model._remap_gdn_slots(slot_remap)
+                if model.num_devices > 1:
+                    model._remap_gdn_slots(slot_remap)
+                else:
+                    model._remap_gdn_slots_replicated(slot_remap)
         # Decode bucketing (default on; TT_DECODE_BUCKETING=0 off): slice host inputs to the
         # smallest power-of-2 width >= active prefix [0:num_active) before the base forward.
         # No runner edit / output re-pad — plugin reads unpadded_batch_size in slot order.
@@ -384,19 +397,27 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # (>chunk_size) replay the traced chunk-outer path per user instead of the slower eager fallback.
         # The scratch is not freed (prefill_paged_slots rebinds it per request); the batched decode
         # buffers are restored before the decode-trace warmup captures at [B,...].
-        batched = model.num_devices > 1 and model.args.max_batch_size > 1
+        batched = model.args.max_batch_size > 1
         logger.info(
             f"Starting Qwen prefill warmup: chunk-prefill trace{' (batched, B=1 scratch)' if batched else ''} "
             f"(chunk={_PREFILL_WARMUP_CHUNK}, page_table_blocks={num_blocks})..."
         )
-        prev = model._bind_gdn_prefill_scratch() if batched else None
+        if not batched:
+            prev = None
+        elif model.num_devices > 1:
+            prev = model._bind_gdn_prefill_scratch()
+        else:
+            prev = model._bind_gdn_prefill_scratch_replicated()
         try:
             model.capture_prefill_trace_chunked(
                 self.mesh_device, page_table, chunk_size=_PREFILL_WARMUP_CHUNK, capture_chunk_trace=True
             )
         finally:
             if prev is not None:
-                model._unbind_gdn_prefill_scratch(prev)
+                if model.num_devices > 1:
+                    model._unbind_gdn_prefill_scratch(prev)
+                else:
+                    model._unbind_gdn_prefill_scratch_replicated(prev)
 
     def warmup_model_decode(self, *args, **kwargs):
         # Defer to WarmupForwardMixin, which warms the paged-SDPA + GDN decode path at pos 0.
