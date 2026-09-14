@@ -165,7 +165,13 @@ class Qwen36GatedDeltaNet:
         gather_indices(self.recurrent_state, idx, dim=0)
         if self.fused_conv_state is not None:
             gather_indices(self.fused_conv_state, idx, dim=0)
-        self.drop_derived_conv_state()
+        # Refresh the derived split view IN PLACE. drop_derived_conv_state() would
+        # deallocate buffers whose addresses the captured decode trace holds, and the
+        # replay would then read whatever landed there -- the same fault that made the
+        # per-slot prefill path serve garbage. A condense happens whenever a request
+        # finishes, so this is on the hot path for any real serving load.
+        if self.split_conv_state is not None:
+            self._restore_split_conv_from_fused()
 
     def _restore_split_conv_from_fused(self):
         """Copy fused_conv_state slices into existing split_conv_state buffers.

@@ -342,7 +342,37 @@ they saw, the prefill-trace capture binding batched buffers, and the rebind
 deallocating split conv buffers the decode trace had baked addresses for (that last one
 served fluent garbage rather than failing).
 
+### Where batched SERVING actually stands
+
+Measured against the shipped batch-1 baseline of 26.7 tok/s aggregate on one die:
+
+| max_num_seqs | concurrency | aggregate | per stream | verdict |
+|---|---|---|---|---|
+| 1 | 1 | 26.7 tok/s | 28.8 | ships today |
+| 4 | 2 | 16.1 tok/s | 9.0 | correct, but SLOWER |
+| 8 | 2 | 9.9 tok/s | 5.0 | correct, but slower still |
+
+Batched serving is currently a throughput LOSS, not a win, and the reason is structural:
+with decode bucketing off every step computes all B slots, so one active user pays Bx.
+Concurrency has to reach ~B before it breaks even (at max_num_seqs=8, eight concurrent
+streams would be ~8 x 5 = 40 tok/s against 26.7). Making it pay at low concurrency means
+slicing GDN state to the active bucket width, which is the bucketing work below.
+
+For scale, `tt-hous/ornith-1.0-35b-p150` -- a fellow Ornith on this stack -- ships the
+same `max_num_seqs: 1` in its manifest but its readiness run used **8**, and got **166
+tok/s output throughput on 32 concurrent prompts** on one p150, with 41.3 tok/s
+single-stream (TPOT 23.2 ms) against our 29. So this is achievable, and a large part of
+the gap is single-stream decode, not batching alone.
+
 `max_num_seqs` still ships at 1 because the SERVING path is not finished:
+
+* **It hangs after a batch condense.** Concurrency 2 works in ISOLATION (2 ok / 0
+  failed, at both max_num_seqs 4 and 8). Run concurrency 1 first against the same
+  server and the next level times out with no server-side exception -- the engine stops
+  responding and tears down. A request completing frees a slot, vLLM condenses the
+  batch and calls the slot remap, and the next batch never returns. This is almost
+  certainly the same fault behind the board wedging below. Not yet root-caused: it
+  needs a stack from the hung engine, which py-spy would not produce here.
 
 * Non-streaming requests are correct at concurrency 1 and 2 (checked by hand).
 * `serve_bench.py`, which streams, fails at concurrency >= 2. Streaming at
