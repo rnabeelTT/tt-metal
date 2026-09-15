@@ -562,7 +562,7 @@ class _SparseExperts:
     def _swiglu(self, fused, lead, half, memory_config=None):
         """SwiGLU over the packed [.., 2*inter] projection, for DECODE (M=1).
 
-        Four ops where `ttnn.swiglu` would be one, and that is deliberate: at M=1 the
+        Three ops where `ttnn.swiglu` would be one, and that is deliberate: at M=1 the
         fused op PADS the row axis to a full tile, returning [1, k, 32, inter] instead
         of [1, k, 1, inter]. The values on the real row are right (max abs err 0.017 vs
         torch), but the shape then drives 32 rows through the down projection. Prefill,
@@ -575,7 +575,10 @@ class _SparseExperts:
         up = ttnn.slice(fused, [0, 0, 0, 0], [1, lead, 1, half], memory_config=memory_config)
         gate = ttnn.slice(fused, [0, 0, 0, half], [1, lead, 1, 2 * half], memory_config=memory_config)
         ttnn.deallocate(fused)
-        out = ttnn.multiply(ttnn.silu(gate, memory_config=memory_config), up, memory_config=memory_config)
+        # SiLU as an activation on the gate operand, not its own program. Both operands are
+        # slices of the same `fused` tensor, so they carry the same dtype -- the pairing a
+        # fused activation needs. One fewer program per layer, 40 per token.
+        out = ttnn.multiply(up, gate, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=memory_config)
         ttnn.deallocate(gate)
         ttnn.deallocate(up)
         return out
@@ -990,9 +993,15 @@ class OrnithMoE:
             return self._forward_decode(x)
         return self._forward_prefill(x)
 
-    def _shared_gate(self, x):
-        """sigmoid(x @ shared_expert_gate) -- the per-token scale on the shared expert."""
+    def _shared_gate(self, x, logit=False):
+        """sigmoid(x @ shared_expert_gate) -- the per-token scale on the shared expert.
+
+        `logit=True` returns the projection unsquashed, for a caller that folds the
+        sigmoid into the multiply that consumes it.
+        """
         proj = ttnn.linear(x, self.shared_gate_w, compute_kernel_config=_hifi(), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if logit:
+            return proj
         out = ttnn.sigmoid(proj, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(proj)
         return out
@@ -1012,7 +1021,16 @@ class OrnithMoE:
         pc2 = self._sh_pc["down"] if decode else None
         g = ttnn.linear(x, w["sh0"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
         u = ttnn.linear(x, w["sh1"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
-        act = ttnn.multiply(ttnn.silu(g), u, memory_config=dram)
+        if decode:
+            # SiLU folded onto the gate operand: one program instead of two, 40 per token
+            # over the model. Both operands come off `ttnn.linear` with the same dtype, so
+            # the fused form is faithful. Prefill keeps the separate spelling so its logit
+            # PCC against the HF reference stays bit-stable -- a fused activation is the
+            # same arithmetic but not the same rounding order, and prefill is not
+            # dispatch-bound.
+            act = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=dram)
+        else:
+            act = ttnn.multiply(ttnn.silu(g), u, memory_config=dram)
         y = ttnn.linear(act, w["sh2"], compute_kernel_config=ckc, memory_config=dram, program_config=pc2)
         for t in (g, u, act):
             ttnn.deallocate(t)
@@ -1052,8 +1070,10 @@ class OrnithMoE:
         # buffers ("circular buffers clash with L1 buffers"), naming neither this module
         # nor the leak.
         se = self._shared_expert(x)
-        sg = self._shared_gate(x)
-        shared = ttnn.multiply(se, sg, memory_config=dram)
+        # The gate's sigmoid rides on the multiply that consumes it -- one fewer program
+        # per layer, 40 per token. Prefill keeps the separate sigmoid (see _shared_expert).
+        sg = self._shared_gate(x, logit=True)
+        shared = ttnn.multiply(se, sg, input_tensor_b_activations=[ttnn.UnaryOpType.SIGMOID], memory_config=dram)
         ttnn.deallocate(se)
         ttnn.deallocate(sg)
         routed = self._run_blocks(x)
