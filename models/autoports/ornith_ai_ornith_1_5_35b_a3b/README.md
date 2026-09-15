@@ -382,12 +382,36 @@ the gap is single-stream decode, not batching alone.
         prefill_paged             model.py:3380
         prefill_paged_slots_replicated  model.py:1946
 
-  So it is the SECOND prefill, on the per-token gather path, that never completes. Note
-  short prompts reach `_decode_gather` at all because the dispatch is
-  `decode = T == 1 or T < self.CHUNK`. Forcing multi-token prefills onto the fixed-shape
-  `_prefill` path instead (`decode = T == 1`) was tried and does NOT fix it, so the
-  data-dependent shapes are not the cause; that change was reverted rather than shipped
-  on a guess, since padding short prompts to CHUNK costs TTFT.
+  So it is the SECOND prefill, on the per-token gather path, that never completes.
+
+  **Five hypotheses tested and eliminated** (each reverted rather than shipped on a
+  guess, since none fixed it):
+
+  1. *Data-dependent shapes.* Short prompts reach `_decode_gather` because the dispatch
+     is `decode = T == 1 or T < self.CHUNK`, so expert shapes follow the prompt length.
+     Forcing multi-token prefills onto the fixed-shape `_prefill` path
+     (`decode = T == 1`) does NOT fix it. (Also costs TTFT, so not worth keeping.)
+  2. *L1 pressure in the concat.* Accumulating the per-token outputs and the concat in
+     DRAM for T != 1 does NOT fix it -- so the host blocking at `ttnn.concat` is where
+     it waits, not what deadlocks.
+  3. *Trace-capture order.* `tools/repro_prefill_after_trace.py` runs the exact serving
+     order without vLLM -- prefill slot 0, capture the decode trace, decode, prefill
+     slot 1 -- and it PASSES (0.33 s).
+  4. *Condense remap and multi-request prefill.* The same repro extended with a real
+     slot remap plus a two-slot prefill in one call also PASSES (0.65 s).
+  5. *Decode/prefill overlap.* The plugin overlaps decode with prefill
+     (`async_decode`/`note_prefill_submitted`), so a replay could be reading GDN buffers
+     while prefill rebinds them. Adding `ttnn.synchronize_device` barriers around the
+     rebind does NOT fix it.
+
+  Since the model-level repro passes in the serving order, the remaining difference is
+  inside the plugin's `execute_model` path. Next step needs either a watcher-enabled
+  tt-metal build to name the stuck kernel (`TT_METAL_WATCHER` is compile-time and this
+  build ignores it -- no `generated/watcher` is produced), or bisecting the plugin.
+
+  Practical note for whoever picks this up: `ptrace_scope=1` here, so plain `py-spy`
+  is refused. Use `sudo -n env "PATH=$PATH" py-spy dump --pid <EngineCore CHILD>`; the
+  API server's own stack shows only the asyncio loop.
 
 * Non-streaming requests are correct at concurrency 1 and 2 (checked by hand).
 * `serve_bench.py`, which streams, fails at concurrency >= 2. Streaming at
