@@ -399,6 +399,7 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     scale=None,
     device=None,
     beta_is_logit=False,
+    inplace_state=False,
 ):
     """T=1 decode step on HEAD-MAJOR operands. q/k/v are [B, H, 1, D], beta/g [B, 1, H].
 
@@ -453,8 +454,14 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
             pass
 
     # Decay before the read, exp fused as a pre-activation on the second operand.
-    h = ttnn.to_memory_config(state_buffer, _L1)
-    h = ttnn.multiply(h, g_b, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
+    if inplace_state:
+        # Update the persistent buffer where it lies. Costs the two DRAM round trips the
+        # L1 copy avoided, but saves a copy in AND a copy back out.
+        h = state_buffer
+        ttnn.multiply(h, g_b, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], output_tensor=h)
+    else:
+        h = ttnn.to_memory_config(state_buffer, _L1)
+        h = ttnn.multiply(h, g_b, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
 
     v_read = ttnn.matmul(
         k_row, h, memory_config=_L1, program_config=read_query_prog_cfg, compute_kernel_config=read_query_compute_cfg
@@ -468,7 +475,10 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
 
     outer = ttnn.matmul(k_row, delta, transpose_a=True, memory_config=_L1, compute_kernel_config=matmul_compute_cfg)
     ttnn.deallocate(delta)
-    h = ttnn.add(h, outer, memory_config=_L1)
+    if inplace_state:
+        ttnn.add(h, outer, output_tensor=h)
+    else:
+        h = ttnn.add(h, outer, memory_config=_L1)
     ttnn.deallocate(outer)
 
     o_t = ttnn.matmul(
@@ -494,9 +504,8 @@ def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(
         scale=scale,
         device=device,
         beta_is_logit=beta_is_logit,
+        inplace_state=True,
     )
-    ttnn.copy(new_h, state_buffer)
-    ttnn.deallocate(new_h)
     return o, state_buffer
 
 
