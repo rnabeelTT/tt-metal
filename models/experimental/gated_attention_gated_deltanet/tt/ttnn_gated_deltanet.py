@@ -33,6 +33,10 @@ from .ttnn_delta_rule_seq import chunk_gated_delta_rule_seq_adapter
 _L1_SEQ_BYTE_BUDGET = 512 * 2048 * 2
 _DEFAULT_GDN_WIDTH = 2048
 
+# softplus(beta=1, threshold=20) -- ttnn.softplus's own defaults -- as a fused
+# post-activation, so `add(a, dt_bias)` and the softplus cost one program, not two.
+_SOFTPLUS = [ttnn.UnaryWithParam(ttnn.UnaryOpType.SOFTPLUS, 1.0, 20.0)]
+
 
 def _decode_1d_matmul_config(k: int, n: int, max_cores: int = 64, in0_cap: int = 8):
     """Tuned 1D-mcast config for a skinny (M=1) decode projection.
@@ -752,8 +756,11 @@ def gated_deltanet_forward_ttnn(
         a = ttnn.linear(hidden_states, a_proj_weight, memory_config=mc, compute_kernel_config=ckc)
     if allow_neg_eigval:
         beta = ttnn.multiply(beta, 2.0, memory_config=mc)
-    a_biased = ttnn.add(a, dt_bias, memory_config=mc)
-    sp = ttnn.softplus(a_biased, memory_config=mc)
+    # softplus as a post-activation on the bias add, not a second program. ttnn.softplus's
+    # defaults are beta=1, threshold=20, which is what UnaryWithParam takes here, so the
+    # arithmetic is identical -- this is purely one fewer dispatch, and decode pays ~8.4 us
+    # per dispatch whatever it computes (30 GDN layers -> 30 programs per token).
+    sp = ttnn.add(a, dt_bias, memory_config=mc, activations=_SOFTPLUS)
     if A_neg_precomputed is not None:
         g = ttnn.multiply(A_neg_precomputed, sp, memory_config=mc)
     else:

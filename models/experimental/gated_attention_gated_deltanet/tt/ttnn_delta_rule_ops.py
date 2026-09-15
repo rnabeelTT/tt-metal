@@ -225,15 +225,24 @@ def _get_matmul_program_config(m, k, n, grid_size=None, in0_block_w=None):
         return None
 
 
-def l2_norm_ttnn(x, dim=-1, eps=1e-6):
-    """L2 norm along dim. Last dim: fused rms_norm path (~3 fewer kernels)."""
+def l2_norm_ttnn(x, dim=-1, eps=1e-6, scale=1.0):
+    """L2 norm along dim. Last dim: fused rms_norm path (~3 fewer kernels).
+
+    `scale` is folded into the norm's own rescale multiply rather than applied by the
+    caller afterwards. The last-dim path already ends in `multiply(normed, K**-0.5)`, so
+    a caller that wants `l2_norm(x) * s` gets it for the same program count instead of
+    one more -- which is what the decode query does with its `K**-0.5` attention scale
+    (the two constants collapse to `K**-1.0`).
+    """
     # L1 for T<=512; DRAM otherwise
     T = x.shape[1] if len(x.shape) >= 3 else x.shape[0]
     mc = ttnn.L1_MEMORY_CONFIG if T <= 512 else ttnn.DRAM_MEMORY_CONFIG
     if dim in (-1, len(x.shape) - 1):
         K = x.shape[-1]
         normed = ttnn.rms_norm(x, epsilon=eps / K)
-        return ttnn.multiply(normed, K**-0.5, memory_config=mc)
+        return ttnn.multiply(normed, scale * K**-0.5, memory_config=mc)
+    if scale != 1.0:
+        x = ttnn.multiply(x, scale, memory_config=mc)
     x_sq = ttnn.multiply(x, x, memory_config=mc)
     norm_sq = ttnn.sum(x_sq, dim=dim, keepdim=True, memory_config=mc)
     inv_norm = ttnn.rsqrt(ttnn.add(norm_sq, eps, memory_config=mc), memory_config=mc)
@@ -405,13 +414,12 @@ def recurrent_gated_delta_rule_decode_ttnn(
         beta = ttnn.typecast(beta, ttnn.float32)
         g = ttnn.typecast(g, ttnn.float32)
 
-    # L2 norm
-    q = l2_norm_ttnn(q, dim=-1)
-    k = l2_norm_ttnn(k, dim=-1)
-
+    # L2 norm. Q's attention scale rides on the norm's own rescale multiply (one
+    # program, constant `scale * K**-0.5`) instead of a separate multiply after it.
     if scale is None:
         scale = K**-0.5
-    q = ttnn.multiply(q, scale, memory_config=ttnn.L1_MEMORY_CONFIG)
+    q = l2_norm_ttnn(q, dim=-1, scale=scale)
+    k = l2_norm_ttnn(k, dim=-1)
 
     # Reshape to matmul shapes; caller already TILE_LAYOUT.
     # Decode opt: q_row/k_row in L1 with L1-resident state h.
