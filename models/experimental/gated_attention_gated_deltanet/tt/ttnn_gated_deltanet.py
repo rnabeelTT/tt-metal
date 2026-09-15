@@ -133,8 +133,10 @@ def _causal_conv1d_decode_t1_split_inplace(
 
     out = ttnn.multiply(x, weight_taps[kernel_size - 1], memory_config=mc)
     for k in range(kernel_size - 1):
-        term = ttnn.multiply(conv_state_list[k], weight_taps[k], memory_config=mc)
-        out = ttnn.add(out, term, memory_config=mc)
+        # addcmul is out + state*tap in ONE program where multiply+add is two. Decode is
+        # dispatch-bound (~8.4 us per program regardless of size), so on a 30-layer GDN
+        # stack this is 30 * (K-1) fewer programs per token -- 90 at K=4. Same arithmetic.
+        out = ttnn.addcmul(out, conv_state_list[k], weight_taps[k], memory_config=mc)
 
     if bias_dev is not None:
         out = ttnn.add(out, bias_dev, memory_config=mc)
