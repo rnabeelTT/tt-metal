@@ -398,8 +398,13 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     state_buffer,
     scale=None,
     device=None,
+    beta_is_logit=False,
 ):
     """T=1 decode step on HEAD-MAJOR operands. q/k/v are [B, H, 1, D], beta/g [B, 1, H].
+
+    `beta_is_logit`: beta arrives straight from its projection and the sigmoid rides on
+    the delta multiply as an activation, one fewer program than materialising
+    `sigmoid(b)` first.
 
     Identical recurrence to :func:`recurrent_gated_delta_rule_decode_ttnn` -- decay the
     state, read ``k @ h``, write the beta-weighted delta outer product, read ``q @ h`` --
@@ -458,7 +463,8 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     # count, but the rank-1 operand is the smaller tensor.
     delta = ttnn.subtract(v, v_read, memory_config=_L1)
     ttnn.deallocate(v_read)
-    delta = ttnn.multiply(delta, beta_b, memory_config=_L1)
+    _sig = {"input_tensor_b_activations": [ttnn.UnaryOpType.SIGMOID]} if beta_is_logit else {}
+    delta = ttnn.multiply(delta, beta_b, memory_config=_L1, **_sig)
 
     outer = ttnn.matmul(k_row, delta, transpose_a=True, memory_config=_L1, compute_kernel_config=matmul_compute_cfg)
     ttnn.deallocate(delta)
@@ -474,10 +480,20 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     return o, h
 
 
-def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(q, k, v, beta, g, state_buffer, scale=None, device=None):
+def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(
+    q, k, v, beta, g, state_buffer, scale=None, device=None, beta_is_logit=False
+):
     """Head-major decode with the state copied back into the pre-allocated buffer."""
     o, new_h = recurrent_gated_delta_rule_decode_headmajor_ttnn(
-        q=q, k=k, v=v, beta=beta, g=g, state_buffer=state_buffer, scale=scale, device=device
+        q=q,
+        k=k,
+        v=v,
+        beta=beta,
+        g=g,
+        state_buffer=state_buffer,
+        scale=scale,
+        device=device,
+        beta_is_logit=beta_is_logit,
     )
     ttnn.copy(new_h, state_buffer)
     ttnn.deallocate(new_h)

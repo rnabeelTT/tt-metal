@@ -93,10 +93,26 @@ def _seq_memory_config(seq_len, width=_DEFAULT_GDN_WIDTH):
     return ttnn.L1_MEMORY_CONFIG if seq_len * width * 2 <= _L1_SEQ_BYTE_BUDGET else None
 
 
-def rms_norm_gated_ttnn(x, gate, weight, eps=1e-5, memory_config=None):
-    """RMSNorm + SiLU gate (trace-compatible). Clips gate to avoid overflow at long T."""
+def rms_norm_gated_ttnn(x, gate, weight, eps=1e-5, memory_config=None, fuse_silu=False):
+    """RMSNorm + SiLU gate (trace-compatible). Clips gate to avoid overflow at long T.
+
+    `fuse_silu` folds the activation onto the gate operand of the multiply, which also
+    retires the clip that guarded `silu(gate)` -- three programs become one.
+
+    It is opt-in, and only the T=1 decode path asks for it. The clip's stated job is
+    long-T overflow, which a single decode token does not have. And folding a SiLU into
+    this particular gate is known to be dtype-sensitive: the Ornith-1.0 port records
+    (doc/fused_decoder/work_log.md 4.8) that with a float32 left operand against a
+    bfloat16 gate -- which is what its float32 chunk-prefill kernel hands the prefill
+    gate -- the folded form produced non-finite values at every gate magnitude while the
+    separate form was exact. Prefill here has the same mixed pairing, so it keeps the
+    separate spelling; the T=1 recurrent step's output is bfloat16 like the gate, so
+    decode does not.
+    """
     mc = memory_config
     x_normed = ttnn.rms_norm(x, weight=weight, epsilon=eps, memory_config=mc)
+    if fuse_silu:
+        return ttnn.multiply(x_normed, gate, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mc)
     gate_act = ttnn.silu(gate, memory_config=mc)
     gate_act = ttnn.clip(gate_act, min=-1e4, max=1e4)
     return ttnn.multiply(x_normed, gate_act, memory_config=mc)
@@ -786,10 +802,13 @@ def gated_deltanet_forward_ttnn(
             q = ttnn.repeat_interleave(q, repeats, dim=2)
             k = ttnn.repeat_interleave(k, repeats, dim=2)
 
-    # Beta and g
+    # Beta and g. The head-major step is the only consumer that multiplies beta into a
+    # tensor rather than reading it, so it can take the sigmoid as an activation on that
+    # multiply; everywhere else beta is materialised here as before.
+    _beta_logit = _head_major and not allow_neg_eigval
     if _mega_extracted:
         a = a_raw
-        beta = ttnn.sigmoid(b_raw, memory_config=mc)
+        beta = b_raw
     elif ab_proj_weight is not None:
         ab = ttnn.linear(hidden_states, ab_proj_weight, memory_config=mc, compute_kernel_config=ckc)
         num_v = num_v_heads if num_v_heads is not None else num_heads
@@ -798,13 +817,12 @@ def gated_deltanet_forward_ttnn(
         b_raw = ab[:, :, num_v:]
         b_raw = ttnn.to_layout(b_raw, ttnn.TILE_LAYOUT)
         ttnn.deallocate(ab)
-        beta = ttnn.sigmoid(b_raw, memory_config=mc)
+        beta = b_raw
     else:
-        beta = ttnn.sigmoid(
-            ttnn.linear(hidden_states, b_proj_weight, memory_config=mc, compute_kernel_config=ckc),
-            memory_config=mc,
-        )
+        beta = ttnn.linear(hidden_states, b_proj_weight, memory_config=mc, compute_kernel_config=ckc)
         a = ttnn.linear(hidden_states, a_proj_weight, memory_config=mc, compute_kernel_config=ckc)
+    if not _beta_logit:
+        beta = ttnn.sigmoid(beta, memory_config=mc)
     if allow_neg_eigval:
         beta = ttnn.multiply(beta, 2.0, memory_config=mc)
     # softplus as a post-activation on the bias add, not a second program. ttnn.softplus's
@@ -848,6 +866,7 @@ def gated_deltanet_forward_ttnn(
                 g=g,
                 state_buffer=recurrent_state,
                 device=device,
+                beta_is_logit=_beta_logit,
             )
         elif use_inplace_state and recurrent_state is not None:
             o, new_state = recurrent_gated_delta_rule_decode_inplace_ttnn(
@@ -887,11 +906,15 @@ def gated_deltanet_forward_ttnn(
         else:
             gate = ttnn.linear(hidden_states, g_proj_weight, memory_config=mc, compute_kernel_config=ckc)
             gate = ttnn.reshape(gate, [B, T, num_v_heads, head_v_dim], memory_config=mc)
-        o = rms_norm_gated_ttnn(o, gate, o_norm_weight, eps=norm_eps, memory_config=mc)
+        o = rms_norm_gated_ttnn(o, gate, o_norm_weight, eps=norm_eps, memory_config=mc, fuse_silu=T == 1)
     else:
         o = rms_norm_ttnn(o, o_norm_weight, eps=norm_eps, memory_config=mc)
 
-    o = ttnn.clip(o, min=-1e4, max=1e4, memory_config=mc)
+    if T > 1:
+        # Guards the long-T prefill accumulation into the output projection. A single
+        # decode token has no accumulation to overflow, and the gated norm above has
+        # already bounded `o` by the gate, so decode skips the program.
+        o = ttnn.clip(o, min=-1e4, max=1e4, memory_config=mc)
     o = ttnn.reshape(o, [B, T, num_v_heads * head_v_dim], memory_config=mc)
     if mc is not None:
         o = ttnn.to_memory_config(o, mc)
