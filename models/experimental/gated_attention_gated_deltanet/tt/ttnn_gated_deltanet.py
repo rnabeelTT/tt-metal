@@ -14,6 +14,8 @@ from .ttnn_delta_rule_ops import (
     recurrent_gated_delta_rule_ttnn,
     recurrent_gated_delta_rule_decode_ttnn,
     recurrent_gated_delta_rule_decode_inplace_ttnn,
+    recurrent_gated_delta_rule_decode_headmajor_ttnn,
+    recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn,
 )
 from .ttnn_delta_rule_seq import chunk_gated_delta_rule_seq_adapter
 
@@ -408,6 +410,35 @@ def causal_conv1d_ttnn(
     return out, new_state
 
 
+def _split_qkv_head_major(qkv, B, T, num_heads, num_v_heads, head_dim, mc):
+    """Split a fused ``[B, T, (2*num_heads + num_v_heads) * head_dim]`` conv stream into
+    head-major ``q, k, v`` of shape ``[B, head, T, head_dim]``, GVA already expanded.
+
+    One reshape and one permute put every head on dim 1; after that the Q|K pair is a
+    single contiguous block, so ONE ``repeat_interleave`` does both GVA expansions
+    (``[q0..q15, k0..k15]`` -> ``[q0,q0,..,q15,q15, k0,k0,..,k15,k15]``) where the
+    per-stream spelling needs two, and each of those lowers to untilize + concat +
+    tilize + copy. Everything else here is a slice on the head axis, which is a
+    batch-dim slice of whole tiles.
+    """
+    n_all = 2 * num_heads + num_v_heads
+    rows = ttnn.reshape(qkv, [B, T, n_all, head_dim], memory_config=mc)
+    heads = ttnn.permute(rows, (0, 2, 1, 3), memory_config=mc)
+    if rows is not qkv:  # a tiled reshape that changes the tile padding is a copy, not a view
+        ttnn.deallocate(rows)
+    qk = ttnn.slice(heads, [0, 0, 0, 0], [B, 2 * num_heads, T, head_dim], memory_config=mc)
+    v = ttnn.slice(heads, [0, 2 * num_heads, 0, 0], [B, n_all, T, head_dim], memory_config=mc)
+    ttnn.deallocate(heads)
+    if num_v_heads > num_heads:
+        expanded = ttnn.repeat_interleave(qk, num_v_heads // num_heads, dim=1)
+        ttnn.deallocate(qk)
+        qk = expanded
+    q = ttnn.slice(qk, [0, 0, 0, 0], [B, num_v_heads, T, head_dim], memory_config=mc)
+    k = ttnn.slice(qk, [0, num_v_heads, 0, 0], [B, 2 * num_v_heads, T, head_dim], memory_config=mc)
+    ttnn.deallocate(qk)
+    return q, k, v
+
+
 def gated_deltanet_forward_ttnn(
     hidden_states,
     q_proj_weight,
@@ -488,6 +519,17 @@ def gated_deltanet_forward_ttnn(
         and (T > 1 or (fused_conv_state is not None and fused_conv_weight_taps is not None))
     )
 
+    # Head-major decode: put the head axis in dim 1 ONCE, for Q, K and V together, and
+    # every op after it is a batch-dim slice on a tensor already shaped the way the
+    # recurrent step wants. The token-major spelling splits Q/K/V out of the conv stream,
+    # reshapes each into heads, runs TWO repeat_interleaves, and then reshapes q, k, v,
+    # v_read, k and delta again inside the step -- all of them real tiled relayouts, none
+    # of them views. Requires a single fused QKV stream, equal K/V head dims (so one
+    # reshape covers all 2*num_heads + num_v_heads heads) and a whole GVA ratio.
+    _use_head_major = (
+        T == 1 and head_k_dim == head_v_dim and num_v_heads % num_heads == 0 and recurrent_state is not None
+    )
+
     # Fused conv decode: QKV -> fused conv -> split (skip mega path)
     use_fused_conv = (
         not use_mega_fused
@@ -566,12 +608,15 @@ def gated_deltanet_forward_ttnn(
             new_conv_v = None
 
         # Split QKV after conv
-        q = qkv[:, :, :q_dim]
-        k = qkv[:, :, q_dim : q_dim + k_dim]
-        v = qkv[:, :, q_dim + k_dim :]
-        q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
-        k = ttnn.to_layout(k, ttnn.TILE_LAYOUT)
-        v = ttnn.to_layout(v, ttnn.TILE_LAYOUT)
+        if _use_head_major:
+            q, k, v = _split_qkv_head_major(qkv, B, T, num_heads, num_v_heads, head_k_dim, mc)
+        else:
+            q = qkv[:, :, :q_dim]
+            k = qkv[:, :, q_dim : q_dim + k_dim]
+            v = qkv[:, :, q_dim + k_dim :]
+            q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
+            k = ttnn.to_layout(k, ttnn.TILE_LAYOUT)
+            v = ttnn.to_layout(v, ttnn.TILE_LAYOUT)
         ttnn.deallocate(qkv)
 
         # a/b/g already from mega projection
@@ -591,12 +636,15 @@ def gated_deltanet_forward_ttnn(
             bias_dev=fused_conv_bias_dev,
         )
         # Split after conv
-        q = qkv[:, :, :q_dim]
-        k = qkv[:, :, q_dim : q_dim + k_dim]
-        v = qkv[:, :, q_dim + k_dim :]
-        q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
-        k = ttnn.to_layout(k, ttnn.TILE_LAYOUT)
-        v = ttnn.to_layout(v, ttnn.TILE_LAYOUT)
+        if _use_head_major:
+            q, k, v = _split_qkv_head_major(qkv, B, T, num_heads, num_v_heads, head_k_dim, mc)
+        else:
+            q = qkv[:, :, :q_dim]
+            k = qkv[:, :, q_dim : q_dim + k_dim]
+            v = qkv[:, :, q_dim + k_dim :]
+            q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
+            k = ttnn.to_layout(k, ttnn.TILE_LAYOUT)
+            v = ttnn.to_layout(v, ttnn.TILE_LAYOUT)
         ttnn.deallocate(qkv)
         new_conv_q = None
         new_conv_k = None
@@ -724,16 +772,19 @@ def gated_deltanet_forward_ttnn(
             bias_dev=v_bias_dev,
         )
 
-    # Reshape to heads (explicit mc keeps decode in L1)
-    q = ttnn.reshape(q, [B, T, num_heads, head_k_dim], memory_config=mc)
-    k = ttnn.reshape(k, [B, T, num_heads, head_k_dim], memory_config=mc)
-    v = ttnn.reshape(v, [B, T, num_v_heads, head_v_dim], memory_config=mc)
+    # Reshape to heads (explicit mc keeps decode in L1). _split_qkv_head_major already
+    # did both this and the GVA expansion, in half the programs.
+    _head_major = _use_head_major and len(q.shape) == 4 and q.shape[1] == num_v_heads
+    if not _head_major:
+        q = ttnn.reshape(q, [B, T, num_heads, head_k_dim], memory_config=mc)
+        k = ttnn.reshape(k, [B, T, num_heads, head_k_dim], memory_config=mc)
+        v = ttnn.reshape(v, [B, T, num_v_heads, head_v_dim], memory_config=mc)
 
-    # GVA: repeat q,k
-    if num_v_heads > num_heads:
-        repeats = num_v_heads // num_heads
-        q = ttnn.repeat_interleave(q, repeats, dim=2)
-        k = ttnn.repeat_interleave(k, repeats, dim=2)
+        # GVA: repeat q,k
+        if num_v_heads > num_heads:
+            repeats = num_v_heads // num_heads
+            q = ttnn.repeat_interleave(q, repeats, dim=2)
+            k = ttnn.repeat_interleave(k, repeats, dim=2)
 
     # Beta and g
     if _mega_extracted:
@@ -783,7 +834,22 @@ def gated_deltanet_forward_ttnn(
             valid_len=valid_len,
         )
     elif T == 1:
-        if use_inplace_state and recurrent_state is not None:
+        if _head_major:
+            _decode_fn = (
+                recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn
+                if use_inplace_state
+                else recurrent_gated_delta_rule_decode_headmajor_ttnn
+            )
+            o, new_state = _decode_fn(
+                q=q,
+                k=k,
+                v=v,
+                beta=beta,
+                g=g,
+                state_buffer=recurrent_state,
+                device=device,
+            )
+        elif use_inplace_state and recurrent_state is not None:
             o, new_state = recurrent_gated_delta_rule_decode_inplace_ttnn(
                 q=q,
                 k=k,

@@ -389,6 +389,101 @@ def recurrent_delta_rule_step_ttnn(
     return o_t, h
 
 
+def recurrent_gated_delta_rule_decode_headmajor_ttnn(
+    q,
+    k,
+    v,
+    beta,
+    g,
+    state_buffer,
+    scale=None,
+    device=None,
+):
+    """T=1 decode step on HEAD-MAJOR operands. q/k/v are [B, H, 1, D], beta/g [B, 1, H].
+
+    Identical recurrence to :func:`recurrent_gated_delta_rule_decode_ttnn` -- decay the
+    state, read ``k @ h``, write the beta-weighted delta outer product, read ``q @ h`` --
+    on operands whose head axis is already dim 1, which is where every op in the step
+    wants it. The token-major spelling has to reshape into and out of that layout six
+    times per layer (q and k to ``[B,H,1,K]``, ``v_read`` back to ``[B,H,V]``, k to a
+    ``[B,H,K,1]`` column and delta to a ``[B,H,1,V]`` row), and each of those is a real
+    tiled relayout, not a view. Here they are all gone and ``k^T`` folds into the outer
+    product as ``transpose_a``.
+
+    That is the whole point: decode is dispatch-bound at ~8.4 us per program regardless
+    of what the program computes, so the saving is the program count. The matmuls are
+    bit-for-bit the same three matmuls on the same shapes.
+
+    Returns ``(o, h)`` with ``o`` back in the caller's token-major ``[B, 1, H, V]``.
+    """
+    B, H, K, V = q.shape[0], q.shape[1], q.shape[3], v.shape[3]
+    _L1 = ttnn.L1_MEMORY_CONFIG
+
+    if scale is None:
+        scale = K**-0.5
+    # Q's attention scale rides on the L2 norm's own rescale multiply.
+    q_row = l2_norm_ttnn(q, dim=-1, scale=scale)
+    k_row = l2_norm_ttnn(k, dim=-1)
+
+    beta_b = ttnn.reshape(beta, [B, H, 1, 1], memory_config=_L1)
+    g_b = ttnn.reshape(g, [B, H, 1, 1], memory_config=_L1)
+
+    read_query_compute_cfg = ttnn.WormholeComputeKernelConfig(
+        math_fidelity=ttnn.MathFidelity.HiFi2,
+        math_approx_mode=False,
+        fp32_dest_acc_en=True,
+        packer_l1_acc=True,
+    )
+    matmul_compute_cfg = ttnn.WormholeComputeKernelConfig(
+        math_fidelity=ttnn.MathFidelity.HiFi2,
+        math_approx_mode=False,
+        fp32_dest_acc_en=True,
+        packer_l1_acc=False,
+    )
+    read_query_prog_cfg = None
+    if device is not None:
+        try:
+            read_query_prog_cfg = _recurrent_read_query_program_config(device, K, V)
+        except Exception:
+            pass
+
+    # Decay before the read, exp fused as a pre-activation on the second operand.
+    h = ttnn.to_memory_config(state_buffer, _L1)
+    h = ttnn.multiply(h, g_b, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
+
+    v_read = ttnn.matmul(
+        k_row, h, memory_config=_L1, program_config=read_query_prog_cfg, compute_kernel_config=read_query_compute_cfg
+    )
+    # beta on the delta row (1 x V) rather than on the outer product (K x V): same op
+    # count, but the rank-1 operand is the smaller tensor.
+    delta = ttnn.subtract(v, v_read, memory_config=_L1)
+    ttnn.deallocate(v_read)
+    delta = ttnn.multiply(delta, beta_b, memory_config=_L1)
+
+    outer = ttnn.matmul(k_row, delta, transpose_a=True, memory_config=_L1, compute_kernel_config=matmul_compute_cfg)
+    ttnn.deallocate(delta)
+    h = ttnn.add(h, outer, memory_config=_L1)
+    ttnn.deallocate(outer)
+
+    o_t = ttnn.matmul(
+        q_row, h, memory_config=_L1, program_config=read_query_prog_cfg, compute_kernel_config=read_query_compute_cfg
+    )
+    # Back to the caller's token-major convention for the gated output norm.
+    o = ttnn.permute(o_t, (0, 2, 1, 3), memory_config=_L1)
+    ttnn.deallocate(o_t)
+    return o, h
+
+
+def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(q, k, v, beta, g, state_buffer, scale=None, device=None):
+    """Head-major decode with the state copied back into the pre-allocated buffer."""
+    o, new_h = recurrent_gated_delta_rule_decode_headmajor_ttnn(
+        q=q, k=k, v=v, beta=beta, g=g, state_buffer=state_buffer, scale=scale, device=device
+    )
+    ttnn.copy(new_h, state_buffer)
+    ttnn.deallocate(new_h)
+    return o, state_buffer
+
+
 def recurrent_gated_delta_rule_decode_ttnn(
     q,
     k,
