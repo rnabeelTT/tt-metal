@@ -109,6 +109,8 @@ def recurrent_forward(gdn, x, mode="recurrent", chunk_size=None, valid_len=None)
         use_inplace_state=gdn.use_inplace_state,
         chunk_seq_masks=seq_masks,
         valid_len=valid_len,
+        qk_l2_weight_q=getattr(w, "qk_l2_weight_q", None),
+        qk_l2_weight_k=getattr(w, "qk_l2_weight_k", None),
     )
 
     if gdn._chunk_inplace_state and mode == "chunk":

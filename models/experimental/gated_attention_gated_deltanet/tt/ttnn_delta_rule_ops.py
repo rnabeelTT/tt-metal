@@ -225,7 +225,7 @@ def _get_matmul_program_config(m, k, n, grid_size=None, in0_block_w=None):
         return None
 
 
-def l2_norm_ttnn(x, dim=-1, eps=1e-6, scale=1.0):
+def l2_norm_ttnn(x, dim=-1, eps=1e-6, scale=1.0, weight=None):
     """L2 norm along dim. Last dim: fused rms_norm path (~3 fewer kernels).
 
     `scale` is folded into the norm's own rescale multiply rather than applied by the
@@ -239,6 +239,11 @@ def l2_norm_ttnn(x, dim=-1, eps=1e-6, scale=1.0):
     mc = ttnn.L1_MEMORY_CONFIG if T <= 512 else ttnn.DRAM_MEMORY_CONFIG
     if dim in (-1, len(x.shape) - 1):
         K = x.shape[-1]
+        if weight is not None:
+            # `weight` is a constant gamma vector already holding `scale * K**-0.5`, so
+            # ttnn.rms_norm's own gamma does the rescale and there is no second program.
+            # It is the caller's job to have built it for this `scale`.
+            return ttnn.rms_norm(x, epsilon=eps / K, weight=weight, memory_config=mc)
         normed = ttnn.rms_norm(x, epsilon=eps / K)
         return ttnn.multiply(normed, scale * K**-0.5, memory_config=mc)
     if scale != 1.0:
@@ -400,6 +405,8 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     device=None,
     beta_is_logit=False,
     inplace_state=False,
+    l2_weight_q=None,
+    l2_weight_k=None,
 ):
     """T=1 decode step on HEAD-MAJOR operands. q/k/v are [B, H, 1, D], beta/g [B, 1, H].
 
@@ -428,8 +435,8 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
     if scale is None:
         scale = K**-0.5
     # Q's attention scale rides on the L2 norm's own rescale multiply.
-    q_row = l2_norm_ttnn(q, dim=-1, scale=scale)
-    k_row = l2_norm_ttnn(k, dim=-1)
+    q_row = l2_norm_ttnn(q, dim=-1, scale=scale, weight=l2_weight_q)
+    k_row = l2_norm_ttnn(k, dim=-1, weight=l2_weight_k)
 
     beta_b = ttnn.reshape(beta, [B, H, 1, 1], memory_config=_L1)
     g_b = ttnn.reshape(g, [B, H, 1, 1], memory_config=_L1)
@@ -491,7 +498,7 @@ def recurrent_gated_delta_rule_decode_headmajor_ttnn(
 
 
 def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(
-    q, k, v, beta, g, state_buffer, scale=None, device=None, beta_is_logit=False
+    q, k, v, beta, g, state_buffer, scale=None, device=None, beta_is_logit=False, l2_weight_q=None, l2_weight_k=None
 ):
     """Head-major decode with the state copied back into the pre-allocated buffer."""
     o, new_h = recurrent_gated_delta_rule_decode_headmajor_ttnn(
@@ -505,6 +512,8 @@ def recurrent_gated_delta_rule_decode_headmajor_inplace_ttnn(
         device=device,
         beta_is_logit=beta_is_logit,
         inplace_state=True,
+        l2_weight_q=l2_weight_q,
+        l2_weight_k=l2_weight_k,
     )
     return o, state_buffer
 

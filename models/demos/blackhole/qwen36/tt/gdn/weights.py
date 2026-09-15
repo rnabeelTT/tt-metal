@@ -59,6 +59,10 @@ class GDNWeights:
     # Chunk-parallel prefill kernel (gated_delta_attn_seq) — always on
     use_chunk_seq_prefill: bool
     chunk_seq_masks_long: object
+    # Constant rescale vectors for the decode Q/K L2 norms (see below). Optional so a
+    # weights object built elsewhere (the TP loader) still constructs.
+    qk_l2_weight_q: object = None
+    qk_l2_weight_k: object = None
 
 
 def _host_copy(t):
@@ -173,6 +177,40 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
 
     # Precompute A_neg = -exp(A_log) once (constant per layer, saves 2 ops per decode step)
     A_neg = ttnn.neg(ttnn.exp(A_log))
+
+    # The decode step's Q/K L2 norm is `rms_norm(x, eps/K)` followed by a rescale
+    # multiply: K**-0.5 turns the RMS norm into an L2 norm, and Q carries the attention
+    # scale K**-0.5 on top of it. `ttnn.rms_norm` already applies a gamma vector inside
+    # its own kernel, so a constant gamma does that rescale for free and the multiply --
+    # one program per tensor, two per layer, 60 per token over the 30-layer stack --
+    # disappears. Built here rather than lazily because a tensor allocated on the first
+    # decode could be allocated inside a trace capture.
+    _dk = config.head_k_dim
+
+    def _const_gamma(value):
+        # SINGLE-DEVICE ONLY, and that restriction is empirical. On P300 and P150x4 --
+        # which run this model replicated, so they take the same decode path -- folding
+        # the rescale into the norm's gamma makes the traced decode hang in
+        # `read_decode_output`, at a step that moves between runs. Bisected against a
+        # clean HEAD with the same script and a board reset in front of it: HEAD returns
+        # 25.67 ms/token on both meshes, this change produces no output until the
+        # timeout, with or without an explicit ReplicateTensorToMesh on these two
+        # tensors. Not diagnosed; the model's own NONDETERMINISM.md records that this
+        # decode path is sensitive to allocation shifts. Returning None here puts those
+        # meshes back on the explicit rescale multiply, bit-for-bit as before.
+        if mesh_device is None or mesh_device.get_num_devices() != 1:
+            return None
+        return ttnn.from_torch(
+            torch.full((_dk,), value, dtype=torch.bfloat16),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+        )
+
+    qk_l2_weight_q = _const_gamma(float(_dk) ** -1.0)
+    qk_l2_weight_k = _const_gamma(float(_dk) ** -0.5)
 
     # ---- precompute helpers (bodies verbatim; self.device -> mesh_device, self.<dim> -> config.<dim>) ----
 
@@ -317,4 +355,6 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         mega_g_dim=mega_g_dim,
         use_chunk_seq_prefill=use_chunk_seq_prefill,
         chunk_seq_masks_long=chunk_seq_masks_long,
+        qk_l2_weight_q=qk_l2_weight_q,
+        qk_l2_weight_k=qk_l2_weight_k,
     )

@@ -512,6 +512,8 @@ def gated_deltanet_forward_ttnn(
     use_inplace_state=False,  # ttnn.copy for trace-stable state
     chunk_seq_masks=None,  # cached masks for gated_delta_attn_seq prefill
     valid_len=None,  # fixed-bucket padding; zeros padded positions in scan
+    qk_l2_weight_q=None,  # constant gamma folding the decode Q L2 rescale + attention scale
+    qk_l2_weight_k=None,  # constant gamma folding the decode K L2 rescale
 ):
     """Gated DeltaNet forward. mode: recurrent (decode T=1) or chunk (prefill T>1).
 
@@ -867,6 +869,8 @@ def gated_deltanet_forward_ttnn(
                 state_buffer=recurrent_state,
                 device=device,
                 beta_is_logit=_beta_logit,
+                l2_weight_q=qk_l2_weight_q,
+                l2_weight_k=qk_l2_weight_k,
             )
         elif use_inplace_state and recurrent_state is not None:
             o, new_state = recurrent_gated_delta_rule_decode_inplace_ttnn(
