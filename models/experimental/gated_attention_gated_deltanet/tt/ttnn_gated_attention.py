@@ -24,6 +24,69 @@ def rotate_half_ttnn(x):
     return ttnn.concat([ttnn.neg(x2), x1], dim=-1)
 
 
+def _rope_fusable(x, cos, rotary_dim):
+    """Can ttnn.experimental.rotary_embedding_hf's prefill mode stand in for the manual sequence?
+
+    The prefill mode takes ``[1, num_heads, seq, head_dim]`` against cos/sin
+    ``[1, 1, seq, head_dim]``, broadcasting cos/sin over the head axis -- so it is correct
+    only at batch 1, where there is a single position per step and nothing per-user to
+    broadcast wrongly. It also constrains the rotated width: TILE_SIZE, or a multiple of
+    2*TILE_SIZE.
+
+    Restricted to a SINGLE-DEVICE mesh, and that one is a defect, not a preference.
+    P300 and P150x4 run this model REPLICATED (model_config sets num_devices = 1 while
+    mesh_devices stays 2 or 4), so they reach this function too -- and with the fused op
+    in the traced decode both of them hang in `read_decode_output` inside
+    `prime_decode_trace`, every time, while the same commit with this gate returns in the
+    usual ~2 minutes. Bisected against a clean HEAD on P300: manual path 25.68 ms/token,
+    fused path no output in 10 minutes. The manual sequence below is what those meshes
+    keep, bit-for-bit unchanged.
+
+    Restricted to seq == 1 on purpose, which is decode. The op is the same rotation but
+    not the same rounding order as multiply/multiply/add, and running it over a prefill
+    block moves the model's logit PCC against the HF reference (measured: 0.96809 /
+    0.94212 / 0.93442 -> 0.96763 / 0.95768 / 0.91944 -- two of three within noise of
+    where they were, one better, one worse, top-1 unchanged on all three). Prefill is not
+    dispatch-bound, so there is nothing to win there worth perturbing a stable gate for.
+    Anything that does not qualify falls back to the manual spelling below.
+    """
+    try:
+        if x.device().get_num_devices() != 1:
+            return False
+    except Exception:
+        return False
+    return (
+        len(x.shape) == 4
+        and int(x.shape[0]) == 1
+        and int(x.shape[-2]) == 1
+        and int(cos.shape[0]) == 1
+        and int(cos.shape[1]) == 1
+        and int(cos.shape[-2]) == 1
+        and (rotary_dim == 32 or rotary_dim % 64 == 0)
+    )
+
+
+def _apply_rope_fused(x, cos, sin, rotary_dim):
+    """HF rotate-half on the first `rotary_dim` channels, in one device program.
+
+    Replaces slice + multiply + (slice, slice, neg, concat) + multiply + add -- eight
+    programs -- with one, plus the partial-rotary slice/concat the manual form also pays.
+    Same convention: ttnn's op IS the HF rotate-half, `concat(-x2, x1)`.
+    """
+    b, h, s, d = (int(v) for v in x.shape)
+    mc = x.memory_config()
+    if rotary_dim == d:
+        return ttnn.experimental.rotary_embedding_hf(x, cos, sin, is_decode_mode=False, memory_config=mc)
+    x_rot = ttnn.slice(x, (0, 0, 0, 0), (b, h, s, rotary_dim), memory_config=mc)
+    roped = ttnn.experimental.rotary_embedding_hf(x_rot, cos, sin, is_decode_mode=False, memory_config=mc)
+    ttnn.deallocate(x_rot)
+    x_pass = ttnn.slice(x, (0, 0, 0, rotary_dim), (b, h, s, d), memory_config=mc)
+    out = ttnn.concat([roped, x_pass], dim=-1, memory_config=mc)
+    ttnn.deallocate(roped)
+    ttnn.deallocate(x_pass)
+    return out
+
+
 def apply_rotary_pos_emb_ttnn(q, k, cos, sin):
     """Apply RoPE to query and key tensors using TTNN ops."""
     if len(cos.shape) < 4:
@@ -32,6 +95,9 @@ def apply_rotary_pos_emb_ttnn(q, k, cos, sin):
 
     rotary_dim = cos.shape[-1]
     full_dim = q.shape[-1]
+
+    if _rope_fusable(q, cos, rotary_dim) and _rope_fusable(k, cos, rotary_dim):
+        return _apply_rope_fused(q, cos, sin, rotary_dim), _apply_rope_fused(k, cos, sin, rotary_dim)
 
     q_rot = q[..., :rotary_dim]
     k_rot = k[..., :rotary_dim]
