@@ -85,22 +85,34 @@ Running ONE instance that opens the whole board instead of one per die gives a s
 replica and no throughput gain -- that is what the `p300`/`p300x2` tt-model profiles do,
 and it is why `tools/serve_lanes.sh` exists.
 
-### Device-level numbers (same on every mesh)
+### Device-level numbers (near-identical across meshes)
 
-| mesh | experts | MoE block | TTFT @128 | prefill | decode (traced) | decode (pure trace) |
-|---|---|---|---|---|---|---|
-| P150 (1 chip) | bfp4 | 5/5 | 364.1 ms | 351.6 tok/s | 29.41 tok/s | 34.45 tok/s (29.03 ms) |
-| P300 (2 chips) | bfp4 | 5/5 | 368.7 ms | 347.2 tok/s | 29.07 tok/s | 34.51 tok/s (28.98 ms) |
-| P150x4 (4 chips) | bfp4 | 5/5 | 368.3 ms | 347.6 tok/s | 28.37 tok/s | 34.52 tok/s (28.97 ms) |
+| mesh | experts | TTFT @128 | prefill | decode (traced) | decode (pure trace) |
+|---|---|---|---|---|---|
+| P150 (1 chip) | bfp4 | 359.5 ms | 356.0 tok/s | 33.75 tok/s | **40.50 tok/s (24.69 ms)** |
+| P300 (2 chips) | bfp4 | 365.6 ms | 350.2 tok/s | 32.69 tok/s | 39.18 tok/s (25.52 ms) |
+| P150x4 (4 chips) | bfp4 | 373.5 ms | 342.7 tok/s | 31.92 tok/s | 39.18 tok/s (25.52 ms) |
+
+Re-measured on 2026-09-16 with `tools/bench_model.py --isl 128 --decode-steps 32` on all
+three meshes. **The numbers this table used to carry (29.03 ms / 34.45 tok/s) were stale
+by 16%.** Eight hand-fusion commits on this branch walked pure-trace decode 28.97 ->
+24.69 ms/token and none of them updated this file; each commit message records its own
+step. P150 is now faster than the other two meshes because two of those fusions -- the
+fused RoPE op (`ea58fce14f4`) and the L2-rescale-into-gamma fold (`d69c283c82d`) -- are
+gated to a single-device mesh, since with the fused RoPE in the traced decode both P300
+and P150x4 hang in `read_decode_output` inside `prime_decode_trace`. That gate is
+deliberate and those meshes keep the manual sequence bit-for-bit.
 
 Three numbers, three measurement points: `pure execute_trace` is device only, `traced`
 adds the host readback, and the per-stream figure in the table above is end to end
 through vLLM. The served one is the honest one to advertise.
 
-Per-stream numbers are identical across meshes ON PURPOSE: the model is replicated, so
-each die runs a complete independent copy. Decode is also independent of context length
-(24.1 tok/s at ISL 2048 on the pre-optimization build), which is what a 3:1
-linear-attention stack should give.
+Per-stream numbers are near-identical across meshes ON PURPOSE: the model is replicated,
+so each die runs a complete independent copy, and extra dies add replicas rather than
+speed. The one real difference is the 24.69 vs 25.52 ms above, which is the two
+single-device-gated fusions, not a parallelism effect. Decode is also independent of
+context length (24.1 tok/s at ISL 2048 on the pre-optimization build), which is what a
+3:1 linear-attention stack should give.
 
 **Accuracy, stated honestly: top-1 agrees on 3/3 prompts, logit PCC does not clear the
 gate.** Against the HF reference on P150 at bfp4: PCC 0.968 / 0.942 / 0.934 with 6/8 of
@@ -115,6 +127,52 @@ in the routed experts:
 
 So the error accumulates in the non-MoE path (GDN, attention, norms). Every optimization
 in this round left the logits BIT-IDENTICAL, so none of it moved accuracy.
+
+### Where the error actually comes from, measured per layer
+
+That "accumulates in the non-MoE path" was an inference by elimination. It is now
+measured, and it holds -- with a specific culprit and a specific non-culprit.
+
+Feeding every decoder layer the HF reference's EXACT residual stream (teacher forcing, so
+each layer's error is its own with nothing inherited) gives end-to-end logit PCC
+**0.99934 / 0.99898 / 0.99891**, against 0.968 / 0.942 / 0.934 free-running. All 40
+layers land between 0.9935 and 0.9995. **No layer is broken and there is no step at any
+layer or layer type: the free-running gap is pure accumulation over 40 layers.**
+
+**GDN is the lever.** Per layer, a Gated DeltaNet layer contributes ~2.5x the error of a
+full-attention one -- mean contribution PCC 0.9841-0.9852 (n=30) against 0.9937-0.9944
+(n=10), relative error 0.164 vs 0.113 -- and with three times the count it carries
+roughly **80% of the total injected error**. The only outlier is layer 4 (GDN) at ~2x the
+median GDN contribution on all three prompts; a factor, not a step.
+
+Beware the free-running view here, which says the opposite: it shows ~+0.008 PCC lost per
+FULL layer and ~0 per GDN layer. That is confounded -- a full-attention layer follows
+three GDN layers and inherits their error. Trust the teacher-forced numbers.
+
+**Prompt 2 is an ill-conditioned POSITION, not a defect.** It is the prompt that misses
+the gate, and it diverges from layer 0 rather than from somewhere mid-stack (last-position
+relative error 0.122 after layer 0, against 0.039 and 0.059). Yet teacher-forced, prompt
+2's layers are the MOST accurate of the three. The mechanism is signal strength: its
+last-position residual norm is the smallest through the first third of the stack (0.327 at
+the embedding and 1.414 at L10, against 0.392/2.034 and 0.493/1.994), so the same absolute
+layer noise is ~30% more RELATIVE error. Its final token is `:` -- a low-information
+position where the reference itself is near-tied over whitespace. Note this is a
+conditioning effect in the MODEL, not a defect in the metric: adding bf16-scale noise to
+the reference logits leaves PCC at 1.0000 on all three prompts over 5 seeds, so the 0.93
+is a real deviation.
+
+**The LM head and final norm are not worth touching.** Logit PCC comes out 0.012-0.019
+HIGHER than the PCC of the hidden state that produced it, on every prompt at both
+fidelities (e.g. prompt 1 at lofi: final-norm 0.92487 -> logits 0.94212). The
+248320-wide projection averages the 2048-dim error down. Improving them cannot help.
+
+**One thing still unexplained.** 16% relative error on a single layer's own contribution
+is far more than bf16 arithmetic accounts for (~0.4%) and more than the MoE's measured
+share (~2% equivalent). So a specific low-precision step inside the GDN path is likely
+and has not been found. Two alignment traps for whoever looks, both of which produced
+spurious results first time round: `output_hidden_states` returns 41 tensors whose LAST
+entry is post-final-RMSNorm rather than the layer-39 output, and this checkpoint's
+RMSNorm is `x/rms(x) * (1 + gamma)`, not `* gamma`.
 
 **Extra dies buy concurrency, and it scales.** One instance per die -- launch them
 with `tools/serve_lanes.sh start 4`. End to end through vLLM, one stream per lane,
@@ -231,9 +289,16 @@ manifest, so the package described a configuration nobody had run.
 
 ## Why decode costs what it does, and what would actually make it faster
 
-Decode is **dispatch-bound**. One program costs ~8.4 us no matter what it computes, so
-decode time is essentially `op_count x 8.4 us` and nothing else. Three independent
-measurements say so:
+Decode is **dispatch-bound**. A program has a floor that dominates what it computes, so
+decode time is essentially `op_count x (per-program cost)` and little else. Three
+independent measurements say so.
+
+One refinement, from the eight fusion commits that followed: **~8.4 us is an average over
+a mix that includes the 1 MB recurrent-state ops, and it overstates a SMALL program.**
+Those commits removed 870 programs for 4.34 ms, i.e. ~5.0 us each, and one of them
+measured its own three folded eltwise ops at ~1.5 us. Use ~5-6.5 us when costing a small
+eltwise or relayout program and ~10.35 us for anything touching the 1 MB state; ~8.4 us
+is still right for a whole-layer average.
 
 * **A program has a floor, and it is most of the cost.** Traced, a `multiply` costs
   5.45 us at 8 KB, 5.46 at 64 KB, 6.36 at 512 KB -- flat until the tensor gets large.
@@ -733,8 +798,15 @@ into L1. Changed to a BYTE budget calibrated to reproduce the old threshold exac
 - **The GDN chunk-prefill kernel needs T ≥ 128, and T a multiple of 32.** Below that the
   single-device path is *silently wrong* while the TP path errors out.
 - `l1_small_size`, `num_command_queues: 2` and `trace_region_size` are required device
-  params, not tuning. Without a trace region, trace capture fails and traced decode
-  silently falls back to eager.
+  params, not tuning -- with one CAVEAT now measured. The claim that "without a trace
+  region, trace capture fails and traced decode silently falls back to eager" is NOT
+  true: on a device opened with ttnn's defaults (l1_small_size=0, trace_region_size=0,
+  1 command queue) capture SUCCEEDS, returning a real MeshTraceId, and traced decode
+  measures ~33 tok/s/user rather than eager's ~3.4. The GDN conv also does not need the
+  L1-small reservation at these shapes. Keep passing the documented params anyway --
+  every number in this file was measured with 2 command queues and a 1 GB trace region,
+  and that is the configuration to reproduce -- but a missing trace region is not the
+  silent-fallback trap this used to claim.
 - **A hard-killed process leaves a UMD chip lock held by a dead PID** in
   `/dev/shm/TT_UMD_LOCK.CHIP_IN_USE_*`, and the next run blocks forever with no timeout.
   The preflight clears them when no device job is running.
