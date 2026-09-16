@@ -192,17 +192,27 @@ serve_profiles:
   # differ only in `hardware`, which is how tt-model states the device requirement; a
   # p300x2 box should not have to read "p150" and infer that one die is enough.
   #
-  # max_model_len is what has been VERIFIED to serve, not what the KV arithmetic allows.
-  # The hybrid stack makes long context cheap on paper -- only 10 of 40 layers hold a KV
-  # cache, so ~20 KB/token and 128K is ~2.7 GB -- but declaring 131072 previously made
-  # the engine fail at startup on a 4.3 GB allocation. Prefill is measured flat at
-  # ~335 tok/s out to 2048 tokens with no cliff, so raising this is plausible; do it
-  # alongside a run that shows the profile serving at the new length.
+  # max_model_len is the FULL HF-advertised 262144, and that is now measured rather than
+  # assumed. It used to be 4096 -- 1.5% of what the model does -- on the stated grounds
+  # that declaring 131072 made the engine fail on a 4.3 GB allocation. That reason did not
+  # survive checking: no surviving bring-up log records it, and the arithmetic never
+  # supported it. Only 10 of 40 layers hold a KV cache (~20 KB/token), and the GDN
+  # recurrent state is context-INDEPENDENT (~30 MB total whatever the length), so the
+  # whole 262144-token cache is 5.0 GB at bfloat16 against ~6.5 GB of headroom.
+  #
+  # Verified two ways on ONE die, both recorded in doc/context_contract.json:
+  #   model level  -- 4096 / 16384 / 65536 / 131072 / 262144 each allocate their paged KV
+  #                   cache, prefill 2048 tokens and decode, at bfloat16 (the expensive
+  #                   option); 262144 uses 4096 blocks / 5.00 GB
+  #   serving      -- vLLM at max_model_len=262144 reaches "Application startup complete",
+  #                   advertises 262144 on /v1/models and answers a real completion
+  #
+  # This is the architecture's actual selling point, and the package was discarding it.
   - name: p150
     hardware: p150                # 1 chip -- the unit a lane is made of
     mesh_device: P150             # the one profile measured SERVING end to end
                                   # (stage 11/12: the package answered a real request)
-    max_model_len: 4096
+    max_model_len: 262144
     # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
     # They were, and they were INERT: the launcher emits the merged additional_config
     # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
@@ -222,7 +232,7 @@ serve_profiles:
                                   # DEVICE-LEVEL bench_model number, not a serve
                                   # result -- see tools/serve_lanes.sh for measured
                                   # multi-die serving.
-    max_model_len: 4096
+    max_model_len: 262144
     # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
     # They were, and they were INERT: the launcher emits the merged additional_config
     # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
@@ -250,7 +260,7 @@ serve_profiles:
                                   # (slice_device_operation.cpp:134), reproduced on the
                                   # bare host at chunk=2048. Any TTFT/tok/s previously
                                   # quoted here was a DEVICE-LEVEL bench_model number.
-    max_model_len: 4096
+    max_model_len: 262144
     # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
     # They were, and they were INERT: the launcher emits the merged additional_config
     # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"

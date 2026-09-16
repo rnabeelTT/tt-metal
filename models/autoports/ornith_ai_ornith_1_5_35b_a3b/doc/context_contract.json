@@ -1,0 +1,52 @@
+{
+  "hf_model": "ornith-ai/Ornith-1.5-35B-A3B",
+  "hf_advertised_context": 262144,
+  "current_supported_context": 262144,
+  "limiting_reason": null,
+  "measured_on": "2026-09-16",
+  "hardware": "QB2, 2x Blackhole p300c (4 dies); every measurement below used ONE die (P150)",
+
+  "summary": "The full HF-advertised 262144 context is supported, on a single chip, and is verified both at the model level and through the vLLM serving path. No reduction is claimed and none is needed.",
+
+  "why_it_is_affordable": {
+    "kv_layers": "10 of 40 (only the gated full-attention layers hold a KV cache; the 30 Gated DeltaNet layers hold none)",
+    "kv_bytes_per_token": 20480,
+    "kv_at_full_context_bfloat16_bytes": 5368709120,
+    "gdn_recurrent_state_bytes": 31457280,
+    "gdn_recurrent_state_note": "context-INDEPENDENT: 30 layers x 32 heads x 128 x 128 at bf16 is ~30 MB whatever the sequence length. This is the architectural reason long context is cheap here.",
+    "arithmetic": "A dense model of this size would need roughly 21 GB of KV at 256K; this hybrid needs 5.0 GB at bfloat16 and 2.7 GB at bfloat8_b."
+  },
+
+  "model_level_evidence": {
+    "method": "Allocate the paged KV cache each target context requires, prefill a 2048-token prompt through prefill_paged, then run 4 decode steps. bfloat16 KV, i.e. the most expensive option.",
+    "tool": "probe_context.py (session scratchpad)",
+    "results": [
+      {"context": 4096,   "kv_blocks": 64,   "kv_gb": 0.08, "verdict": "OK"},
+      {"context": 16384,  "kv_blocks": 256,  "kv_gb": 0.31, "verdict": "OK"},
+      {"context": 65536,  "kv_blocks": 1024, "kv_gb": 1.25, "verdict": "OK"},
+      {"context": 131072, "kv_blocks": 2048, "kv_gb": 2.50, "verdict": "OK"},
+      {"context": 262144, "kv_blocks": 4096, "kv_gb": 5.00, "verdict": "OK"}
+    ]
+  },
+
+  "serving_evidence": {
+    "method": "vLLM 0.26.0 + the Tenstorrent plugin, one chip, max_num_seqs=1, block_size=64, max_model_len=262144, fabric_config DISABLED, trace_region_size 1 GiB.",
+    "startup": "Application startup complete",
+    "advertised_by_server": 262144,
+    "request": "answered a real /v1/completions request",
+    "note": "At max_num_seqs=1 the plugin sizes its block pool as max_model_len * max_num_seqs, i.e. 262144/64 = 4096 blocks -- the same allocation the model-level probe made."
+  },
+
+  "corrects_a_previous_claim": {
+    "previous_supported_context": 4096,
+    "previous_stated_reason": "the engine failed at startup on a 4.3 GB allocation when max_model_len was declared as 131072",
+    "finding": "UNSUBSTANTIATED. No surviving log in the bring-up records that failure, and the arithmetic never supported it: the whole 262144-token KV cache is 5.0 GB at bfloat16 against roughly 6.5 GB of headroom after weights and the trace region. 4096 was 1.5% of what the model actually does. It has been raised to 262144 with the evidence above rather than justified.",
+    "note": "A 4.3 GB figure is consistent with a vLLM-side block-pool sizing decision rather than a model limit, which is why this contract records serving evidence separately from model-level evidence."
+  },
+
+  "known_limitations_at_this_context": [
+    "max_num_seqs remains 1. That is a batching/concurrency limit, not a context limit: the GDN external-state path and the batched serving deadlock are tracked separately.",
+    "Prompts shorter than 128 tokens are a separate correctness concern on the serving path: the GDN chunk-prefill kernel requires T >= 128 and T % 32 == 0, and below that the single-device path is documented as silently wrong. This is independent of context length and is being investigated.",
+    "Decode-path logit PCC (0.75-0.94) is materially worse than prefill's and the decode graph is not bit-reproducible. Neither is context-dependent."
+  ]
+}
