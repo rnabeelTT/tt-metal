@@ -86,10 +86,39 @@ def _expert_compute_config(device, fidelity=ttnn.MathFidelity.LoFi):
     )
 
 
+_MOE_FIDELITIES = {
+    "lofi": ttnn.MathFidelity.LoFi,
+    "hifi2": ttnn.MathFidelity.HiFi2,
+    "hifi4": ttnn.MathFidelity.HiFi4,
+}
+
+
 def _hifi():
-    """HiFi4 for the small non-expert matmuls (router, shared expert)."""
+    """HiFi4 for the small non-expert matmuls (router, shared expert).
+
+    Selectable via ORNITH_MOE_FIDELITY, defaulting to the hifi4 this shipped with.
+
+    The knob exists because these are the model's ONLY high-fidelity matmuls, and on
+    Blackhole high fidelity plus `matmul_block` is a suspect combination:
+    `matmul_block` routes unconditionally through
+    `matmul_block_math_dynamic_throttle` (matmul.h:246-266), which reads a
+    firmware-written word and, when its low bit is set, reprograms the MOP for
+    MM_THROTTLE_MAX=5 while passing MATH_FIDELITY through UNGUARDED -- and the LLK's own
+    test skips exactly that combination, because "throttle levels 4/5 do not increment
+    the fidelity phase per LLK; only correct for LoFi (single-phase)" and "for a
+    high-fidelity (multi-phase) matmul this collapses the extra phases and yields ~half
+    the result" (tt-llk/tests/python_tests/test_matmul_custom.py:216-228).
+
+    Since the throttle word is power/thermal state, that would be intermittent and
+    immune to synchronisation -- the signature in NONDETERMINISM.md. Setting this to
+    lofi takes the model off the suspect path entirely, which makes it the discriminating
+    experiment rather than a tuning option.
+    """
+    name = os.environ.get("ORNITH_MOE_FIDELITY", "hifi4").strip().lower()
+    if name not in _MOE_FIDELITIES:
+        raise ValueError(f"ORNITH_MOE_FIDELITY={name!r} is not one of {sorted(_MOE_FIDELITIES)}")
     return ttnn.WormholeComputeKernelConfig(
-        math_fidelity=ttnn.MathFidelity.HiFi4,
+        math_fidelity=_MOE_FIDELITIES[name],
         math_approx_mode=False,
         fp32_dest_acc_en=False,
         packer_l1_acc=False,
