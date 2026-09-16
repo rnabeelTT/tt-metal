@@ -528,7 +528,46 @@ the gap is single-stream decode, not batching alone.
 
   So it is the SECOND prefill, on the per-token gather path, that never completes.
 
-  **Five hypotheses tested and eliminated** (each reverted rather than shipped on a
+  **One of the five "eliminations" below does not hold.** Hypothesis 3 rests on
+  `tools/repro_prefill_after_trace.py` running "the exact serving order" and passing. It
+  does not run the exact serving order. Verified by reading it: every prompt is
+  **12 tokens** (`p0`, `p1`, `p2` are all `(1, 12)`), and it parks only the DECODE trace
+  via `prime_decode_trace` -- it never calls `capture_prefill_trace_chunked`. So it
+  supplies neither factor the "a post-park compile clobbers the parked trace" mechanism
+  needs, and its PASS eliminates nothing.
+
+  That mechanism is not exotic here: `prefill_paged_slots_replicated` calls
+  `self.prefill_paged()`, whose shapes all derive from the real prompt length, so it
+  compiles a fresh program set per distinct T AT REQUEST TIME. Its TP sibling
+  `prefill_paged_slots` calls `prefill_traced_chunked()` -- the bounded, pre-warmed
+  masked-bucket set -- instead, and so does `prefill_chunked_peruser`. The replicated
+  path is the only holdout. `warmup_prefill_masked_buckets`' own docstring says why that
+  matters: "so a request never compiles after a trace is parked (a post-park compile
+  clobbers the trace -> second-request hang, #48536)", and
+  `tests/test_prefill.py::test_masked_bucket_after_trace_capture` says "This is the case
+  that used to hang -- the eager short path would compile a fresh program per length and
+  clobber the parked trace."
+
+  **Measured here, 2026-09-16, and left honestly unresolved.** A standalone repro with
+  prompts of three DISTINCT lengths (13/24/31) against identical ones (12/12/12):
+
+  * the length variation is real and visible -- the differing-length second prefill took
+    **10.61 s against 0.65 s** on a cold kernel cache, i.e. fresh program sets genuinely
+    are built at request time;
+  * but it dropped to **1.14 s** on a second run, because ttnn's on-disk kernel cache
+    survives process exit. So the per-length cost is a one-time cache miss, not a
+    per-process one -- which weakens (does not kill) the concern;
+  * and NEITHER arm deadlocked -- but the test is INCONCLUSIVE, not a refutation, because
+    `capture_prefill_trace_chunked` failed in every attempt (`concat shapes_match`, then
+    `binary_ng` after binding the B=1 scratch), so the chunk-prefill trace was never
+    actually parked. The hypothesis remains UNTESTED.
+
+  Worth knowing for whoever finishes this: `_bind_gdn_prefill_scratch_replicated` and
+  `_unbind_gdn_prefill_scratch_replicated` ALREADY EXIST (model.py) and are simply not
+  used by `prefill_paged_slots_replicated`, which nulls `split_conv_state` and takes the
+  eager path instead. The pieces for the swap are in the tree.
+
+  The original five hypotheses, for reference (each reverted rather than shipped on a
   guess, since none fixed it):
 
   1. *Data-dependent shapes.* Short prompts reach `_decode_gather` because the dispatch
