@@ -106,6 +106,29 @@ serve:
       # The plugin defaults this to 50 MB; a 40-layer decode trace does not fit
       # ("get_trace_buffers_size() <= trace_region_size").
       trace_region_size: 1073741824
+      # NO FABRIC, and THIS is the knob that actually turns it off.
+      #
+      # The model runs zero collectives: experts are replicated per die, and attention
+      # and GDN are replicated too (model_config forces num_devices = 1), so nothing
+      # crosses a chip boundary. But the plugin does not know that -- worker.py's
+      # get_fabric_config defaults any non-Galaxy MULTI-DEVICE mesh to FABRIC_1D and
+      # calls set_fabric before open_mesh_device. Requesting a fabric nothing uses is
+      # what broke the p300 profile: a (1,2) mesh on this 4-chip QB2 is a SUBSET of the
+      # cluster, its EDM routers never complete their handshake, and engine init dies
+      # in fabric_firmware_initializer.cpp.
+      #
+      # Measured directly on this host, two processes, same device params:
+      #   set_fabric_config(FABRIC_1D) then open MeshShape(1,2)
+      #     -> "Fabric Router Sync: Timeout after 10000 ms on Device 0.
+      #         Expected status 0xa2b2c2d2 (LOCAL_HANDSHAKE_COMPLETE)", throws at
+      #        fabric_firmware_initializer.cpp:206/271 -- the container's exact failure
+      #   no fabric, open MeshShape(1,2)
+      #     -> OPENS, device ids [1, 0]
+      #
+      # get_fabric_config reads this key by name out of ttnn.FabricConfig.__members__,
+      # so DISABLED short-circuits FabricFirmwareInitializer::init and the router-sync
+      # wait returns immediately.
+      fabric_config: DISABLED
       # NOT set: sample_on_device_mode would be worth ~5 ms/token (dropping the full
       # [1, 1, 248320] logits readback and its sync every step) but the plugin refuses
       # it here:
@@ -124,14 +147,12 @@ serve:
     reasoning_parser: qwen3       # the model emits <think>...</think> traces
     tool_parser: hermes           # XML-formatted function calls
   env:
-    # NO FABRIC. The model runs zero collectives: experts are replicated per die and
-    # attention/GDN are replicated too, so nothing crosses a chip boundary. Requesting
-    # a fabric that is never used is not free -- a cold multi-chip open trains ethernet
-    # links and fails often enough to need a warm-up retry, and a half-configured
-    # fabric resurfaces later as "Unsupported fabric config" from ccl_common.
-    # Set to DISABLED, not "" -- an empty string is not a valid fabric selector and
-    # the container dies in fabric_firmware_initializer.cpp during engine init.
-    TT_METAL_FABRIC_CONFIG: DISABLED
+    # There is deliberately no TT_METAL_FABRIC_CONFIG here. That variable DOES NOT
+    # EXIST in tt-metal -- a grep over the whole tree finds it only in this file, and it
+    # is absent from rtoptions.cpp's env table -- so the entry that used to sit here was
+    # a no-op, and the fabric it claimed to disable was never disabled. The fabric is
+    # turned off through the plugin's own `fabric_config` key above, which is read by
+    # name and takes effect.
     # NOT set here, deliberately: TT_MESH_GRAPH_DESC_PATH is per-LANE, not per-package.
     # To run one instance per die (the throughput deployment -- see serve_profiles),
     # each instance needs BOTH of these, and only then:
@@ -179,39 +200,76 @@ serve_profiles:
   # alongside a run that shows the profile serving at the new length.
   - name: p150
     hardware: p150                # 1 chip -- the unit a lane is made of
-    mesh_device: P150             # verified: 363.7 ms TTFT, 29.48 tok/s
+    mesh_device: P150             # the one profile measured SERVING end to end
+                                  # (stage 11/12: the package answered a real request)
     max_model_len: 4096
-    additional_config:
-      routed_expert_dtype: bfloat4_b
-      kv_cache_dtype: bfloat8_b
+    # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
+    # They were, and they were INERT: the launcher emits the merged additional_config
+    # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
+    # namespace, and nothing in the plugin looks for either name. Expert precision comes
+    # from ORNITH_ROUTED_DTYPE or else MESH_PRECISION in tt/model_config.py (bfloat4_b on
+    # every mesh); the served KV cache is allocated by the plugin from vLLM's own
+    # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
+    # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
 
   - name: p300
     hardware: p300                # 1 dual-chip board = 2 chips
-    mesh_device: P300             # on the host: 365.0 ms TTFT, 28.91 tok/s (one replica)
+    mesh_device: P300             # NOT YET MEASURED SERVING. Engine init died in
+                                  # fabric_firmware_initializer.cpp; the fabric_config
+                                  # above is the proven fix but this profile has not
+                                  # been re-run through the container since. Any
+                                  # TTFT/tok/s previously quoted here was a
+                                  # DEVICE-LEVEL bench_model number, not a serve
+                                  # result -- see tools/serve_lanes.sh for measured
+                                  # multi-die serving.
     max_model_len: 4096
-    additional_config:
-      routed_expert_dtype: bfloat4_b
-      kv_cache_dtype: bfloat8_b
-    env:
-      # Per-PROFILE (ServeProfile inherits env from ServeSettings), because it must not
-      # apply to p150 or p300x2. A 2-chip mesh on a 4-chip QB2 is a subset, and unless
-      # tt-metal is told which 2-chip topology that is, engine init dies in
-      # fabric_firmware_initializer.cpp. The same open succeeds on the bare host, where
-      # nothing is subsetting the cluster -- so this is a container-allocation detail,
-      # not a model problem.
-      TT_MESH_GRAPH_DESC_PATH: /opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p300_mesh_graph_descriptor.textproto
+    # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
+    # They were, and they were INERT: the launcher emits the merged additional_config
+    # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
+    # namespace, and nothing in the plugin looks for either name. Expert precision comes
+    # from ORNITH_ROUTED_DTYPE or else MESH_PRECISION in tt/model_config.py (bfloat4_b on
+    # every mesh); the served KV cache is allocated by the plugin from vLLM's own
+    # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
+    # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
+    # No TT_MESH_GRAPH_DESC_PATH. One used to be set here, on the theory that engine
+    # init died because tt-metal was not told which 2-chip topology a (1,2) mesh on a
+    # 4-chip QB2 is. That theory is DISPROVEN: with the fabric disabled, opening
+    # MeshShape(1,2) on this host succeeds with no descriptor at all, and with the
+    # fabric enabled it fails WITH one. The cause was the fabric (see fabric_config
+    # above), not the cluster description -- tt_cluster.cpp types a 2-chip P300 board
+    # and a 4-chip P300_X2 as known cluster types either way, so the CUSTOM refusal
+    # that a descriptor guards against cannot fire here. (It IS genuinely required for
+    # tools/serve_lanes.sh, which pins TT_VISIBLE_DEVICES to ONE die and so really does
+    # leave tt-metal looking at a partial board.)
 
   - name: p300x2
     hardware: p300x2              # 2 boards = 4 chips (a QB2)
-    mesh_device: P150x4           # verified: 370.0 ms TTFT, 28.78 tok/s (one replica)
+    mesh_device: P150x4           # NOT YET MEASURED SERVING. Gets past fabric, then
+                                  # engine init dies in the PREFILL WARMUP with
+                                  # "Ends 2048 must be <= the shape of the tensor 32"
+                                  # (slice_device_operation.cpp:134), reproduced on the
+                                  # bare host at chunk=2048. Any TTFT/tok/s previously
+                                  # quoted here was a DEVICE-LEVEL bench_model number.
     max_model_len: 4096
-    additional_config:
-      routed_expert_dtype: bfloat4_b
-      kv_cache_dtype: bfloat8_b
+    # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
+    # They were, and they were INERT: the launcher emits the merged additional_config
+    # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
+    # namespace, and nothing in the plugin looks for either name. Expert precision comes
+    # from ORNITH_ROUTED_DTYPE or else MESH_PRECISION in tt/model_config.py (bfloat4_b on
+    # every mesh); the served KV cache is allocated by the plugin from vLLM's own
+    # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
+    # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
 
-# The best-quality configuration is the default. A QB2 is the box this was developed and
-# measured on, and it is the only profile that runs bf16 experts.
-default_profile: p300x2
+# p150 is the default because it is the ONLY profile measured serving end to end. The
+# previous default was p300x2 -- a profile that has never answered a request -- and its
+# stated reason ("the only profile that runs bf16 experts") was false: all three profiles
+# run bfloat4_b routed experts. MESH_PRECISION's bf16 entry sits under `routed_ep` and is
+# reachable only with ORNITH_MOE_EP=1, which nothing in this package sets.
+#
+# On a multi-die box the higher-throughput deployment is N instances of THIS profile, one
+# per die, via tools/serve_lanes.sh -- 91.24 tok/s aggregate on four dies against 28.78
+# for a single four-die instance.
+default_profile: p150
 
 # Run inside the finished image, on top of the launcher's own import checks.
 # Run inside the finished image, on top of the launcher's own import checks.
@@ -257,6 +315,6 @@ card:
 
     ```bash
     tt-model pull  <repo>
-    tt-model serve <repo>                 # default profile: p300x2 (4 chips, bf16 experts)
-    tt-model serve <repo> --profile p150  # single chip, bfp4 experts
+    tt-model serve <repo>                 # default profile: p150 (1 chip)
+    tools/serve_lanes.sh start 4          # multi-die: one replica per die (3.5x throughput)
     ```
