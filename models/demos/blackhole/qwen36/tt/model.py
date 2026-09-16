@@ -2395,6 +2395,18 @@ class Qwen36Model:
         )
         ttnn.synchronize_device(self.device)
 
+        # Re-seed the derived conv window from the fused state the chunk prefill just
+        # wrote, IN PLACE, so a decode trace captured earlier replays against the prompt's
+        # real conv taps at the addresses it baked. Without this the window still holds
+        # whatever the pre-prefill reset left (zeros), and the 30 GDN layers decode from a
+        # zero conv history while every other part of the model is correct -- wrong, and
+        # wrong in the quiet way that produces fluent nonsense.
+        for layer in self.layers:
+            if layer.is_full_attention:
+                continue
+            if layer.attention.split_conv_state is not None:
+                layer.attention._restore_split_conv_from_fused()
+
         if self.num_devices > 1:
             return self._masked_bucket_logits_tp(hidden, actual_len, bucket)
 
@@ -2891,8 +2903,30 @@ class Qwen36Model:
             dn = layer.attention
             ttnn.copy(self._dn_zero_recurrent, dn.recurrent_state)
             ttnn.copy(self._dn_zero_conv, dn.fused_conv_state)
-            # split_conv_state rebuilt lazily on first decode.
-            dn.drop_derived_conv_state()
+            # REFRESH the derived conv window in place; do NOT free it.
+            #
+            # This used to call drop_derived_conv_state(), which ttnn.deallocate()s the
+            # split conv buffers (force=True, a real free) and rebuilt them lazily on the
+            # next decode -- at whatever addresses the allocator then handed out. A decode
+            # trace captured BEFORE that free has the old addresses baked in, so the replay
+            # reads and writes freed DRAM for all 30 GDN layers while attention, the paged
+            # KV cache, positions, rope and logits all stay correct. The result is
+            # fluent-looking garbage rather than a failure.
+            #
+            # That is not a hypothetical: it is the failure this file already warns about
+            # in the batched path's guard (see prefill_paged_slots_replicated, "NOT
+            # set_external_state ... the model serves fluent-looking garbage rather than
+            # failing"), and it is what the vLLM max_num_seqs=1 server was hitting on
+            # EVERY request -- the plugin captures its decode trace during decode warmup,
+            # which runs BEFORE any prefill.
+            #
+            # fused_conv_state was zeroed on the line above, so restoring the split view
+            # from it is exactly the intended "zero the window" semantics, minus the free,
+            # and _restore_split_conv_from_fused preserves the device addresses.
+            if dn.split_conv_state is not None:
+                dn._restore_split_conv_from_fused()
+            else:
+                dn.drop_derived_conv_state()
 
     def _init_dn_zero_buffers(self):
         """Allocate shared zero buffers for DN recurrent and conv shapes.
