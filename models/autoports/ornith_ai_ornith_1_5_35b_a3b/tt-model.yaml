@@ -146,7 +146,9 @@ serve:
     # model whose tool calls silently come back as prose.
     reasoning_parser: qwen3       # the model emits <think>...</think> traces
     tool_parser: hermes           # XML-formatted function calls
-  env:
+  # env: intentionally ABSENT, not empty. ContainerManifest types serve.env as a
+  # dict, so a comment-only `env:` key parses as None and fails manifest validation
+  # with "Input should be a valid dictionary". Leave the key out entirely.
     # There is deliberately no TT_METAL_FABRIC_CONFIG here. That variable DOES NOT
     # EXIST in tt-metal -- a grep over the whole tree finds it only in this file, and it
     # is absent from rtoptions.cpp's env table -- so the entry that used to sit here was

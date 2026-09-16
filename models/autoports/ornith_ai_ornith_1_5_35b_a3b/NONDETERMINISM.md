@@ -116,6 +116,50 @@ intended (HiFi4 ~16x better than LoFi, error flat in K). See the README's accura
 section; it is a precision-policy bug, fully deterministic, and unrelated to this
 document's non-determinism.
 
+## What the flip rate actually is, and where it is NOT
+
+Measured 2026-09-16, through the traced paged decode path (tt/generator.py), all on P150.
+These narrow the search a lot, and one of them corrects a tempting misreading.
+
+**Prefill is exact.** Six runs of the same prompt give ONE distinct post-prefill logit
+fingerprint, and the step-0 token (the argmax of those logits) is identical across 16
+runs. So nothing before the first decode step contributes. This is stronger than the
+"prefill is bitwise deterministic, 6/6" already recorded above: it is the full logit
+vector, not just the sampled token.
+
+**The first decode step is where divergence begins.** Every diverging run of a 32-token
+generation first differs at step 1, never later. Not at step 5, not at step 20.
+
+**The per-step flip rate is LOW.** Repeating prefill + exactly one decode step 16 times in
+one process gives the same step-1 token 13-15 times in a row, with the odd flip. Across
+six FRESH processes the sixth generation was identical in all six.
+
+**But a long generation still diverges, and this is the trap.** Repeating a 48-token
+greedy completion 8 times in one warmed process gives 6 distinct completions. A low
+per-step flip rate is not a low per-GENERATION flip rate: ~48 steps x 40 layers is enough
+opportunity that some step flips nearly every time, and greedy then amplifies it forever.
+
+    DO NOT conclude from the one-step data that "the model is deterministic once warmed".
+    That was concluded here and it is WRONG. One decode step is mostly stable; a real
+    generation is not. Always grade on a full-length completion.
+
+**The bank-level b2b reproducer is no longer a valid proxy.** Matching decode's
+expert-combine DEST precision to prefill's took b2b from 7-of-16 dirty reps to 0-of-16
+(p ~ 4e-5) while repeated greedy completions stayed unreproducible -- 7 of 8 distinct
+before, 6 of 8 after. So b2b and the user-visible symptom have DIFFERENT sources, and
+only the b2b one is fixed. Grade future work on repeated greedy completions.
+
+**Ruled out as the cause:** the lazy construction of the derived conv window.
+`restore_split_conv_from_fused` returns early when `split_conv_state is None`, so
+generation 1 skipped every in-place restore and let `gdn/decode.py` build the window
+lazily -- a different code path from generation N, at addresses nothing had baked. That
+IS a real hazard and is now fixed (the in-place reset materialises the window instead),
+but it is NOT this bug: with it fixed, six fresh processes still split 5x/1x on the first
+generation's step-1 token, and in-process greedy went only 7-of-8 to 6-of-8 distinct.
+
+So the remaining source is a rare, genuine per-step non-determinism in the decode graph,
+below the expert bank (which b2b now exonerates) and after prefill (which is exact).
+
 ## A warning about instrumented measurements
 
 This effect is suppressed or distorted by observation, so several plausible-looking

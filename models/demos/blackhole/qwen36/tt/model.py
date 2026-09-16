@@ -2926,7 +2926,20 @@ class Qwen36Model:
             if dn.split_conv_state is not None:
                 dn._restore_split_conv_from_fused()
             else:
-                dn.drop_derived_conv_state()
+                # MATERIALISE it now rather than leaving decode to build it lazily.
+                #
+                # This is what made the FIRST generation in a process differ from every
+                # later one. restore_split_conv_from_fused() returns early when
+                # split_conv_state is None, so on generation 1 both this reset and the
+                # post-prefill re-seed were no-ops and gdn/decode.py built the window
+                # lazily instead -- a different code path, at addresses nothing had
+                # baked. Measured across 6 fresh processes: the first generation's
+                # step-1 token varied (13/13/11/13/11/11) while the 6th generation was
+                # identical in all six (369). Creating it here makes generation 1 follow
+                # the same restore-in-place path as generation N.
+                from models.demos.blackhole.qwen36.tt.gdn.state import split_fused_conv_state
+
+                split_fused_conv_state(dn)
 
     def _init_dn_zero_buffers(self):
         """Allocate shared zero buffers for DN recurrent and conv shapes.

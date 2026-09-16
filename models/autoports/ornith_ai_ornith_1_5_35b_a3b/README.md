@@ -282,9 +282,30 @@ tt-metal tree, vLLM 0.26.0 empty-target, the plugin, and this model's code) and
 
 | profile | chips | verdict |
 |---|---|---|
-| **p150** | 1 | **ANSWERED** -- the package serves |
-| p300 | 2 | fails at `fabric_firmware_initializer.cpp:271` |
-| p300x2 | 4 | fails in a slice: "Ends 2048 must be <= the shape of the tensor 32" |
+| **p150** | 1 | **SERVES, AND THE ANSWERS ARE CORRECT** (re-verified 2026-09-16) |
+| p300 | 2 | engine init fixed; multi-die DECODE hangs -- use `serve_lanes.sh` |
+| p300x2 | 4 | same: init and prefill work, decode hangs |
+
+Re-verified on 2026-09-16 by rebuilding the package and reading the COMPLETION TEXT:
+
+    "The capital of France is"  -> " Paris, a city renowned for its iconic landmarks
+                                    such as the Eiffel Tower, the Louvre Museum, and
+                                    the Notre-Dame Cathedral..."
+    "the three laws of thermodynamics?" -> "1. **First Law (Law of Conservation of
+                                    Energy):** Energy cannot be created or destroyed..."
+
+**That check is the point, and the previous one was not good enough.** The earlier
+verdict "ANSWERED -- the package serves" was produced by asserting that a request
+returned SOMETHING. It did: it returned fluent gibberish, because the image carried the
+pre-fix code that freed the GDN conv buffers the decode trace had baked. A package that
+answers incorrectly is not a deliverable, so the check now reads the text. (That stage's
+own log also ends in `FAIL :: serve verification` despite the status file recording PASS,
+so it had never cleanly passed either.)
+
+p300 and p300x2 both get FURTHER than before -- the fabric fix takes them through engine
+init and prefill -- but decode then hangs on a multi-die mesh, so neither is a working
+serve profile yet. One replica per die via `tools/serve_lanes.sh` remains the measured
+multi-die deployment.
 
 p300's failure is the per-process fabric link training documented above: the host tests
 absorb it with an in-process warm-up, and the plugin's device-open path does not. That
