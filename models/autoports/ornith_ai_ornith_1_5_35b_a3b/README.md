@@ -12,6 +12,47 @@ attention stack — onto tt-metal, packaged for `tt-model` v5.1 container servin
 > `tools/repro_nondeterminism.py`. **Do not advertise reproducible greedy output
 > until this is fixed.**
 
+## What is verified to serve CORRECT output, per hardware type
+
+Re-verified 2026-09-16 by reading the completion TEXT on every configuration, not by
+checking that a request returned something. All three target hardware types serve, and
+the unit is ONE DIE -- bigger boards scale by running more replicas, not by opening a
+wider mesh.
+
+| hardware | dies | how | verified |
+|---|---|---|---|
+| **p150** | 1 | the tt-model container package, profile `p150` | **correct text** |
+| **p150x2** (= p300) | 2 | `tools/serve_lanes.sh start 2` | **correct text on BOTH dies** |
+| **p150x4** (= p300x2) | 4 | `tools/serve_lanes.sh start 4` | **correct text on ALL FOUR dies** |
+
+Sample, four lanes, same prompt "The capital of France is", temperature 0:
+
+    lane 0  " Paris. Paris is the largest city in France, and one of the largest in
+              Europe. It is located on the River Seine, in the region of Ile-de"
+    lane 1  " Paris, a city renowned for its iconic landmarks such as the Eiffel Tower,
+              the Louvre Museum, and the Notre-Dame Cathedral. Paris is also a"
+    lane 2  (identical to lane 1)
+    lane 3  " Paris. Paris is a beautiful city located on the Seine River. It is home to
+              famous landmarks like the Eiffel Tower, the Louvre Museum, and Notre"
+
+All four are correct; the differences in phrasing are the open non-determinism
+(NONDETERMINISM.md), since each lane is an independent process. Two lanes on one board
+returned BYTE-IDENTICAL 32-token completions, which is consistent with the low per-step
+flip rate measured there -- divergence needs enough steps to catch.
+
+**Why lanes rather than one wide mesh.** A single instance that opens the whole board is
+one replica and gains no throughput; per-die replicas measure 26 -> 54 -> 91 tok/s
+aggregate on 1/2/4 dies. And the one-big-mesh `p300` / `p300x2` serve profiles are
+currently blocked anyway: the fabric fix carries them through engine init and prefill,
+then multi-die DECODE hangs. So lanes are both the faster and the working multi-die
+deployment.
+
+**What is NOT yet true, so nobody has to discover it the hard way:** greedy output is not
+reproducible run to run (see NONDETERMINISM.md -- open, characterised, not fixed);
+`max_num_seqs` is 1, so concurrency comes from lanes rather than batching; and on-device
+sampling is unavailable at this vocabulary on a single die, which is what blocks the TTI
+release stage.
+
 ## Running it
 
 ```bash
