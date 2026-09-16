@@ -61,6 +61,60 @@ One op, one set of inputs, two different answers, milliseconds apart. Rare per c
 | Reading uninitialised L1 | **Ruled out** | filling free L1 with 0/7/-7/1000 before each trial changed nothing |
 | `ttnn.sparse_matmul` standalone | Deterministic in isolation | 8/8 identical, synthetic operands, empty device — so context matters, not the op alone |
 | A host/device timing race | **Ruled out** | a full `ttnn.synchronize_device` after each of the 40 layers does NOT suppress it, 0/3 runs |
+| The MoE's high-fidelity matmuls (router / shared expert) | **Ruled out** | `ORNITH_MOE_FIDELITY=lofi` takes them off HiFi entirely and b2b still flips (1 of 3 reps dirty, L24 diff 6.87e-05) -- the same rate as the hifi4 baseline (1 of 3, L36 diff 1.95e-03) |
+| Blackhole's dynamic matmul throttle corrupting HiFi matmuls | **Ruled out** | see below -- the guard is bit-identical on both light and sustained load |
+| Uninitialised L1 at device init | **Ruled out** | `TT_METAL_CLEAR_L1=1`, which zeroes the whole per-core L1 including the throttle word, still flips (1 of 3 reps, L16 diff 3.05e-05) |
+
+## The Blackhole matmul-throttle hypothesis, and why it is not the answer
+
+A source audit proposed a specific and attractive mechanism, and it is worth recording in
+full because the DEFECT IS REAL even though it is not this model's problem.
+
+On Blackhole, `matmul_block` routes unconditionally through
+`matmul_block_math_dynamic_throttle` (`tt_metal/hw/inc/api/compute/matmul.h:246-266`).
+That function reads a word the ARC firmware writes and, when its low bit is set,
+reprograms the matmul MOP for `MM_THROTTLE_MAX = 5` while passing `MATH_FIDELITY` through
+**with no guard**. The LLK's own test refuses to exercise that combination
+(`tt_metal/tt-llk/tests/python_tests/test_matmul_custom.py:216-228`):
+
+    "throttle levels 4/5 do not increment the fidelity phase per LLK;
+     only correct for LoFi (single-phase)"
+    "for a high-fidelity (multi-phase) matmul this collapses the extra phases
+     and yields ~half the result"
+
+ttnn's main matmul kernel (`bmm_large_block_zm_fused_bias_activation.cpp`) uses
+`matmul_block`, so every high-fidelity matmul on this architecture is exposed. Since the
+throttle word is power/thermal state, that would be intermittent and immune to
+synchronisation -- exactly this document's signature.
+
+**It is not what is happening here.** Guarding the branch so only single-phase fidelity
+takes it (a one-line `if constexpr`; `matmul.h` is JIT-compiled, so no tt-metal rebuild is
+needed) changes NOTHING, measured twice:
+
+* a standalone 512x2048x2048 bf16 matmul at LoFi / HiFi2 / HiFi4 -- **bit-identical**
+  before and after, same checksum, PCC and mean error at all three fidelities;
+* the full 40-layer model's prefill logits at lofi and hifi2 -- **bit-identical** before
+  and after, all six PCCs matching to 5 decimals. This is the sustained-load case, where
+  an idle board's failure to draw enough power is not an excuse.
+
+So the firmware never asserts the bit destructively on this part, and the hypothesis is
+refuted for this model on both light and sustained load. Report the `matmul_block` defect
+upstream on its own merits; do not spend time on it here.
+
+One caveat on the guard's SHAPE, for whoever writes that upstream fix: the fidelity test
+must sit inside `TRISC_MATH`. `MATH_FIDELITY` is part of the compute kernel's generated
+prelude and is not declared for the unpack/pack RISCs, which also compile that header, so
+a naive guard fails to build -- silently, if the caller only greps for its expected
+output. Those cores are unaffected either way, because both arms of the branch contain
+nothing but `MATH()` calls.
+
+What the hunt DID turn up is a real second-order defect, and it is not throttle-related:
+with `fp32_dest_acc_en=False`, HIGHER math fidelity is measurably WORSE than LoFi past
+K~1024 (1.7x worse at K=2048, with a ~2.8% scale bias), because the extra fidelity passes
+accumulate into a bf16 destination. With `fp32_dest_acc_en=True` fidelity behaves as
+intended (HiFi4 ~16x better than LoFi, error flat in K). See the README's accuracy
+section; it is a precision-policy bug, fully deterministic, and unrelated to this
+document's non-determinism.
 
 ## A warning about instrumented measurements
 

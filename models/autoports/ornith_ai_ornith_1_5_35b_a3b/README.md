@@ -114,11 +114,28 @@ single-device-gated fusions, not a parallelism effect. Decode is also independen
 context length (24.1 tok/s at ISL 2048 on the pre-optimization build), which is what a
 3:1 linear-attention stack should give.
 
-**Accuracy, stated honestly: top-1 agrees on 3/3 prompts, logit PCC does not clear the
-gate.** Against the HF reference on P150 at bfp4: PCC 0.968 / 0.942 / 0.934 with 6/8 of
-the reference top-8 surviving, against `test_model.py`'s 0.95 bar for this dtype. That
-test has never passed at bfp4 (there is no `status/10-full-model`), and the loss is NOT
-in the routed experts:
+**Accuracy, stated honestly: top-1 agrees on 3/3 prompts, and logit PCC clears the gate
+on 2 of 3.** Against the HF reference on P150 at bfp4, with the precision policy now
+shipped (non-MoE path hifi2, shared expert lofi): PCC **0.9717 / 0.9713 / 0.9433**,
+top-8 overlap 6/8 8/8 6/8, against `test_model.py`'s 0.95 bar for this dtype. Prompt 2
+still misses. The previous policy (non-MoE lofi, shared expert hifi4) gave
+0.9681 / 0.9421 / 0.9344 and cleared the bar on none of the three; see the precision
+table in `tt/model_config.py` for the five configurations measured and the one real
+trade-off among them (lofi/lofi has better top-8 agreement, 8/7/8, and worse PCC).
+
+**More precision will not close prompt 2, and the reason is the router.** The binding
+constraint is discrete expert-selection agreement with HF, not arithmetic. Hooking the
+router and recording selected indices shows that changing ANY fidelity setting flips
+11-16% of all expert slots and alters the expert set for 59-69% of token-decisions,
+concentrated in layers 23-32 -- the same band as the largest per-layer PCC moves.
+Top-8-of-256 is a discontinuous selection, so bf16 noise flips near-ties and the model
+draws a DIFFERENT expert, which is a bounded-but-large output change that no matmul
+precision removes. That single mechanism accounts for the fidelity non-monotonicity, the
+per-prompt inconsistency, hifi4 buying nothing over hifi2, and the fact that everything
+is nonetheless bitwise reproducible for a fixed configuration. Worth measuring next: the
+HF rank-8 vs rank-9 score-gap distribution.
+
+The loss is NOT in the routed experts:
 
 * the MoE block itself measures **0.99976** PCC against a 0.99978 ceiling, and
 * raising the down projection to bfp8 (`bfloat4_bfloat8`, 23.9 GB, still one chip)

@@ -130,6 +130,43 @@ class OrnithModelArgs(Qwen36ModelArgs):
         # the base forward pass and is excluded until MTP is scoped as its own goal.
         self.mtp_num_hidden_layers = getattr(tc, "mtp_num_hidden_layers", 0)
 
+        # NON-MoE MATH FIDELITY. qwen36's attention and GDN build their compute kernel
+        # configs from QWEN36_MATH_FIDELITY, whose default stays `lofi` so the dense
+        # Qwen3.5/3.6 models that share those modules are unaffected. Ornith wants hifi2,
+        # so it asks for it HERE rather than by changing shared code.
+        #
+        # Measured on the full 40-layer model against the HF reference, P150, bfp4
+        # experts, 2 reps each and bitwise reproducible (non-MoE fidelity / shared-expert
+        # fidelity -> logit PCC p0/p1/p2, top-8 overlap):
+        #
+        #   lofi  / hifi4  0.96809 0.94212 0.93442   6/8 6/8 6/8   <- what shipped
+        #   hifi2 / lofi   0.97174 0.97134 0.94334   6/8 8/8 6/8   <- this policy
+        #   hifi2 / hifi2  0.96959 0.95724 0.92689   6/8 6/8 7/8
+        #   lofi  / lofi   0.96757 0.96115 0.93623   8/8 7/8 8/8
+        #   hifi4 / lofi   0.97238 0.96287 0.93214   7/8 7/8 7/8
+        #
+        # hifi2/lofi is the best PCC on ALL THREE prompts and the largest single gain
+        # available (+0.029 on prompt 1, +0.009 on prompt 2). It works because the
+        # non-MoE path DOES set fp32_dest_acc_en=True, so extra fidelity passes there
+        # actually resolve; the shared expert does not, so extra passes there hurt (see
+        # moe.py::_hifi).
+        #
+        # A REAL TRADE-OFF, recorded rather than hidden: lofi/lofi has better TOP-8 TOKEN
+        # AGREEMENT (8/7/8 against this policy's 6/8/6), and test_model.py's own docstring
+        # argues token agreement discriminates better than PCC. Neither config dominates.
+        # hifi2/lofi is chosen because PCC is the criterion the stage gate actually fails,
+        # and it is uniformly better there; top-1 is 3/3 and top-8 clears the 6/8 bar in
+        # both. Set QWEN36_MATH_FIDELITY=lofi ORNITH_MOE_FIDELITY=lofi to take the other
+        # side of that trade.
+        #
+        # NOTE none of this reaches the 0.95 bar on prompt 2, and more precision will not:
+        # the binding constraint is discrete router expert-selection agreement with HF.
+        # Changing any fidelity flips 11-16% of expert slots and alters the expert set for
+        # 59-69% of token-decisions, concentrated in layers 23-32. Top-8-of-256 is
+        # discontinuous, so bf16 noise flips near-ties and the model draws a DIFFERENT
+        # expert -- a bounded-but-large change no matmul precision removes.
+        os.environ.setdefault("QWEN36_MATH_FIDELITY", "hifi2")
+
         policy = MESH_PRECISION.get(self.device_name)
         if policy is None:
             raise ValueError(

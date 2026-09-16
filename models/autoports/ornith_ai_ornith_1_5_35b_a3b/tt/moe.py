@@ -94,9 +94,27 @@ _MOE_FIDELITIES = {
 
 
 def _hifi():
-    """HiFi4 for the small non-expert matmuls (router, shared expert).
+    """Compute config for the SHARED EXPERT's matmuls. Defaults to LoFi, measured.
 
-    Selectable via ORNITH_MOE_FIDELITY, defaulting to the hifi4 this shipped with.
+    Despite the name this is not the router -- the router goes through TTMoEGate, which
+    already defaults to HiFi2 WITH fp32 accumulation and is therefore already in the
+    correct regime. This function covers the shared expert's gate projection and its
+    matmuls, and nothing else.
+
+    It used to be HiFi4 with fp32_dest_acc_en=False, which is the worst available
+    combination at this K. Measured against an exact fp64 product of the same bf16
+    inputs, with fp32_dest_acc_en=False higher fidelity is WORSE than LoFi past K~1024 --
+    1.7x worse at K=2048 with a ~2.8% scale bias -- because the extra fidelity passes
+    accumulate into a bf16 destination. With fp32_dest_acc_en=True fidelity behaves as
+    intended (HiFi4 ~16x better than LoFi, error flat in K).
+
+    Turning fp32 accumulation ON is not available here: it halves the matmul dest from 8
+    tiles to 4 and corrupts expert output on Blackhole (tt-metal #49068). Measured on the
+    full model, enabling it moved prompt 1 up (0.94212 -> 0.96125) and prompt 2 sharply
+    DOWN (0.93442 -> 0.90373), which is that corruption. So the way out of the bad regime
+    is to drop the fidelity rather than to add the accumulator.
+
+    Selectable via ORNITH_MOE_FIDELITY.
 
     The knob exists because these are the model's ONLY high-fidelity matmuls, and on
     Blackhole high fidelity plus `matmul_block` is a suspect combination:
@@ -114,13 +132,32 @@ def _hifi():
     lofi takes the model off the suspect path entirely, which makes it the discriminating
     experiment rather than a tuning option.
     """
-    name = os.environ.get("ORNITH_MOE_FIDELITY", "hifi4").strip().lower()
+    name = os.environ.get("ORNITH_MOE_FIDELITY", "lofi").strip().lower()
     if name not in _MOE_FIDELITIES:
         raise ValueError(f"ORNITH_MOE_FIDELITY={name!r} is not one of {sorted(_MOE_FIDELITIES)}")
+    # fp32_dest_acc_en is OFF by default here, matching _expert_compute_config -- but for a
+    # different and much weaker reason, which is why it is a knob.
+    #
+    # The experts must keep it off: it halves the matmul dest from 8 tiles to 4 and
+    # corrupts expert output on Blackhole (tt-metal #49068). The router and shared expert
+    # inherited that False without a recorded rationale, and there is a measured reason to
+    # doubt it: with bf16 operands, extra fidelity passes accumulate into a bf16 dest, so
+    # HiFi's additional passes can add rounding rather than remove it. Measured standalone
+    # on a 512x2048x2048 bf16 matmul with fp32_dest_acc_en=False, higher fidelity was
+    # WORSE against an fp32 torch reference:
+    #     LoFi  mean_abs_err 0.835   HiFi2 1.432   HiFi4 1.455
+    # which is the same inversion the full model shows (hifi4 buys nothing over hifi2).
+    # This file's own notes say "HiFi4 with fp32 accumulation closes it", and every other
+    # high-fidelity config in the stack -- qwen36's attention and GDN, and the GDN
+    # delta-rule kernel -- sets fp32_dest_acc_en=True. _hifi() is the odd one out.
+    #
+    # ORNITH_MOE_FP32_ACC=1 turns it on. Treat a PCC collapse as #49068 biting the shared
+    # expert and revert; treat an improvement as the inversion above being the cause.
+    fp32_acc = os.environ.get("ORNITH_MOE_FP32_ACC") == "1"
     return ttnn.WormholeComputeKernelConfig(
         math_fidelity=_MOE_FIDELITIES[name],
         math_approx_mode=False,
-        fp32_dest_acc_en=False,
+        fp32_dest_acc_en=fp32_acc,
         packer_l1_acc=False,
     )
 
