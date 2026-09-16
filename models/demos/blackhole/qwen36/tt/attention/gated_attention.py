@@ -7,6 +7,7 @@ from models.demos.blackhole.qwen36.tt.attention.config import AttentionConfig
 from models.demos.blackhole.qwen36.tt.attention.decode import decode_forward
 from models.demos.blackhole.qwen36.tt.attention.prefill import prefill_forward
 from models.demos.blackhole.qwen36.tt.attention.weights import load_attention_weights
+from models.demos.blackhole.qwen36.utils.fidelity import math_fidelity
 
 
 class Qwen36GatedAttention:
@@ -24,12 +25,12 @@ class Qwen36GatedAttention:
         self.weights = load_attention_weights(mesh_device, state_dict, tensor_cache_path)
 
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(
-            math_fidelity=ttnn.MathFidelity.LoFi,
+            math_fidelity=math_fidelity(),
             fp32_dest_acc_en=True,
             packer_l1_acc=False,
         )
         self.compute_kernel_config_decode = ttnn.WormholeComputeKernelConfig(
-            math_fidelity=ttnn.MathFidelity.LoFi,
+            math_fidelity=math_fidelity(),
             fp32_dest_acc_en=True,
             packer_l1_acc=True,
         )

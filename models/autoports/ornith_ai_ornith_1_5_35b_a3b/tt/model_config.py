@@ -82,6 +82,7 @@ MESH_PRECISION = {
 }
 
 VALID_ROUTED_DTYPES = ("bfloat4_b", "bfloat4_bfloat8", "bfloat8_b", "bfloat16")
+VALID_KV_DTYPES = ("bfloat8_b", "bfloat16")
 
 
 class OrnithModelArgs(Qwen36ModelArgs):
@@ -136,7 +137,16 @@ class OrnithModelArgs(Qwen36ModelArgs):
                 f"Known meshes: {sorted(MESH_PRECISION)}. Add an entry (and a matching "
                 f"configs/moe_*.yaml) before running on this board."
             )
-        self.kv_cache_dtype = policy["kv"]
+        # Only 10 of 40 layers hold a KV cache (20 KB/token), so raising its precision is
+        # nearly free in memory here -- which makes it a dtype-sweep knob rather than a
+        # fixed policy. ORNITH_KV_DTYPE overrides; the policy value is the default.
+        kv_override = os.environ.get("ORNITH_KV_DTYPE")
+        if kv_override:
+            if kv_override not in VALID_KV_DTYPES:
+                raise ValueError(f"ORNITH_KV_DTYPE={kv_override!r} is not one of {VALID_KV_DTYPES}")
+            self.kv_cache_dtype = kv_override
+        else:
+            self.kv_cache_dtype = policy["kv"]
 
         # Stage 09 sweeps precision by overriding the policy per run. Validated here so
         # a typo fails at construction rather than as a confusing dtype error 40 layers

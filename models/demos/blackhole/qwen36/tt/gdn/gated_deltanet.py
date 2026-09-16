@@ -15,6 +15,7 @@ from models.demos.blackhole.qwen36.tt.gdn.state import (
     write_index,
 )
 from models.demos.blackhole.qwen36.tt.gdn.weights import load_gdn_weights
+from models.demos.blackhole.qwen36.utils.fidelity import math_fidelity
 
 
 class Qwen36GatedDeltaNet:
@@ -41,12 +42,12 @@ class Qwen36GatedDeltaNet:
         self.long_prefill_chunk_size = config.long_prefill_chunk_size
 
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(
-            math_fidelity=ttnn.MathFidelity.LoFi,
+            math_fidelity=math_fidelity(),
             fp32_dest_acc_en=True,
             packer_l1_acc=False,
         )
         self.compute_kernel_config_decode = ttnn.WormholeComputeKernelConfig(
-            math_fidelity=ttnn.MathFidelity.LoFi,
+            math_fidelity=math_fidelity(),
             fp32_dest_acc_en=True,
             packer_l1_acc=True,
         )
