@@ -1,6 +1,19 @@
 # Decode is not reproducible
 
-**Status: open, not fixed. Do not advertise reproducible greedy output.**
+**Status: open, not fixed, and ACCEPTED FOR RELEASE. Do not advertise reproducible
+greedy output -- but do not treat this as a ship blocker either.**
+
+The bar that matters is COHERENCE, not bitwise reproducibility, and the model clears it:
+every configuration verified on 2026-09-16 returns fluent, on-prompt, factually correct
+answers (see the README's per-hardware table). The same greedy irreproducibility is
+reported on Qwen3-Coder MoE on this stack, so it is characteristic of the
+architecture/toolchain here rather than a defect unique to this port. What WAS a ship
+blocker -- the serving path returning fluent GIBBERISH -- was a different bug entirely and
+is fixed (the GDN conv buffers the decode trace had baked were being freed on every
+prefill).
+
+Read this document as "why the same prompt can give differently-worded correct answers",
+not as "the model is broken".
 The fault is not in this model's routing or buffer management; it is in the expert
 compute below the Python level. Evidence and the exact reproducers are below.
 

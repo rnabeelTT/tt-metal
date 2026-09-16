@@ -126,6 +126,53 @@ Running ONE instance that opens the whole board instead of one per die gives a s
 replica and no throughput gain -- that is what the `p300`/`p300x2` tt-model profiles do,
 and it is why `tools/serve_lanes.sh` exists.
 
+### Perf across context length, all three meshes (measured 2026-09-16)
+
+Possible for the first time: the old `max_model_len: 4096` made every column past 4K
+unmeasurable. `tools/bench_model.py --isl 128 4096 16384 65536 --decode-steps 24`.
+
+decode is tok/s, "traced" includes the host readback and is the comparable figure;
+"pure" is device-only `execute_trace`.
+
+| ISL | | P150 | P300 | P150x4 |
+|---|---|---|---|---|
+| **128** | TTFT / prefill | 363 ms / 353 tok/s | 364 ms / 352 | 366 ms / 349 |
+| | decode traced / pure | **33.6 / 40.5** | 32.2 / 39.2 | 29.6 / 39.2 |
+| **4096** | TTFT / prefill | 10.4 s / 394 tok/s | 10.4 s / 394 | 10.4 s / 394 |
+| | decode traced / pure | **33.0 / 39.9** | 32.3 / 38.7 | 32.2 / 38.7 |
+| **16384** | TTFT / prefill | 43.0 s / 381 tok/s | 43.1 s / 381 | 43.0 s / 381 |
+| | decode traced / pure | **32.1 / 38.7** | 31.1 / 38.0 | 30.9 / 38.0 |
+| **65536** | TTFT / prefill | 185 s / 354 tok/s | 185 s / 355 | 187 s / 351 |
+| | decode traced / pure | **29.3 / 34.7** | 27.9 / 35.1 | 28.0 / 35.1 |
+
+**Decode barely degrades with context, and that is the architecture paying off.** P150
+pure-trace goes 40.5 -> 34.7 across a 512x context increase, i.e. **-14% from 128 to 64K**.
+Only 10 of 40 layers hold a KV cache and the 30 GDN layers' recurrent state is
+context-independent, so there is very little for long context to slow down. Against the
+fleet at 64K: ornith-1.0 -10%, ours -13%, qwen3-coder-30b-a3b -21%, muse-glimmer -27%.
+
+**PREFILL IS THE WEAK METRIC, and it is the one to fix next.** Prefill throughput is flat
+at ~350-394 tok/s at every length, which is 2.6x to 22x slower than the fleet:
+
+| model | pf@4K tok/s |
+|---|---|
+| muse-glimmer-30b | 8,666 |
+| qwen3.8-27b | 5,937 |
+| ornith-1.0-35b | 2,342 |
+| qwen3-coder-30b-a3b (closest arch peer) | 1,016 |
+| **Ornith-1.5-35B-A3B (this port)** | **394** |
+
+The consequence is TTFT, which is essentially all prefill: **0.36 s at 128 tokens, 10.4 s
+at 4K, 43 s at 16K, 185 s at 64K.** Three minutes to first token at 64K context is a
+usability problem, and it is the single largest gap to the fleet -- larger, proportionally,
+than the decode gap that earlier optimisation rounds targeted. Prefill is compute-bound
+here (the README's own earlier note), so unlike decode it is NOT a dispatch-count problem
+and the fused-GDN-decode work would not touch it.
+
+Extra dies do not help any of this: the model is replicated, so each die runs a complete
+independent copy and per-stream numbers are near-identical across meshes. Extra dies buy
+REPLICAS (see the lanes table), not speed.
+
 ### Device-level numbers (near-identical across meshes)
 
 | mesh | experts | TTFT @128 | prefill | decode (traced) | decode (pure trace) |
