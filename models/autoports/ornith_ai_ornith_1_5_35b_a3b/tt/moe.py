@@ -722,7 +722,17 @@ class _SparseExperts:
             )
             st = ttnn.multiply(_reshape(down, (1, k, 1, H)), sc_u)
             ttnn.deallocate(down)
-            outs.append(ttnn.sum(st, dim=1, keepdim=True))  # [1,1,1,H]
+            # The expert COMBINE. ttnn.sum's default compute config is not the library
+            # default: generic_reductions.cpp passes default_fp32_acc=TRUE and HiFi4, so
+            # this reduction runs with a 32-BIT DEST while the prefill spelling below
+            # (fast_reduce_nc) runs with a 16-bit one. That asymmetry is invisible at the
+            # call site, and fp32_dest_acc_en halves the matmul dest from 8 tiles to 4,
+            # which is the mechanism tt-metal #49068 says corrupts expert output on
+            # Blackhole. Passing the expert config makes decode numerically identical to
+            # prefill and costs nothing. ORNITH_DECODE_SUM_DEFAULT=1 restores the old
+            # implicit config for A/B testing.
+            _sum_cfg = None if os.environ.get("ORNITH_DECODE_SUM_DEFAULT") == "1" else self.compute_config
+            outs.append(ttnn.sum(st, dim=1, keepdim=True, compute_kernel_config=_sum_cfg))  # [1,1,1,H]
             ttnn.deallocate(st)
             if T != 1:
                 ttnn.deallocate(ids_u)
