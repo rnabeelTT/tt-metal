@@ -89,8 +89,30 @@ def _decode_1d_matmul_config(k: int, n: int, max_cores: int = 64, in0_cap: int =
 
 def _seq_memory_config(seq_len, width=_DEFAULT_GDN_WIDTH):
     """L1 for small activations (faster), DRAM for large (leaves room for the prefill
-    kernel's circular buffers)."""
-    return ttnn.L1_MEMORY_CONFIG if seq_len * width * 2 <= _L1_SEQ_BYTE_BUDGET else None
+    kernel's circular buffers).
+
+    The budget SCALES DOWN WITH WIDTH, because what has to fit in L1 is the activation
+    *plus* the prefill kernel's statically allocated circular buffers, and those grow
+    with the GDN's width (heads x head_dim). A budget on the activation alone cannot
+    express that, and getting it wrong does not fail in this function -- it fails several
+    ops later as "statically allocated circular buffers clash with L1 buffers".
+
+    Calibrated against three measured points, all on Blackhole P150:
+
+      width 2048, T=512 -> L1, works      (the pre-existing rule, unchanged by design)
+      width 4096, T=128 -> L1, works
+      width 4096, T=256 -> L1, FAILS      by 5120 bytes: "L1 buffer allocated at
+                                          1355776 and static circular buffer region
+                                          ends at 1360896"
+
+    A flat 2 MB activation budget admits all three (T=256 at 4096 wide lands exactly on
+    the boundary, and `<=` let it through), so it cannot separate the working cases from
+    the failing one. Scaling inversely with width does: it keeps 2048-wide models on
+    exactly the threshold they were validated at, and halves the allowance at Ornith's
+    4096, which puts T=256 in DRAM and leaves T=128 in L1.
+    """
+    budget = _L1_SEQ_BYTE_BUDGET * _DEFAULT_GDN_WIDTH // max(width, 1)
+    return ttnn.L1_MEMORY_CONFIG if seq_len * width * 2 <= budget else None
 
 
 def rms_norm_gated_ttnn(x, gate, weight, eps=1e-5, memory_config=None, fuse_silu=False):
