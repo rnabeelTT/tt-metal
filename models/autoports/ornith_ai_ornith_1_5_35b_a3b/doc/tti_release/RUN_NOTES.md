@@ -232,20 +232,55 @@ Classification:
   `'NoneType' object has no attribute 'strip'`; same null-content cause.
 
 So after the reasoning-parser fix, **every remaining conformance failure is the same single
-defect**: a short-`max_tokens` request to this reasoning model returns `content: null`
-because the whole budget is spent inside the thinking block. Two honest fixes exist and
-**neither was applied in this stage** (both change the serving contract and deserve review):
+behaviour**: a short-`max_tokens` request returns `content: null` because the whole budget
+is spent inside the thinking block.
 
-1. serve/request a non-thinking mode — the model's `chat_template.jinja` supports
-   `enable_thinking`, so `chat_template_kwargs: {"enable_thinking": false}` (or a spec-level
-   default) would let short requests answer directly;
-2. treat `content: null` with non-empty `reasoning_content` as a serving-contract problem
-   to fix in the adapter, and/or fix the TTI conformance suite, which currently crashes with
-   a `TypeError` instead of reporting a clean failure on null content.
+**This is NOT a defect in this model, and this note previously said it was.** It is what
+vLLM 0.26.0's own qwen3 parser does, and it involves no Ornith code at all. Reproduce with
+`tools/probe_null_content.py` -- vLLM's parser, this model's tokenizer, no device:
 
-`$autofix` was **not** invoked: the failing behaviour is understood and localised
-(above), and the candidate fixes change the model's serving contract rather than repair a
-bug, so they are recorded for review instead of applied unilaterally.
+```
+vLLM resolves --reasoning-parser qwen3 to:
+    vllm.parser.engine.adapters.Qwen3ParserReasoningAdapter
+
+=== enable_thinking=True (the default, and what this package serves) ===
+  truncated INSIDE the think block   reasoning='Let me work through this step by'  content=None
+  think closed, budget gone after    reasoning='Reasoning here.'                   content=None
+  think closed, then a real answer   reasoning='Reasoning here.'                   content='Paris.'
+  NO think block at all              reasoning='Paris.'                            content=None
+=== enable_thinking=False ===
+  every case                         reasoning=None    content=the full text, never null
+```
+
+The mechanism is one line of vLLM: `qwen3_config` sets
+`initial_state=ParserState.REASONING if thinking else ParserState.CONTENT`
+(`vllm/parser/qwen3.py:100`). With thinking on, the parser engine STARTS in the reasoning
+state, so everything before `</think>` is reasoning and `content` is null unless the model
+both closes the block and then emits more. Note the fourth case: output with **no think
+block whatsoever** also returns null. That cannot be a property of this model's weights.
+
+Two consequences:
+
+* **Any** reasoning model served on vLLM 0.26.0 with `--reasoning-parser qwen3` behaves
+  this way. It is upstream-by-design, and `message.content` is nullable in the OpenAI
+  schema, so a client must handle null. `VLLMParamConformanceTest` does not -- it crashes
+  with `TypeError`/`AttributeError` on `None` rather than reporting a clean failure. The
+  harness bug is real and is the TTI suite's, not this port's.
+* The earlier "fix 1", `chat_template_kwargs: {"enable_thinking": false}`, **would** work
+  (the probe confirms the flag reaches the parser: `qwen3.py:226` reads
+  `chat_kwargs.get("enable_thinking", True)`). It is deliberately NOT applied to the
+  package, because it disables the model's reasoning wholesale, and reasoning is what took
+  ifeval prompt-level strict from 32.14 to 60.71 in the table above. Trading that away to
+  satisfy a harness that mishandles a nullable field would be a real quality regression for
+  a cosmetic gate win.
+
+So the shipped package keeps `reasoning_parser: qwen3` and thinking ON. The guidance for a
+consumer is to handle null `content` (read `reasoning_content` when it is null), or to pass
+`enable_thinking: false` per-request for deliberately short-budget calls.
+
+`$autofix` was **not** invoked: the behaviour is understood and localised to vLLM's
+parser (above), so there is no bug here to repair, and the one change that would silence
+the gate costs real output quality.
 
 ### 6.2 Evals
 

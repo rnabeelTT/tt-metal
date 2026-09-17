@@ -116,15 +116,21 @@ report-data fields, the 262144 context contract) do pass on real evidence.
 
 What blocks a real pass, in order:
 
-1. **Spec tests FAIL (1/1), and this is a genuine serving-contract bug.** A short
-   `max_tokens` request to this reasoning model returns `message.content: null`: the whole
-   budget is spent inside the `<think>` block, `</think>` is never emitted, and the parser
-   routes everything to `reasoning_content`. The conformance suite then crashes on None.
-   Two fixes exist and NEITHER was applied because both change the serving contract:
-   the chat template supports `enable_thinking`, so `chat_template_kwargs:
-   {"enable_thinking": false}` (or a spec default) lets short requests answer directly;
-   or treat null content as an adapter bug. This is worth fixing -- a user sending
-   max_tokens=16 currently gets null.
+1. **Spec tests FAIL (1/1) -- but NOT because of a defect in this model.** A short
+   `max_tokens` request returns `message.content: null`, and this file previously called
+   that a genuine serving-contract bug of this port. It is not. It is what vLLM 0.26.0's
+   qwen3 parser does, with no Ornith code involved: `qwen3_config` sets
+   `initial_state=ParserState.REASONING if thinking else ParserState.CONTENT`
+   (`vllm/parser/qwen3.py:100`), so with thinking on the parser STARTS in the reasoning
+   state and `content` is null unless the model closes `</think>` and then emits more.
+   `tools/probe_null_content.py` reproduces it against vLLM's own parser with no device,
+   including the case that settles it: output containing **no think block at all** also
+   returns null, which cannot be a property of this model's weights. Any reasoning model
+   on this vLLM behaves identically; `message.content` is nullable in the OpenAI schema,
+   and `VLLMParamConformanceTest` crashes on None instead of failing cleanly, so the
+   harness bug is TTI's. Setting `enable_thinking: false` would silence the gate and does
+   reach the parser, but it disables reasoning -- worth 32.14 -> 60.71 ifeval prompt-level
+   strict -- so it is deliberately not shipped.
 2. **meta_gpqa_cot WAS NOT RUN.** Every GPQA task reads the gated HF dataset
    `Idavidrein/gpqa` and no token with access exists on this box. The skill treats an
    unwaived meta_gpqa_cot failure as blocking, so this is UNMET, not waived.
