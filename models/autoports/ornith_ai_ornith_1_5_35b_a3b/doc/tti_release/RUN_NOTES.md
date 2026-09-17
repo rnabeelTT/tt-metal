@@ -275,8 +275,25 @@ Two consequences:
   a cosmetic gate win.
 
 So the shipped package keeps `reasoning_parser: qwen3` and thinking ON. The guidance for a
-consumer is to handle null `content` (read `reasoning_content` when it is null), or to pass
+consumer is to handle null `content` by reading **`message.reasoning`**, or to pass
 `enable_thinking: false` per-request for deliberately short-budget calls.
+
+**The field is `message.reasoning`, not `message.reasoning_content`** -- corrected
+2026-09-17 against the shipped container. An earlier version of this note said
+`reasoning_content`; vLLM 0.26.0's chat response has no such field. Verified end to end
+against the rebuilt package on p150, asking "What are the three laws of thermodynamics?":
+
+| request | result |
+|---|---|
+| chat, `max_tokens=200` | `content: None`, and `message.reasoning` holds the full thinking text |
+| chat, `max_tokens=1500` | `finish_reason: stop`, 694 completion tokens, a correct formatted answer |
+| raw `/v1/completions`, `max_tokens=200` | the text directly, no parser involved |
+
+**No text is ever dropped.** The 200-token case looks empty only if the client reads the
+wrong field: the budget was spent inside `<think>`, so `content` is legitimately null
+while the reasoning is right there. At a realistic budget the model answers correctly and
+stops on its own. This closes the question of whether the null-content behaviour hides a
+quality problem -- it does not.
 
 `$autofix` was **not** invoked: the behaviour is understood and localised to vLLM's
 parser (above), so there is no bug here to repair, and the one change that would silence

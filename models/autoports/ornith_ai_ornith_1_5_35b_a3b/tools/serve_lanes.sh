@@ -120,12 +120,34 @@ cmd_start() {
         # nothing is shared between lanes, so one dying does not disturb the others.
         TT_VISIBLE_DEVICES="$i" \
         TT_MESH_GRAPH_DESC_PATH="$MESH_DESC" \
+        # --reasoning-parser / --tool-parser ARE NOT OPTIONAL, and this script shipped
+        # without them. tt-model.yaml declares them as `capabilities` and the launcher
+        # turns them into these flags, but a hand-rolled `vllm serve` gets neither -- so
+        # every lane returned the model's THINKING as its answer, `</think>` and all.
+        # Stage 11 measured what that costs on ifeval, changing no prompt or threshold:
+        #   prompt-level strict  32.14 without the parser -> 60.71 with it
+        #   inst-level strict    46.51                    -> 69.77
+        # i.e. lanes -- the deployment this package RECOMMENDS for two and four dies --
+        # were serving at roughly half the instruction-following quality of the container
+        # for the same weights. Caught 2026-09-17 when a 4-lane verification printed
+        # answers with "</think>" inline.
+        #
+        # SPELL THE TOOL FLAG EXACTLY LIKE THIS. `--tool-parser hermes` does not exist:
+        # vLLM's FlexibleArgumentParser normalises '_'->'-', the real flag is
+        # `--tool-call-parser`, and vLLM hard-errors on it unless
+        # `--enable-auto-tool-choice` is also passed. Getting it wrong does not fail
+        # loudly at the CLI -- the server starts, then dies in abstract_tool_parser.py
+        # with "Failed to load module 'hermes' from hermes." because the name is treated
+        # as a plugin PATH. First attempt at this fix brought up 1 lane of 4 that way.
+        # This is the same spelling tt_kernel/packaging.py emits for the container.
         nohup vllm serve "$WEIGHTS" \
             --served-model-name "$MODEL_NAME" \
             --max-num-seqs "$MAX_NUM_SEQS" \
             --block-size 64 \
             --max-model-len "$MAX_MODEL_LEN" \
             --additional-config '{"tt": {"trace_region_size": 1073741824}}' \
+            --reasoning-parser qwen3 \
+            --enable-auto-tool-choice --tool-call-parser hermes \
             --port "$port" \
             > "$(lane_log "$i")" 2>&1 &
         echo $! > "$(lane_pidfile "$i")"

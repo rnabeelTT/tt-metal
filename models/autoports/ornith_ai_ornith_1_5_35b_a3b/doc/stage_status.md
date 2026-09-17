@@ -130,7 +130,11 @@ What blocks a real pass, in order:
    and `VLLMParamConformanceTest` crashes on None instead of failing cleanly, so the
    harness bug is TTI's. Setting `enable_thinking: false` would silence the gate and does
    reach the parser, but it disables reasoning -- worth 32.14 -> 60.71 ifeval prompt-level
-   strict -- so it is deliberately not shipped.
+   strict -- so it is deliberately not shipped. The field a client should read when
+   `content` is null is **`message.reasoning`** (vLLM 0.26.0 has no `reasoning_content`),
+   and verified against the shipped container: at `max_tokens=1500` the same prompt
+   returns a correct answer with `finish_reason: stop` in 694 tokens, so nothing is
+   dropped and no quality problem hides behind the null.
 2. **meta_gpqa_cot WAS NOT RUN.** Every GPQA task reads the gated HF dataset
    `Idavidrein/gpqa` and no token with access exists on this box. The skill treats an
    unwaived meta_gpqa_cot failure as blocking, so this is UNMET, not waived.
@@ -189,6 +193,53 @@ gap they turn on is a median 1.6-2.2 bf16 ulps -- irreducible.
 
 The one reducible lead is the Gated DeltaNet block, whose relative error is 10.0% median
 against full attention's 2.4%, with 34-45% at L4. See the README's accuracy section.
+
+## 2026-09-17 session: what changed
+
+Five things, in order of how much they matter to a consumer.
+
+1. **The multi-die "decode hang" was a program-config assert, and it is fixed.** Under
+   tensor parallelism the shared expert's tuned M=1 config is a
+   `MatmulMultiCoreReuseMultiCast1DProgramConfig` with `fuse_batch=False`, which the op
+   forbids for a sharded `in0` (`matmul_device_operation.cpp:1944`). Every TP decode step
+   died on layer 0. 4-die TP now prefills and decodes end to end. It had gone undiagnosed
+   because the TP decode entry point had never been CALLED -- `bench_model` dispatched
+   prefill to `prefill_tp` but decode to the replicated `model.decode()`, the exception
+   was filtered out of the sweep's output, and the resulting "decode n/a" was recorded in
+   the README as `decode_tp` being "unmeasured".
+
+2. **`tools/serve_lanes.sh` was serving the model's THINKING as its answer.** It is a
+   hand-rolled `vllm serve` and passed neither `--reasoning-parser` nor the tool parser,
+   while the container gets both from `capabilities`. Stage 11 had already measured the
+   cost on ifeval -- prompt-level strict 32.14 without the parser against 60.71 with it --
+   so the deployment this package RECOMMENDS for two and four dies was running at roughly
+   half the instruction-following quality of the container on identical weights. Fixed.
+
+3. **`message.reasoning`, not `message.reasoning_content`.** vLLM 0.26.0 has no
+   `reasoning_content` field in its chat response. Guidance written earlier in this
+   bring-up named that field, which makes a healthy null-content response look like an
+   empty one. Verified against the rebuilt container: at `max_tokens=1500` the
+   thermodynamics prompt returns a correct formatted answer, `finish_reason: stop`, 694
+   completion tokens; at 200 the budget is spent inside `<think>` and the text is in
+   `message.reasoning`. Nothing is dropped at any budget.
+
+4. **Tensor parallelism is measured and OPT-IN.** On four dies it is worth 2.0x prefill
+   at ISL 128 (706 vs 353 tok/s), 3.1x at 4096 (1241 vs 395, which passes
+   qwen3-coder-30b-a3b's 1016), and TTFT 360 -> 181 ms. It is off by default because it
+   DOES NOT SERVE -- a 4-die TP instance dies in the vLLM warmup with "Statically
+   allocated circular buffers ... grow to 1684544 B which is beyond max L1 size of
+   1572864 B", identical at `max_model_len` 4096 and 2048 and with or without an
+   `l1_small_size` reservation, so it is a fixed CB configuration in the serving warmup
+   path rather than a context or chunking problem -- and because single-stream decode is
+   WORSE (8.79 vs 18.40 tok/s eager), this port's TP doing ~4 collectives per layer where
+   ornith-1.0's replicated-residual design does 2. Fixing the warmup overflow is also
+   what would unblock on-device sampling, since qwen36 builds its `SamplingGenerator`
+   only for a (1,4)/(1,8) mesh with `vocab_size // num_devices <= 64K`.
+
+5. **The package was rebuilt and re-verified**, from commit `76dff68a657`: the container
+   serves correct text on p150 and advertises `max_model_len: 262144`. Building requires
+   `--out` OUTSIDE the tt-metal tree or the packager copies its own staging directory
+   into itself until "File name too long".
 
 ## Open blockers, unchanged by this session
 

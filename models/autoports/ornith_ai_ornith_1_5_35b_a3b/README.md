@@ -14,10 +14,27 @@ attention stack — onto tt-metal, packaged for `tt-model` v5.1 container servin
 
 ## What is verified to serve CORRECT output, per hardware type
 
-Re-verified 2026-09-16 by reading the completion TEXT on every configuration, not by
+Re-verified 2026-09-17 by reading the completion TEXT on every configuration, not by
 checking that a request returned something. All three target hardware types serve, and
 the unit is ONE DIE -- bigger boards scale by running more replicas, not by opening a
 wider mesh.
+
+The container rebuilt from `76dff68a657` was re-verified end to end on p150:
+
+    /v1/models        ->  id ornith-ai/Ornith-1.5-35B-A3B, max_model_len 262144
+    "The capital of France is"
+                      ->  "\n\nThe capital of France is **Paris**."
+                          finish_reason stop, 46 completion tokens
+    "What are the three laws of thermodynamics?"  (max_tokens 1500)
+                      ->  a correct formatted answer -- first law with dU = Q - W,
+                          second law with entropy -- finish_reason stop, 694 tokens
+
+**Read `message.reasoning` when `content` is null.** At `max_tokens=200` the same
+thermodynamics prompt returns `content: None` because the whole budget is spent inside
+`<think>`, and the text is in `message.reasoning`. vLLM 0.26.0 has NO
+`message.reasoning_content` field, and an earlier version of these notes told consumers
+to read that name -- which made a healthy response look like an empty one. Nothing is
+dropped at any budget; `/v1/completions` returns the same text with no parser involved.
 
 | hardware | dies | how | verified |
 |---|---|---|---|
