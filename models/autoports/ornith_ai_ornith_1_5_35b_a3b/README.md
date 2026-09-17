@@ -57,6 +57,27 @@ All four are correct; the differences in phrasing are the open non-determinism
 returned BYTE-IDENTICAL 32-token completions, which is consistent with the low per-step
 flip rate measured there -- divergence needs enough steps to catch.
 
+**Status of the lane parser fix, precisely.** `tools/serve_lanes.sh` now passes
+`--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes`, the same
+spelling `tt_kernel/packaging.py` emits for the container. What that is verified against,
+and what it is not:
+
+* **Verified** -- the flags are valid and the parsers load: a lane started cleanly with
+  them and served `/v1/models`. The wrong spelling (`--tool-parser hermes`) does NOT fail
+  at the CLI; it starts and then dies in `abstract_tool_parser.py` with "Failed to load
+  module 'hermes' from hermes.", so a clean start is the meaningful signal here.
+* **Verified** -- those same parsers produce clean answers, through the CONTAINER on
+  p150, which gets them from `capabilities`: `"\n\nThe capital of France is **Paris**."`
+  with no `</think>` and `finish_reason: stop`.
+* **NOT re-verified** -- four lanes simultaneously returning clean text. Before the fix,
+  four lanes came up and all four answered correctly but with the reasoning inline. After
+  it, two attempts had only 1 of 4 lanes ready inside `serve_lanes.sh wait`'s 1800 s
+  budget; the other three sat at `tt/worker.py`'s "TT worker standard-DP binding" line
+  with no error. That is NOT attributable to the parser flags -- the lane that did come
+  up had them -- and 4/4 has worked repeatedly on this box, so treat it as a multi-lane
+  startup flake to investigate, not a regression. If you hit it: `serve_lanes.sh stop`,
+  `tt-smi -r`, and start again.
+
 **Why lanes rather than one wide mesh, and exactly how far tensor parallelism got.**
 Per-die replicas measure 26 -> 54 -> 91 tok/s aggregate on 1/2/4 dies, so lanes are the
 shipped multi-die deployment: every profile in `tt-model.yaml` serves REPLICATED, and all
