@@ -2401,10 +2401,18 @@ class Qwen36Model:
         # whatever the pre-prefill reset left (zeros), and the 30 GDN layers decode from a
         # zero conv history while every other part of the model is correct -- wrong, and
         # wrong in the quiet way that produces fluent nonsense.
+        #
+        # SINGLE-DEVICE ONLY, via getattr. The split/fused conv scheme belongs to
+        # GatedDeltaNet; TPGatedDeltaNet holds its taps directly in `self.conv_states`
+        # (gdn/tp.py), so there is no derived window to re-seed and nothing to do here.
+        # Reading the attribute unguarded made the FIRST TP request kill the engine with
+        #   AttributeError: 'TPGatedDeltaNet' object has no attribute 'split_conv_state'
+        # -- and only a request, never warmup, so a 4-die TP server came up healthy and
+        # then died on use.
         for layer in self.layers:
             if layer.is_full_attention:
                 continue
-            if layer.attention.split_conv_state is not None:
+            if getattr(layer.attention, "split_conv_state", None) is not None:
                 layer.attention._restore_split_conv_from_fused()
 
         if self.num_devices > 1:

@@ -113,16 +113,44 @@ reasons.** Model-level, on four dies, it is a large win on the metrics prefill d
 | TTFT | 360 ms | **181 ms** |
 | decode, eager | **18.40 tok/s** | 8.79 (2.1x WORSE) |
 
-1. **It does not serve.** A 4-die TP instance fails in the vLLM engine warmup with
+1. **It serves, and it is 5x slower at decode than one die.** Two bugs had to go first,
+   and both are now fixed, so the state below is the real ceiling of this design rather
+   than a blocked measurement:
 
-       Statically allocated circular buffers on core range [0-0 - 10-5] grow to
-       1684544 B which is beyond max L1 size of 1572864 B
+   * The engine warmup died with "Statically allocated circular buffers on core range
+     [0-0 - 10-5] grow to 1684544 B which is beyond max L1 size of 1572864 B" -- the same
+     byte count at `max_model_len` 4096 and 2048, with and without `l1_small_size`,
+     because it is not about shapes at all. It is the CHUNK-PREFILL TRACE CAPTURE. The
+     bench never hit it because `prefill_traced_chunked` falls back to the eager TP path
+     when no chunk trace exists, and the bench never captured one. `trace_mode:
+     decode_only` skips that capture and the server starts; decode is still traced, which
+     is the half that needs it (dispatch-bound at ~8.4 us/program) while prefill is
+     compute-bound.
+   * The first REQUEST then killed the engine with `AttributeError: 'TPGatedDeltaNet'
+     object has no attribute 'split_conv_state'` -- the GDN conv re-seed added to fix the
+     fluent-garbage bug, which is a single-device construct (`TPGatedDeltaNet` keeps its
+     taps in `self.conv_states`, so there is nothing to re-seed). Guarded. Note the shape
+     of that failure: warmup passed and the server came up healthy, then died on first
+     use. "It starts" is not evidence for this model.
 
-   and that byte count is IDENTICAL at `max_model_len` 4096 and 2048, with and without an
-   `l1_small_size` reservation -- so it is a fixed circular-buffer configuration in the
-   SERVING WARMUP path, not a context-length or chunking problem. The bench's TP prefill
-   and decode both work, so whatever the warmup does differently is where the defect is.
-   That is the next thing to fix for anyone continuing this.
+   With both fixed, a 4-die TP instance serves and answers. vLLM's own reported
+   generation throughput is **5.0 tok/s**, against **25.89 tok/s per stream** from a
+   single-die lane and **43.03** for ornith-1.0 on the same four dies. A second
+   100-token request then stalled indefinitely with the engine alive and no error, so
+   this is not production-ready either.
+
+   **This settles the design question, and against an argument made earlier in this
+   file.** A previous revision reasoned that because this port fuses its collectives into
+   the matmuls (`all_gather_minimal_matmul_async` on the in-projection,
+   `matmul_reduce_scatter_async` on the out-projection), an all-gather plus a
+   reduce-scatter moves the same bytes as one all-reduce and the gap to ornith-1.0's
+   2-collectives-per-layer design should therefore be small. The measurement says
+   otherwise: 5.0 against 43.03 is an 8x gap that op-count parity cannot explain.
+   Matching ornith-1.0 means adopting its REPLICATED RESIDUAL -- local exact norms, one
+   all-reduce after the token mixer and one after the MoE, no fractured residual and no
+   `mesh_partition` -- which is a re-plumb of this port's TP path, not a tuning exercise.
+   That is the single highest-value piece of work left here, and it is now backed by a
+   number rather than by a count.
 
 2. **Single-stream decode is worse, and structurally so.** 114 ms/token against 54 ms.
    This port's TP does roughly four collectives per layer -- the DistributedNorm
