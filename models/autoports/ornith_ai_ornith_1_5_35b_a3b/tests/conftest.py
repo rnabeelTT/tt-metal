@@ -23,6 +23,19 @@ import ttnn
 MESH_SHAPES = {"P150": (1, 1), "P300": (1, 2), "P150x4": (1, 4)}
 
 
+def _needs_fabric():
+    """Does this run use device-to-device collectives?
+
+    Two independent things can: expert parallelism (ORNITH_MOE_EP, which all-reduces the
+    routed-expert partial sums) and TENSOR parallelism (ORNITH_TP, whose every layer
+    all-gathers the norm input and reduce-scatters the attention/GDN out-projection).
+    Gating on ORNITH_MOE_EP alone opened a fabric-less mesh under ORNITH_TP=1 and the run
+    died in control_plane.cpp with "Trying to get un-initialized fabric context", inside
+    the first layer's DistributedNorm and nowhere near the flag.
+    """
+    return os.environ.get("ORNITH_MOE_EP") == "1" or os.environ.get("ORNITH_TP") == "1"
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _warm_fabric():
     """Absorb the first multi-chip fabric open of the process.
@@ -40,7 +53,7 @@ def _warm_fabric():
     """
     name = os.environ.get("MESH_DEVICE", "P150")
     rows, cols = MESH_SHAPES.get(name, (1, 1))
-    if rows * cols > 1 and os.environ.get("ORNITH_MOE_EP") == "1":
+    if rows * cols > 1 and _needs_fabric():
         # Warm with the FULL mesh, not the target shape. Opening a 2-chip mesh trains
         # only that pair's links, and on this box a cold (1,2) open fails even on the
         # retry; opening the full (1,4) once trains every link and a subsequent (1,2)
@@ -109,7 +122,7 @@ def pytest_generate_tests(metafunc):
             # warm-up dance above, and a fabric left half-configured surfaces later
             # as "Unsupported fabric config" from ccl_common. No collectives, no
             # fabric, no failure mode.
-            if os.environ.get("ORNITH_MOE_EP") == "1":
+            if _needs_fabric():
                 params["fabric_config"] = ttnn.FabricConfig.FABRIC_1D
             params["trace_region_size"] = 1024 * 1024 * 1024
         metafunc.parametrize("device_params", [params], indirect=True, ids=[""])

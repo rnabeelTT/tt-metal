@@ -198,15 +198,20 @@ class OrnithModelArgs(Qwen36ModelArgs):
 
         # PARALLELISM: replicate attention/GDN, shard only the experts.
         #
-        # qwen36's tensor-parallel path assumes the dense Qwen3.5 weight layout, and this
-        # MoE checkpoint does not match it: q arrives with its output gate pre-fused as
-        # one [8192, 2048] tensor, and GDN's qkv is stored separately from z/a/b where
-        # the TP path wants one folded qkvzab. That surfaces as
-        #   "all_gather_minimal_matmul_async inner dimensions must match, K=8192 K_w=2048"
-        # and, once the in-projection fusions are disabled, as further mismatches in the
-        # tuned prefill program configs and the sharded decode matmul.
+        # CORRECTED 2026-09-17: the paragraph that used to stand here said the checkpoint
+        # layout prevents tensor parallelism -- that q's pre-fused [8192, 2048] [q|gate]
+        # and GDN's separate qkv/z/a/b keys were what produced
+        #   "all_gather_minimal_matmul_async inner dimensions must match, K=8192 K_w=2048".
+        # That was wrong on both counts. load_gdn_weights_tp wants qkv/z/a/b SEPARATE and
+        # folds them itself, load_attention_weights_tp de-interleaves the fused [q|gate],
+        # and the K=8192 assert had nothing to do with the weights: it was the prefill
+        # norm-allgather/in-proj FUSION being enabled while `is_distributed_norm(PREFILL)`
+        # is False at dim=2048, so DistributedNorm gathered BEFORE the norm and the fused
+        # op tried to gather the already-replicated activation a second time
+        # (see tp_common.prefill_norm_agmm_enabled). ORNITH_TP=1 now runs correct prefill.
         #
-        # Rather than re-derive those fusions, note what tensor parallelism was buying:
+        # Replication remains the DEFAULT anyway, for the reason below -- and note what
+        # tensor parallelism on its own buys, measured:
         # attention + GDN are 1.03B of 34.8B parameters (~2 GB bf16), so sharding them
         # saves ~1.5 GB per chip on a 4-chip mesh. The experts are 92.5% of the weights
         # and are sharded regardless. So the attention and GDN weights are REPLICATED --
@@ -228,6 +233,15 @@ class OrnithModelArgs(Qwen36ModelArgs):
         # implemented against TPGatedDeltaNet and gated on num_devices > 1, so a
         # replicated model cannot reach max_num_seqs > 1 at all. Concurrency on a
         # replicated model comes from lanes instead (tools/serve_lanes.sh).
+        #
+        # PREFILL, measured on P150x4 (tools/bench_model.py --prefill-only, warmed):
+        #   ISL      single chip     ORNITH_TP=1    ORNITH_TP=1 + ORNITH_MOE_EP=1
+        #    128    351 tok/s       367  (1.04x)    684  (1.95x)
+        #   4096    395 tok/s       478  (1.21x)   1272  (3.22x)
+        #  16384    381 tok/s       468  (1.23x)   1198  (3.15x)
+        # Tensor parallelism ALONE is worth ~1.2x, because it parallelises only the 3% of
+        # the parameters that are not experts. The 3.2x needs EXPERT parallelism with it,
+        # which is what the ornith-1.0 comparison (3.29-3.51x at TP=4/EP=4) was measuring.
         self.tensor_parallel = os.environ.get("ORNITH_TP") == "1" and self.mesh_devices > 1
         if self.mesh_devices > 1 and not self.tensor_parallel:
             self.num_devices = 1

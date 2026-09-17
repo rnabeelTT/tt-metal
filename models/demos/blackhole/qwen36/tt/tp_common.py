@@ -232,7 +232,14 @@ def create_prefill_matmul_program_config(m, k, n, grid_size=None, fused_activati
         # largest legal block rather than scaling with grid width -- see _PREFILL_TUNING.
         in0_block_w = _find_largest_divisor(k_tiles, cap)
     else:
-        in0_block_w = min(cap, max(1, k_tiles // grid_size[0]))
+        # in0_block_w MUST divide k_tiles (the 2D mcast kernel has no K tail):
+        # "MatmulMultiCoreReuseMultiCastProgramConfig: Kt (32) must be divisible by in0_block_w (3)".
+        # k_tiles // grid_size[0] is a width heuristic, not a divisor, so round it DOWN to the
+        # largest divisor of k_tiles. A value that already divides is returned unchanged, so every
+        # shape this path previously produced a legal config for keeps exactly that config; the
+        # only shapes affected are the ones that used to TT_FATAL (e.g. Ornith-1.5 attn wo,
+        # k_tiles=32 on a 10-wide grid -> 3).
+        in0_block_w = _find_largest_divisor(k_tiles, min(cap, max(1, k_tiles // grid_size[0])))
 
     return ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
         compute_with_storage_grid_size=grid_size,
@@ -387,9 +394,43 @@ def all_gather_matmul_prefill(
     return out
 
 
-def mlp_gateup_agmm_enabled(num_devices):
-    """Fuse the ff_norm all-gather into the MLP gate/up matmul (prefill). TP-only (needs the gather)."""
-    return num_devices > 1
+def prefill_norm_agmm_enabled(args):
+    """Can the prefill in-proj all-gather+matmul fusion (all_gather_minimal_matmul_async) be used?
+
+    The fusion requires the preceding RMSNorm to leave its output FRACTURED along the
+    hidden dim, so the AGMM itself performs the gather. That only happens on the
+    DISTRIBUTED-norm path (DistributedNorm: distributed rmsnorm on the fractured
+    residual, post-AG suppressed via enable_all_gather=False).
+
+    ``ModelArgs.is_distributed_norm(PREFILL)`` is False for a 1D mesh whose ``dim <= 4096``
+    (model_config.py:2696-2705). In that case DistributedNorm takes its FIRST branch and
+    all-gathers BEFORE the norm, handing the module a REPLICATED full-width activation --
+    which the AGMM then tries to gather a second time, so it computes K = dim*tp and dies
+    with "all_gather_minimal_matmul_async inner dimensions must match, got K=8192 and
+    K_w=2048". Qwen3.5-27B (dim 5120) never hit this; Ornith-1.5-35B-A3B (dim 2048) does.
+
+    When this returns False the modules take their plain column-parallel matmul path on
+    the already-gathered activation: same math, one unfused all-gather instead of a fused
+    one, and tensor parallelism is otherwise unaffected.
+    """
+    from models.tt_transformers.tt.common import Mode
+
+    if getattr(args, "num_devices", 1) <= 1:
+        return False
+    is_dn = getattr(args, "is_distributed_norm", None)
+    return bool(is_dn(Mode.PREFILL)) if callable(is_dn) else False
+
+
+def mlp_gateup_agmm_enabled(num_devices, args=None):
+    """Fuse the ff_norm all-gather into the MLP gate/up matmul (prefill). TP-only (needs the gather).
+
+    Also requires the fractured-norm contract -- see prefill_norm_agmm_enabled. ``args`` is
+    optional only so the weight-loader call site (which has it) and any legacy caller agree;
+    when it is given, the norm gate is authoritative.
+    """
+    if num_devices <= 1:
+        return False
+    return True if args is None else prefill_norm_agmm_enabled(args)
 
 
 def all_gather_swiglu_prefill(

@@ -95,7 +95,14 @@ def _check_prompt(mesh_device, args, model, reference, prompt_idx):
     # prefill() returns the LAST position's logits, which is exactly what a next-token
     # check needs. The TP variant is a separate entry point on multi-device meshes.
     out = model.prefill_tp(ids) if args.num_devices > 1 else model.prefill(ids)
-    logits = ttnn.to_torch(out, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=0))
+    # prefill() returns a device tensor; prefill_tp() already composed the mesh and
+    # returns a 1-D torch vocab vector (model.py: `lt[0].reshape(-1)[: self.vocab_size]`),
+    # so composing it again raised "'Tensor' object has no attribute 'to_torch'".
+    logits = (
+        out
+        if isinstance(out, torch.Tensor)
+        else ttnn.to_torch(out, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=0))
+    )
     got = logits.reshape(-1, logits.shape[-1])[0].float()[: len(torch.load(REFERENCE / f"logits_{prompt_idx}.pt"))]
     exp = torch.load(REFERENCE / f"logits_{prompt_idx}.pt").float()
 

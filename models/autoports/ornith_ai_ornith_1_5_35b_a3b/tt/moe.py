@@ -539,7 +539,14 @@ class _SparseExperts:
                 mesh_mapper=shard,
                 layout=ttnn.TILE_LAYOUT,
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                cache_file_name=(str(cache / f"moe.sparse.{name}") if cache else None),
+                # The expert-parallel and replicated uploads are DIFFERENT tensors (the
+                # host side is reshaped to [nd, epd, ...] and sharded on dim 0), and
+                # as_tensor ignores mesh_mapper on a cache hit -- so they must not share a
+                # cache file. Without the suffix, flipping ORNITH_MOE_EP on a warm cache
+                # reloads the other layout and dies in the reshape below on volume.
+                cache_file_name=(
+                    str(cache / f"moe.sparse.{name}{f'.ep{nd}' if self.expert_parallel else ''}") if cache else None
+                ),
             )
             return ttnn.reshape(t, shape)
 

@@ -41,6 +41,12 @@ def main() -> int:
         "that cost amortizes across the batch.",
     )
     ap.add_argument("--no-trace", action="store_true", help="skip the traced-decode measurement")
+    ap.add_argument(
+        "--prefill-only",
+        action="store_true",
+        help="measure TTFT/prefill only and skip every decode measurement (the tensor-parallel "
+        "path has no traced-decode capture yet, and a hung capture costs the whole run)",
+    )
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
@@ -133,11 +139,30 @@ def main() -> int:
             # the gap -- several ops away from whatever actually holds the memory.
             print(f"@@@ L1 state before prefill isl={isl}", flush=True)
             ttnn.dump_device_memory_state(mesh, prefix=f"isl{isl}_")
-        model.prefill(ids)  # warm the program cache; the first call compiles
+        # Tensor parallelism has its own full-model prefill entry point: prefill_tp runs
+        # the fractured-residual TP layers and composes the mesh itself. model.prefill()
+        # is the replicated/single-device path and is not valid when num_devices > 1.
+        # Long prompts additionally need CHUNKING. The single-device path chunks itself
+        # (prefill() -> prefill_layer_chunked at T>1024); prefill_tp / _prefill_paged_tp are
+        # single-shot, and a 16K-row in-projection matmul asks for a 5.2 MB circular buffer
+        # in a 1.5 MB L1 ("Statically allocated circular buffers ... grow to 5230080 B").
+        # prefill_traced_chunked is the TP analog: with no captured chunk trace it falls
+        # through to _prefill_chunked_eager_tp, which runs 2048-token chunks eagerly.
+        _tp_chunk_above = int(os.environ.get("ORNITH_TP_BENCH_CHUNK_ABOVE", "4096"))
+
+        def _prefill(t):
+            if args.num_devices > 1:
+                model.reset_tp()
+                if t.shape[-1] > _tp_chunk_above:
+                    return model.prefill_traced_chunked(t, page_table, actual_len=t.shape[-1])
+                return model.prefill_tp(t)
+            return model.prefill(t)
+
+        _prefill(ids)  # warm the program cache; the first call compiles
         ttnn.synchronize_device(mesh)
 
         t0 = time.perf_counter()
-        model.prefill(ids)
+        _prefill(ids)
         ttnn.synchronize_device(mesh)
         ttft = time.perf_counter() - t0
 
@@ -186,6 +211,19 @@ def main() -> int:
                 flush=True,
             )
         dec = dec_traced = None
+        if a.prefill_only:
+            run = {
+                "isl": isl,
+                "ttft_ms": round(ttft * 1e3, 1),
+                "prefill_tok_s": round(isl / ttft, 1),
+            }
+            report["runs"].append(run)
+            print(
+                f"  ISL {isl:>6}: TTFT {run['ttft_ms']:>9.1f} ms "
+                f"({run['prefill_tok_s']:>8.1f} tok/s prefill)   decode skipped",
+                flush=True,
+            )
+            continue
         try:
             model.decode(tok, pos(isl))  # warm / compile
             ttnn.synchronize_device(mesh)
