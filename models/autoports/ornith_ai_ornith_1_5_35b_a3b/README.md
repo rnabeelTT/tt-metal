@@ -452,19 +452,50 @@ the 1.59 ms intercept.
 
 ### What this rules out
 
-**Tensor parallelism buys very little here.** TP divides the DATA per op, not the
-NUMBER of ops. Only a handful of ops per layer are big enough for size to matter (the
-1 MB state ops, ~6 of 109), so TP would shave those from 10.35 to 5.50 us and leave the
-other hundred at the floor -- while adding two all-reduces per layer. The per-op excess
-over the floor is mostly op TYPE (matmul, layernorm, tilize) and CORE UTILISATION, and
-neither is something another die fixes. This is also why Ornith-1.5 is not comparable to
-the dense 30-35B models in the fleet table: those read tens of GB per token and are
-bandwidth-bound, so TP scales them nearly linearly (ornith-1.0: 11.6 -> 33.3 -> 43.0
-tok/s on 1/2/4 chips). An A3B activates ~3B parameters and runs out of ops, not
-bandwidth. This is
-why extra dies serve extra USERS instead (see the lane table above). It is also why
-Ornith is not comparable to a dense-attention MoE like Qwen3-Coder, whose decode is
-made of a few large matmuls per layer rather than ~111 small ops.
+**Tensor parallelism buys very little FOR DECODE -- and that is not the same as "buys
+very little", which is what this section used to claim. Corrected 2026-09-17.**
+
+For DECODE the reasoning holds. TP divides the DATA per op, not the NUMBER of ops. Only a
+handful of ops per layer are big enough for size to matter (the 1 MB state ops, ~6 of
+109), so TP would shave those from 10.35 to 5.50 us and leave the other hundred at the
+floor, while adding two all-reduces per layer. The per-op excess over the floor is mostly
+op TYPE and CORE UTILISATION, neither of which another die fixes.
+
+**But that argument was generalised to prefill, where it is wrong, and prefill is this
+port's worst metric.** Prefill is COMPUTE-bound (stated a few lines below, in this same
+document), so dividing the data per op is exactly what helps it. Measured here: prefill is
+flat at ~394 tok/s against 1,016 for qwen3-coder-30b-a3b and 2,342 for ornith-1.0, which
+is what makes TTFT 10.4 s at 4K and 185 s at 64K.
+
+**Two factual claims in the old text were also simply wrong, and the counter-example is a
+sibling model on this very host.** `tt-model/ornith-1.0-35b-p150`'s own docs say:
+
+* it is NOT dense. It is a **256-routed-expert MoE with the same two layer kinds** --
+  `linear_attention` (DeltaNet recurrent + conv state) and `full_attention` -- and the
+  same `SparseMatmul` expert gate/up and down path. Calling the fleet's 30-35B models
+  "dense" to explain away the comparison was incorrect.
+* it runs **`TP = 4` for every dense tensor and `EP = 4` for the 256 routed experts** on
+  these same four p300c chips, over `FABRIC_1D_RING`, and reports **3.51x / 3.29x warmed
+  2048-token PREFILL** and 1.69x / 1.65x warmed traced decode, at PCC 0.999892 against its
+  own single-chip baseline, with batch 32 and 262144 context intact.
+
+Note how well that matches the corrected picture: ~1.7x on decode (small, as the
+dispatch-bound argument predicts) and ~3.5x on prefill (large, because prefill is
+compute-bound). So the right conclusion is not "TP buys little" but "TP buys little on
+decode and a great deal on prefill".
+
+**So replication is a CHOICE here, not an architectural necessity.** It was forced by two
+implementation obstacles, both recorded in tt/model_config.py: this checkpoint ships q
+with its output gate pre-fused as one [8192, 2048] tensor and stores GDN's qkv separately
+from z/a/b where the TP fusions want a folded qkvzab, which surfaces as
+"all_gather_minimal_matmul_async inner dimensions must match, K=8192 K_w=2048"; and
+`ttnn.all_reduce` deadlocks in the full model on a (1,4) mesh. Neither is a property of
+the architecture -- ornith-1.0 has the same architecture and does it -- and the second has
+a documented workaround already noted here (all-gather + local sum).
+
+Extra dies still serve extra USERS well (see the lane table), and that remains the right
+deployment TODAY. But "extra dies cannot help this model" is not supported, and the
+prefill gap is the reason to revisit it.
 
 Also ruled out, each with a measurement rather than an opinion: raising expert
 precision (bfp8 down projection moved PCC within noise), cutting prefill op count
