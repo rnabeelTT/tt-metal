@@ -590,6 +590,24 @@ The equivalent by hand, per die, is:
 
 ## Packaging (tt-model v5.1)
 
+**Build with `--out` OUTSIDE the tt-metal tree, or the build never finishes.**
+`tt-model package --container` defaults its staging root to `./build` inside the model
+directory, and this package's `source.code` includes `models/autoports` -- the parent of
+this bundle. So the packager copies its own staging directory into its own staging
+directory, and the build dies after several minutes with
+
+    shutil.Error: [... "[Errno 36] File name too long: '.../build/ornith-1.5-35b-a3b/ctx/
+    code/models/autoports/ornith_ai_ornith_1_5_35b_a3b/build/ornith-1.5-35b-a3b/ctx/code/
+    models/autoports/..." ]
+
+nested about forty times. Deleting a stale `build/` first is NOT enough -- it is created
+fresh by the run and recurses again. `build/` is gitignored, so `git status` stays clean
+while 1.7 GB of nested copies accumulate. What works:
+
+```bash
+tt-model package --container tt-model.yaml --out ~/somewhere/outside/tt-metal
+```
+
 `tt-model package --container` builds an OCI image (Ubuntu 22.04, Python 3.12, the
 tt-metal tree, vLLM 0.26.0 empty-target, the plugin, and this model's code) and
 `tt-model serve` runs it. Verified per profile by sending a real completion:
