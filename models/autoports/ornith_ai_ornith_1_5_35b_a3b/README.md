@@ -153,18 +153,56 @@ At 1230 tok/s pf@4K this port passes qwen3-coder-30b-a3b's 1,016. TTFT at 4K dro
 attention reduce-scatters, fused `matmul_reduce_scatter`, and the EP all-reduce. RING was
 never needed here.
 
-**Why it is still OPT-IN, and what to settle before promoting it.** Two things:
+**There is no TP accuracy defect. The alarming comparison was a UNITS ERROR** -- stated
+here because it was written into this file and into commit `d4d43bcd44b` before it was
+checked.
 
-* **TP vs single-chip logits measure PCC 0.991686** (TP+EP 0.991554), top-1 matching.
-  That is ~100x more error than ornith-1.0 reports against its own single-chip baseline
-  (0.999892) and is UNEXPLAINED. Dtypes and the gather arrangement are ruled out by
-  inspection, leaving row-parallel K-split reduction order and matmul blocking
-  accumulating over 40 layers. Note the accuracy gate against the HF reference does NOT
-  get worse -- TP scores 0.98410 on prompt 0 against single-chip's 0.97174 -- so
-  single-chip is not automatically the more correct of the two, and part of that 0.9917
-  may be single-chip error rather than TP error.
-* **EP has had far less exercise in this port than replication**, and the 3.1x depends on
-  it.
+ornith-1.0's **0.999892 is ONE DECODER LAYER**, not 40-layer end-to-end logits: its
+multichip doc opens "One `ornith-ai/Ornith-1.0-35B` decoder layer, both layer kinds" and
+reports 34 such values. Comparing our end-to-end 40-layer figure against it was
+meaningless. The apples-to-apples row is **L00, where the input is bitwise identical on
+both paths** (embedding PCC exactly 1.000000): **0.999487 / 0.999374 / 0.999341**. That is
+~4x ornith-1.0's per-layer error on a model whose routed experts are bfp4 -- not 100x, and
+not a different regime.
+
+Correcting two more numbers while here:
+
+* the 0.991686 in `d4d43bcd44b` was measured on RANDOM token ids, an easier vector. On the
+  real reference prompts TP-vs-single-chip end-to-end logits are **0.9598-0.9809**. Quote
+  those.
+* **TP is closer to the HF float32 reference than single chip** at 40/41 residual stages
+  on prompt 0 (32/41 and 30/41 on the others). End-to-end against HF it is a wash
+  (+0.0124 / -0.00005 / -0.0032). Single chip is NOT ground truth here.
+
+Three independent checks leave no room for a TP defect: per-layer cost is a steady
+0.0005-0.005 up to L21 with medians near-identical by layer kind (gdn 0.00049-0.00081,
+FULL 0.00059-0.00065, so neither reduce-scatter out-projection is anomalous); a quadrature
+test -- if the two paths were independent perturbations of HF they would differ by
+sqrt(eb^2+et^2) -- comes out BELOW the independent-rounding floor at 120/120 layer-stages,
+median ratio 0.58; and `_FracturedFF`'s `mesh_partition` slice is **bitwise lossless on
+40/40 invocations**, with the replicated MoE output identical across all four dies to
+exactly 0.000e+00 both with and without EP (which incidentally validates the EP
+all-reduce).
+
+**So why is TP still OPT-IN?** For a coverage reason, not an accuracy one: everything above
+is PREFILL only, at T=128, batch 1, three prompts. `decode_tp`, long context and batched
+serving under TP+EP are unmeasured, and the 3.1x depends on EP, which has been exercised
+at one prompt and one length. Promote it on a decode + long-context + batched sweep, not on
+this.
+
+**A REAL defect this turned up, and it is on the DEFAULT single-chip path.** Per-layer PCC
+is smooth to L21 and then drops 0.0377 in a single layer at **L22** -- and that event is
+3-6x LARGER on single chip than under TP (prompt 0: -0.038867 single chip against -0.006833
+TP; prompt 1: -0.028900 against -0.011052). It is not round-off accumulation: PCC RECOVERS
+afterwards (+0.0070 at L23, +0.0090 at L28, +0.0264 at L35), and monotone round-off cannot
+un-happen. It is the MoE top-8-of-256 expert-selection flip that this port's accuracy
+section already describes, concentrated in layers 23-32 -- the worst layers here (L22, L30,
+L31, L34) sit in that band and correlate with layer INDEX, not layer type.
+
+That single layer substantially sets the 0.9717 end-to-end figure, which makes it **the most
+promising route to lifting prompt 2 over the 0.95 bar**. Next measurement: dump router top-8
+expert indices per token at layers 21-34 under single chip, TP and HF, and see which path's
+selection actually matches HF.
 
 Decode is deliberately NOT the reason to use TP: it is dispatch-bound here, and
 ornith-1.0 measures only 1.65-1.69x on decode from the same TP=4/EP=4.
