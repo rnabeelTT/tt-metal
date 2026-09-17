@@ -65,9 +65,18 @@ class OrnithForConditionalGeneration(Qwen36ForCausalLM):
     model_capabilities = {
         **(getattr(Qwen36ForCausalLM, "model_capabilities", None) or {}),
         "supports_standard_dp": True,
-        # Every die holds the full KV head set (2 heads), because attention is
-        # replicated rather than tensor-parallel. Without this the plugin sizes the
-        # paged cache as num_kv_heads // num_devices and the model overruns it.
+        # kv_heads_replicated is TRUE ONLY WHILE ATTENTION IS REPLICATED, and since
+        # multi-die meshes now default to tensor parallelism that is no longer a
+        # property of the class -- it is a property of the mesh this instance opened.
+        # initialize_vllm_model overrides it per instance below. The class default stays
+        # True because it is the single-die answer, and single-die is the shipped
+        # default profile and the unit serve_lanes.sh replicates.
+        #
+        # Getting this wrong is a far-away failure either way. Too small and the model
+        # overruns the cache:
+        #   "paged_fill_cache geometry mismatch: cache has 16384 elems/block
+        #    (kv_heads=1 ...) but input view is 32768 (kv_heads=2 ...)"
+        # Too large and the plugin reserves heads no die writes.
         "kv_heads_replicated": True,
     }
 
@@ -106,9 +115,24 @@ class OrnithForConditionalGeneration(Qwen36ForCausalLM):
         cache = args.weight_cache_path(args.routed_expert_dtype)
         cache.mkdir(parents=True, exist_ok=True)
 
-        model = OrnithModel(mesh_device, args, state, tensor_cache_path=cache)
         # Text-first: the vision tower is not initialised here. The checkpoint carries
         # one, and `Qwen36ForCausalLM` knows how to splice its embeddings, but no vision
         # path in this port has been validated against a reference yet -- so it is left
         # off rather than served untested.
-        return cls([model], [args], mesh_device)
+        model = OrnithModel(mesh_device, args, state, tensor_cache_path=cache)
+        gen = cls([model], [args], mesh_device)
+        # Per-INSTANCE KV geometry, because the plugin reads model_capabilities off the
+        # instance (model_runner._paged_cache_shape: `getattr(self.model, ...)`).
+        #
+        # Under tensor parallelism attention is sharded, so each die carries
+        # n_kv_heads // min(num_devices, n_kv_heads) heads -- with n_kv_heads=2 on four
+        # dies that is 1, the plugin capping the divisor at the head count exactly as
+        # OrnithModelArgs does (`n_local_kv_heads = max(1, n_kv_heads // num_devices)`).
+        # Dies 0,1 then own kv head 0 and dies 2,3 own head 1, which is the GQA grouping
+        # the 16 query heads already impose and the same split ornith-1.0 documents for
+        # this architecture. Declaring the heads replicated there would reserve 2 heads
+        # per die while the model writes 1.
+        caps = dict(cls.model_capabilities)
+        caps["kv_heads_replicated"] = not getattr(args, "tensor_parallel", False)
+        gen.model_capabilities = caps
+        return gen

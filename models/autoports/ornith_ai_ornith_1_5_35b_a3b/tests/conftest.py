@@ -23,17 +23,23 @@ import ttnn
 MESH_SHAPES = {"P150": (1, 1), "P300": (1, 2), "P150x4": (1, 4)}
 
 
-def _needs_fabric():
+def _needs_fabric(dies: int):
     """Does this run use device-to-device collectives?
 
-    Two independent things can: expert parallelism (ORNITH_MOE_EP, which all-reduces the
-    routed-expert partial sums) and TENSOR parallelism (ORNITH_TP, whose every layer
-    all-gathers the norm input and reduce-scatters the attention/GDN out-projection).
-    Gating on ORNITH_MOE_EP alone opened a fabric-less mesh under ORNITH_TP=1 and the run
-    died in control_plane.cpp with "Trying to get un-initialized fabric context", inside
-    the first layer's DistributedNorm and nowhere near the flag.
+    Expert parallelism all-reduces the routed-expert partial sums, and TENSOR parallelism
+    all-gathers the norm input and reduce-scatters the attention/GDN out-projection every
+    layer. Either one needs a fabric.
+
+    This asks the MODEL's policy rather than re-reading the environment, because the two
+    have drifted apart twice now and the symptom is always the same and always misleading:
+    a fabric-less mesh dies in control_plane.cpp with "Trying to get un-initialized fabric
+    context", inside the first collective and nowhere near the flag that was missing.
+    First it gated on ORNITH_MOE_EP alone and ORNITH_TP=1 broke; then multi-die meshes
+    began defaulting to TP+EP and a run with NO variables set broke the same way.
     """
-    return os.environ.get("ORNITH_MOE_EP") == "1" or os.environ.get("ORNITH_TP") == "1"
+    from models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.model_config import multidie_parallel_enabled
+
+    return multidie_parallel_enabled(dies) or os.environ.get("ORNITH_SHARD_LM_HEAD") == "1"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -53,7 +59,7 @@ def _warm_fabric():
     """
     name = os.environ.get("MESH_DEVICE", "P150")
     rows, cols = MESH_SHAPES.get(name, (1, 1))
-    if rows * cols > 1 and _needs_fabric():
+    if rows * cols > 1 and _needs_fabric(rows * cols):
         # Warm with the FULL mesh, not the target shape. Opening a 2-chip mesh trains
         # only that pair's links, and on this box a cold (1,2) open fails even on the
         # retry; opening the full (1,4) once trains every link and a subsequent (1,2)
@@ -122,7 +128,11 @@ def pytest_generate_tests(metafunc):
             # warm-up dance above, and a fabric left half-configured surfaces later
             # as "Unsupported fabric config" from ccl_common. No collectives, no
             # fabric, no failure mode.
-            if _needs_fabric():
-                params["fabric_config"] = ttnn.FabricConfig.FABRIC_1D
+            if _needs_fabric(MESH_SHAPES[name][0] * MESH_SHAPES[name][1]):
+                # Ring on four chips, line on two: p300_x2_mesh_graph_descriptor declares
+                # device_topology [2,2] with 2 channels, a degree-2 cycle, and ornith-1.0
+                # ships FABRIC_1D_RING for p150x4 and FABRIC_1D for p150x2.
+                dies = MESH_SHAPES[name][0] * MESH_SHAPES[name][1]
+                params["fabric_config"] = ttnn.FabricConfig.FABRIC_1D_RING if dies >= 4 else ttnn.FabricConfig.FABRIC_1D
             params["trace_region_size"] = 1024 * 1024 * 1024
         metafunc.parametrize("device_params", [params], indirect=True, ids=[""])

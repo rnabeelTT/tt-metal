@@ -12,6 +12,7 @@ import os
 
 from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 
+
 # Which precision each board can actually host.
 #
 # THE FUSED moe_compute PIPELINE IS NOT AVAILABLE ON THIS HARDWARE. TTMoEDecode targets
@@ -64,6 +65,56 @@ from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 #
 # Set ORNITH_MOE_EP=1 to shard experts again; the higher-precision entries below are
 # then the ones that apply, and they are kept here for that path.
+def multidie_parallel_enabled(mesh_devices: int) -> bool:
+    """Should a multi-die mesh run TENSOR + EXPERT parallel rather than replicate?
+
+    NO by default, on every mesh. Opt in with ORNITH_TP=1.
+
+    This is the honest answer as of 2026-09-17, and it is deliberately NOT the answer the
+    prefill numbers alone would suggest. Tensor parallelism on four dies is a large
+    prefill and TTFT win at the MODEL level -- 706 tok/s at ISL 128 against 353
+    replicated (2.0x), 1241 at ISL 4096 against 395 (3.1x, which passes
+    qwen3-coder-30b-a3b's 1016), TTFT 360 -> 181 ms -- and it is the only route to
+    on-device sampling, since qwen36 builds its SamplingGenerator only when the mesh is
+    (1,4) or (1,8) AND vocab_size // num_devices <= 64K (replication forces
+    num_devices = 1, so 248320 fails the bound; 248320 // 4 = 62080 passes).
+
+    It is nevertheless off by default because of two measured facts:
+
+    1. IT DOES NOT SERVE. A 4-die TP instance fails in the vLLM engine's warmup with
+
+         Statically allocated circular buffers on core range [0-0 - 10-5] grow to
+         1684544 B which is beyond max L1 size of 1572864 B
+
+       and that byte count is IDENTICAL at max_model_len 4096 and 2048, with and without
+       an l1_small_size reservation -- so it is a fixed circular-buffer configuration in
+       the serving warmup path, not a context-length or chunking problem. The bench's TP
+       prefill and decode both work, so whatever the warmup does differently is where the
+       defect lives. Unfixed, and not guessed at.
+
+    2. SINGLE-STREAM DECODE IS WORSE, not better: 8.79 tok/s eager on four dies against
+       18.40 on one. The arithmetic points at collectives -- 114 ms/token versus 54 ms,
+       and this port's TP does roughly four per layer (the DistributedNorm all-gather, the
+       out-projection reduce-scatter, the MoE all-reduce, and mesh_partition) where
+       ornith-1.0's replicated-residual design does two, which is how it reaches 43 tok/s
+       on four dies. Matching that means adopting the replicated residual, not tuning.
+
+    So the shipped multi-die deployment stays LANES -- one replica per die via
+    tools/serve_lanes.sh, measured end to end through vLLM at 26 / 54 / 91 tok/s
+    aggregate on 1 / 2 / 4 dies. Replication is what every profile in tt-model.yaml
+    serves, and it is what the readiness evidence was produced on.
+
+    ORNITH_TP=1 turns tensor + expert parallelism on for a mesh of two or more dies, which
+    is how the numbers above were taken and how the remaining work should be continued.
+    Note that two dies additionally hang in the expert-parallel all-reduce
+    (moe.py::_reduce), caught twice with py-spy on a freshly reset device, so four dies is
+    the only configuration where TP is known to run at all.
+    """
+    if mesh_devices <= 1:
+        return False  # nothing to shard across, and a fabric here has no peer
+    return os.environ.get("ORNITH_TP") == "1"
+
+
 MESH_PRECISION = {
     "P150": {
         "routed": "bfloat4_b",
@@ -242,7 +293,19 @@ class OrnithModelArgs(Qwen36ModelArgs):
         # Tensor parallelism ALONE is worth ~1.2x, because it parallelises only the 3% of
         # the parameters that are not experts. The 3.2x needs EXPERT parallelism with it,
         # which is what the ornith-1.0 comparison (3.29-3.51x at TP=4/EP=4) was measuring.
-        self.tensor_parallel = os.environ.get("ORNITH_TP") == "1" and self.mesh_devices > 1
+        # Default ON for any multi-die mesh; see multidie_parallel_enabled above for why
+        # (prefill 3.2x, and it is the precondition for on-device sampling). ORNITH_TP=0
+        # opts back out to replication.
+        self.tensor_parallel = multidie_parallel_enabled(self.mesh_devices)
+        # Expert parallelism travels WITH tensor parallelism: TP alone is worth only
+        # ~1.2x because it parallelises the 3% of parameters that are not experts, and
+        # EP contributes the rest (2.60x at ISL 4096, 2.55x at 16384, measured with TP
+        # held fixed). ornith-1.0 likewise runs TP=4 and EP=4 on the same four chips.
+        # ORNITH_MOE_EP still overrides explicitly, either way.
+        self.expert_parallel = self.tensor_parallel
+        _ep = os.environ.get("ORNITH_MOE_EP")
+        if _ep is not None:
+            self.expert_parallel = _ep == "1"
         if self.mesh_devices > 1 and not self.tensor_parallel:
             self.num_devices = 1
             # cluster_shape has to agree. It is read INDEPENDENTLY of num_devices -- the

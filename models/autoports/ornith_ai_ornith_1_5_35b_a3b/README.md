@@ -40,18 +40,79 @@ All four are correct; the differences in phrasing are the open non-determinism
 returned BYTE-IDENTICAL 32-token completions, which is consistent with the low per-step
 flip rate measured there -- divergence needs enough steps to catch.
 
-**Why lanes rather than one wide mesh.** A single instance that opens the whole board is
-one replica and gains no throughput; per-die replicas measure 26 -> 54 -> 91 tok/s
-aggregate on 1/2/4 dies. And the one-big-mesh `p300` / `p300x2` serve profiles are
-currently blocked anyway: the fabric fix carries them through engine init and prefill,
-then multi-die DECODE hangs. So lanes are both the faster and the working multi-die
-deployment.
+**Why lanes rather than one wide mesh, and exactly how far tensor parallelism got.**
+Per-die replicas measure 26 -> 54 -> 91 tok/s aggregate on 1/2/4 dies, so lanes are the
+shipped multi-die deployment: every profile in `tt-model.yaml` serves REPLICATED, and all
+the readiness evidence was produced that way.
+
+What changed on 2026-09-17 is that the old reason given here -- that one wide mesh is
+"blocked because multi-die decode hangs" -- turned out to be wrong, and the real state is
+more useful to whoever picks this up.
+
+**The multi-die decode "hang" was a program-config assert.** Under tensor parallelism the
+layer's DistributedNorm hands the feed-forward an L1-SHARDED activation, and the shared
+expert's tuned M=1 config is a `MatmulMultiCoreReuseMultiCast1DProgramConfig` with
+`fuse_batch=False`, which the op forbids for a sharded `in0`:
+
+    MatmulMultiCoreReuseMultiCast1DProgramConfig: fuse_batch must be enabled when
+    input A is sharded            (matmul_device_operation.cpp:1944)
+
+Every TP decode step died on layer 0's shared expert. It went undiagnosed for as long as
+it did because the TP decode entry point had never once been CALLED: `bench_model` routed
+prefill to `prefill_tp` but called the replicated `model.decode()` in both decode arms,
+the exception was filtered out of the sweep's own output, and the resulting "decode n/a"
+was written into this README as `decode_tp` being "unmeasured". A measurement GAP got
+recorded as a measurement. Fixed (`moe.py` falls back to ttnn's heuristic config for a
+sharded `in0`), and 4-die TP now prefills and decodes end to end.
+
+**With that fixed, TP is an opt-in (`ORNITH_TP=1`) and NOT the default, for two measured
+reasons.** Model-level, on four dies, it is a large win on the metrics prefill dominates:
+
+| metric, ISL 128 unless noted | 1 die, replicated | 4 dies, TP+EP |
+|---|---|---|
+| prefill | 353 tok/s | **706** (2.0x) |
+| prefill @ 4096 | 395 | **1241** (3.1x -- passes qwen3-coder-30b-a3b's 1016) |
+| TTFT | 360 ms | **181 ms** |
+| decode, eager | **18.40 tok/s** | 8.79 (2.1x WORSE) |
+
+1. **It does not serve.** A 4-die TP instance fails in the vLLM engine warmup with
+
+       Statically allocated circular buffers on core range [0-0 - 10-5] grow to
+       1684544 B which is beyond max L1 size of 1572864 B
+
+   and that byte count is IDENTICAL at `max_model_len` 4096 and 2048, with and without an
+   `l1_small_size` reservation -- so it is a fixed circular-buffer configuration in the
+   SERVING WARMUP path, not a context-length or chunking problem. The bench's TP prefill
+   and decode both work, so whatever the warmup does differently is where the defect is.
+   That is the next thing to fix for anyone continuing this.
+
+2. **Single-stream decode is worse, and structurally so.** 114 ms/token against 54 ms.
+   This port's TP does roughly four collectives per layer -- the DistributedNorm
+   all-gather, the out-projection reduce-scatter, the MoE all-reduce, and
+   `mesh_partition` -- where ornith-1.0's design keeps the residual REPLICATED and does
+   two: local norms, one all-reduce after the token mixer and one after the MoE. That is
+   how ornith-1.0 reaches 43.03 tok/s on four dies. Closing this gap means adopting the
+   replicated residual, which is a re-plumb rather than a tuning exercise, and is the
+   single highest-value piece of work left on this port.
+
+**Two dies additionally hang in the expert-parallel all-reduce** (`moe.py::_reduce`,
+caught twice with `py-spy` on a freshly reset device, host spinning and RSS flat, ending
+at the timeout with no error), so four dies is the only mesh where TP is known to run at
+all. `ORNITH_TP=1` deliberately still reaches two dies so the defect stays reproducible
+(`scratchpad/run_2die_diag.sh`).
+
+**And replication is what blocks on-device sampling.** qwen36 builds its
+`SamplingGenerator` only when the mesh is (1,4) or (1,8) AND
+`vocab_size // num_devices <= 64K`. Replication forces `num_devices = 1`, so 248320 // 1
+fails the bound; TP keeps the real count and 248320 // 4 = 62080 passes. The vocabulary
+was never the problem -- so fixing the warmup overflow above is also what unblocks the
+TTI release stage.
 
 **What is NOT yet true, so nobody has to discover it the hard way:** greedy output is not
 reproducible run to run (see NONDETERMINISM.md -- open, characterised, not fixed);
 `max_num_seqs` is 1, so concurrency comes from lanes rather than batching; and on-device
-sampling is unavailable at this vocabulary on a single die, which is what blocks the TTI
-release stage.
+sampling is unavailable on ONE die (it needs a 4-die TP mesh -- see above), which is what
+blocked the TTI release stage for the single-die profile.
 
 ## Running it
 
@@ -1080,6 +1141,63 @@ Four, all in trees the package already carries (`source.code` covers the tt-meta
 Both plugin flags are declared in `src/tt/ornith_vllm.py`.
 
 ## Hardware and framework gotchas found here
+
+### NEVER SIGKILL a process that has the mesh open
+
+It wedges the device for every later run, and the failure it produces afterwards looks
+like a model bug rather than a dirty machine. Measured here on 2026-09-17: after two
+`kill -9`s of runs that were mid-operation, the next 4-die run stalled inside a CACHED
+WEIGHT UPLOAD, with the same stack on repeated `py-spy` samples --
+
+    load_tensor_flatbuffer -> to_device
+      -> MeshCommandQueue::enqueue_write_tensor
+      -> enqueue_write_shards_nolock
+      -> DeviceBoundThreadPool::wait -> futex
+
+-- host RSS flat at 3.4 GB, two cores spinning, no kernel-cache writes for six minutes.
+Nothing in that picture points at the queue left half-written by the SIGKILL. After
+`tt-smi -r` the identical run loaded in **42 s** and RSS climbed to 56 GB as expected.
+
+So: `kill -TERM` and WAIT (`tools/serve_lanes.sh stop` already does, and says why -- a
+half-closed process also leaves `/dev/shm/tt_device_*` behind, after which the next open
+dies with "Sysmem mapped at unexpected NOC address"). If you do have to `kill -9`,
+treat the machine as dirty: clear `/dev/shm/tt_device_*` and run `tt-smi -r`.
+
+**And check nothing holds the dies before resetting.** `tt-smi -r` on a board another
+process is using destroys that process's work with no warning; that happened in this
+bring-up and cost about eight minutes of an agent's run. The authoritative check is not
+a lock file, it is the kernel:
+
+```bash
+for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+  ls -l /proc/$pid/fd 2>/dev/null | grep -q tenstorrent && echo "HOLDER $pid"
+done
+```
+
+`scratchpad/ttlock.sh` in this bring-up does exactly that scan rather than trusting a
+lock file, because a stale lock and a live run are indistinguishable otherwise.
+
+### A missing fabric is always reported far from the missing flag
+
+Anything that runs a collective -- expert parallelism (all-reduces the routed-expert
+partials), tensor parallelism (all-gathers the norm input and reduce-scatters the
+out-projection every layer), or a vocab-sharded LM head (all-gathers the logit row) --
+needs `set_fabric_config` before the mesh is opened. Without it the run dies in
+
+    control_plane.cpp:2224  "Trying to get un-initialized fabric context"
+
+inside the first collective, naming `ttnn::ccl::get_usable_topology` and nothing else.
+This bring-up hit it **twice**, both times because a fabric gate re-read the environment
+instead of asking the model what it was going to do: first a gate that tested
+`ORNITH_MOE_EP` alone broke under `ORNITH_TP=1`, then multi-die meshes began defaulting
+to TP+EP and a run with *no* variables set broke the same way. Both gates
+(`tools/bench_model.py`, `tests/conftest.py`) now call
+`model_config.multidie_parallel_enabled()`, which is the one place the decision is made.
+
+Also: `close_mesh_device` RESETS the fabric config to DISABLED, so a cold-open warm-up
+silently undoes the `set_fabric_config` above it and the real mesh then opens with no
+fabric -- surfacing much later as "Unsupported fabric config" from `ccl_common`. Re-assert
+it after any warm-up.
 
 ### ttnn.sparse_matmul (the MoE path) -- five ways to lose
 

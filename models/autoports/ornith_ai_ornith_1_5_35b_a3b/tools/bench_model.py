@@ -66,25 +66,59 @@ def main() -> int:
     # throw from ccl_common if anything does reach a collective.
     # A fabric is needed by anything that runs a collective: expert parallelism, or the
     # vocab-sharded LM head's logit all-gather.
-    if rows * cols > 1 and any(
-        os.environ.get(v) == "1" for v in ("ORNITH_MOE_EP", "ORNITH_SHARD_LM_HEAD", "ORNITH_TP")
-    ):
-        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    # WHO NEEDS A FABRIC: ask the model's own policy, do not re-read the environment.
+    # This used to test ORNITH_MOE_EP / ORNITH_SHARD_LM_HEAD / ORNITH_TP == "1" directly.
+    # Once multi-die meshes began defaulting to TP+EP, a run with none of those variables
+    # set ran collectives on a mesh whose fabric had never been configured, and died in
+    #   control_plane.cpp:2224 "Trying to get un-initialized fabric context"
+    # out of ttnn::ccl::get_usable_topology -- nowhere near the flag that was missing.
+    # multidie_parallel_enabled is the single source of truth (model_config.py).
+    from models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.model_config import multidie_parallel_enabled
+
+    needs_fabric = multidie_parallel_enabled(rows * cols) or os.environ.get("ORNITH_SHARD_LM_HEAD") == "1"
+    if rows * cols > 1 and needs_fabric:
+        # WHICH FABRIC, and why this is not FABRIC_1D everywhere any more.
+        #
+        # This used to hardcode FABRIC_1D (a line) on every multi-chip mesh. On this
+        # QB2 the four chips are NOT a line: p300_x2_mesh_graph_descriptor.textproto
+        # declares `device_topology { dims: [2, 2] }` with `channels { count: 2 }`,
+        # i.e. a 2x2 grid where every chip has degree 2 -- a cycle. ornith-1.0, which
+        # is the SAME architecture and ships a working 4-die TP=4/EP=4 decode on this
+        # very host, configures FABRIC_1D_RING for its p150x4 profile and FABRIC_1D
+        # only for the 2-chip p150x2. Matching that is free and is the documented
+        # topology, so the default here follows the hardware: ring on 4, line on 2.
+        # ORNITH_FABRIC overrides by FabricConfig member name.
+        fabric_name = os.environ.get("ORNITH_FABRIC") or ("FABRIC_1D_RING" if rows * cols >= 4 else "FABRIC_1D")
+        fabric = ttnn.FabricConfig.__members__.get(fabric_name)
+        assert fabric is not None, f"ORNITH_FABRIC={fabric_name!r} not in {list(ttnn.FabricConfig.__members__)}"
+        print(f"  fabric: {fabric_name} for a {rows}x{cols} mesh", flush=True)
+        ttnn.set_fabric_config(fabric)
         # Cold multi-chip opens fail ethernet router sync once per process; absorb it.
         try:
             ttnn.close_mesh_device(ttnn.open_mesh_device(ttnn.MeshShape(rows, cols)))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  fabric warm-up threw (expected once per process): {type(e).__name__}", flush=True)
         # close_mesh_device RESETS the fabric config to DISABLED, so the warm-up above
         # silently undoes the line above it and the real mesh then opens with no fabric
         # -- which surfaces much later as "Unsupported fabric config" from ccl_common
         # the first time a collective actually runs. Re-assert it after the warm-up.
-        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+        ttnn.set_fabric_config(fabric)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(rows, cols), **params)
 
     weights = pathlib.Path(a.weights)
     cfg = json.loads((weights / "config.json").read_text())["text_config"]
-    args = OrnithModelArgs(mesh, max_batch_size=a.batch, max_seq_len=max(a.isl) + a.decode_steps + 8)
+    # max_seq_len must be a multiple of 128, not merely of the 32-row tile.
+    #
+    # The TP decode path's SDPA asserts that the KV cache's sequence length divides by its
+    # k_chunk_size, which is 128 here:
+    #   "K sequence length must be multiple of chunk size, got: 160 and 128"
+    #   (sdpa_decode_device_operation.cpp:383, k_shape[2] % k_chunk_size == 0)
+    # and the old expression produced exactly that -- 128 + 8 + 8 = 144, allocated as 160.
+    # This is a harness sizing artifact, not a model limit: a served model takes its cache
+    # length from max_model_len (4096, 262144, ...), all multiples of 128.
+    _ctx = max(a.isl) + a.decode_steps + 8
+    _ctx = -(-_ctx // 128) * 128
+    args = OrnithModelArgs(mesh, max_batch_size=a.batch, max_seq_len=_ctx)
 
     t0 = time.perf_counter()
     state = load_ornith_state_dict(weights, cfg)
@@ -253,6 +287,12 @@ def main() -> int:
                 # characters of str(e) with no type, and the sweep's own output filter
                 # did not match the word it started with, so the reason was discarded.
                 print(f"  eager decode unavailable: {type(e).__name__}: {str(e).splitlines()[0][:200]}", flush=True)
+                # A one-line TT_FATAL names the op but not the call site, and these
+                # failures are program-config bugs whose fix is at the call site.
+                if os.environ.get("ORNITH_BENCH_TRACEBACK") == "1":
+                    import traceback
+
+                    traceback.print_exc()
 
         if not a.no_trace:
             try:

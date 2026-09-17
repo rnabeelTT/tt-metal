@@ -518,11 +518,26 @@ class _SparseExperts:
         #
         # The whole model is ~18.2 GB (17.1 GB of bfp4 experts + ~1.1 GB of bf8
         # everything else) against 30 GB of usable DRAM per chip, so every die can hold
-        # a complete copy. Extra chips then serve extra USERS instead of splitting one:
-        # no collectives, no fabric, and aggregate throughput scales linearly with dies
-        # rather than sub-linearly. Set ORNITH_MOE_EP=1 to get the sharded path back.
-        self.expert_parallel = os.environ.get("ORNITH_MOE_EP", "0") == "1"
+        # a complete copy, and one die per user (tools/serve_lanes.sh) is still the
+        # highest-AGGREGATE deployment.
+        #
+        # But this is no longer the multi-die DEFAULT, and the paragraph above overstated
+        # its case. "Expert parallelism buys nothing" was a DECODE measurement -- the
+        # gather path costs 79 us per expert pair at 64, 128 or 256 experts/die because
+        # only the top-8 are visited. Prefill routes a 4096-token chunk to essentially
+        # all 256, so sharding the bank really does quarter that work: with TP held
+        # fixed, EP is worth 2.60x at ISL 4096 and 2.55x at 16384.
+        #
+        # The decision now lives in ONE place for the whole model, so the layer config
+        # and the expert bank cannot disagree about whether the mesh is sharded --
+        # OrnithModelArgs.expert_parallel, set by model_config.multidie_parallel_enabled
+        # (default on for any multi-die mesh, ORNITH_MOE_EP / ORNITH_TP=0 to override).
+        # Reading the env var independently here is what let the two diverge.
         mesh_n = getattr(args, "mesh_devices", mesh_device.get_num_devices())
+        ep = getattr(args, "expert_parallel", None)
+        if ep is None:  # a bare Qwen36ModelArgs (tests build the block standalone)
+            ep = os.environ.get("ORNITH_MOE_EP", "0") == "1" and mesh_n > 1
+        self.expert_parallel = bool(ep)
         self.num_devices = mesh_n if self.expert_parallel else 1
         self.experts_per_device = args.num_experts // max(self.num_devices, 1)
         self.hidden_size = args.dim
@@ -1117,8 +1132,41 @@ class OrnithMoE:
         # heuristic respectively -- see _decode_matmul_config. Only for a single-token
         # step: prefill's M is tall and the heuristic is not the loser there.
         decode = x.shape[-2] == 1
-        pc0 = self._sh_pc["gate_up"] if decode else None
-        pc2 = self._sh_pc["down"] if decode else None
+        # ...but ONLY when the activation is interleaved, which is the single-chip case
+        # these configs were tuned for.
+        #
+        # Under tensor parallelism the layer's DistributedNorm hands the feed-forward an
+        # L1-SHARDED activation (full width -- the norm all-gathers, so only the
+        # placement differs, not the shape). These are
+        # MatmulMultiCoreReuseMultiCast1DProgramConfigs with fuse_batch=False, and the op
+        # forbids exactly that combination:
+        #   "MatmulMultiCoreReuseMultiCast1DProgramConfig: fuse_batch must be enabled
+        #    when input A is sharded" (matmul_device_operation.cpp:1944)
+        # which is what made EVERY TP decode step die on layer 0's shared expert, and is
+        # the real content of the "4-chip decode hangs" blocker.
+        #
+        # Falling back to ttnn's heuristic for a sharded in0 costs the 2.5x/1.9x these
+        # configs win, and only on the TP path. Two alternatives were considered:
+        #
+        #   * Convert the activation to interleaved at the top of _forward_decode. Not
+        #     taken: it adds an op per layer on every die, and the natural spelling also
+        #     frees that copy at the end -- while _run_bank documents that ttnn.reshape
+        #     hands the routed bank a VIEW over the same buffer ("freeing it frees x, and
+        #     the next matmul fails with 'operand must be on device'"), so the lifetime is
+        #     a trap. This was tried and a single-chip eager decode then hung; that hang is
+        #     NOT offered as evidence against the approach, because the device had been
+        #     left wedged by a SIGKILLed run and a separate 4-die hang in the same window
+        #     turned out to be a stalled MeshCommandQueue weight upload with no relation
+        #     to this code. The aliasing argument stands on its own; the hang is unattributed.
+        #   * Assert fuse_batch=True on the existing configs. Not taken: they were tuned
+        #     and measured at fuse_batch=False, so flipping it changes the very geometry
+        #     the 2.5x was measured with, and nothing here re-measures it.
+        #
+        # A correct slow path beats a fast wrong one. Retuning a sharded-in0 config, or
+        # keeping the activation interleaved without the aliasing hazard, is a follow-up.
+        sharded_in = x.memory_config().is_sharded()
+        pc0 = self._sh_pc["gate_up"] if decode and not sharded_in else None
+        pc2 = self._sh_pc["down"] if decode and not sharded_in else None
         g = ttnn.linear(x, w["sh0"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
         u = ttnn.linear(x, w["sh1"], compute_kernel_config=ckc, memory_config=dram, program_config=pc0)
         if decode:

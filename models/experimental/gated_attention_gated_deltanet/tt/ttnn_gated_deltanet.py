@@ -111,7 +111,19 @@ def _seq_memory_config(seq_len, width=_DEFAULT_GDN_WIDTH):
     exactly the threshold they were validated at, and halves the allowance at Ornith's
     4096, which puts T=256 in DRAM and leaves T=128 in L1.
     """
-    budget = _L1_SEQ_BYTE_BUDGET * _DEFAULT_GDN_WIDTH // max(width, 1)
+    # min(): the budget scales DOWN with width and NEVER UP, which is what the paragraph
+    # above says and what the code did not do. Widths BELOW the default arise under tensor
+    # parallelism -- the GDN is sharded across dies, so a 2048-wide model presents 512 per
+    # die -- and the unclamped expression handed those a 4x budget, admitting sequences up
+    # to 2048 into L1. That does not fail here either; it fails in the prefill warmup as
+    #   "Statically allocated circular buffers on core range [0-0 - 10-5] grow to
+    #    1684544 B which is beyond max L1 size of 1572864 B"
+    # which is how 4-die SERVING died while the same model benched fine.
+    #
+    # Clamping restores exactly the pre-scaling rule for every width <= 2048 (so every
+    # single-die and every TP configuration behaves as it did before the scaling was
+    # introduced) and keeps the scaling only where it was actually calibrated, above 2048.
+    budget = min(_L1_SEQ_BYTE_BUDGET, _L1_SEQ_BYTE_BUDGET * _DEFAULT_GDN_WIDTH // max(width, 1))
     return ttnn.L1_MEMORY_CONFIG if seq_len * width * 2 <= budget else None
 
 
