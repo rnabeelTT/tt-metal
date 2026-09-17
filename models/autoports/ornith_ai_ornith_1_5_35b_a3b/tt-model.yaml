@@ -178,11 +178,27 @@ serve_profiles:
   #
   # The whole thing is ~18.2 GB (17.1 GB of bfp4 routed experts, which are 92.5% of
   # 34.8B parameters, plus ~1.1 GB of bf8 everything else) against ~30 GB usable per
-  # Blackhole die, so one die holds a complete copy. Splitting it across dies was tried
-  # and abandoned: `ttnn.sparse_matmul` in gather mode costs the same 79 us per expert
-  # pair whether a die owns 64 experts or 256, because only the routed top-8 are ever
-  # visited, so expert parallelism bought no speed -- only an all-reduce per layer, and
-  # the collectives were where both multi-chip meshes were failing.
+  # Blackhole die, so one die holds a complete copy.
+  #
+  # CORRECTION. This comment used to say flatly that "expert parallelism bought no
+  # speed", on the grounds that `ttnn.sparse_matmul` in gather mode costs the same 79 us
+  # per expert pair whether a die owns 64 experts or 256, since only the routed top-8 are
+  # ever visited. That per-expert-pair measurement is real and it is a DECODE
+  # measurement, where the cost is dispatch per program and EP indeed buys ~nothing. As a
+  # blanket claim about expert parallelism it is WRONG, and this port's own tensor-parallel
+  # sweep refutes it on PREFILL, all four dies, the only difference being ORNITH_MOE_EP:
+  #
+  #     prefill tok/s     ISL 128    ISL 4096    ISL 16384
+  #     TP only              366.2       477.5        468.8
+  #     TP + EP              574.0      1241.0       1194.9
+  #     EP contributes       1.57x       2.60x        2.55x
+  #
+  # Prefill visits every expert (a 4096-token chunk routes to essentially all 256), so
+  # sharding the bank 4 ways really does quarter the work; decode visits 8. That is why
+  # ornith-1.0 -- the SAME architecture (dim 2048, 16 q / 2 kv heads, 256 experts top-8,
+  # GDN 16/32, 40 layers) -- scales decode 11.59 -> 43.03 tok/s from one die to four with
+  # TP=4/EP=4, while this port already decodes 29.05 tok/s on ONE die: its gain comes from
+  # no longer reading all 256 experts per layer, which the gather path here never did.
   #
   # Extra dies therefore serve extra USERS. Run `tools/serve_lanes.sh start 4`, or one
   # instance per die by hand (each pinned with

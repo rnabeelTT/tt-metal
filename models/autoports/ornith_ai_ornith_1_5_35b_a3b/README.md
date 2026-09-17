@@ -236,23 +236,48 @@ Only 10 of 40 layers hold a KV cache and the 30 GDN layers' recurrent state is
 context-independent, so there is very little for long context to slow down. Against the
 fleet at 64K: ornith-1.0 -10%, ours -13%, qwen3-coder-30b-a3b -21%, muse-glimmer -27%.
 
-**PREFILL IS THE WEAK METRIC, and it is the one to fix next.** Prefill throughput is flat
-at ~350-394 tok/s at every length, which is 2.6x to 22x slower than the fleet:
+**PREFILL WAS THE WEAK METRIC, and tensor parallelism fixed most of it.** It used to be
+flat at ~350-394 tok/s at every length, 2.6x to 22x slower than the fleet. With
+`ORNITH_TP=1 ORNITH_MOE_EP=1` on four dies it is 1,241 tok/s at 4K:
 
 | model | pf@4K tok/s |
 |---|---|
 | muse-glimmer-30b | 8,666 |
 | qwen3.8-27b | 5,937 |
-| ornith-1.0-35b | 2,342 |
+| ornith-1.0-35b (4 dies, TP=4/EP=4) | 2,342 |
+| **Ornith-1.5-35B-A3B, 4 dies, TP+EP** | **1,241** |
 | qwen3-coder-30b-a3b (closest arch peer) | 1,016 |
-| **Ornith-1.5-35B-A3B (this port)** | **394** |
+| Ornith-1.5-35B-A3B, 1 die (replicated, the shipped default) | 394 |
 
-The consequence is TTFT, which is essentially all prefill: **0.36 s at 128 tokens, 10.4 s
-at 4K, 43 s at 16K, 185 s at 64K.** Three minutes to first token at 64K context is a
-usability problem, and it is the single largest gap to the fleet -- larger, proportionally,
-than the decode gap that earlier optimisation rounds targeted. Prefill is compute-bound
-here (the README's own earlier note), so unlike decode it is NOT a dispatch-count problem
-and the fused-GDN-decode work would not touch it.
+So this port now passes its closest architectural peer and reaches 53% of ornith-1.0, on
+the same host and the same four dies. TTFT at 4K falls 10.4 s -> 3.3 s.
+
+**And decode was never the weak metric -- the comparison just had no peer column.**
+`tt-model/ornith-1.0-35b-p150`'s own shipped card measures the SAME ARCHITECTURE (dim
+2048, 16 q / 2 kv heads, 256 experts top-8, GDN 16/32 heads, 40 layers,
+`Qwen3_5MoeForConditionalGeneration`) on THIS host with `vllm bench serve`, p50 of three
+requests, concurrency 1, greedy, EOS ignored -- the same way this port's serving numbers
+were taken:
+
+| dies | ornith-1.0 dec tok/s | this port, dec tok/s | note |
+|---|---|---|---|
+| 1 | 11.59 | **29.05** | 2.51x faster per die |
+| 2 | 33.27 | 28.40/stream, 54.47 aggregate | |
+| 4 | **43.03** (one user) | 25.89/stream, **91.24 aggregate** (four users) | 2.12x the total |
+
+Two honest readings of that table. Per DIE this port decodes 2.5x faster, and its
+four-die AGGREGATE is 2.1x ornith-1.0's, because four independent lanes each serve a
+user. But for a SINGLE user on four dies ornith-1.0 wins 43.03 against 25.89, because it
+spends the extra dies on one stream (TP=4/EP=4) where this port spends them on more
+streams.
+
+The reason the per-die gap exists at all also explains why EP does less for this port:
+ornith-1.0's single die reads all 256 experts per layer, so sharding the bank 4 ways is
+most of its 11.59 -> 43.03. This port's `sparse_matmul` gather path only ever visits the
+routed top-8, so it starts where EP was taking ornith-1.0 and has less left to win on
+decode. On PREFILL, which visits every expert, EP is worth 2.55-2.60x here (see the table
+in tt-model.yaml) -- the blanket claim that "expert parallelism bought no speed", which
+this package shipped, was a decode measurement overgeneralised, and is corrected there.
 
 Extra dies do not help any of this: the model is replicated, so each die runs a complete
 independent copy and per-stream numbers are near-identical across meshes. Extra dies buy

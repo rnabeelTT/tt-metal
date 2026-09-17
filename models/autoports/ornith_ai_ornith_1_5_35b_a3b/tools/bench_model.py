@@ -158,6 +158,19 @@ def main() -> int:
                 return model.prefill_tp(t)
             return model.prefill(t)
 
+        # DECODE HAS ITS OWN TP ENTRY POINT TOO, and this harness used to ignore it.
+        # `_prefill` above correctly routes to prefill_tp when num_devices > 1, but the
+        # decode arms below called model.decode() unconditionally -- the replicated /
+        # single-device path, which is not valid against a fractured-residual TP model.
+        # Both arms therefore threw under ORNITH_TP=1 and every TP row reported
+        # "decode n/a", which was then read as "TP decode does not work". It had never
+        # been called. decode_tp is B=1 only (it builds a [1,1,1,dim] activation and
+        # returns a composed torch vector), so a batched TP run is still out of scope.
+        def _decode(t, p):
+            if args.num_devices > 1:
+                return model.decode_tp(int(t[0, 0]), int(p[0]))
+            return model.decode(t, p)
+
         _prefill(ids)  # warm the program cache; the first call compiles
         ttnn.synchronize_device(mesh)
 
@@ -200,7 +213,7 @@ def main() -> int:
             # (zeroed) state and is fed the same token, so every user's logits must be
             # IDENTICAL. This catches a batch axis that is being read as time, or users
             # bleeding into each other -- neither of which changes any tensor's shape.
-            _lg = model.decode(tok, pos(isl))
+            _lg = model.decode(tok, pos(isl))  # batch > 1 is single-device only; see _decode
             ttnn.synchronize_device(mesh)
             _lt = ttnn.to_torch(_lg).float().reshape(a.batch, -1)
             _dev = max((_lt[u] - _lt[0]).abs().max().item() for u in range(1, a.batch))
@@ -224,16 +237,22 @@ def main() -> int:
                 flush=True,
             )
             continue
-        try:
-            model.decode(tok, pos(isl))  # warm / compile
-            ttnn.synchronize_device(mesh)
-            t0 = time.perf_counter()
-            for i in range(a.decode_steps):
-                model.decode(tok, pos(isl + 1 + i))
-            ttnn.synchronize_device(mesh)
-            dec = (time.perf_counter() - t0) / a.decode_steps
-        except Exception as e:
-            print(f"  eager decode unavailable: {str(e).splitlines()[0][:90]}")
+        if args.num_devices > 1 and a.batch > 1:
+            print("  eager decode skipped: decode_tp is B=1 only")
+        else:
+            try:
+                _decode(tok, pos(isl))  # warm / compile
+                ttnn.synchronize_device(mesh)
+                t0 = time.perf_counter()
+                for i in range(a.decode_steps):
+                    _decode(tok, pos(isl + 1 + i))
+                ttnn.synchronize_device(mesh)
+                dec = (time.perf_counter() - t0) / a.decode_steps
+            except Exception as e:
+                # Print the TYPE and a usefully long message. This used to print 90
+                # characters of str(e) with no type, and the sweep's own output filter
+                # did not match the word it started with, so the reason was discarded.
+                print(f"  eager decode unavailable: {type(e).__name__}: {str(e).splitlines()[0][:200]}", flush=True)
 
         if not a.no_trace:
             try:
