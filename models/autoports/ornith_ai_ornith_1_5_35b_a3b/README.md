@@ -126,6 +126,53 @@ Running ONE instance that opens the whole board instead of one per die gives a s
 replica and no throughput gain -- that is what the `p300`/`p300x2` tt-model profiles do,
 and it is why `tools/serve_lanes.sh` exists.
 
+### Tensor + expert parallelism: 3.1x prefill (opt-in, measured 2026-09-17)
+
+Prefill was the weak metric (see the fleet comparison below). It is now fixable, and the
+reason it was thought impossible was wrong on every count -- see the corrected TP section
+further down and commit `d4d43bcd44b`.
+
+    ORNITH_TP=1                  tensor-parallel attention + GDN
+    ORNITH_TP=1 ORNITH_MOE_EP=1  and expert-parallel experts   <- the configuration that pays
+
+| ISL | single chip | `ORNITH_TP=1` | **TP + EP (4 dies)** |
+|---:|---|---|---|
+| 128 | 351 tok/s, 364 ms | 367 (1.04x) | **684 tok/s, 187 ms (1.95x)** |
+| 4096 | 396 tok/s, 10.34 s | 478 (1.21x) | **1230 tok/s, 3.33 s (3.10x)** |
+| 16384 | 381 tok/s, 43.0 s | 468 (1.23x) | **1198 tok/s (3.15x)** |
+
+**TP ALONE IS WORTH ONLY ~1.2x. You need EP with it.** TP parallelises the non-expert
+1.03B -- 3% of the model -- while the experts are 92.5% and stay replicated unless
+`ORNITH_MOE_EP=1`. This also reframes ornith-1.0's 3.29-3.51x prefill figure: that is a
+TP=4 **and** EP=4 number, so 3.10x is the like-for-like comparison, not 1.21x.
+
+At 1230 tok/s pf@4K this port passes qwen3-coder-30b-a3b's 1,016. TTFT at 4K drops from
+10.3 s to 3.3 s.
+
+`FABRIC_1D` (line) is sufficient for everything -- per-layer all-gather, the GDN and
+attention reduce-scatters, fused `matmul_reduce_scatter`, and the EP all-reduce. RING was
+never needed here.
+
+**Why it is still OPT-IN, and what to settle before promoting it.** Two things:
+
+* **TP vs single-chip logits measure PCC 0.991686** (TP+EP 0.991554), top-1 matching.
+  That is ~100x more error than ornith-1.0 reports against its own single-chip baseline
+  (0.999892) and is UNEXPLAINED. Dtypes and the gather arrangement are ruled out by
+  inspection, leaving row-parallel K-split reduction order and matmul blocking
+  accumulating over 40 layers. Note the accuracy gate against the HF reference does NOT
+  get worse -- TP scores 0.98410 on prompt 0 against single-chip's 0.97174 -- so
+  single-chip is not automatically the more correct of the two, and part of that 0.9917
+  may be single-chip error rather than TP error.
+* **EP has had far less exercise in this port than replication**, and the 3.1x depends on
+  it.
+
+Decode is deliberately NOT the reason to use TP: it is dispatch-bound here, and
+ornith-1.0 measures only 1.65-1.69x on decode from the same TP=4/EP=4.
+
+Also open: `prefill_tp` / `_prefill_paged_tp` are single-shot and exceed L1 above ~8K
+(5.23 MB of circular buffers in a 1.5 MB L1 at 16384). The 16384 row above goes through
+the existing chunked TP path, which works; only that demo entry point lacks chunking.
+
 ### Perf across context length, all three meshes (measured 2026-09-16)
 
 Possible for the first time: the old `max_model_len: 4096` made every column past 4K
