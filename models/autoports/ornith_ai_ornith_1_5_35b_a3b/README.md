@@ -296,6 +296,61 @@ still misses. The previous policy (non-MoE lofi, shared expert hifi4) gave
 table in `tt/model_config.py` for the five configurations measured and the one real
 trade-off among them (lofi/lofi has better top-8 agreement, 8/7/8, and worse PCC).
 
+**Can prompt 2 reach 0.95? No, not by tuning -- and the router is NOT at fault.**
+Settled 2026-09-17 by comparing four expert selections per token across 128 tokens x 40
+layers x 3 prompts: HF (its own bf16 router), TRUTH (float64 `W_fp32 @ hf_gate_in`), TT
+(device), and TT-exact (float64 on the DEVICE's input).
+
+Two readings settle it:
+
+* `TT=HF` (12.0/13.4/16.3% of decisions agree on the top-8 set) is within a point of
+  `TT-exact=TRUTH` (12.2/14.0/16.6%). An EXACT float64 router fed the device's own input
+  agrees with HF no better than the device's router does -- so **all** of the divergence
+  is the hidden state and **none** of it is the router.
+* `TT=TT-exact` (82.6/82.8/85.3%) is within a point of `HF=TRUTH` (83.3/84.0/85.1%). The
+  device's router is exactly as faithful to exact arithmetic as HF's own bf16 router,
+  which itself disagrees with exact ranking on ~17% of decisions.
+
+The rank-8 vs rank-9 score gap is a median of **1.6-2.2 bf16 ulps** -- near-tied, so these
+flips are the irreducible case, not a defect. The gate already runs HiFi2 with
+`fp32_dest_acc_en=True`; what is left is the bf16 logit pack, which HF shares. No router
+change can help and none was made.
+
+Worth correcting a term used loosely throughout these docs: the "HF float32 reference"
+is bf16-RANKED too. HF computes its router logits with `F.linear` on bf16 and its fp32
+softmax is monotone, so its selection is a bf16 ranking. Only the float64 TRUTH column
+above is exact.
+
+**Layer 22 is a red herring for the graded metric.** It really does cost 0.0377 of
+residual-stream PCC in one layer, but injecting the device residual at each layer into an
+otherwise exact model shows layer 22's own contribution to the FINAL logits is
++0.00022 / -0.00104 / -0.00115 -- essentially nothing. Layer 0's is
+-0.00839 / -0.01279 / -0.02501, and **79-86% of the whole deficit already exists by layer
+12's output**. L22 is a GDN layer whose device-ADDED error (0.032 relative) is not even an
+outlier against the 40-layer median of 0.026; the real outliers are L4 (0.144), L2 (0.119)
+and L6 (0.068).
+
+**Where the error actually is, decomposed.** Forcing an otherwise exact model to use the
+device's expert sets gives 0.97875 / 0.97971 / 0.96812, so routing flips alone cost
+0.021 / 0.020 / 0.032 -- **75/70/56% of the deficit** (control: forcing HF's own indices
+gives PCC exactly 1.00000). Of the per-layer ARITHMETIC error, 60-97% is the MoE block,
+and a real ttnn bfp4 round-trip explains 87-90% of that -- i.e. it is the `bfloat4_b`
+expert weights the 0.95 bar exists to grade in the first place.
+
+**Nine configurations measured; the shipped default is the maximum.** Range 0.9037-0.9433
+on prompt 2. The instructive negative: making the dense attention/GDN weights bf16 instead
+of bfp8 is STRICTLY more accurate arithmetic (it removes 13-18% of per-layer error
+variance) and made prompt 2 **0.0267 WORSE**. Prefill is bitwise deterministic here, so
+that is the routing lottery, not noise. Precision knobs move prompt 2 by +-0.01-0.03 with
+unpredictable sign.
+
+**The one reducible lead, for whoever picks this up:** the GDN block's relative error is
+**10.0% median against full attention's 2.4%** -- 4x worse -- with 23% at L2 and
+**34-45% at L4**. That is a genuine accuracy defect in the Gated DeltaNet block and is the
+only credible route to 0.95, estimated to land around 0.95-0.96. That estimate is an
+extrapolation from variance shares, not a measurement, and it is a kernel investigation
+rather than a knob.
+
 **More precision will not close prompt 2, and the reason is the router.** The binding
 constraint is discrete expert-selection agreement with HF, not arithmetic. Hooking the
 router and recording selected indices shows that changing ANY fidelity setting flips
