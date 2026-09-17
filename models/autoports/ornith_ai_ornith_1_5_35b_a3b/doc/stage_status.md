@@ -170,9 +170,19 @@ test suite plus the README. Current state of that suite on P150:
 before this session (statically allocated circular buffers clashing with L1 buffers by
 5120 bytes); stage 05 had recorded a PASS without it passing. Fixed in `5925b92cfbd`.
 
-`test_model.py` has never passed outright, and will not be closed by tuning precision:
-the binding constraint on the remaining prompt is discrete router expert-selection
-agreement with HF, not arithmetic. See the README's accuracy section.
+`test_model.py` has never passed outright, and will not be closed by tuning precision --
+nine configurations were measured and the shipped default is the maximum of them.
+
+Note this supersedes an earlier claim in this file that the binding constraint is the
+ROUTER. It is not. Comparing an exact float64 router fed the device's own input against
+HF shows it agrees with HF no better than the device's router does, so all of the
+divergence is the hidden state and none of it is the router; the device's router is as
+faithful to exact arithmetic as HF's own bf16 router is. Routing FLIPS do carry 56-75% of
+the deficit, but they are a symptom of the upstream hidden state, and the rank-8/rank-9
+gap they turn on is a median 1.6-2.2 bf16 ulps -- irreducible.
+
+The one reducible lead is the Gated DeltaNet block, whose relative error is 10.0% median
+against full attention's 2.4%, with 34-45% at L4. See the README's accuracy section.
 
 ## Open blockers, unchanged by this session
 
