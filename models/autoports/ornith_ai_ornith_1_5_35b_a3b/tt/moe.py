@@ -944,7 +944,25 @@ class _SparseExperts:
             return acc  # replicated experts: every die already has the full sum
         # Partial sums: each device computed only its own experts. All-reduce keeps the
         # residual stream replicated, which is the layer's input/output contract.
-        reduced = ttnn.all_reduce(acc, cluster_axis=self.cluster_axis, topology=ttnn.Topology.Linear)
+        # TOPOLOGY AND LINK COUNT MATTER, and this passed Linear with neither.
+        #
+        # The four chips on a QB2 are a physical ring: p300_x2_mesh_graph_descriptor
+        # declares `device_topology { dims: [2, 2] }` with `channels { count: 2 }`, every
+        # chip degree 2, both directions 2 links wide. ornith-1.0 -- the same architecture
+        # on the same host -- measured every spelling of this collective inside a captured
+        # trace and records that `Topology.Ring` beats `Topology.Linear` "at every traced
+        # shape, which is the physical ring being real", with num_links=2, and calls the
+        # fabric config "load-bearing at decode". We were asking for a line on ring
+        # hardware with one link.
+        #
+        # Ring is selected from the MESH, not from a flag, so it cannot drift from the
+        # fabric the device was opened with (>=4 dies is where the descriptor declares a
+        # cycle; 2 chips really are a line). ORNITH_CCL_TOPOLOGY overrides by name for
+        # A/B measurement.
+        _topo_name = os.environ.get("ORNITH_CCL_TOPOLOGY") or ("Ring" if self.num_devices >= 4 else "Linear")
+        _topo = getattr(ttnn.Topology, _topo_name)
+        _links = int(os.environ.get("ORNITH_CCL_NUM_LINKS", "2"))
+        reduced = ttnn.all_reduce(acc, cluster_axis=self.cluster_axis, topology=_topo, num_links=_links)
         ttnn.deallocate(acc)
         assert reduced.shape[-1] == H, f"reduce returned {reduced.shape[-1]}, expected {H}"
         return reduced

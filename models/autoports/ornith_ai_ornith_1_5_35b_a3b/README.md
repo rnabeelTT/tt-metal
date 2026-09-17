@@ -133,24 +133,39 @@ reasons.** Model-level, on four dies, it is a large win on the metrics prefill d
      of that failure: warmup passed and the server came up healthy, then died on first
      use. "It starts" is not evidence for this model.
 
-   With both fixed, a 4-die TP instance serves and answers. vLLM's own reported
-   generation throughput is **5.0 tok/s**, against **25.89 tok/s per stream** from a
-   single-die lane and **43.03** for ornith-1.0 on the same four dies. A second
-   100-token request then stalled indefinitely with the engine alive and no error, so
-   this is not production-ready either.
+   With those fixed, a 4-die TP instance serves and answers -- and once the COLLECTIVE
+   TOPOLOGY was also corrected it is FASTER than one die on both metrics:
 
-   **This settles the design question, and against an argument made earlier in this
-   file.** A previous revision reasoned that because this port fuses its collectives into
-   the matmuls (`all_gather_minimal_matmul_async` on the in-projection,
-   `matmul_reduce_scatter_async` on the out-projection), an all-gather plus a
-   reduce-scatter moves the same bytes as one all-reduce and the gap to ornith-1.0's
-   2-collectives-per-layer design should therefore be small. The measurement says
-   otherwise: 5.0 against 43.03 is an 8x gap that op-count parity cannot explain.
-   Matching ornith-1.0 means adopting its REPLICATED RESIDUAL -- local exact norms, one
-   all-reduce after the token mixer and one after the MoE, no fractured residual and no
-   `mesh_partition` -- which is a re-plumb of this port's TP path, not a tuning exercise.
-   That is the single highest-value piece of work left here, and it is now backed by a
-   number rather than by a count.
+   | 4 dies, TP+EP, served | value | 1 die, served | ornith-1.0, 4 dies |
+   |---|---|---|---|
+   | decode | **37.50 tok/s** | 32.99 | 43.03 |
+   | TTFT (warm) | **187 ms** | 366 ms | 160 ms |
+
+   **The topology was the whole problem, and it is one line.** `moe.py::_reduce` called
+   `ttnn.all_reduce(..., topology=Topology.Linear)` with no `num_links`, on hardware
+   where `p300_x2_mesh_graph_descriptor` declares `device_topology { dims: [2, 2] }` with
+   `channels { count: 2 }` -- every chip degree 2, both directions two links wide. We
+   were asking for a LINE ON A RING over ONE LINK. ornith-1.0 records having measured
+   every spelling inside a captured trace and concludes that `Topology.Ring` beats
+   `Topology.Linear` "at every traced shape, which is the physical ring being real", with
+   `num_links=2`, and that the fabric config is "load-bearing at decode". It is now
+   selected from the MESH (>=4 dies, where the descriptor declares a cycle) so it cannot
+   drift from the fabric the device opened with; `ORNITH_CCL_TOPOLOGY` overrides for A/B.
+
+   **A previous revision of this file concluded the opposite, and was wrong.** It read
+   "5.0 tok/s" as the TP decode rate and argued from it that closing the gap to
+   ornith-1.0 required adopting their replicated residual -- an 8x deficit that
+   "op-count parity cannot explain". That 5.0 was vLLM's coarse ten-second windowed
+   average, taken from a run whose second request hung, not a p50 TPOT; it was also
+   LOWER than the eager bench's 8.79, which should have been the tell. The design is
+   fine. A line topology on ring hardware was costing ~6x, and the fractured residual
+   this port already uses is not the problem.
+
+   **What still blocks TP from being the default is narrower than that.** A REPEAT long
+   request stalls indefinitely with the engine alive and no error -- reproduced twice,
+   once at 100 tokens and once at 40 -- so the 37.50 above is the first request of a
+   session (n=1, traced, clean). Fixing that stall, not re-plumbing the residual, is
+   what would make four dies the right default for a single user.
 
 2. **Single-stream decode is worse, and structurally so.** 114 ms/token against 54 ms.
    This port's TP does roughly four collectives per layer -- the DistributedNorm
