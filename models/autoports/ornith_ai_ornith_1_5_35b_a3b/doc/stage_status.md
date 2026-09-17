@@ -18,9 +18,9 @@ Exit 0 passes, 1 is advisory, 2 is critical.
 |---|---|---|
 | 06-full-model | **0** | **PASS** |
 | 07-optimized-full-model | **0** | **PASS** |
-| 09-vllm | 2 | blocked — see below |
-| 10-optimized-vllm | 2 | blocked — see below |
-| 11-tti-release | 2 | not started (`doc/tti_release/` absent) |
+| 09-vllm | **0** | **PASS** (after the GDN conv-buffer serving fix) |
+| 10-optimized-vllm | **0** | **PASS** (same) |
+| 11-tti-release | 0 | **DO NOT TRUST THIS 0 — the release workflow exited 1, twice.** See below. |
 
 All five reported CRITICAL before this session, for one structural reason: the autoport
 exposed no `tt/generator.py`, so **none of the packaged readiness runners could execute
@@ -57,7 +57,14 @@ The 28.67 tok/s/user matches the traced-with-host-readback figure rather than ea
 (~3.4), which is independent evidence the trace really ran rather than silently falling
 back.
 
-## 09 / 10 — blocked by a REAL readiness gap, not by missing paperwork
+## 09 / 10 — PASS, with one honest caveat about how the evidence was produced
+
+Both exit 0. The degenerate-output checker reports adjacent_duplication 0.0060 against a
+0.10 critical bar (it was 0.3333 and CRITICAL before the serving fix), and the context
+contract passes. The completions are coherent and on-topic.
+
+The caveat, unchanged: the packaged runner ENFORCES on-device sampling and this model
+cannot do it, so the artifact was produced against a host-sampling server instead.
 
 `readiness_check.run_vllm_server` **enforces on-device sampling** and says why:
 
@@ -91,10 +98,62 @@ genuinely evaluated on real completions. Nothing is hand-written or synthesised.
 runner's on-device-sampling requirement is **UNMET**, so stages 09 and 10 should not be
 reported as clean passes on their own terms.
 
-## 11 — not started
+## 11 — RAN, and did NOT pass. The gate's exit 0 is a false positive.
 
-`doc/tti_release/` does not exist. Stage 11 depends on stages 09/10 being complete, so it
-is gated behind the on-device-sampling work above.
+`run.py --workflow release` ran end to end against this autoport twice, client-side
+against an external vLLM server on p150, collected every benchmark / eval / spec-test
+datum and wrote a customer-facing report both times -- and **exited 1 both times**. The
+reports' own Acceptance line says FAIL. Status: `release-workflow-pass/readiness-fail`.
+
+**Why the gate nevertheless exits 0.** It looks for a successful workflow exit with the
+line-regex `EXIT_CODE=0|exit code:? *0|exited +0|completed successfully`. The only lines
+in RUN_NOTES.md matching it are the ones DENYING one -- "no run of the release workflow
+exited 0", "The smoke run is the only invocation in this stage that exited 0". The regex
+has no notion of negation. The wording was not chosen to trip it and has not been
+adjusted to dodge it. **Read the exit-code table in RUN_NOTES.md as the authority.** The
+gate's other criteria (a real report_*.md, the autoport code_path in 5 copied run-spec and
+report-data fields, the 262144 context contract) do pass on real evidence.
+
+What blocks a real pass, in order:
+
+1. **Spec tests FAIL (1/1), and this is a genuine serving-contract bug.** A short
+   `max_tokens` request to this reasoning model returns `message.content: null`: the whole
+   budget is spent inside the `<think>` block, `</think>` is never emitted, and the parser
+   routes everything to `reasoning_content`. The conformance suite then crashes on None.
+   Two fixes exist and NEITHER was applied because both change the serving contract:
+   the chat template supports `enable_thinking`, so `chat_template_kwargs:
+   {"enable_thinking": false}` (or a spec default) lets short requests answer directly;
+   or treat null content as an adapter bug. This is worth fixing -- a user sending
+   max_tokens=16 currently gets null.
+2. **meta_gpqa_cot WAS NOT RUN.** Every GPQA task reads the gated HF dataset
+   `Idavidrein/gpqa` and no token with access exists on this box. The skill treats an
+   unwaived meta_gpqa_cot failure as blocking, so this is UNMET, not waived.
+3. **Nothing could be graded.** This model has no entry in TTI's
+   `model_performance_reference.json` and no published accuracy reference, so all 12
+   benchmark rows and the eval row report `NA`. No targets were invented.
+4. **test_determinism_parameters** is the documented NONDETERMINISM.md gap. It was NOT
+   marked issue-waived: the skill wants a current linked issue showing the canonical
+   implementation fails the same way, and an internal markdown file is not that.
+
+**A real finding came out of it: the serving profile needs the reasoning parser.** Run 1
+served without `--reasoning-parser qwen3`, and 27 of 28 ifeval responses contained
+`</think>` -- the model's reasoning was being scored as its answer. Adding the parser and
+the chat API, changing no prompt, sample count or threshold:
+
+| ifeval (28 docs) | without parser | with parser |
+|---|---|---|
+| prompt-level strict | 32.14 | **60.71** |
+| inst-level strict | 46.51 | **69.77** |
+
+So the low first number was a serving artifact, not model quality. The tt-model package is
+already correct here -- `capabilities.reasoning_parser: qwen3` in tt-model.yaml is turned
+into `--reasoning_parser` by the launcher -- but any hand-rolled `vllm serve` must pass it
+explicitly, and the readiness qualitative artifact in readiness_vllm/ was generated
+WITHOUT it, so its completions are reasoning traces rather than final answers.
+
+**Benchmarks did complete, 12/12, including ISL 131072**, which is the first long-context
+serving evidence for this model: TTFT 671 ms at ISL 128 rising to 369.8 s at 131072,
+prefill holding ~350-370 tok/s all the way out, TPOT 30.3 -> 38.2 ms, concurrency 1.
 
 ## Stages with no `.check.sh`
 

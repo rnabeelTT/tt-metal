@@ -1,0 +1,2226 @@
+diff --git a/reference_config/evals/eval_config.py b/reference_config/evals/eval_config.py
+index d3876ada..3e6a5650 100644
+--- a/reference_config/evals/eval_config.py
++++ b/reference_config/evals/eval_config.py
+@@ -6193,6 +6193,93 @@ _eval_config_list = [
+             ),
+         ],
+     ),
++    # =========================================================================
++    # LOCAL (uncommitted) entry: Ornith-1.5-35B-A3B tt-metal AUTOPORT.
++    # Added by the tt-model-bringup stage-11 (tti-release) run. EVAL_CONFIGS is
++    # the intersection of MODEL_SPECS and this list, so the autoport catalog
++    # entry in workflows/model_specs/prod/llm.yaml needs a matching eval config
++    # for `--workflow evals` / `--workflow release` to be allowed to run at all.
++    #
++    # Task DEFINITIONS are reused from the existing text-LLM entries
++    # (Falcon3-7B-Instruct's ifeval, the GPQA-Diamond zero-shot CoT task), as
++    # the tti-release skill permits. Reference SCORES are NOT reused: no
++    # Tenstorrent or GPU reference measurement exists for this model, so
++    # gpu_reference_score is None on both tasks and the accuracy rows are
++    # reported as measured-but-ungated (N/A) rather than graded against another
++    # model's baseline. published_score is set only where the model's own card
++    # publishes a number, and GPQA Diamond's 89.2 there is a full-set
++    # thinking-mode result from a different harness -- disclosure, not a gate.
++    #
++    # Sampling comes from the model's own generation_config.json
++    # (do_sample=true, temperature=1.0, top_k=20, top_p=0.95). The chat template
++    # is applied from the HF tokenizer (apply_chat_template defaults True), as
++    # required for an instruct model. max_concurrent is 1 because the autoport
++    # serves max_num_seqs=1; per-task max_length is an EVAL prompt budget only
++    # and does not change the served context (262144, per
++    # models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/context_contract.json).
++    # =========================================================================
++    EvalConfig(
++        hf_model_repo="ornith-ai/Ornith-1.5-35B-A3B",
++        tasks=[
++            EvalTask(
++                task_name="ifeval",
++                max_concurrent=1,
++                workflow_venv_type=WorkflowVenvType.EVALS_COMMON,
++                # Chat API, not /v1/completions. This model's chat template
++                # opens a <think> block, so it emits a reasoning trace before
++                # the answer. The first stage-11 release run scored ifeval over
++                # /v1/completions, where 27 of 28 sampled responses contained
++                # "</think>" and the reasoning text was scored as part of the
++                # answer -- which mechanically violates constraints such as "do
++                # not use any commas" and produced an uninterpretable 32.14.
++                # vLLM's reasoning parser only applies to the chat endpoint, so
++                # the server runs with --reasoning-parser qwen3 and this task
++                # uses the chat API, which is the model's declared serving
++                # contract. This changes only how the response is parsed; it
++                # changes no prompt, no sample count and no context limit.
++                use_chat_api=True,
++                model_kwargs={"max_length": 16384},
++                gen_kwargs={
++                    "stream": "false",
++                    "max_gen_toks": 2048,
++                    "do_sample": "true",
++                    "temperature": 1.0,
++                    "top_k": 20,
++                    "top_p": 0.95,
++                },
++                score=EvalTaskScore(
++                    published_score=None,
++                    published_score_ref=None,
++                    gpu_reference_score=None,
++                    gpu_reference_score_ref=None,
++                    score_func=score_task_single_key,
++                    score_func_kwargs={
++                        "result_keys": [
++                            "prompt_level_strict_acc,none",
++                            "inst_level_strict_acc,none",
++                        ],
++                        "unit": "percent",
++                    },
++                ),
++                limit_samples_map={
++                    EvalLimitMode.CI_NIGHTLY: 0.05,
++                    EvalLimitMode.SMOKE_TEST: 0.01,
++                },
++            ),
++            # NOT RUN HERE: gpqa_diamond_cot_zeroshot / meta_gpqa_cot. The
++            # tti-release skill treats GPQA-CoT as a mandatory quality gate for
++            # text LLMs, but every GPQA task in this harness reads the gated HF
++            # dataset Idavidrein/gpqa, and this environment has no HF token with
++            # access to it: load_dataset("Idavidrein/gpqa", "gpqa_diamond")
++            # raises DatasetNotFoundError ("gated dataset ... must be
++            # authenticated"). That is an environment blocker, not a property
++            # of the autoport. It is recorded as an UN-RUN mandatory gate in
++            # models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/tti_release/
++            # RUN_NOTES.md rather than swapped for an unrelated task, waived,
++            # or quietly dropped. Re-add this task once a token with GPQA
++            # access is available.
++        ],
++    ),
+ ]
+
+
+diff --git a/test_module/server_tests_config.json b/test_module/server_tests_config.json
+index 4b6e9226..7743a853 100644
+--- a/test_module/server_tests_config.json
++++ b/test_module/server_tests_config.json
+@@ -1,931 +1,942 @@
+ {
+-    "_version": "1.0.0",
+-    "_description": "Server tests schema configuration. Test suites are in test_suites/*.json",
+-    "model_categories": {
+-        "IMAGE": [
+-            "stable-diffusion-xl-base-1.0",
+-            "stable-diffusion-xl-base-1.0-img-2-img",
+-            "stable-diffusion-xl-1.0-inpainting-0.1",
+-            "stable-diffusion-3.5-large",
+-            "FLUX.1-dev",
+-            "FLUX.1-schnell",
+-            "Motif-Image-6B-Preview"
+-        ],
+-        "AUDIO": [
+-            "distil-large-v3",
+-            "whisper-large-v3"
+-        ],
+-        "CNN": [
+-            "resnet-50",
+-            "vovnet",
+-            "mobilenetv2",
+-            "efficientnet",
+-            "segformer",
+-            "unet",
+-            "vit"
+-        ],
+-        "EMBEDDING": [
+-            "bge-large-en-v1.5",
+-            "Qwen3-Embedding-4B",
+-            "Qwen3-Embedding-8B",
+-            "bge-m3"
+-        ],
+-        "TTS": [
+-            "speecht5_tts"
+-        ],
+-        "VIDEO": [
+-            "Wan2.2-T2V-A14B-Diffusers",
+-            "Wan2.2-I2V-A14B-Diffusers",
+-            "mochi-1-preview"
+-        ],
+-        "LLM": [
+-            "Qwen3-32B",
+-            "Llama-3.1-8B-Instruct",
+-            "Llama-3.3-70B-Instruct",
+-            "gpt-oss-20b",
+-            "diffusiongemma-26B-A4B-it",
+-            "Mistral-Small-3.1-24B-Instruct-2503"
+-        ]
+-    },
+-    "available_markers": {
+-        "test_types": {
+-            "load": "Load testing with concurrent requests",
+-            "param": "Parameter validation tests",
+-            "e2e": "Full system tests covering complete workflows",
+-            "eval": "Model evaluation tests"
+-        },
+-        "performance_characteristics": {
+-            "slow": "Tests taking >30 seconds to complete",
+-            "heavy": "Resource-intensive tests (large models, high memory)",
+-            "fast": "Tests completing in <10 seconds"
+-        },
+-        "hardware_targets": {
+-            "n150": "Tests for N150 device (1 chip)",
+-            "n300": "Tests for N300 device (2 chips)",
+-            "t3k": "Tests for T3K device (4 chips)",
+-            "galaxy": "Tests for Galaxy device (32 chips)",
+-            "blackhole_galaxy": "Tests for Blackhole Galaxy device (32 P150 chips)",
+-            "p150": "Tests for P150 device (1 chip)",
+-            "p150x4": "Tests for P150x4 device (4 chips)",
+-            "p150x8": "Tests for P150x8 device (8 chips)",
+-            "p300": "Tests for P300 device (2 chips)",
+-            "p300x2": "Tests for P300x2 device (4 chips)"
+-        },
+-        "model_categories": {
+-            "image": "Image generation/processing model tests",
+-            "audio": "Audio transcription model tests",
+-            "cnn": "CNN model tests",
+-            "llm": "Large Language Model tests",
+-            "embedding": "Embedding model tests",
+-            "tts": "Text-to-speech model tests",
+-            "video": "Video generation model tests"
+-        },
+-        "specific_models": {
+-            "sdxl": "Stable Diffusion XL tests",
+-            "sdxl_img2img": "Stable Diffusion XL img2img tests",
+-            "sdxl_inpaint": "Stable Diffusion XL inpainting tests",
+-            "sd35": "Stable Diffusion 3.5 tests",
+-            "whisper": "Whisper model tests",
+-            "distil_whisper": "Distil Whisper model tests",
+-            "flux_dev": "FLUX.1-dev model tests",
+-            "flux_schnell": "FLUX.1-schnell model tests",
+-            "motif": "Motif image generation model tests",
+-            "bge": "BGE embedding model tests",
+-            "qwen3_emb": "Qwen3 embedding model tests",
+-            "speecht5": "SpeechT5 TTS model tests",
+-            "wan": "Wan video generation model tests",
+-            "wan_i2v": "Wan image-to-video generation model tests",
+-            "mochi": "Mochi video generation model tests",
+-            "mobilenetv2": "MobileNetV2 CNN model tests",
+-            "bge_m3": "BGE-M3 embedding model tests"
+-        }
+-    },
+-    "model_configs": {
+-        "mobilenetv2": {
+-            "weights": [
+-                "mobilenetv2"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150",
+-                "n300"
+-            ]
+-        },
+-        "resnet": {
+-            "id_name": "resnet-50",
+-            "weights": [
+-                "resnet-50"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150",
+-                "n300"
+-            ]
+-        },
+-        "efficientnet": {
+-            "weights": [
+-                "efficientnet"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150"
+-            ]
+-        },
+-        "segformer": {
+-            "weights": [
+-                "segformer"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150"
+-            ]
+-        },
+-        "unet": {
+-            "weights": [
+-                "unet"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150"
+-            ]
+-        },
+-        "vit": {
+-            "weights": [
+-                "vit"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150"
+-            ]
+-        },
+-        "vovnet": {
+-            "weights": [
+-                "vovnet"
+-            ],
+-            "category": "CNN",
+-            "compatible_devices": [
+-                "n150"
+-            ]
+-        },
+-        "distil_whisper": {
+-            "id_name": "distil-whisper",
+-            "weights": [
+-                "distil-large-v3"
+-            ],
+-            "category": "AUDIO",
+-            "compatible_devices": [
+-                "n150",
+-                "p150",
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "whisper": {
+-            "weights": [
+-                "whisper-large-v3"
+-            ],
+-            "category": "AUDIO",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy",
+-                "blackhole_galaxy"
+-            ]
+-        },
+-        "wan": {
+-            "weights": [
+-                "Wan2.2-T2V-A14B-Diffusers"
+-            ],
+-            "category": "VIDEO",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "wan_i2v": {
+-            "id_name": "wan-i2v",
+-            "weights": [
+-                "Wan2.2-I2V-A14B-Diffusers"
+-            ],
+-            "category": "VIDEO",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "mochi": {
+-            "weights": [
+-                "mochi-1-preview"
+-            ],
+-            "category": "VIDEO",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "sdxl": {
+-            "weights": [
+-                "stable-diffusion-xl-base-1.0"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy",
+-                "n300",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "sdxl_img2img": {
+-            "id_name": "sdxl-img2img",
+-            "weights": [
+-                "stable-diffusion-xl-base-1.0-img-2-img"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "sdxl_inpaint": {
+-            "id_name": "sdxl-inpaint",
+-            "weights": [
+-                "stable-diffusion-xl-1.0-inpainting-0.1"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "sd35": {
+-            "weights": [
+-                "stable-diffusion-3.5-large"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "flux_dev": {
+-            "id_name": "flux-dev",
+-            "weights": [
+-                "FLUX.1-dev"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300",
+-                "p300x2"
+-            ]
+-        },
+-        "flux_schnell": {
+-            "id_name": "flux-schnell",
+-            "weights": [
+-                "FLUX.1-schnell"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300",
+-                "p300x2"
+-            ]
+-        },
+-        "motif": {
+-            "weights": [
+-                "Motif-Image-6B-Preview"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy",
+-                "p150x4",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "z_image_turbo": {
+-            "weights": [
+-                "Z-Image-Turbo"
+-            ],
+-            "category": "IMAGE",
+-            "compatible_devices": [
+-                "p300x2"
+-            ]
+-        },
+-        "bge": {
+-            "weights": [
+-                "bge-large-en-v1.5"
+-            ],
+-            "category": "EMBEDDING",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "qwen3_emb": {
+-            "id_name": "qwen3-emb-8b",
+-            "weights": [
+-                "Qwen3-Embedding-8B",
+-                "Qwen3-Embedding-4B"
+-            ],
+-            "category": "EMBEDDING",
+-            "compatible_devices": [
+-                "n150",
+-                "t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "speecht5": {
+-            "weights": [
+-                "speecht5_tts"
+-            ],
+-            "category": "TTS",
+-            "compatible_devices": [
+-                "n150",
+-                "p150"
+-            ]
+-        },
+-        "diffusiongemma_26b": {
+-            "id_name": "diffusiongemma-26b-a4b-it",
+-            "weights": [
+-                "diffusiongemma-26B-A4B-it"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "p300x2"
+-            ]
+-        },
+-        "gpt_oss_20b": {
+-            "id_name": "gpt-oss-20b",
+-            "weights": [
+-                "gpt-oss-20b"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "t3k",
+-                "galaxy_t3k",
+-                "galaxy"
+-            ]
+-        },
+-        "qwen3_32b": {
+-            "id_name": "qwen3-32b",
+-            "weights": [
+-                "Qwen3-32B"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "galaxy",
+-                "t3k",
+-                "galaxy_t3k",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "llama_70b_family": {
+-            "id_name": "llama-70b",
+-            "weights": [
+-                "Llama-3.3-70B-Instruct"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "galaxy",
+-                "t3k",
+-                "galaxy_t3k",
+-                "p150x4",
+-                "p150x8",
+-                "p300x2"
+-            ]
+-        },
+-        "llama_3_1_8b": {
+-            "id_name": "llama-3.1-8b",
+-            "weights": [
+-                "Llama-3.1-8B-Instruct"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "n150",
+-                "n300",
+-                "t3k",
+-                "gpu",
+-                "p100",
+-                "p150",
+-                "p150x4",
+-                "p150x8",
+-                "p300",
+-                "p300x2",
+-                "galaxy",
+-                "galaxy_t3k"
+-            ]
+-        },
+-        "mistral_small_24b": {
+-            "id_name": "mistral-small-3.1-24b",
+-            "weights": [
+-                "Mistral-Small-3.1-24B-Instruct-2503"
+-            ],
+-            "category": "LLM",
+-            "compatible_devices": [
+-                "blackhole_galaxy"
+-            ]
+-        }
+-    },
+-    "hardware_defaults": {
+-        "n150": {
+-            "num_of_devices": 1,
+-            "liveness_retry_attempts": 80
+-        },
+-        "n300": {
+-            "num_of_devices": 2,
+-            "liveness_retry_attempts": 100
+-        },
+-        "t3k": {
+-            "num_of_devices": 4,
+-            "liveness_retry_attempts": 120
+-        },
+-        "galaxy": {
+-            "num_of_devices": 32,
+-            "liveness_retry_attempts": 220
+-        },
+-        "blackhole_galaxy": {
+-            "num_of_devices": 32,
+-            "liveness_retry_attempts": 220
+-        },
+-        "p150": {
+-            "num_of_devices": 1,
+-            "liveness_retry_attempts": 80
+-        },
+-        "p150x4": {
+-            "num_of_devices": 4,
+-            "liveness_retry_attempts": 120
+-        },
+-        "p150x8": {
+-            "num_of_devices": 8,
+-            "liveness_retry_attempts": 140
+-        },
+-        "p300": {
+-            "num_of_devices": 2,
+-            "liveness_retry_attempts": 100
+-        },
+-        "p300x2": {
+-            "num_of_devices": 4,
+-            "liveness_retry_attempts": 120
+-        }
+-    },
+-    "prerequisite_tests": [
+-        {
+-            "name": "DeviceLivenessTest",
+-            "module": "test_module.health_tests.device_liveness_test",
+-            "description": "Test for device liveness checks - runs before all other tests",
+-            "engines": [
+-                "media",
+-                "forge"
+-            ],
+-            "exclude_categories": [
+-                "LLM"
+-            ],
+-            "markers": [
+-                "fast",
+-                "prerequisite"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_delay": 10,
+-                "break_on_failure": true,
+-                "mock_mode": false
+-            },
+-            "_comment": "retry_attempts and num_of_devices derived from hardware_defaults. Gated by both 'engines' and 'exclude_categories' (LLM suites run bare vllm serve, which has no /tt-liveness route; the LLM path gates on /health)."
+-        },
+-        {
+-            "name": "LoggerForkSafetyTest",
+-            "module": "test_module.unit_tests.logger_fork_safety_test",
+-            "description": "Test for logging fork safety to prevent deadlocks",
+-            "markers": [
+-                "fast",
+-                "prerequisite"
+-            ],
+-            "test_config": {
+-                "test_timeout": 60,
+-                "retry_attempts": 1,
+-                "retry_delay": 5,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        }
++  "_version": "1.0.0",
++  "_description": "Server tests schema configuration. Test suites are in test_suites/*.json",
++  "model_categories": {
++    "IMAGE": [
++      "stable-diffusion-xl-base-1.0",
++      "stable-diffusion-xl-base-1.0-img-2-img",
++      "stable-diffusion-xl-1.0-inpainting-0.1",
++      "stable-diffusion-3.5-large",
++      "FLUX.1-dev",
++      "FLUX.1-schnell",
++      "Motif-Image-6B-Preview"
++    ],
++    "AUDIO": [
++      "distil-large-v3",
++      "whisper-large-v3"
++    ],
++    "CNN": [
++      "resnet-50",
++      "vovnet",
++      "mobilenetv2",
++      "efficientnet",
++      "segformer",
++      "unet",
++      "vit"
++    ],
++    "EMBEDDING": [
++      "bge-large-en-v1.5",
++      "Qwen3-Embedding-4B",
++      "Qwen3-Embedding-8B",
++      "bge-m3"
++    ],
++    "TTS": [
++      "speecht5_tts"
+     ],
+-    "test_templates": {
+-        "ImageGenerationLoadTest": {
+-            "module": "test_module.load_param_tests.image_generation_load_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "ImageGenerationParamTest": {
+-            "module": "test_module.load_param_tests.image_generation_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "Img2ImgGenerationParamTest": {
+-            "module": "test_module.load_param_tests.img2img_generation_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "InpaintingGenerationParamTest": {
+-            "module": "test_module.load_param_tests.inpainting_generation_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "ImageGenerationEvalsTest": {
+-            "module": "test_module.eval_tests.image_generation_eval_test",
+-            "markers": [
+-                "eval",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "ImageGenerationLoraLoadTest": {
+-            "module": "test_module.load_param_tests.image_generation_lora_load_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "AudioTranscriptionLoadTest": {
+-            "module": "test_module.load_param_tests.audio_transcription_load_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "AudioTranscriptionParamTest": {
+-            "module": "test_module.load_param_tests.audio_transcription_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "AudioTranscriptionLoadDp2Chunk5Test": {
+-            "module": "test_module.load_param_tests.audio_transcription_load_dp2_chunk5_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "AudioTranscriptionLoadDp2Chunk30Test": {
+-            "module": "test_module.load_param_tests.audio_transcription_load_dp2_chunk30_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "DeviceStabilityTest": {
+-            "module": "test_module.stability_tests.device_stability_test",
+-            "markers": [
+-                "stability",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "CnnLoadTest": {
+-            "module": "test_module.load_param_tests.cnn_load_test",
+-            "markers": [
+-                "load",
+-                "e2e"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "CnnParamTest": {
+-            "module": "test_module.load_param_tests.cnn_param_test",
+-            "markers": [
+-                "param",
+-                "e2e"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "EmbeddingLoadTest": {
+-            "module": "test_module.load_param_tests.embedding_load_test",
+-            "markers": [
+-                "load",
+-                "e2e"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "SpeechT5TTSTest": {
+-            "module": "test_module.integration_tests.speecht5_tts_test",
+-            "markers": [
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "TTSLoadTest": {
+-            "module": "test_module.load_param_tests.tts_load_test",
+-            "markers": [
+-                "load",
+-                "e2e"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "TTSParamTest": {
+-            "module": "test_module.load_param_tests.tts_param_test",
+-            "markers": [
+-                "param",
+-                "e2e"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "TTSIntegrationTest": {
+-            "module": "test_module.integration_tests.tts_integration_test",
+-            "markers": [
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VideoGenerationLoadTest": {
+-            "module": "test_module.load_param_tests.video_generation_load_test",
+-            "markers": [
+-                "load",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VideoGenerationParamTest": {
+-            "module": "test_module.load_param_tests.video_generation_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VideoGenerationI2VTest": {
+-            "module": "test_module.load_param_tests.video_generation_i2v_test",
+-            "markers": [
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VideoGenerationI2VParamTest": {
+-            "module": "test_module.load_param_tests.video_generation_i2v_param_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 1,
+-                "retry_delay": 60,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VLLMParamConformanceTest": {
+-            "module": "test_module.llm_tests.vllm_param_conformance_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 0,
+-                "retry_delay": 10,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VLLMResponsesParamConformanceTest": {
+-            "module": "test_module.llm_tests.vllm_param_conformance_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 0,
+-                "retry_delay": 10,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VLLMQwen3StreamingParamConformanceTest": {
+-            "module": "test_module.llm_tests.vllm_param_conformance_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow"
+-            ],
+-            "test_config": {
+-                "test_timeout": 3600,
+-                "retry_attempts": 0,
+-                "retry_delay": 10,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        },
+-        "VLLMDiffusionGemmaParamConformanceTest": {
+-            "module": "test_module.llm_tests.vllm_param_conformance_test",
+-            "markers": [
+-                "param",
+-                "e2e",
+-                "slow",
+-                "heavy"
+-            ],
+-            "test_config": {
+-                "timeout": 3600,
+-                "retry_attempts": 0,
+-                "retry_delay": 10,
+-                "break_on_failure": false,
+-                "mock_mode": false
+-            }
+-        }
+-    },
+-    "_comment": "test_suites are loaded from test_suites/*.json files",
+-    "test_suites": []
++    "VIDEO": [
++      "Wan2.2-T2V-A14B-Diffusers",
++      "Wan2.2-I2V-A14B-Diffusers",
++      "mochi-1-preview"
++    ],
++    "LLM": [
++      "Qwen3-32B",
++      "Llama-3.1-8B-Instruct",
++      "Llama-3.3-70B-Instruct",
++      "gpt-oss-20b",
++      "diffusiongemma-26B-A4B-it",
++      "Mistral-Small-3.1-24B-Instruct-2503"
++    ]
++  },
++  "available_markers": {
++    "test_types": {
++      "load": "Load testing with concurrent requests",
++      "param": "Parameter validation tests",
++      "e2e": "Full system tests covering complete workflows",
++      "eval": "Model evaluation tests"
++    },
++    "performance_characteristics": {
++      "slow": "Tests taking >30 seconds to complete",
++      "heavy": "Resource-intensive tests (large models, high memory)",
++      "fast": "Tests completing in <10 seconds"
++    },
++    "hardware_targets": {
++      "n150": "Tests for N150 device (1 chip)",
++      "n300": "Tests for N300 device (2 chips)",
++      "t3k": "Tests for T3K device (4 chips)",
++      "galaxy": "Tests for Galaxy device (32 chips)",
++      "blackhole_galaxy": "Tests for Blackhole Galaxy device (32 P150 chips)",
++      "p150": "Tests for P150 device (1 chip)",
++      "p150x4": "Tests for P150x4 device (4 chips)",
++      "p150x8": "Tests for P150x8 device (8 chips)",
++      "p300": "Tests for P300 device (2 chips)",
++      "p300x2": "Tests for P300x2 device (4 chips)"
++    },
++    "model_categories": {
++      "image": "Image generation/processing model tests",
++      "audio": "Audio transcription model tests",
++      "cnn": "CNN model tests",
++      "llm": "Large Language Model tests",
++      "embedding": "Embedding model tests",
++      "tts": "Text-to-speech model tests",
++      "video": "Video generation model tests"
++    },
++    "specific_models": {
++      "sdxl": "Stable Diffusion XL tests",
++      "sdxl_img2img": "Stable Diffusion XL img2img tests",
++      "sdxl_inpaint": "Stable Diffusion XL inpainting tests",
++      "sd35": "Stable Diffusion 3.5 tests",
++      "whisper": "Whisper model tests",
++      "distil_whisper": "Distil Whisper model tests",
++      "flux_dev": "FLUX.1-dev model tests",
++      "flux_schnell": "FLUX.1-schnell model tests",
++      "motif": "Motif image generation model tests",
++      "bge": "BGE embedding model tests",
++      "qwen3_emb": "Qwen3 embedding model tests",
++      "speecht5": "SpeechT5 TTS model tests",
++      "wan": "Wan video generation model tests",
++      "wan_i2v": "Wan image-to-video generation model tests",
++      "mochi": "Mochi video generation model tests",
++      "mobilenetv2": "MobileNetV2 CNN model tests",
++      "bge_m3": "BGE-M3 embedding model tests"
++    }
++  },
++  "model_configs": {
++    "mobilenetv2": {
++      "weights": [
++        "mobilenetv2"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150",
++        "n300"
++      ]
++    },
++    "resnet": {
++      "id_name": "resnet-50",
++      "weights": [
++        "resnet-50"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150",
++        "n300"
++      ]
++    },
++    "efficientnet": {
++      "weights": [
++        "efficientnet"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150"
++      ]
++    },
++    "segformer": {
++      "weights": [
++        "segformer"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150"
++      ]
++    },
++    "unet": {
++      "weights": [
++        "unet"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150"
++      ]
++    },
++    "vit": {
++      "weights": [
++        "vit"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150"
++      ]
++    },
++    "vovnet": {
++      "weights": [
++        "vovnet"
++      ],
++      "category": "CNN",
++      "compatible_devices": [
++        "n150"
++      ]
++    },
++    "distil_whisper": {
++      "id_name": "distil-whisper",
++      "weights": [
++        "distil-large-v3"
++      ],
++      "category": "AUDIO",
++      "compatible_devices": [
++        "n150",
++        "p150",
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "whisper": {
++      "weights": [
++        "whisper-large-v3"
++      ],
++      "category": "AUDIO",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy",
++        "blackhole_galaxy"
++      ]
++    },
++    "wan": {
++      "weights": [
++        "Wan2.2-T2V-A14B-Diffusers"
++      ],
++      "category": "VIDEO",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "wan_i2v": {
++      "id_name": "wan-i2v",
++      "weights": [
++        "Wan2.2-I2V-A14B-Diffusers"
++      ],
++      "category": "VIDEO",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "mochi": {
++      "weights": [
++        "mochi-1-preview"
++      ],
++      "category": "VIDEO",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "sdxl": {
++      "weights": [
++        "stable-diffusion-xl-base-1.0"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy",
++        "n300",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "sdxl_img2img": {
++      "id_name": "sdxl-img2img",
++      "weights": [
++        "stable-diffusion-xl-base-1.0-img-2-img"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "sdxl_inpaint": {
++      "id_name": "sdxl-inpaint",
++      "weights": [
++        "stable-diffusion-xl-1.0-inpainting-0.1"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "sd35": {
++      "weights": [
++        "stable-diffusion-3.5-large"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "flux_dev": {
++      "id_name": "flux-dev",
++      "weights": [
++        "FLUX.1-dev"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300",
++        "p300x2"
++      ]
++    },
++    "flux_schnell": {
++      "id_name": "flux-schnell",
++      "weights": [
++        "FLUX.1-schnell"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300",
++        "p300x2"
++      ]
++    },
++    "motif": {
++      "weights": [
++        "Motif-Image-6B-Preview"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "t3k",
++        "galaxy",
++        "p150x4",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "z_image_turbo": {
++      "weights": [
++        "Z-Image-Turbo"
++      ],
++      "category": "IMAGE",
++      "compatible_devices": [
++        "p300x2"
++      ]
++    },
++    "bge": {
++      "weights": [
++        "bge-large-en-v1.5"
++      ],
++      "category": "EMBEDDING",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "qwen3_emb": {
++      "id_name": "qwen3-emb-8b",
++      "weights": [
++        "Qwen3-Embedding-8B",
++        "Qwen3-Embedding-4B"
++      ],
++      "category": "EMBEDDING",
++      "compatible_devices": [
++        "n150",
++        "t3k",
++        "galaxy"
++      ]
++    },
++    "speecht5": {
++      "weights": [
++        "speecht5_tts"
++      ],
++      "category": "TTS",
++      "compatible_devices": [
++        "n150",
++        "p150"
++      ]
++    },
++    "diffusiongemma_26b": {
++      "id_name": "diffusiongemma-26b-a4b-it",
++      "weights": [
++        "diffusiongemma-26B-A4B-it"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "p300x2"
++      ]
++    },
++    "gpt_oss_20b": {
++      "id_name": "gpt-oss-20b",
++      "weights": [
++        "gpt-oss-20b"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "t3k",
++        "galaxy_t3k",
++        "galaxy"
++      ]
++    },
++    "qwen3_32b": {
++      "id_name": "qwen3-32b",
++      "weights": [
++        "Qwen3-32B"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "galaxy",
++        "t3k",
++        "galaxy_t3k",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "llama_70b_family": {
++      "id_name": "llama-70b",
++      "weights": [
++        "Llama-3.3-70B-Instruct"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "galaxy",
++        "t3k",
++        "galaxy_t3k",
++        "p150x4",
++        "p150x8",
++        "p300x2"
++      ]
++    },
++    "llama_3_1_8b": {
++      "id_name": "llama-3.1-8b",
++      "weights": [
++        "Llama-3.1-8B-Instruct"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "n150",
++        "n300",
++        "t3k",
++        "gpu",
++        "p100",
++        "p150",
++        "p150x4",
++        "p150x8",
++        "p300",
++        "p300x2",
++        "galaxy",
++        "galaxy_t3k"
++      ]
++    },
++    "mistral_small_24b": {
++      "id_name": "mistral-small-3.1-24b",
++      "weights": [
++        "Mistral-Small-3.1-24B-Instruct-2503"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "blackhole_galaxy"
++      ]
++    },
++    "ornith_1_5_35b_a3b": {
++      "_comment": "LOCAL (uncommitted) entry added by the tt-model-bringup stage-11 (tti-release) run for the models/autoports/ornith_ai_ornith_1_5_35b_a3b autoport. NOTE: 'weights' here is the FULL HF repo id, because TestFilter.filter_by_model() matches against ModelSpec.hf_model_repo; the bare-name entries above therefore never match an LLM spec.",
++      "id_name": "ornith-1-5-35b-a3b",
++      "weights": [
++        "ornith-ai/Ornith-1.5-35B-A3B"
++      ],
++      "category": "LLM",
++      "compatible_devices": [
++        "p150"
++      ]
++    }
++  },
++  "hardware_defaults": {
++    "n150": {
++      "num_of_devices": 1,
++      "liveness_retry_attempts": 80
++    },
++    "n300": {
++      "num_of_devices": 2,
++      "liveness_retry_attempts": 100
++    },
++    "t3k": {
++      "num_of_devices": 4,
++      "liveness_retry_attempts": 120
++    },
++    "galaxy": {
++      "num_of_devices": 32,
++      "liveness_retry_attempts": 220
++    },
++    "blackhole_galaxy": {
++      "num_of_devices": 32,
++      "liveness_retry_attempts": 220
++    },
++    "p150": {
++      "num_of_devices": 1,
++      "liveness_retry_attempts": 80
++    },
++    "p150x4": {
++      "num_of_devices": 4,
++      "liveness_retry_attempts": 120
++    },
++    "p150x8": {
++      "num_of_devices": 8,
++      "liveness_retry_attempts": 140
++    },
++    "p300": {
++      "num_of_devices": 2,
++      "liveness_retry_attempts": 100
++    },
++    "p300x2": {
++      "num_of_devices": 4,
++      "liveness_retry_attempts": 120
++    }
++  },
++  "prerequisite_tests": [
++    {
++      "name": "DeviceLivenessTest",
++      "module": "test_module.health_tests.device_liveness_test",
++      "description": "Test for device liveness checks - runs before all other tests",
++      "engines": [
++        "media",
++        "forge"
++      ],
++      "exclude_categories": [
++        "LLM"
++      ],
++      "markers": [
++        "fast",
++        "prerequisite"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_delay": 10,
++        "break_on_failure": true,
++        "mock_mode": false
++      },
++      "_comment": "retry_attempts and num_of_devices derived from hardware_defaults. Gated by both 'engines' and 'exclude_categories' (LLM suites run bare vllm serve, which has no /tt-liveness route; the LLM path gates on /health)."
++    },
++    {
++      "name": "LoggerForkSafetyTest",
++      "module": "test_module.unit_tests.logger_fork_safety_test",
++      "description": "Test for logging fork safety to prevent deadlocks",
++      "markers": [
++        "fast",
++        "prerequisite"
++      ],
++      "test_config": {
++        "test_timeout": 60,
++        "retry_attempts": 1,
++        "retry_delay": 5,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    }
++  ],
++  "test_templates": {
++    "ImageGenerationLoadTest": {
++      "module": "test_module.load_param_tests.image_generation_load_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "ImageGenerationParamTest": {
++      "module": "test_module.load_param_tests.image_generation_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "Img2ImgGenerationParamTest": {
++      "module": "test_module.load_param_tests.img2img_generation_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "InpaintingGenerationParamTest": {
++      "module": "test_module.load_param_tests.inpainting_generation_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "ImageGenerationEvalsTest": {
++      "module": "test_module.eval_tests.image_generation_eval_test",
++      "markers": [
++        "eval",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "ImageGenerationLoraLoadTest": {
++      "module": "test_module.load_param_tests.image_generation_lora_load_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "AudioTranscriptionLoadTest": {
++      "module": "test_module.load_param_tests.audio_transcription_load_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "AudioTranscriptionParamTest": {
++      "module": "test_module.load_param_tests.audio_transcription_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "AudioTranscriptionLoadDp2Chunk5Test": {
++      "module": "test_module.load_param_tests.audio_transcription_load_dp2_chunk5_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "AudioTranscriptionLoadDp2Chunk30Test": {
++      "module": "test_module.load_param_tests.audio_transcription_load_dp2_chunk30_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "DeviceStabilityTest": {
++      "module": "test_module.stability_tests.device_stability_test",
++      "markers": [
++        "stability",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "CnnLoadTest": {
++      "module": "test_module.load_param_tests.cnn_load_test",
++      "markers": [
++        "load",
++        "e2e"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "CnnParamTest": {
++      "module": "test_module.load_param_tests.cnn_param_test",
++      "markers": [
++        "param",
++        "e2e"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "EmbeddingLoadTest": {
++      "module": "test_module.load_param_tests.embedding_load_test",
++      "markers": [
++        "load",
++        "e2e"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "SpeechT5TTSTest": {
++      "module": "test_module.integration_tests.speecht5_tts_test",
++      "markers": [
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "TTSLoadTest": {
++      "module": "test_module.load_param_tests.tts_load_test",
++      "markers": [
++        "load",
++        "e2e"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "TTSParamTest": {
++      "module": "test_module.load_param_tests.tts_param_test",
++      "markers": [
++        "param",
++        "e2e"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "TTSIntegrationTest": {
++      "module": "test_module.integration_tests.tts_integration_test",
++      "markers": [
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VideoGenerationLoadTest": {
++      "module": "test_module.load_param_tests.video_generation_load_test",
++      "markers": [
++        "load",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VideoGenerationParamTest": {
++      "module": "test_module.load_param_tests.video_generation_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VideoGenerationI2VTest": {
++      "module": "test_module.load_param_tests.video_generation_i2v_test",
++      "markers": [
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VideoGenerationI2VParamTest": {
++      "module": "test_module.load_param_tests.video_generation_i2v_param_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 1,
++        "retry_delay": 60,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VLLMParamConformanceTest": {
++      "module": "test_module.llm_tests.vllm_param_conformance_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 0,
++        "retry_delay": 10,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VLLMResponsesParamConformanceTest": {
++      "module": "test_module.llm_tests.vllm_param_conformance_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 0,
++        "retry_delay": 10,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VLLMQwen3StreamingParamConformanceTest": {
++      "module": "test_module.llm_tests.vllm_param_conformance_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow"
++      ],
++      "test_config": {
++        "test_timeout": 3600,
++        "retry_attempts": 0,
++        "retry_delay": 10,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    },
++    "VLLMDiffusionGemmaParamConformanceTest": {
++      "module": "test_module.llm_tests.vllm_param_conformance_test",
++      "markers": [
++        "param",
++        "e2e",
++        "slow",
++        "heavy"
++      ],
++      "test_config": {
++        "timeout": 3600,
++        "retry_attempts": 0,
++        "retry_delay": 10,
++        "break_on_failure": false,
++        "mock_mode": false
++      }
++    }
++  },
++  "_comment": "test_suites are loaded from test_suites/*.json files",
++  "test_suites": []
+ }
+diff --git a/test_module/test_suites/llm.json b/test_module/test_suites/llm.json
+index a2fb6d30..b5f313f7 100644
+--- a/test_module/test_suites/llm.json
++++ b/test_module/test_suites/llm.json
+@@ -1,86 +1,87 @@
+ {
+-    "_description": "Test suites for LLM model category",
+-    "_category": "LLM",
+-    "test_matrices": [
++  "_description": "Test suites for LLM model category",
++  "_category": "LLM",
++  "test_matrices": [
++    {
++      "models": [
++        "qwen3_32b",
++        "llama_3_1_8b",
++        "llama_70b_family",
++        "gpt_oss_20b",
++        "ornith_1_5_35b_a3b"
++      ],
++      "devices": [
++        "n150",
++        "n300",
++        "t3k",
++        "galaxy",
++        "galaxy_t3k",
++        "gpu",
++        "p100",
++        "p150",
++        "p150x4",
++        "p150x8",
++        "p300",
++        "p300x2"
++      ],
++      "test_cases": [
+         {
+-            "models": [
+-                "qwen3_32b",
+-                "llama_3_1_8b",
+-                "llama_70b_family",
+-                "gpt_oss_20b"
+-            ],
+-            "devices": [
+-                "n150",
+-                "n300",
+-                "t3k",
+-                "galaxy",
+-                "galaxy_t3k",
+-                "gpu",
+-                "p100",
+-                "p150",
+-                "p150x4",
+-                "p150x8",
+-                "p300",
+-                "p300x2"
+-            ],
+-            "test_cases": [
+-                {
+-                    "template": "VLLMParamConformanceTest",
+-                    "enabled": true,
+-                    "description": "vLLM chat/completions parameter conformance"
+-                }
+-            ]
+-        },
++          "template": "VLLMParamConformanceTest",
++          "enabled": true,
++          "description": "vLLM chat/completions parameter conformance"
++        }
++      ]
++    },
++    {
++      "models": [
++        "gpt_oss_20b"
++      ],
++      "devices": [
++        "t3k",
++        "galaxy",
++        "galaxy_t3k"
++      ],
++      "test_cases": [
+         {
+-            "models": [
+-                "gpt_oss_20b"
+-            ],
+-            "devices": [
+-                "t3k",
+-                "galaxy",
+-                "galaxy_t3k"
+-            ],
+-            "test_cases": [
+-                {
+-                    "template": "VLLMResponsesParamConformanceTest",
+-                    "enabled": true,
+-                    "description": "vLLM responses parameter conformance"
+-                }
+-            ]
+-        },
++          "template": "VLLMResponsesParamConformanceTest",
++          "enabled": true,
++          "description": "vLLM responses parameter conformance"
++        }
++      ]
++    },
++    {
++      "models": [
++        "qwen3_32b"
++      ],
++      "devices": [
++        "galaxy",
++        "t3k",
++        "galaxy_t3k",
++        "p150x8",
++        "p300x2"
++      ],
++      "test_cases": [
+         {
+-            "models": [
+-                "qwen3_32b"
+-            ],
+-            "devices": [
+-                "galaxy",
+-                "t3k",
+-                "galaxy_t3k",
+-                "p150x8",
+-                "p300x2"
+-            ],
+-            "test_cases": [
+-                {
+-                    "template": "VLLMQwen3StreamingParamConformanceTest",
+-                    "enabled": true,
+-                    "description": "Qwen3-32B streaming reasoning/tool-call regressions"
+-                }
+-            ]
+-        },
++          "template": "VLLMQwen3StreamingParamConformanceTest",
++          "enabled": true,
++          "description": "Qwen3-32B streaming reasoning/tool-call regressions"
++        }
++      ]
++    },
++    {
++      "models": [
++        "diffusiongemma_26b"
++      ],
++      "devices": [
++        "p300x2"
++      ],
++      "test_cases": [
+         {
+-            "models": [
+-                "diffusiongemma_26b"
+-            ],
+-            "devices": [
+-                "p300x2"
+-            ],
+-            "test_cases": [
+-                {
+-                    "template": "VLLMDiffusionGemmaParamConformanceTest",
+-                    "enabled": true,
+-                    "description": "DiffusionGemma block-serving and request-admission gates"
+-                }
+-            ]
++          "template": "VLLMDiffusionGemmaParamConformanceTest",
++          "enabled": true,
++          "description": "DiffusionGemma block-serving and request-admission gates"
+         }
+-    ]
++      ]
++    }
++  ]
+ }
+diff --git a/workflows/model_spec.py b/workflows/model_spec.py
+index 372edf16..9d793398 100644
+--- a/workflows/model_spec.py
++++ b/workflows/model_spec.py
+@@ -374,6 +374,17 @@ training_lora_impl = ImplSpec(
+     code_path="tt-media-server/tt_model_runners/forge_training_runners/training_lora_runner.py",
+ )
+
++# --- Local (uncommitted) entry for the Ornith-1.5-35B-A3B tt-metal autoport ---
++# Added locally so tt-inference-server can run its release workflow against the
++# GENERATED autoport implementation under models/autoports/ instead of a stock
++# packaged model. Not part of the upstream catalog.
++ornith_autoport_impl = ImplSpec(
++    impl_id="ornith_autoport",
++    impl_name="ornith-autoport",
++    repo_url="https://github.com/tenstorrent/tt-metal",
++    code_path="models/autoports/ornith_ai_ornith_1_5_35b_a3b",
++)
++
+ _IMPL_REGISTRY: Dict[str, ImplSpec] = {
+     "tt_transformers": tt_transformers_impl,
+     "llama3_70b_galaxy": llama3_70b_galaxy_impl,
+@@ -389,6 +400,7 @@ _IMPL_REGISTRY: Dict[str, ImplSpec] = {
+     "qwen36_blackhole_vlm": qwen36_blackhole_vlm_impl,
+     "diffusion_gemma": diffusion_gemma_impl,
+     "training_lora": training_lora_impl,
++    "ornith_autoport": ornith_autoport_impl,
+ }
+
+
+diff --git a/workflows/model_specs/prod/llm.yaml b/workflows/model_specs/prod/llm.yaml
+index 814373f8..33959501 100644
+--- a/workflows/model_specs/prod/llm.yaml
++++ b/workflows/model_specs/prod/llm.yaml
+@@ -2897,3 +2897,47 @@ templates:
+         # A request must leave one full output canvas inside max_context.
+       max_effective_input_tokens: 261888
+
++
++# =============================================================================
++# LOCAL (uncommitted) entry: Ornith-1.5-35B-A3B tt-metal AUTOPORT.
++# Added by the tt-model-bringup stage-11 (tti-release) run so that
++# tt-inference-server can run its release workflow against the GENERATED
++# implementation at models/autoports/ornith_ai_ornith_1_5_35b_a3b, rather than
++# any stock packaged model. The entry exists for two reasons:
++#   1. impl ornith_autoport carries code_path=models/autoports/... so every
++#      run spec / report identifies the autoport under test;
++#   2. EVAL_CONFIGS is built as the intersection of MODEL_SPECS and the eval
++#      config list, so an eval/release run for this HF repo needs a catalog
++#      entry to exist at all.
++# Serving profile is the one measured in stages 09/10: ONE Blackhole die
++# (P150), max_num_seqs 1 (batched serving is unfinished), full 262144 context
++# per doc/context_contract.json, HOST sampling (this model cannot sample on
++# device: vocab 248320 > 65536/die on a 1x1 mesh), fabric DISABLED.
++# =============================================================================
++- weights:
++    - ornith-ai/Ornith-1.5-35B-A3B
++  version: "0.21.0"
++  tt_metal_commit: "72f2033326e"
++  vllm_commit: "0.26.0"
++  impl: ornith_autoport
++  inference_engine: VLLM
++  model_type: LLM
++  supported_modalities:
++    - text
++  device_model_specs:
++    - device: P150
++      max_concurrency: 1
++      max_context: 262144
++      default_impl: true
++      env_vars:
++        MESH_DEVICE: P150
++        EXTRA_MODELS_DIR: models/autoports
++      vllm_args:
++        block_size: "64"
++        max_model_len: "262144"
++        max_num_seqs: "1"
++      override_tt_config:
++        trace_region_size: 1073741824
++        fabric_config: DISABLED
++  status: EXPERIMENTAL
++  has_builtin_warmup: false

@@ -1,0 +1,98 @@
+{
+  "model_id": "id_ornith-autoport_Ornith-1.5-35B-A3B_p150",
+  "impl": {
+    "impl_id": "ornith_autoport",
+    "impl_name": "ornith-autoport",
+    "repo_url": "https://github.com/tenstorrent/tt-metal",
+    "code_path": "models/autoports/ornith_ai_ornith_1_5_35b_a3b"
+  },
+  "hf_model_repo": "ornith-ai/Ornith-1.5-35B-A3B",
+  "model_name": "Ornith-1.5-35B-A3B",
+  "inference_engine": "vLLM",
+  "device_type": "P150",
+  "device_model_spec": {
+    "device": "P150",
+    "max_concurrency": 1,
+    "max_context": 262144,
+    "max_tokens_all_users_override": null,
+    "perf_targets_map": {},
+    "default_impl": true,
+    "perf_reference": [],
+    "vllm_args": {
+      "model": "/home/raahem/ornith-bringup/weights/ornith_ai_ornith_1_5_35b_a3b-tt",
+      "served_model_name": "ornith-ai/Ornith-1.5-35B-A3B /home/raahem/ornith-bringup/weights/ornith_ai_ornith_1_5_35b_a3b-tt",
+      "max_num_seqs": "1",
+      "block_size": "64",
+      "max_model_len": "262144",
+      "port": "8000",
+      "additional_config": "{\"tt\": {\"trace_region_size\": 1073741824, \"fabric_config\": \"DISABLED\"}}",
+      "reasoning_parser": "qwen3"
+    },
+    "override_tt_config": {
+      "trace_region_size": 1073741824,
+      "fabric_config": "DISABLED"
+    },
+    "env_vars": {
+      "MESH_DEVICE": "P150",
+      "ARCH_NAME": "blackhole",
+      "EXTRA_MODELS_DIR": "models/autoports"
+    },
+    "tensor_cache_timeout": 3600.0,
+    "system_requirements": null,
+    "known_issues": [],
+    "eval_max_retries": null,
+    "image_benchmark_num_batches": 3
+  },
+  "system_requirements": null,
+  "env_vars": {
+    "VLLM_CONFIGURE_LOGGING": "1",
+    "VLLM_RPC_TIMEOUT": "900000",
+    "VLLM_TARGET_DEVICE": "tt",
+    "TORCHDYNAMO_DISABLE": "1",
+    "MESH_DEVICE": "P150",
+    "ARCH_NAME": "blackhole",
+    "EXTRA_MODELS_DIR": "models/autoports"
+  },
+  "tt_metal_commit": "72f2033326e",
+  "vllm_commit": "0.26.0",
+  "hf_weights_repo": "ornith-ai/Ornith-1.5-35B-A3B",
+  "param_count": 3,
+  "min_disk_gb": 26,
+  "min_ram_gb": 7.5,
+  "model_type": "LLM",
+  "repacked": 0,
+  "version": "0.21.0",
+  "docker_image": "ghcr.io/tenstorrent/tt-inference-server/vllm-tt-metal-src-release-ubuntu-22.04-amd64:0.21.0-72f2033326e-0.26.0",
+  "status": "EXPERIMENTAL",
+  "code_link": "https://github.com/tenstorrent/tt-metal/tree/72f2033326e/models/autoports/ornith_ai_ornith_1_5_35b_a3b",
+  "override_tt_config": {
+    "trace_region_size": 1073741824,
+    "fabric_config": "DISABLED"
+  },
+  "supported_modalities": [
+    "text"
+  ],
+  "subdevice_type": null,
+  "uses_tensor_model_cache": true,
+  "has_builtin_warmup": false,
+  "metadata": {
+    "reasoning_parser_name": "qwen3"
+  },
+  "cli_args": {
+    "model": "ornith-ai/Ornith-1.5-35B-A3B",
+    "workflow": "release",
+    "device": "p150",
+    "impl": "ornith-autoport",
+    "engine": "vLLM",
+    "docker_server": false,
+    "local_server": false,
+    "service_port": "8000",
+    "server_url": "http://127.0.0.1",
+    "no_auth": true,
+    "skip_system_sw_validation": true,
+    "disable_trace_capture": false,
+    "runtime_model_spec_json": "/tmp/claude-1003/-home-raahem-tt-metal/ce4a8061-1dc4-4464-a943-ff7d6bb636e4/scratchpad/tti_work/ornith_autoport_p150_spec.json",
+    "limit_samples_mode": "ci-nightly",
+    "tt_device": "p150"
+  }
+}

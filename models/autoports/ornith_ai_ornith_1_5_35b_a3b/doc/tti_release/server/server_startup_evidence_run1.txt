@@ -1,0 +1,12 @@
+# extract from the stage-11 autoport vLLM server log (run 1)
+INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+(APIServer pid=1800871) INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+(APIServer pid=1800871) INFO 09-16 23:12:03 [api_utils.py:273] non-default args: {'model_tag': '/home/raahem/ornith-bringup/weights/ornith_ai_ornith_1_5_35b_a3b-tt', 'model': '/home/raahem/ornith-bringup/weights/ornith_ai_ornith_1_5_35b_a3b-tt', 'max_model_len': 262144, 'served_model_name': ['ornith-ai/Ornith-1.5-35B-A3B', '/home/raahem/ornith-bringup/weights/ornith_ai_ornith_1_5_35b_a3b-tt'], 'block_size': 64, 'max_num_seqs': 1, 'additional_config': {'tt': {'trace_region_size': 1073741824, 'fabric_config': 'DISABLED'}}}
+(APIServer pid=1800871) INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+(APIServer pid=1800871) INFO 09-16 23:12:03 [tt/platform.py:995] Registered TT model TTQwen3_5MoeForConditionalGeneration -> tt.ornith_vllm:OrnithForConditionalGeneration (from EXTRA_MODELS_DIR/ornith_ai_ornith_1_5_35b_a3b)
+(APIServer pid=1800871) INFO 09-16 23:12:03 [tt/platform.py:149] Chunked prefill is not supported for TT model OrnithForConditionalGeneration (tt.ornith_vllm); disabling it.
+(APIServer pid=1800871) WARNING 09-16 23:12:03 [tt/platform.py:1814] Async scheduling was requested, but TT model OrnithForConditionalGeneration (tt.ornith_vllm) does not declare support (`model_capabilities['supports_async_decode']`). Disabling async scheduling.
+(APIServer pid=1800871) INFO:     Application startup complete.
