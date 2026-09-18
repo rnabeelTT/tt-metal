@@ -820,6 +820,76 @@ these were fields declared from arithmetic rather than from a run:
 Each was a flag typed by hand to make the host server work and never carried into the
 manifest, so the package described a configuration nobody had run.
 
+## Where single-die PREFILL time goes, measured per op
+
+There was no prefill breakdown anywhere in this repo. Every prefill claim -- including
+the TTFT table in the model card -- was arithmetic on end-to-end totals, so "optimize
+prefill" had no target. Reproduce with:
+
+    ORNITH_WEIGHTS=<ckpt> python3 tools/prefill_profile.py --mesh P150 \
+        --weights <ckpt> --spec mixed --n 4 --isl 2048 [--sequence]
+
+ISL 2048, the repeating 4-layer unit (3 GDN + 1 full attention = 1/10th of the stack).
+**Device-op COUNTS per layer, which are exact:**
+
+| device op | per layer |
+|---|---|
+| **SliceDeviceOperation** | **302.5** |
+| UnaryDeviceOperation | 206.8 |
+| BinaryNgDeviceOperation | 185.5 |
+| **SparseMatmulDeviceOperation** | **128.0** |
+| UntilizeWithUnpadding | 86.0 |
+| Permute | 68.5 |
+| Reduce | 67.2 |
+| FastReduceNC | 64.0 |
+
+**1,312 device ops per layer, so 52,480 for the 40-layer stack, and 2.4 slices for every
+matmul.** The MoE chunk loop is ~73% of that: one iteration is 15 device ops of which
+only 2 are matmuls --
+
+    SparseMatmul -> Slice, Slice, Unary, BinaryNg, Unary -> SparseMatmul
+                 -> Permute, BinaryNg, FastReduceNC, Slice, Slice, Reduce, Untilize, Unary
+
+-- and it runs ISL/32 times per layer (64 at ISL 2048, 16 at 512, confirmed by the swiglu
+call count scaling with it).
+
+**`ttnn.swiglu` is the largest single line (248 us/call, 64 calls/layer) and it is a
+COMPOSITE, not a fused kernel.** `moe.py` says it "Replaces slice + slice + silu +
+multiply", which is true of the Python but not of the device: the captured sequence runs
+exactly `Slice, Slice, Unary, BinaryNg, Unary` right after the gate/up matmul, 2,560 times
+per prefill at ISL 2048. The slices are not cheap -- the packed gate/up output is
+[1, 256, 32, 1024] bf16, 16 MB, so each pair is a 16 MB read plus 16 MB of writes.
+
+A genuinely fused path exists IN THIS TREE: `ttnn.experimental.minimal_matmul(...,
+fuse_swiglu=True)` emits [..., M, N/2] straight out of the matmul from weights arranged by
+`models.tt_dit.utils.tensor.prepare_for_fused_swiglu`, and `models/tt_dit` already ships in
+`source.code` because qwen36's MLP uses it. It does NOT drop in here: it is a DENSE matmul
+and the MoE needs `sparse_matmul` for expert sparsity, while
+`MatmulMultiCoreReuseMultiCast1DProgramConfig`'s elementwise `fused_activation` cannot
+express SwiGLU (it would silu both halves). Capturing it means swiglu fusion inside the
+sparse matmul kernel -- C++ work, not a config change. That is the top-ranked prefill
+optimization and it is NOT done.
+
+### Ruled out by this measurement, so do not re-walk them
+
+* **Re-tuning prefill GEMM tiling.** The premise that prefill reuses decode's M=1
+  descriptors is false: `create_prefill_matmul_program_config` is a separate 2D factory
+  deriving `per_core_M` from the real M. And on a SINGLE die it is not even reached --
+  `prefill_progcfg` is called only from `attention/tp.py`, `gdn/tp.py` and `mlp.py`, and
+  every MLP in this model is MoE. `_PREFILL_TUNING` having no TP=1 entry is a TP gap, not
+  a single-die one.
+* **Raising the MoE `CHUNK` above 32** to cut the iteration count. The expert union
+  SATURATES -- 162 live experts at 32 tokens against ~251 at 128 -- so a 4x bigger chunk
+  costs ~1.55x more per-token expert work. `moe.py`'s own docstring measured this.
+* **Folding the chunk loop into one call.** The down projection's output becomes
+  [1, E, T, H]: 128 MB at just 128 tokens, L1 OOM, growing linearly with the prompt.
+
+**Caveat on the timings.** Graph-capture durations NEST -- `ttnn.sparse_matmul` (57.7 ms)
+contains `SparseMatmulDeviceOperation` (40.2 ms) -- so the tool's TOTAL and share columns
+are not additive, and the captured total scales to ~6.7 s against a measured ~5.1 s
+prefill at this length. Read the timings as a ranking and the counts as fact.
+
+
 ## Why decode costs what it does, and what would actually make it faster
 
 Decode is **dispatch-bound**. A program has a floor that dominates what it computes, so
