@@ -2,8 +2,27 @@
 
 ## State
 
-Shipping configuration is measured, correct and packaged. `repo:` is set. Nothing has
-been pushed: the box has no Hugging Face credentials at all, so the push is yours.
+Shipping configuration is measured, correct, rebuilt and verified. `repo:` is set.
+Nothing has been pushed: the box has no Hugging Face credentials at all, so the push is
+yours.
+
+**Rebuilt and re-verified 2026-09-18** (`handoff/build_pkg.sh`, then
+`handoff/verify_final.sh`), bundle at `artifacts/pkgbuild-final/ornith-1.5-35b-a3b`,
+image `tt-model/ornith-1.5-35b-a3b:fb4b1ebf493b`:
+
+| gate | result |
+|---|---|
+| image provenance | plugin `5961e48`, repo `raahemnabeel/ornith-1.5-35b-a3b` |
+| container serves correct text on p150 | pass, `max_model_len: 262144` |
+| p150 perf through the container | TTFT **367.5 ms**, decode **32.77 tok/s**, TPOT 30.5 ms |
+| four lanes, one per die | **4/4 ready**, all four correct, `finish_reason: stop` |
+
+The rebuild mattered for more than the numbers: the previously built image labelled its
+plugin `bef89e42`, the commit BEFORE the replicated-MoE capabilities, because those were
+sitting uncommitted in the plugin working tree. They are now committed and
+fast-forwarded onto the plugin's `main` (`5961e48`), and the image records it. The older
+image `tt-model/ornith-1.5-35b-a3b:82768e358642` still carries `PLACEHOLDER` and the old
+plugin label; delete it so nobody serves it by accident.
 
 ```bash
 hf auth login
@@ -33,8 +52,8 @@ Every one of these beats what the package previously recorded (26.07 / 54.47 / 9
 aggregate, 29.05 / 28.40 / 25.89 per stream). Those were from 2026-09-16 on a retired
 harness and were flagged as un-re-measured; they were conservative.
 
-Through the packaged container on one die, p50 of 3, ornith-1.0's method: **decode 32.96
-tok/s (TPOT 30.3 ms), TTFT 366 ms** short / 5.04 s at ~1.4K. Context **262144**, verified
+Through the rebuilt container on one die, p50 of 3, ornith-1.0's method: **decode 32.77
+tok/s (TPOT 30.5 ms), TTFT 367.5 ms** short / 5.03 s at ~1.4K. Context **262144**, verified
 live from the container. Prefill flat ~350-370 tok/s out to ISL 131072 — only 10 of 40
 layers hold KV, which is why it is flat.
 
