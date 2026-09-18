@@ -785,12 +785,32 @@ Where the time goes, from models built out of layer subsets (`tools/layer_sweep.
 
 | | per layer | x count | share |
 |---|---|---|---|
-| GDN (linear-attention) layers | 905 us | 30 -> 27.15 ms | 74.6% |
-| full-attention layers | 764 us | 10 -> 7.64 ms | 21.0% |
-| fixed (lm_head + embedding + final norm) | | 1.59 ms | 4.4% |
+| GDN (linear-attention) layers | **583 us** | 30 -> 17.50 ms | 70.9% |
+| full-attention layers | **557 us** | 10 -> 5.57 ms | 22.6% |
+| fixed (lm_head + embedding + final norm) | | 1.60 ms | 6.5% |
 
-That model predicts 36.38 ms against 36.38 measured, and two independent fits agree on
-the 1.59 ms intercept.
+Device model: **24.67 ms**. Two independent fits agree on the intercept (1597 / 1591 us).
+
+**RE-MEASURED 2026-09-18, and the previous numbers were badly stale.** This table used to
+read 905 us / 764 us / 36.38 ms, from before the eight fusion commits; nobody re-ran the
+sweep afterwards and the figures under-stated the model by 36%. They are re-derived here
+from `tools/layer_sweep.py` on P150, slope between 4 and 12 layers
+(`handoff/decompose/P150_*.log`):
+
+    gdn   4 layers 3.931 ms, 12 layers 8.598 ms  -> 583 us/layer, intercept 1597 us
+    full  4 layers 3.820 ms, 10 layers 7.164 ms  -> 557 us/layer, intercept 1591 us
+
+Anything derived from the old numbers is suspect -- in particular "111 device ops per GDN
+layer at ~8.4 us each". The real count is **76** (measured two ways, n=3 minus n=1 with
+fast dispatch off), so the per-op figure is ~7.7 us, not 8.4 at 111.
+
+**AND THE DEVICE IS NOT WHERE THE TIME GOES.** 24.67 ms device against 30.50 ms served on
+the same die is **5.83 ms/token of serving overhead** -- the full [1, 1, 248320] logits
+readback and its per-step sync. For scale, ornith-1.0's served 23.3 ms on FOUR dies
+essentially equals its own device model, so it carries no such tax; and enabling
+on-device sampling on our TP path recovered 2.4 ms of ours. Our single-die device compute
+is within 6% of their four-die number (24.67 vs 23.30 ms); the deficit a user sees is
+almost entirely this overhead.
 
 ### What this rules out
 
