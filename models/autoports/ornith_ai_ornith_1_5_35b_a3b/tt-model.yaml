@@ -242,6 +242,12 @@ serve_profiles:
 
   - name: p300
     hardware: p300                # 1 dual-chip board = 2 chips
+    # DELIBERATELY NOT TENSOR-PARALLEL, unlike p300x2 below. TP=2 cannot use on-device
+    # sampling -- the vocabulary does not fit ttnn.topk's 64K limit at a 2-way split
+    # (248320/2 = 124160) -- and TP alone, without that, is worth ~1.2x on prefill while
+    # costing decode. So this profile is one replica that happens to open two chips.
+    # ON TWO DIES, RUN TWO LANES INSTEAD: 61.55 tok/s aggregate against this profile's
+    # ~33. See tools/serve_lanes.sh.
     mesh_device: P300             # NOT YET MEASURED SERVING. Engine init died in
                                   # fabric_firmware_initializer.cpp; the fabric_config
                                   # above is the proven fix but this profile has not
@@ -294,15 +300,29 @@ serve_profiles:
                                   # For THROUGHPUT on four dies use four lanes instead --
                                   # 109.03 tok/s aggregate against this profile's 30.57.
                                   #
-                                  # It is opt-in and NOT the default, and it needs all of:
-                                  #   ORNITH_TP=1
-                                  #   additional_config tt.fabric_config: FABRIC_1D_RING
-                                  #   additional_config tt.l1_small_size: 24576
-                                  #   additional_config tt.sample_on_device_mode: decode_only
-                                  # The last is worth 2.4 ms/token here and is refused on
-                                  # a (1,1) mesh, so it cannot move to the top-level
-                                  # additional_config -- see handoff/tp_serve.sh.
+                                  # EVERYTHING IT NEEDS IS WIRED BELOW rather than left to
+                                  # the operator. Without these four the profile opens a
+                                  # 4-die mesh and then REPLICATES onto it -- one instance
+                                  # at ~28.78 tok/s, the worst configuration available on
+                                  # this board. Profile `env` and `additional_config`
+                                  # deep-merge over the `serve:` defaults, so
+                                  # trace_region_size is inherited and fabric_config is
+                                  # overridden from DISABLED to the ring.
     max_model_len: 262144
+    env:
+      # Tensor + expert parallelism. Without it model_config forces num_devices = 1.
+      ORNITH_TP: "1"
+    additional_config:
+      tt:
+        # The replicated profiles run zero collectives and disable the fabric; TP runs two
+        # per layer and needs the ring, or ccl::get_usable_topology dies on
+        # "fabric_context_ != nullptr".
+        fabric_config: FABRIC_1D_RING
+        # The GDN depthwise conv1d reserves from the L1 small pool.
+        l1_small_size: 24576
+        # Worth a measured 2.4 ms/token (28.53 -> 30.57 tok/s). It CANNOT live in the
+        # top-level additional_config: a (1,1) mesh refuses it, which would break p150.
+        sample_on_device_mode: decode_only
     # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
     # They were, and they were INERT: the launcher emits the merged additional_config
     # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
