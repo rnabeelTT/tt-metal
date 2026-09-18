@@ -204,11 +204,48 @@ explains why.** Backing the collectives out of the measured per-layer times:
                        641 us / 76 ops                      = 8.43 us/op
 
 Both sides are quartered -- our per-device shapes are verified above -- so this is not a
-sharding gap. Candidates not yet separated: activation memory configs on the sharded path,
-core utilisation at the narrower per-device widths, or program configs tuned at single-chip
-widths and never re-tuned at TP widths (ornith-1.0 explicitly re-ran its dense-matmul
-ladder at per-device widths; this port has not). Closing it would be worth ~200 us/layer,
-which is most of the way to their 564.
+sharding gap.
+
+**CAUSE FOUND: the decode matmul SHAPES are TP-aware and the CORE COUNTS are not.**
+
+`tp_common.create_matmul_1d_decode_progcfg(m, k, n, num_cores, ...)` computes
+`per_core_n = ceil(n_tiles / (cols * rows))`. In `model_config.py` the `n` passed in is
+per-device (`hidden_dim // tp`, `attn_qkv_fused_dim_tp`, ...) but `num_cores` is a
+HARDCODED CONSTANT -- 44, 64, 33 -- chosen by `test_mlp_matmul_sweep` at SINGLE-CHIP
+widths, as the quoted timings show (42.8 us, ~59 us, ~63 us are full-width numbers). At
+TP=4 the width is quartered and the core budget never moves, so the grid is wrong in both
+directions at once:
+
+| projection | N/die | tiles | cores now | per_core_n | at 110 cores |
+|---|---|---|---|---|---|
+| `gdn_qkvz` | 3088 | 97 | 44 | **3** | 1 |
+| `attn_qkv` | 2304 | 72 | 64 | **2** | 1 |
+| `mlp_w2` | 2048 | 64 | 33 | **2** | 1 |
+| `mlp_w1/w3` | 128 | 4 | 44 | 1 | 1 (40 cores idle either way) |
+
+Blackhole's worker grid is 11 x 10 = **110 cores**. We use 33-64 of them and run
+`per_core_n` of 2-3; ornith-1.0 spreads the same class of op over all 110 and deliberately
+targets `per_core_n = 1` ("at 110 realised cores the 80 output tiles give one tile per
+core", and a larger subblock needing fewer cores measured SLOWER on their ladder). Summed
+across the four dense decode projections we run 8 units of serialised per-core work where
+110 cores would give 4.
+
+Their own doc names the same trap from the other side: "that measurement is at single-chip
+widths, and no DRAM-sharded candidate exists at the per-device multichip widths in any
+artifact." They re-ran a 9-target x 6-cap ladder AT PER-DEVICE WIDTHS. This port never has.
+
+**The fix is a re-sweep, not a rewrite.** `num_cores` is already a parameter; only the
+constants are wrong for TP. Sweep them at the per-device widths in the table (and pass
+`grid_w=self.decode_grid_w` on `attn_qkv`, which still uses the legacy cols<=8 shaping),
+then select per `tp` rather than per model. `mlp_w1/w3` wants the opposite treatment: at
+N=128/die it has four output tiles and 40 of its 44 cores sit idle paying multicast setup,
+so it should shrink, not grow.
+
+Sizing it honestly: dense `Matmul` is 14.82% of ornith-1.0's linear-decode window, so if
+ours is comparable (~110 us of the 734 us layer) and per_core_n halves, this is roughly
+50-70 us/layer = **2-2.8 ms/token**, taking 4-die decode from 33.7 ms to about 31 ms
+(~32 tok/s). Real and low-risk, but not the whole 200 us/layer -- the remainder is still
+unaccounted, and activation memory configs on the sharded path are the next suspect.
 
 It needs per-op DEVICE timing under TP, which is still partly blocked: full-attention
 layers under TP fail in `slice.cpp:121` (`input_rank == begins.size()`), the sixth bug in
