@@ -19,6 +19,7 @@ from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
 from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
 from models.demos.blackhole.qwen36.utils.prefill_buckets import prefill_buckets
+from models.demos.blackhole.qwen36.utils.prefill_chunk import prefill_chunk
 from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in_seq
 
 
@@ -1145,9 +1146,13 @@ class Qwen36Model:
         return x
 
     def capture_prefill_trace_chunked(
-        self, device, page_table, chunk_size=2048, warmup_masked_buckets=True, capture_chunk_trace=True
+        self, device, page_table, chunk_size=None, warmup_masked_buckets=True, capture_chunk_trace=True
     ):
         """Capture one chunk's all-layer prefill as a trace; replayed per chunk.
+
+        chunk_size=None resolves QWEN36_PREFILL_CHUNK (default 2048), so a direct caller and
+        the serving path cannot drift to different widths. It IS M for every projection a
+        long prefill runs; see utils/prefill_chunk.py for the limits raising it trades off.
 
         Chunk-outer prefill stays under the 4 GiB trace limit at long context.
         Flexible SDPA (runtime chunk_start) makes one trace serve all chunk positions.
@@ -1156,6 +1161,8 @@ class Qwen36Model:
         The batched (B>1) vLLM path passes capture_chunk_trace=True with the PERSISTENT B=1 prefill
         scratch bound (_bind_gdn_prefill_scratch), so the trace bakes that scratch's addresses and
         long prompts replay the traced chunk path per user (prefill_paged_slots rebinds the scratch)."""
+        if chunk_size is None:
+            chunk_size = prefill_chunk()
         if self.num_devices > 1:
             return self._capture_prefill_trace_chunked_tp(
                 device,

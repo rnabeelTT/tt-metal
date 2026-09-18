@@ -26,9 +26,14 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 import ttnn
 from models.demos.blackhole.qwen36.tt.common import create_tt_model
 from models.demos.blackhole.qwen36.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
+from models.demos.blackhole.qwen36.utils.prefill_chunk import prefill_chunk
 from models.tt_transformers.tt.generator import Generator
 
-_PREFILL_WARMUP_CHUNK = 2048
+# Outer chunk width for chunked (long-prompt) prefill: one all-layer chunk forward is
+# traced and replayed per chunk, so this IS M for every projection a long prefill runs.
+# QWEN36_PREFILL_CHUNK sweeps it; see utils/prefill_chunk.py for the limits it trades
+# against. Default unchanged at 2048.
+_PREFILL_WARMUP_CHUNK = prefill_chunk()
 _PREFILL_WARMUP_BUCKET = 4096
 _BLOCK_SIZE = 64
 

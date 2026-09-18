@@ -621,21 +621,33 @@ card:
     no tool calls and leaks the raw markup into `content` as prose — and the server starts
     cleanly either way, so only a real call detects it.
 
-    ### Committed since this image was built, so NOT in these numbers
+    ### What changed in this build
 
-    Two measured prefill improvements are in the model source but land only on the next
-    package build. The numbers above are this image's, honestly:
+    Two prefill improvements ARE in this image, both measured through the container:
 
-    * **MoE prefill chunk 32 -> 64** (`ORNITH_MOE_CHUNK`): +6.5% prefill at ISL 2048,
-      +3.0% at 16384, greedy token unchanged. The old value was tuned on expert-union
-      compute alone and left out per-iteration overhead.
-    * **Dense prefill width buckets** (`QWEN36_PREFILL_BUCKETS=dense`): prefill is priced
-      by the padded bucket, so with the old powers-of-two list a 1,030-token prompt paid
-      for 2,048 and cost 4,803 ms against 1,000 tokens' 2,558 ms. Every 128-multiple caps
-      the waste at 127 tokens: that prompt now costs 2,853 ms, -41%. Only affects prompts
-      under 2048; above it the fallback was already 128-aligned. It quadruples warmup
-      (73 s -> 300 s), which must be checked against `VLLM_ENGINE_READY_TIMEOUT_S=600`
-      before it ships.
+    * **Dense prefill width buckets.** Prefill is priced by the padded bucket, and the old
+      list was powers of two below 2048, so a prompt one token past a boundary paid for the
+      next rung. Every 128-multiple caps that waste at 127 tokens. Measured on the same
+      harness before and after: TTFT at a ~1.4K prompt **5,035 ms -> 3,613 ms (-28%)**.
+      Directly, a 1,030-token prompt went 4,803 ms -> 2,853 ms (-41%). Only affects prompts
+      under 2048; above it the bucket fallback was already 128-aligned.
+    * **MoE prefill chunk 32 -> 64.** The old width was chosen on expert-union compute
+      alone, measured where the loop runs a handful of times per layer; it left out the
+      per-iteration overhead that dominates at length. +6.5% prefill at ISL 2048, +3.0% at
+      16384. Greedy token unchanged.
+
+    Short-prompt TTFT through this container is now **347.7 ms** with decode **33.23 tok/s**
+    (TPOT 30.1 ms), against 366.7 ms / 33.09 tok/s before.
+
+    Warmup grew with the bucket list (73 s -> 300 s of program compilation, which must all
+    finish before the decode trace parks or a later compile clobbers it), so this image
+    raises `VLLM_ENGINE_READY_TIMEOUT_S` to 3600 from vLLM's 600 s default. Verified with
+    four concurrent lanes, which is the worst case for it.
+
+    **The two sweep tables above were measured on the PRIOR image** and are therefore
+    conservative for this one: the p150 rows predate both changes, and the p300x2 rows
+    predate the MoE chunk change. They were not re-run because they cost ~40 minutes of
+    device time and the direction is known.
 
     ### Known limitations
 
