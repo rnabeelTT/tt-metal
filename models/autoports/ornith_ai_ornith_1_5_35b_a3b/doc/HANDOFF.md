@@ -94,8 +94,13 @@ harness and were flagged as un-re-measured; they were conservative.
 
 Through the rebuilt container on one die, p50 of 3, ornith-1.0's method: **decode 32.77
 tok/s (TPOT 30.5 ms), TTFT 367.5 ms** short / 5.03 s at ~1.4K. Context **262144**, verified
-live from the container. Prefill flat ~350-370 tok/s out to ISL 131072 — only 10 of 40
-layers hold KV, which is why it is flat.
+live from the container. **Prefill is NOT flat across the sweep, and the 10-of-40 KV
+ratio is not why.** Measured rate (input tokens / TTFT): 190 tok/s at ISL 128 and 215 at
+1024, where a ~500 ms fixed floor dominates; 378-396 from 2048 to 16384; then decaying
+375 -> 355 at 65536 -> 131072 as the O(T^2) term in the 10 full-attention layers shows
+up. The KV ratio is why 256K context is cheap in MEMORY and why DECODE is nearly
+context-independent (-21% over the whole sweep), not why prefill holds. And a flat
+prefill rate is precisely what makes TTFT LINEAR in prompt length: 370 s at 131072.
 
 ### Reading this against the fleet table
 

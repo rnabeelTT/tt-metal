@@ -163,7 +163,13 @@ WITHOUT it, so its completions are reasoning traces rather than final answers.
 
 **Benchmarks did complete, 12/12, including ISL 131072**, which is the first long-context
 serving evidence for this model: TTFT 671 ms at ISL 128 rising to 369.8 s at 131072,
-prefill holding ~350-370 tok/s all the way out, TPOT 30.3 -> 38.2 ms, concurrency 1.
+prefill NOT holding flat: 190 tok/s at ISL 128 (a ~500 ms fixed floor dominates short
+prompts), 378-396 from ISL 2048-16384, decaying to 355 at 131072 as the O(T^2) term in
+the 10 full-attention layers appears. TPOT 30.3 -> 38.2 ms, concurrency 1. NOTE the
+sample count falls with length (n = 8/4/2 down to 1) to bound wall-clock, so the three
+longest rows are single observations, not medians. This line previously read "prefill
+holding ~350-370 tok/s all the way out"; that range excludes both the fastest rows and
+the slow short-prompt ones.
 
 ## Stages with no `.check.sh`
 

@@ -679,6 +679,17 @@ The 3.45 -> 24.2 tok/s decode is `ttnn.sparse_matmul` in INDEXED/GATHER mode; th
 docstring carries the measurements. Prefill throughput is flat in prompt length, so
 TTFT is linear with no cliff out to 2048.
 
+**These are MODEL-level numbers and they do not transfer to the endpoint.** Through
+vLLM's chat API the same ISL 128 costs 672 ms, not 380 -- roughly 300 ms of HTTP, chat
+templating, tokenisation, scheduling, host sampling and detokenisation that a
+bench_model run never pays. So `input tokens / TTFT` measured at the endpoint reads
+190 tok/s at ISL 128 against this table's 337, converging on ~396 by ISL 8192 once the
+fixed cost is amortised and decaying to 355 by 131072 as the O(T^2) term in the 10
+full-attention layers appears. The flatness above is a property of the MODEL; the
+endpoint sweep in doc/tti_release/benchmarks/ is not flat, and conflating the two is
+where the retired "prefill holds ~350-370 tok/s across the whole sweep" claim came
+from.
+
 Served through vLLM (one lane, `max_num_seqs=1`): 417 ms median TTFT, 23.9 tok/s per
 stream. Sending 2 requests to ONE lane still queues them (1909 ms TTFT, flat aggregate)
 because `max_num_seqs` is pinned to 1 by the GDN external-state assert -- concurrency

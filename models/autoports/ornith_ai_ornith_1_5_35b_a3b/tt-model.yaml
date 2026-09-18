@@ -447,30 +447,71 @@ card:
     Measured with `vllm bench serve` over `/v1/chat/completions` against a server running
     the settings the `p150` profile ships (`max_num_seqs 1`, `block_size 64`,
     `max_model_len 262144`, fabric disabled, host sampling), on **one die** of a
-    2x Blackhole p300c host. Each row is the median of *n* sequential requests at
-    concurrency 1, with exact input/output lengths and EOS ignored. 12/12 runs completed,
-    none failed. Decode tokens/s is derived as `1000 / median TPOT`.
+    2x Blackhole p300c host. Concurrency 1, exact input/output lengths, EOS ignored.
+    12/12 runs completed, none failed. Decode tokens/s is `1000 / median TPOT`; prefill
+    tokens/s is `input tokens / TTFT`.
+
+    **`n` is how many requests that row sampled, and it shrinks as the prompt grows** --
+    purely to bound wall-clock, since one 131,072-token request takes 370 s and eight
+    would take 50 minutes. It is the sample count, not a model property. Read the last
+    three rows with that in mind: at **n = 1 there is no median and no dispersion**, they
+    are single observations. Where n > 1 the run-to-run spread is small (TTFT standard
+    deviation 6 ms at ISL 128, 107 ms at 2,048, 446 ms at 16,384 -- under 1.1% of TTFT
+    throughout).
 
     #### p150
 
-    | Input tokens | Output tokens | n | TTFT (ms) | Decode tokens/s | TPOT (ms) |
-    | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 8 | 672 | 32.99 | 30.31 |
-    | 128 | 1,024 | 4 | 672 | 32.61 | 30.67 |
-    | 1,024 | 128 | 4 | 4,774 | 32.73 | 30.56 |
-    | 2,048 | 128 | 4 | 5,426 | 32.75 | 30.53 |
-    | 4,096 | 128 | 4 | 10,531 | 32.55 | 30.72 |
-    | 8,192 | 128 | 2 | 20,688 | 32.27 | 30.98 |
-    | 8,192 | 1,024 | 2 | 20,690 | 32.33 | 30.93 |
-    | 10,000 | 1,024 | 2 | 25,491 | 32.14 | 31.11 |
-    | 16,384 | 128 | 2 | 41,405 | 31.73 | 31.51 |
-    | 32,768 | 128 | 1 | 84,731 | 30.68 | 32.60 |
-    | 65,536 | 128 | 1 | 174,855 | 29.19 | 34.26 |
-    | 131,072 | 128 | 1 | 369,740 | 26.06 | 38.38 |
+    | Input tokens | Output tokens | n | TTFT (ms) | Prefill tokens/s | Decode tokens/s | TPOT (ms) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 8 | 672 | 190 | 32.99 | 30.31 |
+    | 128 | 1,024 | 4 | 672 | 190 | 32.61 | 30.67 |
+    | 1,024 | 128 | 4 | 4,774 | 215 | 32.73 | 30.56 |
+    | 2,048 | 128 | 4 | 5,426 | 378 | 32.75 | 30.53 |
+    | 4,096 | 128 | 4 | 10,531 | 389 | 32.55 | 30.72 |
+    | 8,192 | 128 | 2 | 20,688 | 396 | 32.27 | 30.98 |
+    | 8,192 | 1,024 | 2 | 20,690 | 396 | 32.33 | 30.93 |
+    | 10,000 | 1,024 | 2 | 25,491 | 392 | 32.14 | 31.11 |
+    | 16,384 | 128 | 2 | 41,405 | 396 | 31.73 | 31.51 |
+    | 32,768 | 128 | 1 | 84,731 | 387 | 30.68 | 32.60 |
+    | 65,536 | 128 | 1 | 174,855 | 375 | 29.19 | 34.26 |
+    | 131,072 | 128 | 1 | 369,740 | 355 | 26.06 | 38.38 |
 
-    Decode falls only 21% from 128 to 131,072 input tokens, and prefill holds at
-    ~350-370 tok/s across the whole sweep, because only 10 of 40 layers carry a KV cache.
-    That flatness is the architecture's point.
+    **Why TTFT grows so much, and why that is not a contradiction.** TTFT *is* the
+    prefill: `TTFT = input tokens / prefill rate`. So a roughly FLAT prefill rate is
+    exactly what makes TTFT grow roughly LINEARLY with prompt length -- the two
+    statements are the same fact. Per doubling above ISL 2,048, TTFT goes 1.94x, 1.96x,
+    2.00x, 2.05x, 2.06x, 2.11x. A 131,072-token prompt costs 370 s of prefill, and no
+    reading of the flat rate avoids that; **budget TTFT from the prompt length, always.**
+
+    The mild drift above 2.00x is the O(T^2) term in the 10 full-attention layers
+    appearing at long context: prefill rate peaks at 396 tok/s around ISL 8K-16K and
+    decays to 355 by 131,072.
+
+    **Below ISL 2,048 the rate is HALF that** -- 190 tok/s at 128 and 215 at 1,024 --
+    and this column is an ENDPOINT metric, not the model's prefill compute rate. It is
+    `input tokens / TTFT` measured through the whole serving stack, so a short prompt is
+    dominated by a fixed cost that has nothing to do with prompt length: HTTP, chat
+    templating, tokenisation, scheduling, host-side sampling and detokenisation. Measured
+    at the model level instead, ISL 128 prefills in 380 ms (337 tok/s) against this
+    table's 672 ms -- so roughly 300 ms of the short-prompt TTFT is serving overhead, and
+    **the model's own prefill rate IS roughly flat from ISL 128 (337 tok/s) to 2,048
+    (380)**. That distinction is where the discredited "flat across the whole sweep"
+    claim came from: flat is true of the model and false of the endpoint.
+
+    Two more short-prompt artefacts: 5.25 ms/token at ISL 128 against 2.53 at 8,192, and
+    the 1,024 -> 2,048 step costing only 1.14x rather than 2x, which is the fixed-bucket
+    prefill showing through. Treat short-prompt TTFT as a latency floor (~400-670 ms),
+    not a throughput measurement.
+
+    **What the 10-of-40 KV ratio does and does not buy.** It is why 256K context is
+    affordable in MEMORY (5.0 GB rather than ~21 GB) and why DECODE is nearly
+    context-independent -- decode falls only 21% from ISL 128 to 131,072, which for a
+    3:1 linear-attention stack is the architecture's real payoff. It does **not** make
+    prefill flat: prefill is O(T) work in all 40 layers plus that O(T^2) term in 10 of
+    them. An earlier revision of this card claimed prefill held at "~350-370 tok/s across
+    the whole sweep, because only 10 of 40 layers carry a KV cache". Both halves were
+    wrong -- the range excludes the two fastest rows and both slow short-prompt ones, and
+    the causal link does not hold.
 
     Cross-checked through the packaged container itself, p50 of 3 short requests: TTFT
     **366.7 ms**, decode **33.09 tok/s**, TPOT 30.2 ms — within 0.3% of the ISL-128
