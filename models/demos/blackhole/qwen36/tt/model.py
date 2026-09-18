@@ -884,7 +884,7 @@ class Qwen36Model:
         self._build_request_rope(token_ids, vision_tokens)
 
         if T > 1024:
-            return self.prefill_layer_chunked(token_ids, chunk_size=2048, vision_tokens=vision_tokens)
+            return self.prefill_layer_chunked(token_ids, chunk_size=prefill_chunk(), vision_tokens=vision_tokens)
 
         # Short sequences (<=1024)
         self.reset_state(batch_size=B)
@@ -905,11 +905,13 @@ class Qwen36Model:
 
         return logits
 
-    def prefill_layer_chunked(self, token_ids, chunk_size=2048, page_table=None, vision_tokens=None):
+    def prefill_layer_chunked(self, token_ids, chunk_size=None, page_table=None, vision_tokens=None):
         """Prefill long sequences using layer-at-a-time chunked processing.
 
         DeltaNet uses larger chunk_size (256 vs 64) to limit Neumann-series error
         (4096 tokens -> 16 sub-chunks, PCC >0.98). page_table enables paged prefill."""
+        if chunk_size is None:
+            chunk_size = prefill_chunk()
         B, T = token_ids.shape
         self.reset_state(batch_size=B)
 
@@ -1262,12 +1264,14 @@ class Qwen36Model:
         logger.info("Chunked prefill trace captured successfully!")
 
     def _capture_prefill_trace_chunked_tp(
-        self, device, page_table, chunk_size=2048, warmup_masked_buckets=True, capture_chunk_trace=True
+        self, device, page_table, chunk_size=None, warmup_masked_buckets=True, capture_chunk_trace=True
     ):
         """TP fork of capture_prefill_trace_chunked.
 
         Replicated persistent buffers; rope_tp cos/sin; GDN uses _stable_state (not external buffers).
         Trace replays _forward_prefill_chunk_tp."""
+        if chunk_size is None:
+            chunk_size = prefill_chunk()
         assert self._deltanet_external_states is not None, "Call allocate_kv_caches first"
         assert chunk_size % 128 == 0, f"chunk_size {chunk_size} must be a multiple of 128"
         block_size = get_block_size(self._paged_kv_caches)
@@ -2580,7 +2584,7 @@ class Qwen36Model:
         # Default to the standard 2048-token chunk when no trace is captured (e.g. the TP MVP,
         # which serves <=2048 prompts entirely via the masked bucket below and so needs no chunk
         # trace). The chunk trace is only required once there is at least one full chunk to replay.
-        chunk_size = self._chunked_chunk_size or 2048
+        chunk_size = self._chunked_chunk_size or prefill_chunk()
         B, T = token_ids.shape
         assert 1 <= actual_len <= T, f"actual_len {actual_len} not in [1, {T}]"
         block_size = get_block_size(self._paged_kv_caches)
@@ -3448,7 +3452,7 @@ class Qwen36Model:
         # Concat-based prefill for SDPA.
         if T > 1024:
             logits = self.prefill_layer_chunked(
-                token_ids, chunk_size=2048, page_table=page_table_torch, vision_tokens=vision_tokens
+                token_ids, chunk_size=prefill_chunk(), page_table=page_table_torch, vision_tokens=vision_tokens
             )
         else:
             token_ids_ttnn = ttnn.from_torch(token_ids, dtype=ttnn.uint32, device=self.device)

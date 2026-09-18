@@ -1358,6 +1358,42 @@ precision policy (bfp8 dense + bfp4 routed). Going further was measured, not ass
 * **bfloat8_b expert activations** (which Ornith-1.0's policy ships): slightly SLOWER,
   32.52 vs 32.14 ms. Those intermediates are 8-32 KB and traced op cost is flat below
   ~256 KB, so halving them buys nothing and costs a conversion.
+* **A LADDER OF OUTER PREFILL CHUNK WIDTHS** (the qwen3-coder
+  `prefill_bucket_ladder` idea: warm several program shapes at deployment and swap per
+  prompt). It does not port to this model, and the reason is memory, not tuning.
+  `QWEN36_PREFILL_CHUNK` now reaches every path; swept with `tools/bench_model.py
+  --prefill-only`:
+
+  | chunk | p150 ISL 8192 / 16384 | p300x2 ISL 8192 / 16384 |
+  |---|---|---|
+  | 2048 | 408.7 / 404.2 tok/s | 1369.4 / 1353.8 tok/s |
+  | 4096 | **OOM** | 1375.5 / 1350.9 tok/s (+0.4% / -0.2%) |
+  | 8192 | **OOM** | **L1 CB overflow** |
+
+  On ONE die no width above 2048 is allocatable at all: chunk 4096 asks for a 67,108,864 B
+  L1 buffer across 110 banks (610,304 B per bank) and dies in `bank_manager.cpp:462`,
+  because a replicated single die holds every activation unsharded. On four dies TP shards
+  that four ways so 4096 fits -- and measures identical to 2048, inside noise -- while 8192
+  hits "statically allocated circular buffers grow to 2727424 B which is beyond max L1 size
+  of 1572864 B", the same byte count the single-shot `prefill_tp` path asks for at 8192
+  rows.
+
+  So the ladder would have ONE viable rung on single die and two indistinguishable rungs on
+  four. There is nothing to swap between. The mechanism is that this model's prefill is
+  already chunked more finely INSIDE the outer chunk than the outer chunk itself: the MoE
+  groups tokens at `CHUNK` = 64 regardless of the outer width, SDPA chunks by
+  `sdpa_chunk_size`, and dispatch within a chunk is already eliminated by the chunk trace.
+  Widening the outer chunk therefore raises M only for the dense projections -- GDN in/out,
+  attention QKV/O, the norms -- which `tools/prefill_profile.py` shows are a minority of
+  prefill cost against the MoE. qwen3-coder's ladder pays because a rung there sets the
+  shape of the WHOLE program; here it sets the shape of a wrapper around work that is
+  already tiled.
+
+  Kept anyway: the knob consolidated FIVE hardcoded copies of the width (`model.prefill`'s
+  `prefill_layer_chunked` call and that method's default, `prefill_traced_chunked`'s
+  `or 2048` fallback, and both capture variants' defaults) into one resolver, so the value
+  can no longer be "changed" in one place and silently ignored in the path that matters --
+  which is exactly what invalidated the first run of this sweep.
 * **bfloat16 DENSE projection weights** (`QWEN36_DENSE_WEIGHT_DTYPE=bfloat16`): worse
   accuracy, not better. Logit PCC 0.97631 / 0.96889 / **0.91666** against the shipped
   bfloat8_b's 0.97174 / 0.97134 / **0.94334** -- a 0.027 LOSS on the one prompt that
