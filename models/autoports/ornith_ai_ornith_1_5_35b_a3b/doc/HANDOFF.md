@@ -138,11 +138,27 @@ decode emits one:
     TT_FATAL: Shape of Output tensor Shape([1, 248320]) provided does not match the
     broadcasted output shape Shape([32, 248320])
 
-Closing it means padding decode logits to 32 rows through the captured trace and taking
-the token from row 0. That is a real change to the SHIPPING path, and a subtle sampling
-bug yields plausible-but-wrong tokens that smoke tests pass, so it was not attempted
-against a verified release. It is the first thing to do next, and it is worth more than
-anything else on this list.
+**And the fix is smaller than that error suggests.** Tracing it: the crash is the additive
+invalid-vocab mask, built once at `max_batch_size` rows
+(`tt_sampling.py:_create_invalid_vocab_mask` -> `build_invalid_vocab_mask(..., self.max_batch_size)`)
+and added to the logits in four places. The mask is **row-invariant** — `vocab_padding.py`
+builds `torch.zeros(1, 1, max_batch_size, padded_vocab)` and sets the same padded tail on
+every row, because it marks padded VOCAB columns, not batch slots. So a 32-row mask against
+1-row logits is both the crash and pure waste, and cutting the mask to the logits' row
+count is exact rather than an approximation.
+
+A working patch is four call sites plus a cached `_rows_of(mask, logits)` helper that
+returns the mask untouched when the counts already agree (so every currently-working model
+is unaffected) and otherwise slices once per row count at warmup. It was written and
+reverted rather than shipped: with the single-die gate still closed nothing in the shipped
+profiles exercises it, and an unexercised change has no business in a release that is
+push-ready. Re-apply it together with the gate in `qwen36/tt/model.py` (allow `(1, 1)` when
+`TTSampling.num_single_device_vocab_splits(padded_vocab)` is not None) and gate the pair on
+`tests/test_model.py` PCC, because a wrong sampler produces plausible text that smoke tests
+pass.
+
+Worth more than anything else outstanding: it is the difference between 33.21 tok/s served
+and the 40.5 tok/s the dies are already capable of.
 
 ## Still open, all pre-existing and none blocking the shipping config
 
