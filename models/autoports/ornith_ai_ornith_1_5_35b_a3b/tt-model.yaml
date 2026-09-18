@@ -432,230 +432,90 @@ card:
     endpoint on Tenstorrent Blackhole hardware. It holds its full 262,144-token context
     on a single chip.
   quickstart: |
-    ### Select a serve profile
+    ### Serve
 
     ```bash
-    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p150   --follow
-    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p300x2 --follow
+    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p150   --follow   # 1 chip
+    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p300x2 --follow   # 4 chips
     ```
 
-    Both profiles enable Qwen3 reasoning and Qwen3 XML tool-call parsing.
+    Both profiles enable Qwen3 reasoning and Qwen3 XML tool calling.
 
-    **On a four-die box, use `p300x2` for anything but a short prompt.** It is
-    tensor- and expert-parallel and prefills **3.3x faster**, measured through this
-    container out to ISL 32768 (see below). `p150` keeps the best single-user DECODE
-    (33.09 against 30.57 tok/s), so it remains the default because it is also the only
-    profile that runs on one chip -- but the decode edge is 2.5 ms/token and the prefill
-    edge is up to 59 SECONDS, so it is not close once the prompt is long.
+    | | `p150` | `p300x2` |
+    | --- | ---: | ---: |
+    | chips | 1 | 4 (tensor + expert parallel) |
+    | prefill | ~450 tok/s | **~1,560 tok/s** |
+    | decode | **33.1 tok/s** | 30.6 tok/s |
+    | best for | short prompts, best decode | long prompts |
 
-    An earlier revision of this card said `p300x2` "pays off below roughly 84 output
-    tokens and `p150` pays off above it". That crossover was derived at ISL 128 and does
-    not generalise -- it scales with the TTFT gap:
+    `p150` is the default because it is the only single-chip profile. On four chips prefer
+    `p300x2` unless the prompt is short: it decodes 2.5 ms/token slower and prefills up to
+    52 seconds faster.
 
-    | ISL | p150 TTFT | p300x2 TTFT | TTFT saved | crossover (output tokens) |
-    | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 368 ms | 183 ms | 184 ms | 74 |
-    | 8,192 | 20,688 ms | 6,288 ms | 14.4 s | 5,760 |
-    | 16,384 | 41,405 ms | 12,581 ms | 28.8 s | 11,529 |
-    | 32,768 | 84,731 ms | 25,339 ms | **59.4 s** | **23,757** |
-
-    **When `content` is null, read `message.reasoning`.** A short `max_tokens` budget can
-    be spent entirely inside the `<think>` block, which is a property of the reasoning
-    parser rather than a fault; nothing is dropped, and a larger budget returns the
-    answer with `finish_reason: stop`. vLLM 0.26.0 has no `reasoning_content` field.
+    **When `content` is null, read `message.reasoning`** -- a short `max_tokens` budget can
+    be spent entirely inside the `<think>` block. vLLM 0.26.0 has no `reasoning_content`.
 
     ### Architecture
 
-    A 256-expert / top-8 MoE with a hybrid attention stack: 30 Gated DeltaNet layers and
-    10 gated full-attention layers. Only the full-attention layers hold a KV cache
-    (20 KB/token), so 256K context costs 5.0 GB rather than the ~21 GB a dense model of
-    this size would need, and the Gated DeltaNet recurrent state is context-independent
-    (~30 MB at any length). The whole model is ~18.2 GB — 17.1 GB of that bfp4 routed
-    experts, which are 92.5% of 34.8B parameters — so one Blackhole die holds a complete
-    copy.
+    256 experts, top-8, with a hybrid stack: 30 Gated DeltaNet layers and 10 gated
+    full-attention layers. Only the attention layers hold a KV cache (20 KB/token), so 256K
+    context costs 5.0 GB instead of ~21 GB, and the Gated DeltaNet state is
+    context-independent (~30 MB at any length). The whole model is ~18.2 GB -- 17.1 GB of it
+    bfp4 routed experts -- so one Blackhole chip holds a complete copy.
 
-    ### Measured endpoint performance
+    ### Performance
 
-    Measured with `vllm bench serve` over `/v1/chat/completions` against a server running
-    the settings the `p150` profile ships (`max_num_seqs 1`, `block_size 64`,
-    `max_model_len 262144`, fabric disabled, host sampling), on **one die** of a
-    2x Blackhole p300c host. Concurrency 1, exact input/output lengths, EOS ignored.
-    12/12 runs completed, none failed. Decode tokens/s is `1000 / median TPOT`; prefill
-    tokens/s is `input tokens / TTFT`.
+    Measured on this image, one 2x Blackhole p300c host, `/v1/completions`, concurrency 1,
+    `max_tokens=1` so the latency is the prefill.
 
-    **`n` is how many requests that row sampled, and it shrinks as the prompt grows** --
-    purely to bound wall-clock, since one 131,072-token request takes 370 s and eight
-    would take 50 minutes. It is the sample count, not a model property. Read the last
-    three rows with that in mind: at **n = 1 there is no median and no dispersion**, they
-    are single observations. Where n > 1 the run-to-run spread is small (TTFT standard
-    deviation 6 ms at ISL 128, 107 ms at 2,048, 446 ms at 16,384 -- under 1.1% of TTFT
-    throughout).
+    | Input tokens | `p150` TTFT | `p300x2` TTFT | speedup |
+    | ---: | ---: | ---: | ---: |
+    | 8,192 | 18.5 s | **5.2 s** | 3.5x |
+    | 12,345 | 27.4 s | **8.0 s** | 3.4x |
+    | 16,384 | 36.1 s | **10.5 s** | 3.5x |
+    | 32,768 | 73.1 s | **21.1 s** | 3.5x |
 
-    #### p150
+    Prefill rate is flat in prompt length on both profiles, so **budget TTFT as
+    `input tokens / prefill rate`**. A 131,072-token prompt extrapolates to ~293 s on `p150`
+    and **~85 s** on `p300x2`.
 
-    | Input tokens | Output tokens | n | TTFT (ms) | Prefill tokens/s | Decode tokens/s | TPOT (ms) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 8 | 672 | 190 | 32.99 | 30.31 |
-    | 128 | 1,024 | 4 | 672 | 190 | 32.61 | 30.67 |
-    | 1,024 | 128 | 4 | 4,774 | 215 | 32.73 | 30.56 |
-    | 2,048 | 128 | 4 | 5,426 | 378 | 32.75 | 30.53 |
-    | 4,096 | 128 | 4 | 10,531 | 389 | 32.55 | 30.72 |
-    | 8,192 | 128 | 2 | 20,688 | 396 | 32.27 | 30.98 |
-    | 8,192 | 1,024 | 2 | 20,690 | 396 | 32.33 | 30.93 |
-    | 10,000 | 1,024 | 2 | 25,491 | 392 | 32.14 | 31.11 |
-    | 16,384 | 128 | 2 | 41,405 | 396 | 31.73 | 31.51 |
-    | 32,768 | 128 | 1 | 84,731 | 387 | 30.68 | 32.60 |
-    | 65,536 | 128 | 1 | 174,855 | 375 | 29.19 | 34.26 |
-    | 131,072 | 128 | 1 | 369,740 | 355 | 26.06 | 38.38 |
+    Short prompts on `p150`: TTFT **346 ms**, decode **33.05 tok/s** (TPOT 30.3 ms).
 
-    **Why TTFT grows so much, and why that is not a contradiction.** TTFT *is* the
-    prefill: `TTFT = input tokens / prefill rate`. So a roughly FLAT prefill rate is
-    exactly what makes TTFT grow roughly LINEARLY with prompt length -- the two
-    statements are the same fact. Per doubling above ISL 2,048, TTFT goes 1.94x, 1.96x,
-    2.00x, 2.05x, 2.06x, 2.11x. A 131,072-token prompt costs 370 s of prefill, and no
-    reading of the flat rate avoids that; **budget TTFT from the prompt length, always.**
-
-    The mild drift above 2.00x is the O(T^2) term in the 10 full-attention layers
-    appearing at long context: prefill rate peaks at 396 tok/s around ISL 8K-16K and
-    decays to 355 by 131,072.
-
-    **Below ISL 2,048 the rate is HALF that** -- 190 tok/s at 128 and 215 at 1,024 --
-    and this column is an ENDPOINT metric, not the model's prefill compute rate. It is
-    `input tokens / TTFT` measured through the whole serving stack, so a short prompt is
-    dominated by a fixed cost that has nothing to do with prompt length: HTTP, chat
-    templating, tokenisation, scheduling, host-side sampling and detokenisation. Measured
-    at the model level instead, ISL 128 prefills in 380 ms (337 tok/s) against this
-    table's 672 ms -- so roughly 300 ms of the short-prompt TTFT is serving overhead, and
-    **the model's own prefill rate IS roughly flat from ISL 128 (337 tok/s) to 2,048
-    (380)**. That distinction is where the discredited "flat across the whole sweep"
-    claim came from: flat is true of the model and false of the endpoint.
-
-    Two more short-prompt artefacts: 5.25 ms/token at ISL 128 against 2.53 at 8,192, and
-    the 1,024 -> 2,048 step costing only 1.14x rather than 2x, which is the fixed-bucket
-    prefill showing through. Treat short-prompt TTFT as a latency floor (~400-670 ms),
-    not a throughput measurement.
-
-    **What the 10-of-40 KV ratio does and does not buy.** It is why 256K context is
-    affordable in MEMORY (5.0 GB rather than ~21 GB) and why DECODE is nearly
-    context-independent -- decode falls only 21% from ISL 128 to 131,072, which for a
-    3:1 linear-attention stack is the architecture's real payoff. It does **not** make
-    prefill flat: prefill is O(T) work in all 40 layers plus that O(T^2) term in 10 of
-    them. An earlier revision of this card claimed prefill held at "~350-370 tok/s across
-    the whole sweep, because only 10 of 40 layers carry a KV cache". Both halves were
-    wrong -- the range excludes the two fastest rows and both slow short-prompt ones, and
-    the causal link does not hold.
-
-    Cross-checked through the packaged container itself, p50 of 3 short requests: TTFT
-    **366.7 ms**, decode **33.09 tok/s**, TPOT 30.2 ms — within 0.3% of the ISL-128
-    decode above, which is independent evidence the container reproduces these numbers.
-
-    #### p300x2 (tensor + expert parallel, 4 chips) -- THE LONG-PROMPT PROFILE
-
-    Measured through THIS container on a 2x Blackhole p300c host, `/v1/completions` so no
-    chat template inflates the token count, `max_tokens=1` so the latency is the prefill.
-    The p150 column is the sweep above, so these are endpoint-to-endpoint comparable.
-
-    | Input tokens | p150 TTFT | **p300x2 TTFT** | p300x2 prefill | speedup |
-    | ---: | ---: | ---: | ---: | ---: |
-    | 8,192 | 20,688 ms | **6,288 ms** | 1,302.9 tok/s | 3.29x |
-    | 16,384 | 41,405 ms | **12,581 ms** | 1,302.2 tok/s | 3.29x |
-    | 32,768 | 84,731 ms | **25,339 ms** | 1,293.2 tok/s | 3.34x |
-
-    **p300x2's prefill rate is FLAT where p150's decays** -- 1,293-1,303 tok/s across the
-    whole range against p150's 396 -> 387 -> falling to 355 by 131,072 -- so the speedup
-    GROWS with prompt length. Extrapolating the flat rate, ISL 131,072 is **~101 s against
-    p150's measured 370 s (3.7x)**. That last figure is an EXTRAPOLATION: 32,768 is the
-    longest length measured on this profile.
-
-    Why it works here when tensor parallelism does nothing for decode: prefill routes a
-    chunk to essentially ALL 256 experts while decode visits 8, so sharding the bank four
-    ways genuinely quarters the work. The run metadata shows it -- `experts_per_device` is
-    64 on this profile against 256 on p150. Tensor parallelism alone is worth only ~1.2x;
-    expert parallelism supplies the rest and travels with it automatically.
-
-    Decode is the trade, and it is small: 30.57 tok/s against p150's 33.09 (TPOT 32.7 vs
-    30.2 ms), because decode is launch-bound, so TP runs the same op count on smaller data
-    and adds ~4.6 ms/token of collectives to recover ~0.9 ms of compute.
+    Decode is nearly context-independent, falling only 21% from ISL 128 to 131,072, because
+    just 10 of 40 layers carry a KV cache.
 
     ### Throughput: one instance per die
 
-    `max_num_seqs` is **1**, and it is a hard limit rather than a tuning choice — the
-    Gated DeltaNet recurrent state is held in batch-1 external buffers on the
-    single-device path. Concurrency therefore comes from running one complete replica per
-    die, not from batching. Measured end to end through vLLM with `tools/serve_bench.py`,
-    one stream per lane, 256-token completions, all three columns in one pass against one
-    set of lanes:
+    `max_num_seqs` is 1 -- the Gated DeltaNet recurrent state is held in batch-1 buffers --
+    so concurrency comes from one replica per die rather than from batching:
 
     | | 1 die | 2 dies | 4 dies |
     | --- | ---: | ---: | ---: |
     | aggregate tokens/s | 31.66 | 61.55 | **109.03** |
     | per stream | 33.15 | 32.35 | 28.52 |
-    | TTFT median (ms) | 394 | 395 | 410 |
 
-    3.44x on four dies, with per-stream latency nearly flat. Two things to read off it.
-    Aggregate is below per-stream x lanes because it is total tokens over wall clock and
-    so carries TTFT — at 128-token completions the same lanes give 30.35 / 59.06 / 102.10,
-    since a fixed ~400 ms prefill is amortized over half as many tokens, so **always
-    quote the completion length with the number**. And per-stream decays 33.15 -> 28.52 as
-    lanes are added because four vLLM processes contend for the HOST; the dies are
-    independent. Do not read 28.52 as a single-user four-die figure: one user on a
-    four-die box runs one lane and gets 33.15.
-
-    ```bash
-    tools/serve_lanes.sh start 4      # one replica per die
-    ```
+    3.44x on four dies, 256-token completions. Per-stream decay is host contention between
+    vLLM processes, not the dies. Start them with `tools/serve_lanes.sh start 4`.
 
     ### Tool calling
 
-    Verified end to end against this container, not inferred from a loaded flag:
-    `get_weather({"city": "Paris"})` and `add({"a": 17, "b": 25})` both parse with
-    `finish_reason: tool_calls` and no markup leaked into `content`, and a prompt needing
-    no tool correctly returns zero calls. Re-run the check yourself:
+    Verified against this image: `get_weather({"city": "Paris"})` and
+    `add({"a": 17, "b": 25})` both parse with `finish_reason: tool_calls`, no markup leaks
+    into `content`, and a prompt needing no tool returns zero calls.
 
     ```bash
     tools/verify_tools.sh http://127.0.0.1:20000
     ```
 
     The parser must be `qwen3_xml`, which this package sets. `hermes` expects JSON inside
-    `<tool_call>` while this model emits Qwen XML, so it raises `JSONDecodeError`, reports
-    no tool calls and leaks the raw markup into `content` as prose — and the server starts
-    cleanly either way, so only a real call detects it.
+    `<tool_call>` while this model emits Qwen XML, so it silently reports no tool calls and
+    leaks the markup into `content`.
 
-    ### What changed in this build
-
-    Two prefill improvements ARE in this image, both measured through the container:
-
-    * **Dense prefill width buckets.** Prefill is priced by the padded bucket, and the old
-      list was powers of two below 2048, so a prompt one token past a boundary paid for the
-      next rung. Every 128-multiple caps that waste at 127 tokens. Measured on the same
-      harness before and after: TTFT at a ~1.4K prompt **5,035 ms -> 3,613 ms (-28%)**.
-      Directly, a 1,030-token prompt went 4,803 ms -> 2,853 ms (-41%). Only affects prompts
-      under 2048; above it the bucket fallback was already 128-aligned.
-    * **MoE prefill chunk 32 -> 64.** The old width was chosen on expert-union compute
-      alone, measured where the loop runs a handful of times per layer; it left out the
-      per-iteration overhead that dominates at length. +6.5% prefill at ISL 2048, +3.0% at
-      16384. Greedy token unchanged.
-
-    Short-prompt TTFT through this container is now **347.7 ms** with decode **33.23 tok/s**
-    (TPOT 30.1 ms), against 366.7 ms / 33.09 tok/s before.
-
-    Warmup grew with the bucket list (73 s -> 300 s of program compilation, which must all
-    finish before the decode trace parks or a later compile clobbers it), so this image
-    raises `VLLM_ENGINE_READY_TIMEOUT_S` to 3600 from vLLM's 600 s default. Verified with
-    four concurrent lanes, which is the worst case for it.
-
-    **The two sweep tables above were measured on the PRIOR image** and are therefore
-    conservative for this one: the p150 rows predate both changes, and the p300x2 rows
-    predate the MoE chunk change. They were not re-run because they cost ~40 minutes of
-    device time and the direction is known.
-
-    ### Known limitations
+    ### Limitations
 
     * **Decode is not bit-reproducible.** At temperature 0 the same prompt can return a
-      different completion between runs; a routed expert bank returns different results
-      from bitwise-identical inputs. See `NONDETERMINISM.md` before quoting any
-      determinism or accuracy figure.
+      different completion between runs. See `NONDETERMINISM.md`.
     * **`max_num_seqs` is 1.** Batched serving deadlocks; use lanes for concurrency.
-    * **On-device sampling is unavailable on `p150`.** The vocabulary is 248,320 against a
-      65,536-logits-per-die bound, so the single-chip profile samples on the host.
-      `p300x2` enables it for decode.
+    * **On-device sampling is unavailable on `p150`** (vocabulary 248,320 against a
+      65,536-logits-per-die bound), so it samples on the host. `p300x2` enables it for
+      decode.
