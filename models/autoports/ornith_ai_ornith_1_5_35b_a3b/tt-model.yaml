@@ -260,41 +260,32 @@ serve_profiles:
     # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
     # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
 
-  - name: p300
-    hardware: p300                # 1 dual-chip board = 2 chips
-    # DELIBERATELY NOT TENSOR-PARALLEL, unlike p300x2 below. TP=2 cannot use on-device
-    # sampling -- the vocabulary does not fit ttnn.topk's 64K limit at a 2-way split
-    # (248320/2 = 124160) -- and TP alone, without that, is worth ~1.2x on prefill while
-    # costing decode. So this profile is one replica that happens to open two chips.
-    # ON TWO DIES, RUN TWO LANES INSTEAD: 61.55 tok/s aggregate against this profile's
-    # ~33. See tools/serve_lanes.sh.
-    mesh_device: P300             # NOT YET MEASURED SERVING. Engine init died in
-                                  # fabric_firmware_initializer.cpp; the fabric_config
-                                  # above is the proven fix but this profile has not
-                                  # been re-run through the container since. Any
-                                  # TTFT/tok/s previously quoted here was a
-                                  # DEVICE-LEVEL bench_model number, not a serve
-                                  # result -- see tools/serve_lanes.sh for measured
-                                  # multi-die serving.
-    max_model_len: 262144
-    # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
-    # They were, and they were INERT: the launcher emits the merged additional_config
-    # whole, so they landed as TOP-LEVEL vLLM keys while the plugin reads only the "tt"
-    # namespace, and nothing in the plugin looks for either name. Expert precision comes
-    # from ORNITH_ROUTED_DTYPE or else MESH_PRECISION in tt/model_config.py (bfloat4_b on
-    # every mesh); the served KV cache is allocated by the plugin from vLLM's own
-    # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
-    # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
-    # No TT_MESH_GRAPH_DESC_PATH. One used to be set here, on the theory that engine
-    # init died because tt-metal was not told which 2-chip topology a (1,2) mesh on a
-    # 4-chip QB2 is. That theory is DISPROVEN: with the fabric disabled, opening
-    # MeshShape(1,2) on this host succeeds with no descriptor at all, and with the
-    # fabric enabled it fails WITH one. The cause was the fabric (see fabric_config
-    # above), not the cluster description -- tt_cluster.cpp types a 2-chip P300 board
-    # and a 4-chip P300_X2 as known cluster types either way, so the CUSTOM refusal
-    # that a descriptor guards against cannot fire here. (It IS genuinely required for
-    # tools/serve_lanes.sh, which pins TT_VISIBLE_DEVICES to ONE die and so really does
-    # leave tt-metal looking at a partial board.)
+  # p300 (a single 2-chip board) IS DELIBERATELY ABSENT, and its removal is a measurement.
+  # It cannot serve on this hardware in EITHER configuration:
+  #
+  #   * WITH a fabric, which tensor parallelism requires for its two collectives per layer:
+  #       Fabric Router Sync: Timeout after 10000 ms on Device 0: expected status
+  #       0xa2b2c2d2 ... got 0xa0b0c0d0    (fabric_firmware_initializer.cpp:271)
+  #     A (1,2) mesh on this 4-chip QB2 is a SUBSET of the cluster, so its EDM routers never
+  #     complete the handshake. This is the same failure the fabric_config note above
+  #     records, reproduced 2026-09-18 with ORNITH_TP=1 + FABRIC_1D_RING on the profile.
+  #
+  #   * WITHOUT a fabric, which is the only way a (1,2) mesh opens: the model then
+  #     REPLICATES onto two dies, and multi-die replicated decode hangs. Reproduced the
+  #     same day -- it opens 2 chips, loads all 40 layers, configures a 262,208-token KV
+  #     cache, captures the decode trace, and then never answers a request.
+  #
+  # So it was never "not yet measured"; it is measured and it does not work here. A profile
+  # that hangs is worse than no profile, so it is gone rather than carrying a warning.
+  #
+  # ON A 2-CHIP BOARD: use p150 (one die) for latency, or two lanes for throughput --
+  # 61.55 tok/s aggregate against the ~33 a single replica would give if it worked.
+  # tools/serve_lanes.sh start 2
+  #
+  # CAVEAT, stated because it bounds the claim: both failures are on a 2-chip SUBSET of a
+  # 4-chip QB2. A standalone p300 box, where 2 chips ARE the whole cluster, may well
+  # handshake its fabric correctly -- no such box was available to test, so this says
+  # nothing about one.
 
   - name: p300x2
     hardware: p300x2              # 2 boards = 4 chips (a QB2)
@@ -352,15 +343,26 @@ serve_profiles:
     # kv_cache_dtype, which is bfloat16 here. The removed kv_cache_dtype: bfloat8_b was
     # doubly wrong -- inert, and contradicted by what the paged path actually allocates.
 
-# p150 is the default because it is the ONLY profile measured serving end to end. The
-# previous default was p300x2 -- a profile that has never answered a request -- and its
-# stated reason ("the only profile that runs bf16 experts") was false: all three profiles
-# run bfloat4_b routed experts. MESH_PRECISION's bf16 entry sits under `routed_ep` and is
-# reachable only with ORNITH_MOE_EP=1, which nothing in this package sets.
+# p150 is the default because it has the BEST SINGLE-USER DECODE of the three, which is
+# what a default should optimise. Measured, p50 of 3, same harness:
 #
-# On a multi-die box the higher-throughput deployment is N instances of THIS profile, one
-# per die, via tools/serve_lanes.sh -- 109.03 tok/s aggregate on four dies against 28.78
-# for a single four-die instance.
+#     profile   TTFT        decode
+#     p150      365.6 ms    33.13 tok/s   <- default
+#     p300x2    184.0 ms    29.65 tok/s   (tensor-parallel; 2.0x TTFT, slower decode)
+#
+# p300x2 now SERVES -- the note that it "has never answered a request" was true when it was
+# written and is not any more -- so the default is a trade-off rather than the only option:
+# take p300x2 when time-to-first-token dominates (it wins end to end below ~84 output
+# tokens) and p150 otherwise.
+#
+# The original reason recorded for defaulting to p300x2 was false and stays corrected: "the
+# only profile that runs bf16 experts". All three run bfloat4_b routed experts;
+# MESH_PRECISION's bf16 entry sits under `routed_ep`, reachable only with ORNITH_MOE_EP=1,
+# which nothing in this package sets.
+#
+# On a multi-die box the higher-THROUGHPUT deployment is neither: it is N instances of the
+# p150 profile, one per die, via tools/serve_lanes.sh -- 109.03 tok/s aggregate on four
+# dies against 29.65 for a single four-die tensor-parallel instance.
 default_profile: p150
 
 # Run inside the finished image, on top of the launcher's own import checks.

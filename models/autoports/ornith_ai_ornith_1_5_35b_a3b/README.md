@@ -721,9 +721,23 @@ tt-metal tree, vLLM 0.26.0 empty-target, the plugin, and this model's code) and
 
 | profile | chips | verdict |
 |---|---|---|
-| **p150** | 1 | **SERVES, AND THE ANSWERS ARE CORRECT** (re-verified 2026-09-16) |
-| p300 | 2 | engine init fixed; multi-die DECODE hangs -- use `serve_lanes.sh` |
-| p300x2 | 4 | same: init and prefill work, decode hangs |
+| **p150** | 1 | **SERVES, ANSWERS CORRECT** — default (re-verified 2026-09-18) |
+| **p300x2** | 4 | **SERVES with `ORNITH_TP=1`** — TTFT 184.0 ms (2.0x), decode 29.65 tok/s |
+| ~~p300~~ | 2 | **REMOVED 2026-09-18: cannot serve on this hardware either way** |
+
+The p300x2 row used to read "init and prefill work, decode hangs". That was the REPLICATED
+path; with tensor parallelism it serves, and the profile now wires `ORNITH_TP=1`, the ring
+fabric, the L1 small pool and on-device sampling itself. The general rule behind both
+changed rows: **multi-die REPLICATED decode hangs, tensor-parallel decode works.**
+
+p300 is gone because it is measured, not unmeasured. With a fabric (which TP needs) a (1,2)
+mesh on this 4-chip QB2 is a cluster SUBSET and its routers never handshake — `Fabric Router
+Sync: Timeout ... fabric_firmware_initializer.cpp:271`. Without a fabric it replicates onto
+two dies and decode hangs: it opens 2 chips, loads 40 layers, configures a 262,208-token KV
+cache, captures the decode trace, then never answers. On a 2-chip board use p150 for latency
+or two lanes for throughput (61.55 tok/s aggregate). Caveat: both failures are on a 2-chip
+subset of a QB2; a standalone p300 box, where 2 chips are the whole cluster, was never
+available to test and this says nothing about one.
 
 Re-verified on 2026-09-16 by rebuilding the package and reading the COMPLETION TEXT:
 
