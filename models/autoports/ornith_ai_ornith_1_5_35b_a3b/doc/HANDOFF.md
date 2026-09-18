@@ -2,31 +2,71 @@
 
 ## State
 
-Shipping configuration is measured, correct, rebuilt and verified. `repo:` is set.
-Nothing has been pushed: the box has no Hugging Face credentials at all, so the push is
-yours.
+Shipping configuration is measured, correct, rebuilt, re-gated and **PUSHED**.
 
-**Rebuilt and re-verified 2026-09-18** (`handoff/build_pkg.sh`, then
-`handoff/verify_final.sh`), bundle at `artifacts/pkgbuild-final/ornith-1.5-35b-a3b`,
-image `tt-model/ornith-1.5-35b-a3b:fb4b1ebf493b`:
+**Rebuilt and re-gated 2026-09-18 15:21-15:43Z** (`handoff/package_final.sh`), bundle at
+`artifacts/pkgbuild-final/ornith-1.5-35b-a3b`, image
+`tt-model/ornith-1.5-35b-a3b:f76179a04901`, pushed to `raahemnabeel/ornith-1.5-35b-a3b`
+(private). All seven gates pass:
 
 | gate | result |
 |---|---|
-| image provenance | plugin `5961e48`, repo `raahemnabeel/ornith-1.5-35b-a3b` |
-| container serves correct text on p150 | pass, `max_model_len: 262144` |
-| p150 perf through the container | TTFT **367.5 ms**, decode **32.77 tok/s**, TPOT 30.5 ms |
-| four lanes, one per die | **4/4 ready**, all four correct, `finish_reason: stop` |
+| 1 clean rebuild from `tt-model.yaml` | pass, `PACKAGE_EXIT=0` |
+| 2 wiring survived the rebuild | `p150` + `p300x2`; TP env, ring fabric and `decode_only` sampling all intact |
+| 3 container serves correct text on p150 | pass, `max_model_len: 262144` |
+| 4 p150 perf through the container | TTFT **366.7 ms**, decode **33.09 tok/s**, TPOT 30.2 ms |
+| 5 four lanes, one per die | **4/4 ready**, all four correct, `finish_reason: stop` |
+| 6 **tool calling** | **pass** — `get_weather({"city": "Paris"})`, `add({"a": 17, "b": 25})`, zero markup leakage, no-call case clean |
+| 7 leave p150 serving | live on `:8000`, `finish_reason: stop`, 300 tokens |
 
-The rebuild mattered for more than the numbers: the previously built image labelled its
-plugin `bef89e42`, the commit BEFORE the replicated-MoE capabilities, because those were
-sitting uncommitted in the plugin working tree. They are now committed and
+Perf is within noise of the pre-fix build (365.6 ms / 33.13 tok/s), so neither fix below
+cost anything.
+
+### Two claims in the previous revision of this file were false
+
+**It said "Nothing has been pushed: the box has no Hugging Face credentials at all, so the
+push is yours." Both halves were wrong.** The HF token was written 03:21Z and
+`hf auth whoami` returns `raahemnabeel` / `orgs=Tenstorrent`; the repo had already been
+pushed at **04:59Z**, from the 04:31 build. That build predates both fixes below, so for
+about eleven hours the published package was the one with broken tool calling and an
+unservable `p300` profile. Replacing it is what this rebuild is for.
+
+**It also named image `fb4b1ebf493b`, which has never existed on this box.** The build it
+described produced `b5c6d1d848ff` (04:31Z). The current image is `f76179a04901` (15:23Z).
+
+### What this rebuild carries that the published package did not
+
+|  | published `b5c6d1d848ff` | current `f76179a04901` |
+|---|---|---|
+| `capabilities.tool_parser` | `hermes` — never parsed a call | **`qwen3_xml`** |
+| `serve_profiles` | p150, **p300**, p300x2 | p150, p300x2 |
+| shipped `tools/serve_lanes.sh` | `--tool-call-parser hermes` | **`qwen3_xml`** |
+
+**The tool-calling gate could not have passed even after the parser was fixed.**
+`handoff/verify_tools.sh`, written specifically to prove `qwen3_xml` works, had
+`f"[{ \"PASS\" if ok else \"FAIL\" }]"` in its embedded Python. Backslash-escaped quotes
+inside an f-string expression is a `SyntaxError`, so every one of its three checks exited 1
+and the gate reported `TOOL CALLING FAILED` regardless of what the server did. A second bug
+behind it read `c.function.name` on `tool_calls` entries, which are parsed JSON dicts, not
+objects. Neither had been observed because the gate had never been run. Both fixed, and the
+gate exercised against a live server at 15:40Z — the first end-to-end proof that this model
+can call a tool.
+
+**`verify_tools.sh` is still not versioned.** It lives only in `~/ornith-bringup/handoff/`,
+which is not a git repository, and it is not shipped in the package — so a consumer who
+pulls this model cannot re-run the check that validates its own `serve_lanes.sh`. It
+belongs in the model's `tools/` next to the script it tests.
+
+The 2026-09-18 04:26 rebuild mattered for more than the numbers: the image built before it
+labelled its plugin `bef89e42`, the commit BEFORE the replicated-MoE capabilities, because
+those were sitting uncommitted in the plugin working tree. They are now committed and
 fast-forwarded onto the plugin's `main` (`5961e48`), and the image records it. The older
 image `tt-model/ornith-1.5-35b-a3b:82768e358642` still carries `PLACEHOLDER` and the old
 plugin label; delete it so nobody serves it by accident.
 
 ```bash
-hf auth login
-tt-model push /home/raahem/ornith-bringup/artifacts/pkgbuild-final/ornith-1.5-35b-a3b --private
+# The repo already exists, so no visibility flag: push leaves it as it is.
+tt-model push /home/raahem/ornith-bringup/artifacts/pkgbuild-final/ornith-1.5-35b-a3b
 ```
 
 ## The numbers

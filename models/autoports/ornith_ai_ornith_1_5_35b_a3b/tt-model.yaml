@@ -397,17 +397,151 @@ verify:
     )
     assert set(MESH_PRECISION) == {"P150", "P300", "P150x4"}, MESH_PRECISION
 
+# The generated model card. Only two fields exist (CardSettings sets extra="forbid"):
+# `description`, which leads the card under the title, and `quickstart`, which is
+# inserted after the generated quickstart block and before "## Serve profiles" -- so
+# everything below is H3 to sit under that H2, matching how other tt-model repos
+# (e.g. tt-hous/ornith-1.0-35b-p150) lay their cards out.
+#
+# EVERY NUMBER BELOW IS MEASURED AND SOURCED. The endpoint table is the 12-row
+# `vllm bench serve` sweep in doc/tti_release/benchmarks/ (12/12 completed, 0 failed);
+# the lane table is tools/serve_bench.py; the container rows are handoff gates. Nothing
+# here is projected, and the methodology is stated with each table because the three
+# were produced by different harnesses and are NOT interchangeable.
 card:
+  description: >-
+    Ornith-1.5-35B-A3B is a 256-expert mixture-of-experts reasoning model with a hybrid
+    Gated DeltaNet / full-attention stack, served through an OpenAI-compatible vLLM
+    endpoint on Tenstorrent Blackhole hardware. It holds its full 262,144-token context
+    on a single chip.
   quickstart: |
-    ## Ornith-1.5-35B-A3B on Tenstorrent Blackhole
+    ### Select a serve profile
+
+    ```bash
+    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p150   --follow
+    tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p300x2 --follow
+    ```
+
+    Both profiles enable Qwen3 reasoning and Qwen3 XML tool-call parsing. `p150` is the
+    default because it has the best single-user decode. `p300x2` is tensor-parallel
+    across four chips and halves time-to-first-token while decoding slightly slower, so
+    it pays off below roughly 84 output tokens and `p150` pays off above it.
+
+    **When `content` is null, read `message.reasoning`.** A short `max_tokens` budget can
+    be spent entirely inside the `<think>` block, which is a property of the reasoning
+    parser rather than a fault; nothing is dropped, and a larger budget returns the
+    answer with `finish_reason: stop`. vLLM 0.26.0 has no `reasoning_content` field.
+
+    ### Architecture
 
     A 256-expert / top-8 MoE with a hybrid attention stack: 30 Gated DeltaNet layers and
     10 gated full-attention layers. Only the full-attention layers hold a KV cache
-    (20 KB/token), so 256K context costs 5.4 GB rather than the ~21 GB a dense model of
-    this size would need.
+    (20 KB/token), so 256K context costs 5.0 GB rather than the ~21 GB a dense model of
+    this size would need, and the Gated DeltaNet recurrent state is context-independent
+    (~30 MB at any length). The whole model is ~18.2 GB — 17.1 GB of that bfp4 routed
+    experts, which are 92.5% of 34.8B parameters — so one Blackhole die holds a complete
+    copy.
+
+    ### Measured endpoint performance
+
+    Measured with `vllm bench serve` over `/v1/chat/completions` against a server running
+    the settings the `p150` profile ships (`max_num_seqs 1`, `block_size 64`,
+    `max_model_len 262144`, fabric disabled, host sampling), on **one die** of a
+    2x Blackhole p300c host. Each row is the median of *n* sequential requests at
+    concurrency 1, with exact input/output lengths and EOS ignored. 12/12 runs completed,
+    none failed. Decode tokens/s is derived as `1000 / median TPOT`.
+
+    #### p150
+
+    | Input tokens | Output tokens | n | TTFT (ms) | Decode tokens/s | TPOT (ms) |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 8 | 672 | 32.99 | 30.31 |
+    | 128 | 1,024 | 4 | 672 | 32.61 | 30.67 |
+    | 1,024 | 128 | 4 | 4,774 | 32.73 | 30.56 |
+    | 2,048 | 128 | 4 | 5,426 | 32.75 | 30.53 |
+    | 4,096 | 128 | 4 | 10,531 | 32.55 | 30.72 |
+    | 8,192 | 128 | 2 | 20,688 | 32.27 | 30.98 |
+    | 8,192 | 1,024 | 2 | 20,690 | 32.33 | 30.93 |
+    | 10,000 | 1,024 | 2 | 25,491 | 32.14 | 31.11 |
+    | 16,384 | 128 | 2 | 41,405 | 31.73 | 31.51 |
+    | 32,768 | 128 | 1 | 84,731 | 30.68 | 32.60 |
+    | 65,536 | 128 | 1 | 174,855 | 29.19 | 34.26 |
+    | 131,072 | 128 | 1 | 369,740 | 26.06 | 38.38 |
+
+    Decode falls only 21% from 128 to 131,072 input tokens, and prefill holds at
+    ~350-370 tok/s across the whole sweep, because only 10 of 40 layers carry a KV cache.
+    That flatness is the architecture's point.
+
+    Cross-checked through the packaged container itself, p50 of 3 short requests: TTFT
+    **366.7 ms**, decode **33.09 tok/s**, TPOT 30.2 ms — within 0.3% of the ISL-128
+    decode above, which is independent evidence the container reproduces these numbers.
+
+    #### p300x2 (tensor-parallel, 4 chips)
+
+    A different harness: p50 of 3 requests through the container, short prompt, 100
+    output tokens, both rows measured in the same session so they are comparable to each
+    other but not to the sweep above. No ISL sweep was run on this profile.
+
+    | profile | TTFT (ms) | Decode tokens/s | TPOT (ms) |
+    | --- | ---: | ---: | ---: |
+    | `p150` | 367.5 | 32.77 | 30.5 |
+    | `p300x2` | **183.1** | 30.57 | 32.7 |
+
+    Tensor parallelism buys 2.0x on TTFT and costs ~2.2 tok/s of decode. Decode here is
+    launch-bound rather than bandwidth-bound, so TP runs the same op count on smaller
+    data and adds ~4.6 ms/token of collectives to recover ~0.9 ms of compute.
+
+    ### Throughput: one instance per die
+
+    `max_num_seqs` is **1**, and it is a hard limit rather than a tuning choice — the
+    Gated DeltaNet recurrent state is held in batch-1 external buffers on the
+    single-device path. Concurrency therefore comes from running one complete replica per
+    die, not from batching. Measured end to end through vLLM with `tools/serve_bench.py`,
+    one stream per lane, 256-token completions, all three columns in one pass against one
+    set of lanes:
+
+    | | 1 die | 2 dies | 4 dies |
+    | --- | ---: | ---: | ---: |
+    | aggregate tokens/s | 31.66 | 61.55 | **109.03** |
+    | per stream | 33.15 | 32.35 | 28.52 |
+    | TTFT median (ms) | 394 | 395 | 410 |
+
+    3.44x on four dies, with per-stream latency nearly flat. Two things to read off it.
+    Aggregate is below per-stream x lanes because it is total tokens over wall clock and
+    so carries TTFT — at 128-token completions the same lanes give 30.35 / 59.06 / 102.10,
+    since a fixed ~400 ms prefill is amortized over half as many tokens, so **always
+    quote the completion length with the number**. And per-stream decays 33.15 -> 28.52 as
+    lanes are added because four vLLM processes contend for the HOST; the dies are
+    independent. Do not read 28.52 as a single-user four-die figure: one user on a
+    four-die box runs one lane and gets 33.15.
 
     ```bash
-    tt-model pull  <repo>
-    tt-model serve <repo>                 # default profile: p150 (1 chip)
-    tools/serve_lanes.sh start 4          # multi-die: one replica per die (3.4x throughput)
+    tools/serve_lanes.sh start 4      # one replica per die
     ```
+
+    ### Tool calling
+
+    Verified end to end against this container, not inferred from a loaded flag:
+    `get_weather({"city": "Paris"})` and `add({"a": 17, "b": 25})` both parse with
+    `finish_reason: tool_calls` and no markup leaked into `content`, and a prompt needing
+    no tool correctly returns zero calls. Re-run the check yourself:
+
+    ```bash
+    tools/verify_tools.sh http://127.0.0.1:20000
+    ```
+
+    The parser must be `qwen3_xml`, which this package sets. `hermes` expects JSON inside
+    `<tool_call>` while this model emits Qwen XML, so it raises `JSONDecodeError`, reports
+    no tool calls and leaks the raw markup into `content` as prose — and the server starts
+    cleanly either way, so only a real call detects it.
+
+    ### Known limitations
+
+    * **Decode is not bit-reproducible.** At temperature 0 the same prompt can return a
+      different completion between runs; a routed expert bank returns different results
+      from bitwise-identical inputs. See `NONDETERMINISM.md` before quoting any
+      determinism or accuracy figure.
+    * **`max_num_seqs` is 1.** Batched serving deadlocks; use lanes for concurrency.
+    * **On-device sampling is unavailable on `p150`.** The vocabulary is 248,320 against a
+      65,536-logits-per-die bound, so the single-chip profile samples on the host.
+      `p300x2` enables it for decode.
