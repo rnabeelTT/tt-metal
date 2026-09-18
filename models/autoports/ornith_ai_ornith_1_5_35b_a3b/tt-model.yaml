@@ -422,10 +422,25 @@ card:
     tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile p300x2 --follow
     ```
 
-    Both profiles enable Qwen3 reasoning and Qwen3 XML tool-call parsing. `p150` is the
-    default because it has the best single-user decode. `p300x2` is tensor-parallel
-    across four chips and halves time-to-first-token while decoding slightly slower, so
-    it pays off below roughly 84 output tokens and `p150` pays off above it.
+    Both profiles enable Qwen3 reasoning and Qwen3 XML tool-call parsing.
+
+    **On a four-die box, use `p300x2` for anything but a short prompt.** It is
+    tensor- and expert-parallel and prefills **3.3x faster**, measured through this
+    container out to ISL 32768 (see below). `p150` keeps the best single-user DECODE
+    (33.09 against 30.57 tok/s), so it remains the default because it is also the only
+    profile that runs on one chip -- but the decode edge is 2.5 ms/token and the prefill
+    edge is up to 59 SECONDS, so it is not close once the prompt is long.
+
+    An earlier revision of this card said `p300x2` "pays off below roughly 84 output
+    tokens and `p150` pays off above it". That crossover was derived at ISL 128 and does
+    not generalise -- it scales with the TTFT gap:
+
+    | ISL | p150 TTFT | p300x2 TTFT | TTFT saved | crossover (output tokens) |
+    | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 368 ms | 183 ms | 184 ms | 74 |
+    | 8,192 | 20,688 ms | 6,288 ms | 14.4 s | 5,760 |
+    | 16,384 | 41,405 ms | 12,581 ms | 28.8 s | 11,529 |
+    | 32,768 | 84,731 ms | 25,339 ms | **59.4 s** | **23,757** |
 
     **When `content` is null, read `message.reasoning`.** A short `max_tokens` budget can
     be spent entirely inside the `<think>` block, which is a property of the reasoning
@@ -517,20 +532,33 @@ card:
     **366.7 ms**, decode **33.09 tok/s**, TPOT 30.2 ms — within 0.3% of the ISL-128
     decode above, which is independent evidence the container reproduces these numbers.
 
-    #### p300x2 (tensor-parallel, 4 chips)
+    #### p300x2 (tensor + expert parallel, 4 chips) -- THE LONG-PROMPT PROFILE
 
-    A different harness: p50 of 3 requests through the container, short prompt, 100
-    output tokens, both rows measured in the same session so they are comparable to each
-    other but not to the sweep above. No ISL sweep was run on this profile.
+    Measured through THIS container on a 2x Blackhole p300c host, `/v1/completions` so no
+    chat template inflates the token count, `max_tokens=1` so the latency is the prefill.
+    The p150 column is the sweep above, so these are endpoint-to-endpoint comparable.
 
-    | profile | TTFT (ms) | Decode tokens/s | TPOT (ms) |
-    | --- | ---: | ---: | ---: |
-    | `p150` | 367.5 | 32.77 | 30.5 |
-    | `p300x2` | **183.1** | 30.57 | 32.7 |
+    | Input tokens | p150 TTFT | **p300x2 TTFT** | p300x2 prefill | speedup |
+    | ---: | ---: | ---: | ---: | ---: |
+    | 8,192 | 20,688 ms | **6,288 ms** | 1,302.9 tok/s | 3.29x |
+    | 16,384 | 41,405 ms | **12,581 ms** | 1,302.2 tok/s | 3.29x |
+    | 32,768 | 84,731 ms | **25,339 ms** | 1,293.2 tok/s | 3.34x |
 
-    Tensor parallelism buys 2.0x on TTFT and costs ~2.2 tok/s of decode. Decode here is
-    launch-bound rather than bandwidth-bound, so TP runs the same op count on smaller
-    data and adds ~4.6 ms/token of collectives to recover ~0.9 ms of compute.
+    **p300x2's prefill rate is FLAT where p150's decays** -- 1,293-1,303 tok/s across the
+    whole range against p150's 396 -> 387 -> falling to 355 by 131,072 -- so the speedup
+    GROWS with prompt length. Extrapolating the flat rate, ISL 131,072 is **~101 s against
+    p150's measured 370 s (3.7x)**. That last figure is an EXTRAPOLATION: 32,768 is the
+    longest length measured on this profile.
+
+    Why it works here when tensor parallelism does nothing for decode: prefill routes a
+    chunk to essentially ALL 256 experts while decode visits 8, so sharding the bank four
+    ways genuinely quarters the work. The run metadata shows it -- `experts_per_device` is
+    64 on this profile against 256 on p150. Tensor parallelism alone is worth only ~1.2x;
+    expert parallelism supplies the rest and travels with it automatically.
+
+    Decode is the trade, and it is small: 30.57 tok/s against p150's 33.09 (TPOT 32.7 vs
+    30.2 ms), because decode is launch-bound, so TP runs the same op count on smaller data
+    and adds ~4.6 ms/token of collectives to recover ~0.9 ms of compute.
 
     ### Throughput: one instance per die
 
@@ -575,6 +603,22 @@ card:
     `<tool_call>` while this model emits Qwen XML, so it raises `JSONDecodeError`, reports
     no tool calls and leaks the raw markup into `content` as prose — and the server starts
     cleanly either way, so only a real call detects it.
+
+    ### Committed since this image was built, so NOT in these numbers
+
+    Two measured prefill improvements are in the model source but land only on the next
+    package build. The numbers above are this image's, honestly:
+
+    * **MoE prefill chunk 32 -> 64** (`ORNITH_MOE_CHUNK`): +6.5% prefill at ISL 2048,
+      +3.0% at 16384, greedy token unchanged. The old value was tuned on expert-union
+      compute alone and left out per-iteration overhead.
+    * **Dense prefill width buckets** (`QWEN36_PREFILL_BUCKETS=dense`): prefill is priced
+      by the padded bucket, so with the old powers-of-two list a 1,030-token prompt paid
+      for 2,048 and cost 4,803 ms against 1,000 tokens' 2,558 ms. Every 128-multiple caps
+      the waste at 127 tokens: that prompt now costs 2,853 ms, -41%. Only affects prompts
+      under 2048; above it the fallback was already 128-aligned. It quadruples warmup
+      (73 s -> 300 s), which must be checked against `VLLM_ENGINE_READY_TIMEOUT_S=600`
+      before it ships.
 
     ### Known limitations
 
