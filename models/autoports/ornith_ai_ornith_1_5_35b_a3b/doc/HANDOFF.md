@@ -105,6 +105,45 @@ first run.
 `verify_lanes.sh` also swallowed its own failure (it returned the exit status of a final
 `echo`), which is how `run_all.sh` printed `exit=0` over a 0/4 result. Also fixed.
 
+## The single biggest win available, and exactly what blocks it
+
+**5.83 ms/token — 19% of decode — never touches the dies.** Measured on p150:
+
+    device model (tools/layer_sweep.py)   24.67 ms
+    served TPOT                           30.50 ms
+    SERVING OVERHEAD                       5.83 ms
+
+That is the full `[1, 1, 248320]` logits readback and its per-step sync. ornith-1.0's
+served 23.3 ms on FOUR dies essentially equals its own device model, so it carries no
+equivalent tax — and our SINGLE-die device compute (24.67 ms) is within 6% of their
+four-die total (23.30 ms). The deficit a user sees is almost entirely this overhead, not
+compute, not op count, not collectives, and not the architecture.
+
+On-device sampling removes it. Measured on the TP path, it is worth 2.4 ms
+(28.53 -> 30.57 tok/s). On one die it would be worth the lot.
+
+**Two things that do NOT block it, both checked:**
+* `ttnn.topk`'s 64K width limit. `TTSampling.multi_step_reduction` cuts the padded vocab
+  into chunks and is enabled precisely when the mesh is `[1, 1]` (`tt_sampling.py:192`) —
+  it exists FOR the single-die case. 248320 pads to 262144 = 4 chunks of exactly 65536,
+  tile-aligned; `TTSampling.num_single_device_vocab_splits` accepts it.
+* The vLLM plugin. It only reads the `supports_sample_on_device` capability, which we
+  already declare. The "certified TP topology (1x4 or 1x8)" wording in tt-model.yaml was
+  describing qwen36's OWN gate, not a plugin rule.
+
+**What DOES block it:** `TTSampling.max_batch_size` is floored at 32 for tile alignment
+(`tt_sampling.py:229`), so the sampler's parameter tensors are 32 rows while single-die
+decode emits one:
+
+    TT_FATAL: Shape of Output tensor Shape([1, 248320]) provided does not match the
+    broadcasted output shape Shape([32, 248320])
+
+Closing it means padding decode logits to 32 rows through the captured trace and taking
+the token from row 0. That is a real change to the SHIPPING path, and a subtle sampling
+bug yields plausible-but-wrong tokens that smoke tests pass, so it was not attempted
+against a verified release. It is the first thing to do next, and it is worth more than
+anything else on this list.
+
 ## Still open, all pre-existing and none blocking the shipping config
 
 * **Tensor parallelism is opt-in and has one blocker left**, precisely localized. The TP

@@ -272,12 +272,36 @@ serve_profiles:
 
   - name: p300x2
     hardware: p300x2              # 2 boards = 4 chips (a QB2)
-    mesh_device: P150x4           # NOT YET MEASURED SERVING. Gets past fabric, then
-                                  # engine init dies in the PREFILL WARMUP with
-                                  # "Ends 2048 must be <= the shape of the tensor 32"
-                                  # (slice_device_operation.cpp:134), reproduced on the
-                                  # bare host at chunk=2048. Any TTFT/tok/s previously
-                                  # quoted here was a DEVICE-LEVEL bench_model number.
+    mesh_device: P150x4           # MEASURED SERVING 2026-09-18, with full trace capture.
+                                  # The old note here said engine init died in the prefill
+                                  # warmup; that was the GDN conv1d CB overflow, fixed by
+                                  # splitting the depthwise conv into 1024-channel blocks.
+                                  #
+                                  # THIS PROFILE ALONE IS ONE FOUR-DIE REPLICA, and for a
+                                  # single user that is SLOWER to decode than one die.
+                                  # Measured, p50 of 3, same method as the p150 row:
+                                  #
+                                  #            TTFT      decode
+                                  #   p150     367.5 ms  32.77 tok/s   <- best decode
+                                  #   4-die TP 183.1 ms  30.57 tok/s   <- best TTFT (2.0x)
+                                  #
+                                  # so it is a LATENCY-SHAPED choice, not a faster one:
+                                  # TP wins end to end below ~84 output tokens and loses
+                                  # above it. Tensor parallelism costs ~4.6 ms/token in
+                                  # collectives and returns ~0.9 ms of compute, because
+                                  # this model's decode is launch-bound (24.67 ms device
+                                  # model on ONE die; per-layer 583 us GDN / 557 us full).
+                                  # For THROUGHPUT on four dies use four lanes instead --
+                                  # 109.03 tok/s aggregate against this profile's 30.57.
+                                  #
+                                  # It is opt-in and NOT the default, and it needs all of:
+                                  #   ORNITH_TP=1
+                                  #   additional_config tt.fabric_config: FABRIC_1D_RING
+                                  #   additional_config tt.l1_small_size: 24576
+                                  #   additional_config tt.sample_on_device_mode: decode_only
+                                  # The last is worth 2.4 ms/token here and is refused on
+                                  # a (1,1) mesh, so it cannot move to the top-level
+                                  # additional_config -- see handoff/tp_serve.sh.
     max_model_len: 262144
     # NOTE: routed_expert_dtype / kv_cache_dtype are deliberately NOT declared here.
     # They were, and they were INERT: the launcher emits the merged additional_config
