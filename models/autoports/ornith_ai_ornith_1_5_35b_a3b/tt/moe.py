@@ -929,6 +929,28 @@ class _SparseExperts:
             ttnn.deallocate(down)
             ttnn.deallocate(r_c)
             ttnn.deallocate(sp_c)
+            # The expert COMBINE. Stays `fast_reduce_nc`, and that is now MEASURED rather
+            # than inherited.
+            #
+            # `deepseek_moe_fast_reduce_nc` looked like a free accuracy win: ornith-1.0
+            # measured its accumulation at PCC 0.999999 against a float32 sum of 256
+            # bfloat16 expert blocks where `fast_reduce_nc` gives 0.999409, and prompt 2
+            # here sits at 0.94334 against a 0.95 bar. Summing 256 bfp4 expert
+            # contributions is exactly that shape, so it was worth trying.
+            #
+            # IT IS WORSE END TO END. A/B against the cached HF reference, same build,
+            # baseline reproduced to five decimals first (handoff/log_ab_reduce.txt):
+            #
+            #   prompt        fast_reduce_nc   deepseek_moe_fast_reduce_nc
+            #   0                0.97174              0.96974
+            #   1                0.97134              0.97016
+            #   2                0.94334              0.93604
+            #
+            # Every prompt regressed and prompt 2 moved AWAY from the bar. Top-1 stayed
+            # correct 3/3 either way, and top-8 overlap actually improved on prompts 0 and
+            # 2 (6/8 -> 7/8), so the op is not broken -- it is a different accumulation
+            # order whose op-level accuracy does not survive to the logits. A more accurate
+            # reduce in isolation is not a more accurate model.
             outs.append(ttnn.experimental.fast_reduce_nc(st, dims=[1]))
             ttnn.deallocate(st)
 
