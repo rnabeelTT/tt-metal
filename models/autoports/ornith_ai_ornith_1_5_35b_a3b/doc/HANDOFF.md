@@ -234,18 +234,35 @@ Their own doc names the same trap from the other side: "that measurement is at s
 widths, and no DRAM-sharded candidate exists at the per-device multichip widths in any
 artifact." They re-ran a 9-target x 6-cap ladder AT PER-DEVICE WIDTHS. This port never has.
 
-**The fix is a re-sweep, not a rewrite.** `num_cores` is already a parameter; only the
-constants are wrong for TP. Sweep them at the per-device widths in the table (and pass
-`grid_w=self.decode_grid_w` on `attn_qkv`, which still uses the legacy cols<=8 shaping),
-then select per `tp` rather than per model. `mlp_w1/w3` wants the opposite treatment: at
-N=128/die it has four output tiles and 40 of its 44 cores sit idle paying multicast setup,
-so it should shrink, not grow.
+**SWEPT, AND THE CONSTANTS ARE FINE. This hypothesis is refuted.** Measured on one die at
+the exact TP=4 per-device shapes (these are per-device matmuls, so no mesh is needed;
+`handoff/log_mmsweep.txt`), num_cores from 8 to 110:
 
-Sizing it honestly: dense `Matmul` is 14.82% of ornith-1.0's linear-decode window, so if
-ours is comparable (~110 us of the 734 us layer) and per_core_n halves, this is roughly
-50-70 us/layer = **2-2.8 ms/token**, taking 4-die decode from 33.7 ms to about 31 ms
-(~32 tok/s). Real and low-risk, but not the whole 200 us/layer -- the remainder is still
-unaccounted, and activation memory configs on the sharded path are the next suspect.
+| projection | K x N/die | current | best | gain |
+|---|---|---|---|---|
+| `gdn_qkvz` | 2048 x 3088 | 44 -> **20.92 us** | 110 -> 20.33 us | 0.59 us (2.8%) |
+| `attn_qkv` | 2048 x 2304 | 64 -> **19.46 us** | 66 -> 18.82 us | 0.64 us (3.3%) |
+| `mlp_w2` | 512 x 2048 | 33 -> **8.57 us** | 22 -> 7.14 us | 1.43 us (17%) |
+| `mlp_w1/w3` | 2048 x 128 | 44 -> **9.58 us** | 99 -> 9.56 us | noise |
+
+Summed over 30 GDN + 10 full-attention layers that is **~83 us/token, 0.25% of the 33.7 ms
+TPOT** -- not the 2-2.8 ms predicted above. The prediction was wrong by ~30x and the reason
+is the comment in model_config.py that this analysis read as a mistake: these matmuls are
+BANDWIDTH-bound at M=1, so `per_core_n` going 3 -> 1 does not divide the time. Extra cores
+cannot read DRAM faster once it is saturated. The single-chip tuning was correct and stays
+correct at quarter width; the shapes being TP-aware while the core counts are not turns out
+not to matter.
+
+The only real percentage is `mlp_w2` at 17%, and it is not taken: its K differs between
+tp=1 (2048) and tp=4 (512), so hardcoding 22 would regress the single-die path, and a
+tp-conditional is not worth 0.17% of a token.
+
+**So the 8.43 vs 5.75 us/op gap remains unexplained, and matmul geometry is now ruled out
+along with sharding and op count.** What is left, in the order worth trying: activation
+memory configs on the sharded path (are the per-device activations landing in L1 where the
+single-chip path put them?), the two collectives' true in-situ cost as opposed to their
+standalone 46.3 us, and the DistributedNorm all-gather that TP adds per layer and the
+replicated path never runs.
 
 It needs per-op DEVICE timing under TP, which is still partly blocked: full-attention
 layers under TP fail in `slice.cpp:121` (`input_rank == begins.size()`), the sixth bug in
