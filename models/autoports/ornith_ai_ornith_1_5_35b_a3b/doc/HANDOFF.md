@@ -194,6 +194,33 @@ all sixty-four. ornith-1.0 is not dense either -- its own decode profile shows
 per die. Their 564 us/layer comes from quartering TENSOR dimensions, which is already done
 above, not from densifying experts.
 
+## The one unexplained TP number, and a dead end to not re-walk
+
+**Our TP ops cost ~46% more than ornith-1.0's at the same data size, and nothing here
+explains why.** Backing the collectives out of the measured per-layer times:
+
+    ornith-1.0 4-die   564 us / 98 ops                      = 5.75 us/op
+    us 4-die           734 us - 92.6 us collectives = 641 us
+                       641 us / 76 ops                      = 8.43 us/op
+
+Both sides are quartered -- our per-device shapes are verified above -- so this is not a
+sharding gap. Candidates not yet separated: activation memory configs on the sharded path,
+core utilisation at the narrower per-device widths, or program configs tuned at single-chip
+widths and never re-tuned at TP widths (ornith-1.0 explicitly re-ran its dense-matmul
+ladder at per-device widths; this port has not). Closing it would be worth ~200 us/layer,
+which is most of the way to their 564.
+
+It needs per-op DEVICE timing under TP, which is still partly blocked: full-attention
+layers under TP fail in `slice.cpp:121` (`input_rank == begins.size()`), the sixth bug in
+that family and the only one left unfixed. GDN layers sweep clean.
+
+**A dead end, stated so it is not re-walked.** There is no "fast-path dispatch queue" that
+contiguous strides unlock. The 5.45 / 5.75 / 8.4 us figures that suggest one are a SIZE
+curve plus an average, not two dispatch modes: `multiply` measures 5.45 us at 8 KB, 5.46 at
+64 KB and 6.36 at 512 KB, and the ~8-10 us numbers are whole-layer averages that include
+the 1 MB GDN recurrent-state ops at 10.35 us each. Re-aligning strides cannot move ops onto
+a queue that does not exist; the 46% above is real work, wherever it turns out to live.
+
 ## Still open, all pre-existing and none blocking the shipping config
 
 * **Tensor parallelism is opt-in and has one blocker left**, precisely localized. The TP
