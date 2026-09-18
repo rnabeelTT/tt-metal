@@ -538,7 +538,17 @@ class Qwen36Model:
                     self.mesh_device,
                     self.tt_ccl,
                     cluster_axis=None,
-                    dim=len(logits.shape) - 1,
+                    # dim=-1, NOT len(shape)-1. The op validates gather_dim against the
+                    # rank IT sees, which is not always the rank Python reports here:
+                    # a rank-4 [1,1,32,vocab] logits gave dim=3 against an op that had
+                    # rank 3, and every standalone TP run died in
+                    # all_gather_async_device_operation.cpp:288 with
+                    #   "Dimension input should be in between -3 and 2, but has 3".
+                    # That is why tools/op_profile.py and tools/layer_sweep.py could not
+                    # profile the TP decode path at all, while the vLLM server -- which
+                    # reaches this with a different rank -- was fine. -1 is the vocab axis
+                    # under either rank.
+                    dim=-1,
                     topology=self.args.ccl_topology(),
                 )
             else:
@@ -3640,10 +3650,35 @@ class Qwen36Model:
         for layer in self.layers:
             if not layer.is_full_attention:
                 dn = layer.attention
+                # BOTH GDN MODULES, because the tensor-parallel one names its state
+                # differently and this used to assume the single-device spelling:
+                # GatedDeltaNet has `recurrent_state` + `fused_conv_state`, while
+                # TPGatedDeltaNet has `rec_state` + a `conv_states` LIST of K taps.
+                # Under TP this raised
+                #   AttributeError: 'TPGatedDeltaNet' object has no attribute 'recurrent_state'
+                # which is why no standalone TP run could reach a traced decode.
+                _multi = len(list(self.mesh_device.shape)) > 0 and int(self.mesh_device.get_num_devices()) > 1
+                _rec = getattr(dn, "recurrent_state", None)
+                if _rec is None:
+                    _rec = getattr(dn, "rec_state", None)
+                _fused = getattr(dn, "fused_conv_state", None)
+                _tp_convs = getattr(dn, "conv_states", None)
+
+                # DEVICE-SIDE CLONE, not a host round-trip, whenever the state is
+                # mesh-distributed. ttnn.to_torch on a tensor sharded over MeshShape([1,4])
+                # raises "Can't convert a tensor distributed on ... Supply a mesh composer",
+                # and supplying one would mean hardcoding a shard dim per tensor. A clone
+                # needs no such knowledge, and restore is then a plain ttnn.copy.
+                def _snap(t):
+                    if t is None:
+                        return None
+                    return ("dev", ttnn.clone(t)) if _multi else ("host", ttnn.to_torch(t))
+
                 saved.append(
                     {
-                        "recurrent": ttnn.to_torch(dn.recurrent_state),
-                        "conv": ttnn.to_torch(dn.fused_conv_state) if dn.fused_conv_state is not None else None,
+                        "recurrent": _snap(_rec),
+                        "conv": _snap(_fused),
+                        "tp_convs": [_snap(c) for c in _tp_convs] if _tp_convs else None,
                     }
                 )
         return saved
@@ -3655,16 +3690,28 @@ class Qwen36Model:
             if not layer.is_full_attention:
                 dn = layer.attention
                 saved = saved_states[idx]
-                restored = ttnn.from_torch(
-                    saved["recurrent"], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device
-                )
-                ttnn.copy(restored, dn.recurrent_state)
-                ttnn.deallocate(restored)
+                # Mirror of the dual-naming save above.
+                _rec_dst = getattr(dn, "recurrent_state", None)
+                if _rec_dst is None:
+                    _rec_dst = getattr(dn, "rec_state", None)
+
+                def _put(snap, dst):
+                    if snap is None or dst is None:
+                        return
+                    kind, val = snap
+                    if kind == "dev":
+                        ttnn.copy(val, dst)
+                        ttnn.deallocate(val)
+                    else:
+                        _r = ttnn.from_torch(val, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
+                        ttnn.copy(_r, dst)
+                        ttnn.deallocate(_r)
+
+                _put(saved["recurrent"], _rec_dst)
+                if saved.get("tp_convs") and getattr(dn, "conv_states", None):
+                    for _src, _dst in zip(saved["tp_convs"], dn.conv_states):
+                        _put(_src, _dst)
                 if saved["conv"] is not None:
-                    restored_conv = ttnn.from_torch(
-                        saved["conv"], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device
-                    )
-                    ttnn.copy(restored_conv, dn.fused_conv_state)
-                    ttnn.deallocate(restored_conv)
+                    _put(saved["conv"], getattr(dn, "fused_conv_state", None))
                     dn._restore_split_conv_from_fused()
                 idx += 1

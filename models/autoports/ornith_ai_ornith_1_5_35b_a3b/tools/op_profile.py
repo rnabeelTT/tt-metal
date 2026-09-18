@@ -59,6 +59,12 @@ def main() -> int:
         idx = [i for i in range(40) if FULL_ATTN(i)][: a.n]
 
     rows, cols = MESH_SHAPES[a.mesh]
+    # A multi-die TP build runs collectives, and a collective needs a fabric BEFORE the
+    # mesh is opened -- without it ccl::get_usable_topology dies on
+    # "control_plane.cpp: this->fabric_context_ != nullptr". vLLM gets this from the
+    # plugin's `fabric_config` key; a standalone script has to ask for it itself.
+    if rows * cols > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D_RING)
     mesh = ttnn.open_mesh_device(
         ttnn.MeshShape(rows, cols),
         l1_small_size=GDN_CONV1D_L1_SMALL_SIZE,

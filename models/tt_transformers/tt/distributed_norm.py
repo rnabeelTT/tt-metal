@@ -137,7 +137,13 @@ class DistributedNorm(LightweightModule):
             x = ttnn.experimental.all_gather_async(
                 x,
                 persistent_output_buffer=None,
-                dim=3,
+                # -1, not a hardcoded 3. This gathers the HIDDEN axis, which is 3 on a
+                # rank-4 [1,1,S,H] activation and 2 on a rank-3 [1,S,H] one -- and dim=3
+                # against a rank-3 input fails validation with
+                #   all_gather_async_device_operation.cpp:288
+                #   "Dimension input should be in between -3 and 2, but has 3"
+                # -1 is the same axis for every rank-4 caller, so nothing they do changes.
+                dim=-1,
                 multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(),
                 num_links=self.args.model_config[self.ag_config_key]["num_links"]
                 if self.ag_config_key and mode == "decode"
@@ -171,7 +177,7 @@ class DistributedNorm(LightweightModule):
             x = ttnn.experimental.all_gather_async(
                 x,
                 persistent_output_buffer=None,
-                dim=3,
+                dim=-1,  # hidden axis; see the note on the other gather in this file
                 multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(),
                 num_links=self.tt_ccl.get_num_links(1),
                 topology=self.args.ccl_topology(),

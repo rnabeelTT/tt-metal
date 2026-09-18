@@ -52,6 +52,10 @@ def main() -> int:
 
     idx = pick(a.spec, a.n)
     rows, cols = MESH_SHAPES[a.mesh]
+    # TP runs collectives, and a collective needs a fabric BEFORE the mesh opens, or
+    # ccl::get_usable_topology dies on "control_plane.cpp: fabric_context_ != nullptr".
+    if rows * cols > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D_RING)
     mesh = ttnn.open_mesh_device(
         ttnn.MeshShape(rows, cols),
         l1_small_size=GDN_CONV1D_L1_SMALL_SIZE,

@@ -395,6 +395,16 @@ class TPAttention:
             out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, NH * HD), memory_config=_L1)
         return ttnn.reshape(out, (1, B, NH * HD), memory_config=_L1)
 
+    def reset_cache(self):
+        """Alias for :meth:`reset_state`, because model.py calls the single-device
+        Attention's name. Same reason as TPGatedDeltaNet's state aliases: model.py's
+        reset_state() dispatches `layer.attention.reset_cache()` on full-attention layers
+        and `reset_state()` on GDN ones, so under tensor parallelism the full-attention
+        branch raised
+          AttributeError: 'TPAttention' object has no attribute 'reset_cache'
+        and no standalone tool could build a TP model containing a full-attention layer."""
+        return self.reset_state()
+
     def reset_state(self):
         def z():
             return ttnn.from_torch(

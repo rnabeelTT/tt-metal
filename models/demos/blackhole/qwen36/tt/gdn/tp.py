@@ -201,6 +201,30 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
 class TPGatedDeltaNet:
     """Standalone TP GDN decode (per-device value-head recurrence + all-reduce)."""
 
+    # NAME ALIASES FOR THE SINGLE-DEVICE GDN's STATE. model.py drives GDN state through
+    # `recurrent_state` and `fused_conv_state` -- the names GatedDeltaNet uses -- in at
+    # least seven places (external-state install, batched save/restore, zeroing, shape
+    # probe, and the decode-trace save/restore pair). This class stores the same thing as
+    # `rec_state` and keeps its conv history as the `conv_states` list of K taps, so every
+    # one of those raised
+    #   AttributeError: 'TPGatedDeltaNet' object has no attribute 'recurrent_state'
+    # and no standalone tool could reach a traced decode under tensor parallelism.
+    #
+    # Aliasing here rather than renaming at each call site keeps one owner for the name and
+    # cannot miss a site. `fused_conv_state` reads as None because this class has no fused
+    # tensor; every consumer already guards on `is not None` before touching it.
+    @property
+    def recurrent_state(self):
+        return self.rec_state
+
+    @recurrent_state.setter
+    def recurrent_state(self, value):
+        self.rec_state = value
+
+    @property
+    def fused_conv_state(self):
+        return None
+
     def __init__(self, mesh, args, tw, tt_ccl):
         self.mesh = mesh
         self.args = args
