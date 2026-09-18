@@ -58,14 +58,23 @@ returned BYTE-IDENTICAL 32-token completions, which is consistent with the low p
 flip rate measured there -- divergence needs enough steps to catch.
 
 **Status of the lane parser fix, precisely.** `tools/serve_lanes.sh` now passes
-`--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser hermes`, the same
+`--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml`, the same
 spelling `tt_kernel/packaging.py` emits for the container. What that is verified against,
 and what it is not:
 
 * **Verified** -- the flags are valid and the parsers load: a lane started cleanly with
-  them and served `/v1/models`. The wrong spelling (`--tool-parser hermes`) does NOT fail
+  them and served `/v1/models`. The wrong spelling (`--tool-parser <name>`) does NOT fail
   at the CLI; it starts and then dies in `abstract_tool_parser.py` with "Failed to load
-  module 'hermes' from hermes.", so a clean start is the meaningful signal here.
+  module ... ", so a clean start is the meaningful signal here.
+
+* **TOOL CALLING WAS BROKEN UNTIL 2026-09-18, and a clean start did not show it.** The
+  parser was `hermes`, which expects JSON inside `<tool_call>`; this model emits Qwen XML
+  (`<function=name><parameter=k>v</parameter>`). hermes threw `JSONDecodeError`, returned
+  `tools_called=False` and leaked the raw markup into `content` as prose. It is now
+  `qwen3_xml`, verified against the model's real output: hermes 0 calls, qwen3_xml 1 call
+  `get_weather({"city": "Paris"})`, and correct on multi-argument, two-calls-in-one-reply,
+  prose-then-call and no-call. Every earlier statement in this document that tool calling
+  was "verified" meant the flags loaded, not that a tool call parsed.
 * **Verified** -- those same parsers produce clean answers, through the CONTAINER on
   p150, which gets them from `capabilities`: `"\n\nThe capital of France is **Paris**."`
   with no `</think>` and `finish_reason: stop`.

@@ -136,14 +136,20 @@ cmd_start() {
         # for the same weights. Caught 2026-09-17 when a 4-lane verification printed
         # answers with "</think>" inline.
         #
-        # SPELL THE TOOL FLAG EXACTLY LIKE THIS. `--tool-parser hermes` does not exist:
+        # SPELL THE TOOL FLAG EXACTLY LIKE THIS. `--tool-parser X` does not exist:
         # vLLM's FlexibleArgumentParser normalises '_'->'-', the real flag is
         # `--tool-call-parser`, and vLLM hard-errors on it unless
         # `--enable-auto-tool-choice` is also passed. Getting it wrong does not fail
         # loudly at the CLI -- the server starts, then dies in abstract_tool_parser.py
-        # with "Failed to load module 'hermes' from hermes." because the name is treated
-        # as a plugin PATH. First attempt at this fix brought up 1 lane of 4 that way.
+        # with "Failed to load module ... " because the name is treated as a plugin PATH.
         # This is the same spelling tt_kernel/packaging.py emits for the container.
+        #
+        # AND THE PARSER IS qwen3_xml, NOT hermes. hermes expects JSON inside <tool_call>
+        # while this model emits Qwen XML (<function=name><parameter=k>v</parameter>), so
+        # hermes threw JSONDecodeError, reported tools_called=False and leaked the markup
+        # into `content` as prose -- tool calling was simply broken, on lanes and in the
+        # container alike, while the server started cleanly either way. qwen3_xml and
+        # qwen3_coder are aliases for the same class. See tt-model.yaml's capabilities.
         #
         # KEEP THE ENV ASSIGNMENTS WELDED TO `nohup` -- NO COMMENT MAY SIT BETWEEN THEM.
         # A `#` line after a trailing backslash ENDS the continuation: bash then parses
@@ -163,7 +169,7 @@ cmd_start() {
             --max-model-len "$MAX_MODEL_LEN" \
             --additional-config '{"tt": {"trace_region_size": 1073741824}}' \
             --reasoning-parser qwen3 \
-            --enable-auto-tool-choice --tool-call-parser hermes \
+            --enable-auto-tool-choice --tool-call-parser qwen3_xml \
             --port "$port" \
             > "$(lane_log "$i")" 2>&1 &
         local lpid=$!

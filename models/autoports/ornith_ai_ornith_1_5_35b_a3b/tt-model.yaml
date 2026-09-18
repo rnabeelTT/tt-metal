@@ -145,7 +145,27 @@ serve:
     # extra="forbid" specifically so a typo here fails at load rather than shipping a
     # model whose tool calls silently come back as prose.
     reasoning_parser: qwen3       # the model emits <think>...</think> traces
-    tool_parser: hermes           # XML-formatted function calls
+    # NOT hermes. This was `hermes` and TOOL CALLING DID NOT WORK: hermes expects JSON
+    # inside <tool_call>, this model emits Qwen XML, so the parser threw
+    # JSONDecodeError, returned tools_called=False, and leaked the raw markup into
+    # `content` as prose. Caught by actually calling a tool rather than by reading the
+    # flag -- the server starts fine either way, which is exactly how it survived this
+    # long. What the model emits:
+    #   <tool_call>
+    #   <function=get_weather>
+    #   <parameter=city>
+    #   Paris
+    #   </parameter>
+    #   </function>
+    #   </tool_call>
+    # Verified against that exact string: hermes -> 0 calls; qwen3_xml -> 1 call,
+    # get_weather({"city": "Paris"}). Also checked multi-argument, two-calls-in-one-reply,
+    # prose-then-call and no-call-at-all, all correct, and the no-call case leaves
+    # `content` untouched. `qwen3_xml` and `qwen3_coder` are ALIASES for the same class
+    # (vllm/tool_parsers/__init__.py maps both to Qwen3EngineToolParser); the format name
+    # is used here because this model is not the coder variant. Streaming comes from the
+    # adapter base (vllm/parser/engine/adapters.py).
+    tool_parser: qwen3_xml        # Qwen XML function calls
   # env: intentionally ABSENT, not empty. ContainerManifest types serve.env as a
   # dict, so a comment-only `env:` key parses as None and fails manifest validation
   # with "Input should be a valid dictionary". Leave the key out entirely.
