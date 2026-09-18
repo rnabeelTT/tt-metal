@@ -18,6 +18,7 @@ from models.common.rmsnorm import RMSNorm
 from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
 from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
+from models.demos.blackhole.qwen36.utils.prefill_buckets import prefill_buckets
 from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in_seq
 
 
@@ -2197,9 +2198,18 @@ class Qwen36Model:
         return x
 
     # Fixed buckets for masked tail/short prefill. Lengths round up here -> bounded compile set.
-    # All 128-multiples (GDN sub-chunk). Masked GDN in DRAM avoids L1 clash at bucket 512.
-    # Diverges from get_padded_prefill_len: 256/512 for short TTFT; GDN needs exact valid_len mask.
-    _PREFILL_MASK_BUCKETS = (128, 256, 512, 1024, 2048)
+    # Every bucket is a 128-multiple (the GDN sub-chunk). Masked GDN in DRAM avoids L1 clash at
+    # bucket 512. Diverges from get_padded_prefill_len: 256/512 for short TTFT; GDN needs exact
+    # valid_len mask.
+    #
+    # PREFILL COST IS SET BY THE BUCKET, NOT THE PROMPT -- measured at a near-constant
+    # 2.32-2.48 ms per bucket-token from 128 to 2560, so a sparse list makes TTFT a staircase and
+    # a prompt one token past a boundary pays for the whole next bucket (1030 tokens cost 4753 ms
+    # against 1000 tokens' 2540 ms). This used to be powers of two below 2048, which put a
+    # 1.8-1.9x cliff on ordinary prompt lengths; it now defaults to every 128-multiple, bounding
+    # the waste at 127 padded tokens. See utils/prefill_buckets.py for the measurements and the
+    # warmup trade, and QWEN36_PREFILL_BUCKETS=legacy to get the old list back.
+    _PREFILL_MASK_BUCKETS = prefill_buckets()
 
     @classmethod
     def _mask_bucket_for(cls, length):
