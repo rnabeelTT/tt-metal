@@ -95,6 +95,20 @@ first run.
   chunk 2048 vs 1024 — so it is the CB config at the TP head width (`qkv_dim_tp`), not a
   knob. Reproduce with `handoff/tp_stall.sh`. Worth 2.0-3.1x prefill and 37.50 tok/s
   served decode if closed.
+
+  **The named knob to try first is `act_block_h_override`, and it has not been tried.**
+  `ttnn.Conv1dConfig` is an alias for `Conv2dConfig`
+  (`ttnn/ttnn/__init__.py:612`), which carries `act_block_h_override`
+  (`conv2d_nanobind.cpp:320`) — the canonical control for precisely this
+  "statically allocated circular buffers grow to N beyond max L1" failure. Every knob
+  tried so far (`max_model_len`, `l1_small_size`, trace capture, bucket caps, chunk size)
+  is OUTSIDE the conv, which is exactly why the byte count never moved: none of them
+  reaches the activation block that sizes the CB. The deficit is 111,680 B of 1,684,544,
+  6.6%, so a modest reduction should clear it. `_conv1d_prefill` builds its `conv_cfg` at
+  `models/demos/blackhole/qwen36/tt/gdn/tp.py:323` with only `weights_dtype` and
+  `shard_layout` set. Second lead if that costs too much throughput: `weights_dtype`
+  is `bfloat16` there and the non-TP path tolerates less. Both are untested — no hardware
+  time was spent on TP this session.
 * **Prompt 2 accuracy**: logit PCC 0.94334 against the 0.95 bfp4 bar (top-1 3/3; the other
   two prompts pass). Nine precision configs measured; the shipped default is the maximum.
   The reducible lead is the GDN block at 10.0% median relative error vs full attention's
