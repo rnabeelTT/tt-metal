@@ -255,14 +255,16 @@ all three because the model is replicated; throughput is what scales with dies.
 
 | hardware | dies | best deployment | aggregate | per stream | TTFT | batch |
 |---|---|---|---|---|---|---|
-| **p150** | 1 | 1 instance | **26.07 tok/s** | 29.05 tok/s | 397 ms | 1 |
-| **p300** | 2 | `serve_lanes.sh start 2` | **54.47 tok/s** | 28.40 tok/s | 404 ms | 1 |
-| **p300x2** | 4 | `serve_lanes.sh start 4` | **91.24 tok/s** | 25.89 tok/s | 420 ms | 1 |
+| **p150** | 1 | 1 instance | **31.66 tok/s** | 33.15 tok/s | 394 ms | 1 |
+| **p300** | 2 | `serve_lanes.sh start 2` | **61.55 tok/s** | 32.35 tok/s | 395 ms | 1 |
+| **p300x2** | 4 | `serve_lanes.sh start 4` | **109.03 tok/s** | 28.52 tok/s | 410 ms | 1 |
 
-Served end to end through vLLM, one stream per lane, 256-token completions; 3.50x at
-four dies. Aggregate carries TTFT, so it sits under per-stream x lanes -- the same four
-lanes measure 80.63 at 64-token completions, where a fixed ~400 ms prefill is amortised
-over a quarter as many tokens. Quote the completion length with the number.
+Served end to end through vLLM, one stream per lane, 256-token completions; 3.44x at
+four dies. Re-measured 2026-09-18 against current code, all three rows in ONE pass on
+one set of lanes, 12/12 requests served with no failures. Aggregate carries TTFT, so it
+sits under per-stream x lanes -- the same four lanes measure 102.10 at 128-token
+completions, where a fixed ~400 ms prefill is amortised over half as many tokens. Quote
+the completion length with the number.
 
 Running ONE instance that opens the whole board instead of one per die gives a single
 replica and no throughput gain -- that is what the `p300`/`p300x2` tt-model profiles do,
@@ -403,13 +405,13 @@ were taken:
 
 | dies | ornith-1.0 dec tok/s | this port, dec tok/s | note |
 |---|---|---|---|
-| 1 | 11.59 | **29.05** | 2.51x faster per die |
-| 2 | 33.27 | 28.40/stream, 54.47 aggregate | |
-| 4 | **43.03** (one user) | 25.89/stream, **91.24 aggregate** (four users) | 2.12x the total |
+| 1 | 11.59 | **33.15** | 2.86x faster per die |
+| 2 | 33.27 | 32.35/stream, 61.55 aggregate | |
+| 4 | **43.03** (one user) | 28.52/stream, **109.03 aggregate** (four users) | 2.53x the total |
 
-Two honest readings of that table. Per DIE this port decodes 2.5x faster, and its
-four-die AGGREGATE is 2.1x ornith-1.0's, because four independent lanes each serve a
-user. But for a SINGLE user on four dies ornith-1.0 wins 43.03 against 25.89, because it
+Two honest readings of that table. Per DIE this port decodes 2.9x faster, and its
+four-die AGGREGATE is 2.5x ornith-1.0's, because four independent lanes each serve a
+user. But for a SINGLE user on four dies ornith-1.0 wins 43.03 against 28.52, because it
 spends the extra dies on one stream (TP=4/EP=4) where this port spends them on more
 streams.
 
@@ -592,18 +594,18 @@ with `tools/serve_lanes.sh start 4`. End to end through vLLM, one stream per lan
 
 | lanes (dies) | 1 | 2 | 4 |
 |---|---|---|---|
-| aggregate | 26.07 tok/s | 54.47 tok/s | **91.24 tok/s** |
-| per stream | 29.05 | 28.40 | 25.89 |
-| TTFT (median) | 397 ms | 404 ms | 420 ms |
+| aggregate | 31.66 tok/s | 61.55 tok/s | **109.03 tok/s** |
+| per stream | 33.15 | 32.35 | 28.52 |
+| TTFT (median) | 394 ms | 395 ms | 410 ms |
 
-3.50x at four dies. That is the payoff for choosing data parallelism over expert
+3.44x at four dies. That is the payoff for choosing data parallelism over expert
 parallelism -- and, per the cost model below, the only way extra dies can help this
 model at all.
 
 Two caveats worth carrying into any quote of these numbers. Aggregate is total tokens
 over wall clock, so it includes TTFT and comes in under per-stream x lanes; the same
-four lanes measure 80.63 tok/s at 64-token completions, where a fixed ~400 ms prefill
-is amortized over a quarter as many tokens. And per-stream decays 29.05 -> 25.89 as
+four lanes measure 102.10 tok/s at 128-token completions, where a fixed ~400 ms prefill
+is amortized over half as many tokens. And per-stream decays 33.15 -> 28.52 as
 lanes are added. That is HOST contention between four vLLM processes, not the dies,
 which are independent -- and it is proportionally worse than the 25.22 -> 23.71 this
 table recorded before this round of optimization, because the device got faster while
