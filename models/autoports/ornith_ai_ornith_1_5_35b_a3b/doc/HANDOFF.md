@@ -160,6 +160,40 @@ pass.
 Worth more than anything else outstanding: it is the difference between 33.21 tok/s served
 and the 40.5 tok/s the dies are already capable of.
 
+## What TP already shards, and the one tensor it does not
+
+Measured from the per-device shapes the 4-die run actually loads, so this is what the
+hardware holds rather than what the code intends:
+
+| tensor | global | per die at TP=4 | |
+|---|---|---|---|
+| `qkvzab.il` fused in-projection | 2048 x 12352 | 2048 x **3088** | quartered |
+| `out` row-parallel out-projection | 4096 x 2048 | **1024** x 2048 | quartered |
+| routed experts `up_gate` | [1, **256**, 2048, 1024] | [1, **64**, ...] | EP=4 |
+| routed experts `down` | [1, **256**, 512, 2048] | [1, **64**, ...] | EP=4 |
+| norms (`weight_distributed`) | 64 | **16** | quartered |
+| **shared expert** `sh0` / `sh1` / `sh2` | 2048 x 512, 512 x 2048 | **unchanged** | **REPLICATED** |
+
+So the hidden and intermediate dimensions are already quartered; the shared expert is the
+only tensor left at full width on every die. ornith-1.0 does shard its equivalent
+(`shared_in` 1056 -> 288 per device).
+
+Worth roughly **0.52 ms/token**: three matmuls of ~2 MB at bf16 is ~6 MB/layer, ~17 us at
+this board's measured bandwidth, so quartering saves ~13 us/layer x 40 layers. That is 1.5%
+of the 33.7 ms TP TPOT -- 29.65 -> about 30.1 tok/s. It is worth twice as much to
+ornith-1.0, whose shared expert is 1056 wide against this model's 512.
+
+Not done: 1.5% did not justify changing shared TP code against an already-verified
+package. It is the cheapest remaining TP item if someone wants it.
+
+**And one thing NOT to try.** Running the routed experts DENSE over each die's 64-expert
+shard instead of gathering the routed top-8 would be ~32x MORE expert math per die at
+decode, not less: top-8 of 256 puts about two experts on each die, and dense would compute
+all sixty-four. ornith-1.0 is not dense either -- its own decode profile shows
+`SparseMatmul (routed experts)` at 19.99% / 24.46% of the window, running at `active=4`
+per die. Their 564 us/layer comes from quartering TENSOR dimensions, which is already done
+above, not from densifying experts.
+
 ## Still open, all pre-existing and none blocking the shipping config
 
 * **Tensor parallelism is opt-in and has one blocker left**, precisely localized. The TP
