@@ -13,6 +13,7 @@ import torch
 import ttnn
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
+from models.demos.blackhole.qwen36.utils.weight_dtype import dense_weight_dtype
 from models.tt_transformers.tt.ccl import tt_all_reduce
 
 
@@ -68,7 +69,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
             dim=-1,
             memory_config=ttnn.DRAM_MEMORY_CONFIG if _proj1d else args.attn_qkv_fused_weight_memcfg,
             cache_path=c(_base + (".il" if _proj1d else ".dramshard")),
-            dtype=ttnn.bfloat8_b,
+            dtype=dense_weight_dtype(),
         )
     else:
         qkv_sharded = getattr(args, "attn_qg_weight_memcfg", None) is not None
@@ -82,7 +83,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
             dim=-1,
             memory_config=qg_mc,
             cache_path=c("wqkv" + tag),
-            dtype=ttnn.bfloat8_b,
+            dtype=dense_weight_dtype(),
         )
         # k_proj/v_proj are the KV-replicated weights: shard_w splits tp*head_dim rows evenly, so
         # each device lands on its GQA-assigned head instead of a fraction of one.
@@ -92,7 +93,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
             dim=-1,
             memory_config=k_mc,
             cache_path=c("wk" + tag),
-            dtype=ttnn.bfloat8_b,
+            dtype=dense_weight_dtype(),
         )
         tw["wv"] = tpc.shard_w(
             v_proj,
@@ -100,7 +101,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
             dim=-1,
             memory_config=v_mc,
             cache_path=c("wv" + tag),
-            dtype=ttnn.bfloat8_b,
+            dtype=dense_weight_dtype(),
         )
     # Row-parallel wo (reduce-scatter after): DRAM-width-sharded like the in-proj — decode tput win.
     wo_sharded = getattr(args, "attn_wo_weight_memcfg", None) is not None
@@ -110,7 +111,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
         dim=0,
         memory_config=args.attn_wo_weight_memcfg if wo_sharded else ttnn.DRAM_MEMORY_CONFIG,
         cache_path=c("wo.dramshard" if wo_sharded else "wo"),
-        dtype=ttnn.bfloat8_b,
+        dtype=dense_weight_dtype(),
     )
     # QK norms: HF-correct zero-centered (1+weight), used uniformly at prefill AND decode
     tw["q_norm"] = tpc.replicate(state_dict["q_norm.weight"].to(torch.float32) + 1.0, mesh, None)

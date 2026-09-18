@@ -604,13 +604,44 @@ HIGHER than the PCC of the hidden state that produced it, on every prompt at bot
 fidelities (e.g. prompt 1 at lofi: final-norm 0.92487 -> logits 0.94212). The
 248320-wide projection averages the 2048-dim error down. Improving them cannot help.
 
-**One thing still unexplained.** 16% relative error on a single layer's own contribution
-is far more than bf16 arithmetic accounts for (~0.4%) and more than the MoE's measured
-share (~2% equivalent). So a specific low-precision step inside the GDN path is likely
-and has not been found. Two alignment traps for whoever looks, both of which produced
-spurious results first time round: `output_hidden_states` returns 41 tensors whose LAST
-entry is post-final-RMSNorm rather than the layer-39 output, and this checkpoint's
-RMSNorm is `x/rms(x) * (1 + gamma)`, not `* gamma`.
+**One thing still unexplained, but measured against the WRONG BASELINE.** 16% relative
+error on a single layer's own contribution is more than the MoE's measured share (~2%
+equivalent), and this paragraph used to call it "far more than bf16 arithmetic accounts
+for (~0.4%)" and conclude that a specific low-precision step inside the GDN path was
+likely. **The bf16 figure was never the right budget: these weights are not bf16.**
+`gdn/weights.py` and `attention/weights.py` hard-coded `ttnn.bfloat8_b` for every 2D
+projection -- GDN's fused QKV, `a+b`, the mega-fused QKV+a+b+g and out projections, and
+attention's q/k/v/o -- so part of what was called unexplained is correctly-accounted bf8
+error. The residual gap against a bf8 budget is much smaller than against a bf16 one.
+
+**And raising it does not help: that is now measured, not assumed.** The backbone dtype
+was the one term in this model's error budget no sweep could reach, because every dtype
+knob that existed (`ORNITH_ROUTED_DTYPE`, `ORNITH_KV_DTYPE`, `ORNITH_LM_HEAD_DTYPE`,
+`ORNITH_EXPERT_ACT`) varies an expert, KV-cache or LM-head dtype, and both prior sweeps
+only ever went DOWN. `QWEN36_DENSE_WEIGHT_DTYPE` now exposes it, defaulting to
+`bfloat8_b` so nothing changes silently. `tests/test_model.py`, three reps per arm,
+bitwise identical every rep:
+
+| dense weight dtype | p0 | p1 | p2 | top-8 | top-1 |
+|---|---|---|---|---|---|
+| `bfloat8_b` (shipped) | 0.97174 | **0.97134** | **0.94334** | 6/8 8/8 6/8 | 3/3 |
+| `bfloat16` | **0.97631** | 0.96889 | 0.91666 | 7/8 7/8 6/8 | 3/3 |
+
+More precise weights are WORSE on the prompt that misses the gate, by 0.027. That is not
+a contradiction, it is the discreteness this file already documents from the fidelity
+sweep: top-8-of-256 is discontinuous, so any perturbation -- including a more accurate
+one -- flips near-tie expert selections and the model draws a different expert set.
+Precision changes here are non-monotone, and prompt 2 is the most exposed because it is
+the ill-conditioned position described above. The baseline arm reproduced
+`model_config.py`'s recorded hifi2/lofi row to five decimals, which is what establishes
+this prefill harness as deterministic and the comparison as real.
+
+**So the reducible lead is NOT a dtype.** It is the layer-4 outlier -- one GDN layer at
+~2x the median GDN contribution on all three prompts -- which no weight dtype explains,
+because every GDN layer shares one. Two alignment traps for whoever looks, both of which
+produced spurious results first time round: `output_hidden_states` returns 41 tensors
+whose LAST entry is post-final-RMSNorm rather than the layer-39 output, and this
+checkpoint's RMSNorm is `x/rms(x) * (1 + gamma)`, not `* gamma`.
 
 **Extra dies buy concurrency, and it scales.** One instance per die -- launch them
 with `tools/serve_lanes.sh start 4`. End to end through vLLM, one stream per lane,
@@ -1246,6 +1277,14 @@ precision policy (bfp8 dense + bfp4 routed). Going further was measured, not ass
 * **bfloat8_b expert activations** (which Ornith-1.0's policy ships): slightly SLOWER,
   32.52 vs 32.14 ms. Those intermediates are 8-32 KB and traced op cost is flat below
   ~256 KB, so halving them buys nothing and costs a conversion.
+* **bfloat16 DENSE projection weights** (`QWEN36_DENSE_WEIGHT_DTYPE=bfloat16`): worse
+  accuracy, not better. Logit PCC 0.97631 / 0.96889 / **0.91666** against the shipped
+  bfloat8_b's 0.97174 / 0.97134 / **0.94334** -- a 0.027 LOSS on the one prompt that
+  misses the 0.95 bar, three reps per arm, bitwise identical. It also doubles the
+  backbone's weight bytes. Raising precision reshuffles near-tie top-8-of-256 expert
+  selections, so the effect is non-monotone; see the per-layer error section. The knob
+  stays because the backbone dtype should be sweepable, but bfloat8_b is the better
+  setting and is the default.
 
 
 
@@ -1262,7 +1301,8 @@ precision policy (bfp8 dense + bfp4 routed). Going further was measured, not ass
 
 The MoE block matches the HF module to **PCC 0.99976**, against a measured bf16 ceiling
 of 0.99978 -- the port is essentially exact, and the whole-model figures above are
-accumulated bf16/bfp4 error across 40 layers, not a defect.
+accumulated bf8/bfp4 error across 40 layers, not a defect (the dense projections are
+bfloat8_b, not bf16 -- see the per-layer section above).
 
 4-chip prefill is dominated by small attention/RoPE ops dispatching to four devices,
 because attention is replicated. Correct, but not practical without tracing or a

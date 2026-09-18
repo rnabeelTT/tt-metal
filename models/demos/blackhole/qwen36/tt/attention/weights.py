@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import ttnn
+from models.demos.blackhole.qwen36.utils.weight_dtype import dense_weight_dtype
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,7 @@ def load_attention_weights(mesh_device, state_dict, tensor_cache_path=None) -> A
         t = state_dict[f"{name}.weight"].T.contiguous()
         return ttnn.as_tensor(
             t,
-            dtype=ttnn.bfloat8_b,
+            dtype=dense_weight_dtype(),
             layout=ttnn.TILE_LAYOUT,
             device=mesh_device,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
