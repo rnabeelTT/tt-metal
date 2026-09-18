@@ -22,6 +22,27 @@ from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_seq i
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_gated_deltanet import _causal_conv1d_fir
 from models.tt_transformers.tt.ccl import tt_all_reduce
 
+#: Channels per ``ttnn.conv1d`` call for the depthwise causal conv.
+#:
+#: ttnn.conv1d cannot serve the full per-device conv width here. The circular buffers it
+#: allocates are sized by CHANNELS and are INDEPENDENT of length: measured on this QB2 at
+#: TP=4 (C=2048), the requirement is 1684544 B against 1572864 B of L1 -- identical to the
+#: byte at T=128, 256, 512, 1024 and 2048, because ttnn holds the per-core shard height at
+#: one tile and adds cores as T grows (4, 8, 22, 33, 66 cores for those T). That is why no
+#: chunk, bucket, context or l1_small knob ever moved the number, and why
+#: ``act_block_h_override`` cannot help either -- the block height is already at the 32-row
+#: minimum (measured: unchanged at 1684544).
+#:
+#: A depthwise conv is SEPARABLE OVER CHANNELS, so the fix is to issue one call per channel
+#: block. Measured widest block that fits: 1024 (2048 fails, 1024/512/256/128 all pass).
+#: WIDTH_SHARDED is rejected by the op and BLOCK_SHARDED fails at kernel compile, so
+#: splitting is the only route. ornith-1.0 hit the same wall at its own conv_dim=8192 and
+#: resolved it the same way (``CONV1D_CHANNELS = 4096`` in its optimized_decoder).
+#:
+#: At TP=4 this also lands on the natural boundary: per device q=512, k=512, v=1024, so the
+#: two 1024-wide blocks are exactly [q|k] and [v].
+CONV1D_MAX_CHANNELS = 1024
+
 
 def _softplus_add(a, bias):
     """g-gate: softplus(a + bias) fused into one op (softplus as a post-activation on the add)."""
@@ -155,6 +176,25 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
         layout=ttnn.ROW_MAJOR_LAYOUT,
         mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=0),
     )
+    # Same weight, split into CONV1D_MAX_CHANNELS-wide CHANNEL BLOCKS -- see the comment on
+    # CONV1D_MAX_CHANNELS. Each block is its own mesh-sharded tensor, built by gathering the
+    # per-device rows for that block across devices (a plain dim-0 shard of a channel slice
+    # would hand device d the wrong rows, because the device axis is the outer one).
+    C_dev = args.gdn_qkv_dim // tp
+    nblk = (C_dev + CONV1D_MAX_CHANNELS - 1) // CONV1D_MAX_CHANNELS
+    tw["conv_w1d_blocks"] = []
+    if nblk > 1:
+        Cb = C_dev // nblk
+        for b in range(nblk):
+            rows = torch.cat([W1d[d * C_dev + b * Cb : d * C_dev + (b + 1) * Cb] for d in range(tp)], dim=0)
+            tw["conv_w1d_blocks"].append(
+                ttnn.from_torch(
+                    rows.contiguous(),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=0),
+                )
+            )
     return tw
 
 
@@ -208,7 +248,7 @@ class TPGatedDeltaNet:
         # Native ttnn.conv1d depthwise prefill; L1_FULL slice keeps it trace-safe.
         # Only used when valid_len is None (masked buckets keep the MAC FIR).
         self._gdn_conv1d = True
-        self._conv1d_wprep = None  # prepared depthwise weight (populated on first prefill call)
+        self._conv1d_wprep = None  # list of prepared depthwise weights, one per channel block (first prefill call)
         # Persistent zero sources for trace-safe reset_state_inplace (alloc before any trace)
         self._zero_conv0 = None
         self._zero_conv_carry = None
@@ -325,54 +365,72 @@ class TPGatedDeltaNet:
             weights_dtype=ttnn.bfloat16,
             shard_layout=ttnn.TensorMemoryLayout.HEIGHT_SHARDED,
         )
-        # Prepare conv weight once (warmup); avoids host reprocess + keeps traced replay device-only.
+        # ONE CALL PER CHANNEL BLOCK. The conv's CBs are sized by channel count, not by
+        # length, and the full per-device width does not fit L1 -- see CONV1D_MAX_CHANNELS.
+        blocks = self.tw.get("conv_w1d_blocks") or []
+        nblk = len(blocks) if blocks else 1
+        Cb = C // nblk
+        # Prepare conv weights once (warmup); avoids host reprocess + keeps traced replay device-only.
         if self._conv1d_wprep is None:
-            self._conv1d_wprep = ttnn.prepare_conv_weights(
-                weight_tensor=self.tw["conv_w1d"],
-                input_memory_config=_dram,
-                input_layout=ttnn.ROW_MAJOR_LAYOUT,
-                weights_format="OIHW",
-                in_channels=C,
-                out_channels=C,
-                batch_size=1,
-                input_height=1,
-                input_width=Lin,
-                kernel_size=(1, K),
-                stride=(1, 1),
-                padding=(0, 0),
-                dilation=(1, 1),
-                has_bias=False,
-                groups=C,
+            srcs = blocks if nblk > 1 else [self.tw["conv_w1d"]]
+            self._conv1d_wprep = [
+                ttnn.prepare_conv_weights(
+                    weight_tensor=wsrc,
+                    input_memory_config=_dram,
+                    input_layout=ttnn.ROW_MAJOR_LAYOUT,
+                    weights_format="OIHW",
+                    in_channels=Cb,
+                    out_channels=Cb,
+                    batch_size=1,
+                    input_height=1,
+                    input_width=Lin,
+                    kernel_size=(1, K),
+                    stride=(1, 1),
+                    padding=(0, 0),
+                    dilation=(1, 1),
+                    has_bias=False,
+                    groups=Cb,
+                    device=dev,
+                    input_dtype=ttnn.bfloat16,
+                    conv_config=conv_cfg,
+                    compute_config=cc,
+                )
+                for wsrc in srcs
+            ]
+        parts = []
+        for b in range(nblk):
+            xb = xin if nblk == 1 else ttnn.slice(xin, (0, 0, 0, b * Cb), (1, Lin, 1, (b + 1) * Cb))
+            ob = ttnn.conv1d(
+                input_tensor=xb,
+                weight_tensor=self._conv1d_wprep[b],
                 device=dev,
-                input_dtype=ttnn.bfloat16,
+                in_channels=Cb,
+                out_channels=Cb,
+                batch_size=1,
+                input_length=Lin,
+                kernel_size=K,
+                stride=1,
+                padding=0,
+                dilation=1,
+                groups=Cb,
+                dtype=ttnn.bfloat16,
                 conv_config=conv_cfg,
                 compute_config=cc,
+                # L1_FULL slice: keep the conv in L1 instead of DRAM-width-slicing. The DRAM-slice path does
+                # host reads that begin_trace_capture rejects (see uniad); L1_FULL is trace-safe (as UNet).
+                slice_config=ttnn.Conv2dL1FullSliceConfig,
+                return_output_dim=False,
+                return_weights_and_bias=False,
             )
-        out = ttnn.conv1d(
-            input_tensor=xin,
-            weight_tensor=self._conv1d_wprep,
-            device=dev,
-            in_channels=C,
-            out_channels=C,
-            batch_size=1,
-            input_length=Lin,
-            kernel_size=K,
-            stride=1,
-            padding=0,
-            dilation=1,
-            groups=C,
-            dtype=ttnn.bfloat16,
-            conv_config=conv_cfg,
-            compute_config=cc,
-            # L1_FULL slice: keep the conv in L1 instead of DRAM-width-slicing. The DRAM-slice path does
-            # host reads that begin_trace_capture rejects (see uniad); L1_FULL is trace-safe (as UNet).
-            slice_config=ttnn.Conv2dL1FullSliceConfig,
-            return_output_dim=False,
-            return_weights_and_bias=False,
-        )
+            if nblk > 1:
+                ttnn.deallocate(xb)
+            ob = ttnn.sharded_to_interleaved(ob, _dram)
+            parts.append(ttnn.reshape(ob, (1, T, Cb)))
         ttnn.deallocate(xin)
-        out = ttnn.sharded_to_interleaved(out, _dram)
-        out = ttnn.reshape(out, (1, T, C))
+        out = parts[0] if nblk == 1 else ttnn.concat(parts, dim=2, memory_config=_dram)
+        if nblk > 1:
+            for pt in parts:
+                ttnn.deallocate(pt)
         out = ttnn.to_layout(out, ttnn.TILE_LAYOUT, memory_config=_dram)
         # SiLU stays separate (folding via conv_config.activation drops PCC to ~0.84 on this depthwise).
         return ttnn.silu(out, memory_config=_dram), new_state
