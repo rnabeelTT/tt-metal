@@ -69,17 +69,24 @@ and what it is not:
 * **Verified** -- those same parsers produce clean answers, through the CONTAINER on
   p150, which gets them from `capabilities`: `"\n\nThe capital of France is **Paris**."`
   with no `</think>` and `finish_reason: stop`.
-* **NOT re-verified** -- four lanes simultaneously returning clean text. Before the fix,
-  four lanes came up and all four answered correctly but with the reasoning inline. After
-  it, two attempts had only 1 of 4 lanes ready inside `serve_lanes.sh wait`'s 1800 s
-  budget; the other three sat at `tt/worker.py`'s "TT worker standard-DP binding" line
-  with no error. That is NOT attributable to the parser flags -- the lane that did come
-  up had them -- and 4/4 has worked repeatedly on this box, so treat it as a multi-lane
-  startup flake to investigate, not a regression. If you hit it: `serve_lanes.sh stop`,
-  `tt-smi -r`, and start again.
+* **Verified 2026-09-18** -- four lanes simultaneously returning clean text. All four
+  answer `The capital of France is **Paris**.` with `finish_reason: stop` and no
+  `</think>` anywhere in `content`, and 12/12 benchmark requests across those lanes
+  succeeded.
+
+  This entry previously read "NOT re-verified", because after the parser fix only 1 of 4
+  lanes would come up and the other three appeared to sit at `tt/worker.py`'s
+  "TT worker standard-DP binding" line with no error. **That diagnosis was wrong on both
+  counts**: there was an error (an identical 600 s `VLLM_ENGINE_READY_TIMEOUT_S` timeout
+  in all four logs), and it was a regression, introduced by the parser fix itself. The
+  comment block it added landed between the env assignments and the `vllm serve` they
+  prefix, which ends the line continuation and silently drops `TT_VISIBLE_DEVICES` and
+  `TT_MESH_GRAPH_DESC_PATH` from the child -- so every lane tried to open the whole 4-die
+  mesh. Fixed, with a guard that reads the pinning back out of `/proc/<pid>/environ` and
+  refuses to launch an unpinned lane. Details in `doc/HANDOFF.md`.
 
 **Why lanes rather than one wide mesh, and exactly how far tensor parallelism got.**
-Per-die replicas measure 26 -> 54 -> 91 tok/s aggregate on 1/2/4 dies, so lanes are the
+Per-die replicas measure 32 -> 62 -> 109 tok/s aggregate on 1/2/4 dies, so lanes are the
 shipped multi-die deployment: every profile in `tt-model.yaml` serves REPLICATED, and all
 the readiness evidence was produced that way.
 
@@ -411,9 +418,17 @@ were taken:
 
 Two honest readings of that table. Per DIE this port decodes 2.9x faster, and its
 four-die AGGREGATE is 2.5x ornith-1.0's, because four independent lanes each serve a
-user. But for a SINGLE user on four dies ornith-1.0 wins 43.03 against 28.52, because it
-spends the extra dies on one stream (TP=4/EP=4) where this port spends them on more
-streams.
+user. But for a SINGLE user on four dies ornith-1.0 still wins, because it spends the
+extra dies on one stream (TP=4/EP=4) where this port spends them on more streams.
+
+READ THE SINGLE-USER COMPARISON OFF THE RIGHT CELL. It is 43.03 against **33.15**, not
+against 28.52. The 28.52 in the table is per-stream with FOUR streams running, and the
+gap from 33.15 is host contention between four vLLM processes. One user on a four-die
+box runs ONE lane and gets the one-die number, 33.15, with three dies idle -- so
+ornith-1.0's single-user lead is 1.30x, not the 1.51x the aggregate row would suggest.
+With the opt-in tensor-parallel path (`ORNITH_TP=1`) this port has served 37.50 tok/s on
+four dies, which narrows it to 1.15x; that path is not shipped by default (see the
+tensor-parallelism section).
 
 The reason the per-die gap exists at all also explains why EP does less for this port:
 ornith-1.0's single die reads all 256 experts per layer, so sharding the bank 4 ways is

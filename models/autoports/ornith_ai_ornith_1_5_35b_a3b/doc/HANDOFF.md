@@ -1,138 +1,130 @@
-# Ornith-1.5-35B-A3B — handoff, 2026-09-17
+# Ornith-1.5-35B-A3B — handoff, 2026-09-18
 
-## Pick up here
+## State
+
+Shipping configuration is measured, correct and packaged. `repo:` is set. Nothing has
+been pushed: the box has no Hugging Face credentials at all, so the push is yours.
 
 ```bash
-tmux attach -t ornith          # the verification pass is running in window "verify"
-tail -f /home/raahem/ornith-bringup/handoff/log_run_all.txt
+hf auth login
+tt-model push /home/raahem/ornith-bringup/artifacts/pkgbuild-final/ornith-1.5-35b-a3b --private
 ```
 
-`run_all.sh` runs three steps unattended, each resetting the dies first and writing its
-own log in this directory:
+## The numbers
 
-| step | log | what it proves |
-|---|---|---|
-| `verify_pkg.sh` | `log_verify_pkg.txt` | the packaged container serves **correct text** on p150, and advertises `max_model_len: 262144` |
-| `perf_p150.sh` | `log_perf_p150.txt` | TTFT + traced decode, p50 of 3, ornith-1.0's method |
-| `verify_lanes.sh` | `log_verify_lanes.txt` | four lanes each answer correctly, one per die |
+Re-measured 2026-09-18 with `tools/serve_bench.py`, one stream per lane, 256-token
+completions, **all three rows in one pass against one set of four lanes** so they are
+directly comparable. 12/12 requests served, none failed. Every lane's text was checked
+through the reasoning parser before any timing was taken.
 
-Everything there exercises the **shipping** configuration. None of it depends on tensor
-parallelism.
-
-## What ships, and the numbers
-
-| | 1 die (default `p150`) | 2 dies | 4 dies |
+| | p150 (1 die) | 2 dies | 4 dies |
 |---|---|---|---|
-| deployment | container, `p150` profile | 2 lanes | 4 lanes |
-| decode | **32.99 tok/s** (TPOT 30.3 ms) | 28.40/stream | 25.89/stream |
-| aggregate | 26.07 | 54.47 | **91.24 tok/s** |
-| TTFT | **366 ms** (short), 5.04 s (~1.4K) | 404 ms | 420 ms |
-| context | 262144, verified live from the container | | |
+| deployment | 1 instance | `serve_lanes.sh start 2` | `serve_lanes.sh start 4` |
+| **aggregate** | **31.66 tok/s** | **61.55 tok/s** | **109.03 tok/s** |
+| per stream | 33.15 | 32.35 | 28.52 |
+| TTFT (median) | 394 ms | 395 ms | 410 ms |
+| TTFT (p99) | 394 ms | 398 ms | 418 ms |
 
-Long context on p150: prefill flat **~350-370 tok/s out to ISL 131072**, TPOT 30.3 ->
-38.2 ms. Only 10 of 40 layers hold KV, which is why it is flat.
+3.44x at four dies. At 128-token completions the same lanes give 30.35 / 59.06 / 102.10 —
+shorter completions amortize the fixed ~400 ms prefill over fewer tokens, so **always
+quote the completion length with the number**.
 
-Against the fleet on four dies: ornith-1.0 43.03 tok/s decode / 2342 pf@4K, qwen3-coder
-49.2 / 1016. We beat ornith-1.0 **2.1x on aggregate throughput** and **2.8x per die**
-(32.99 against its 11.59 on one die); we lose on single-user decode and on prefill
-without TP.
+Every one of these beats what the package previously recorded (26.07 / 54.47 / 91.24
+aggregate, 29.05 / 28.40 / 25.89 per stream). Those were from 2026-09-16 on a retired
+harness and were flagged as un-re-measured; they were conservative.
 
-Caveat on the 2- and 4-die rows: those aggregates are from 2026-09-16 (256-token
-completions, a different harness). Single-die decode measured *higher* tonight (32.99 vs
-29.05), so they are probably conservative, but they have not been re-measured with
-current code. `verify_lanes.sh` re-confirms correctness, not throughput.
+Through the packaged container on one die, p50 of 3, ornith-1.0's method: **decode 32.96
+tok/s (TPOT 30.3 ms), TTFT 366 ms** short / 5.04 s at ~1.4K. Context **262144**, verified
+live from the container. Prefill flat ~350-370 tok/s out to ISL 131072 — only 10 of 40
+layers hold KV, which is why it is flat.
 
-## Tensor parallelism: opt-in, one blocker left, precisely localized
+### Reading this against the fleet table
 
-`ORNITH_TP=1`. On four dies it is worth **2.0x prefill at ISL 128 (706 tok/s), 3.1x at
-4096 (1241, which passes qwen3-coder's 1016), and TTFT 366 -> 187 ms**, and served
-traced decode measured **37.50 tok/s** — faster than one die and 87% of ornith-1.0.
+The fleet latency sweep measures **Users = 1** — single-user decode per mesh. This model
+is replicated, so extra dies serve extra USERS and do not make one stream faster. In the
+fleet's frame this port is ~33 tok/s at every mesh, not a scaling curve.
 
-Two fixes got it there, both committed:
-* **The ring topology.** `moe.py::_reduce` was calling `ttnn.all_reduce(...,
-  topology=Topology.Linear)` with no `num_links` on hardware whose descriptor declares
-  `dims: [2,2]`, `channels { count: 2 }` — a line on a ring over one link. ornith-1.0 had
-  measured and documented `Ring` + `num_links=2` as better at every traced shape. Worth
-  ~6x. This is the single most valuable thing found in this bring-up.
-* **A `getattr` guard** in `prefill_masked_bucket`: the GDN conv re-seed is a
-  single-device construct and `TPGatedDeltaNet` has no `split_conv_state`, which killed
-  the engine on the first TP request while warmup passed clean.
+| dies | ornith-1.0 | this port |
+|---|---|---|
+| 1 | 11.59 | **33.15** (2.86x) |
+| 4, one user | **43.03** | 33.15 one lane / 37.50 with opt-in TP |
+| 4, four users | 43.03 | **109.03 aggregate** (2.53x) |
 
-**THE ONE REMAINING BLOCKER.** The TP GDN depthwise conv1d cannot fit L1 during the vLLM
-prefill warmup:
+Do not quote 28.52 as the single-user four-die number. It is per-stream with four streams
+running, and the gap from 33.15 is host contention between four vLLM processes. One user
+on a four-die box runs one lane and gets 33.15 with three dies idle.
 
-```
-gdn/tp.py:351 _conv1d_prefill
-  Statically allocated circular buffers on core range [0-0 - 10-5] grow to
-  1684544 B which is beyond max L1 size of 1572864 B      (deficit 111,680 B)
-```
+## What was wrong, and is now fixed
 
-What is **ruled out by measurement** — the byte count is *identical*, to the byte, in
-every one of these, which is how we know it is one fixed CB configuration and not a
-sizing problem:
+**The 4-lane "startup flake" was neither flaky nor mysterious.** All four lanes failed
+identically at exactly 600 s with `TimeoutError: Timed out waiting for engine core
+processes to start (VLLM_ENGINE_READY_TIMEOUT_S)`. The previous handoff recorded them as
+"parked at tt/worker.py's DP-binding line with no error"; the error was in every log.
 
-* `max_model_len` 4096 vs 2048
-* with and without an `l1_small_size: 24576` reservation
-* capturing the chunk-prefill trace vs warming the masked buckets only
-* masked-bucket set capped to 1024 vs the full `(128,256,512,1024,2048)`
-* warmup chunk 2048 vs 1024
-
-So the next step is to look at the CB config inside `_conv1d_prefill` for the TP head
-width (`qkv_dim_tp`), not at chunk/bucket/context knobs. Two disproven attempts (a bucket
-cap and a chunk halving) were reverted rather than left in shared code.
-
-`trace_mode: decode_only` lets a 4-die TP server *start* (it skips the chunk-trace
-capture) and is how the 37.50 was measured — but it leaves prefill unwarmed, so a
-post-park compile then deadlocks request 2 in that same conv1d. Both paths lead to the
-same op. Reproduce with:
+The cause was in `serve_lanes.sh`, introduced by the parser fix (28147b0b5a0), which
+inserted a comment block between the env assignments and the command they prefix:
 
 ```bash
-/home/raahem/ornith-bringup/handoff/tp_stall.sh     # stalls on request 2, dumps py-spy stacks
+TT_VISIBLE_DEVICES="$i" \
+TT_MESH_GRAPH_DESC_PATH="$MESH_DESC" \
+# --reasoning-parser / --tool-parser ARE NOT OPTIONAL, ...
+nohup vllm serve "$WEIGHTS" \
 ```
 
-## Also open
+A `#` line after a trailing backslash **ends the continuation**. Bash parses the two
+assignments as a complete command, setting them as plain shell variables in the launching
+shell and never exporting them; `nohup vllm serve` then runs as a separate command with
+neither in its environment. Every lane lost its die pinning and its single-die descriptor,
+so all four tried to open the whole 4-die mesh at once and starved until vLLM gave up.
+That is also why earlier attempts saw "1 of 4 came up" — whichever lane won the mesh.
 
-* **Prompt 2 accuracy**: logit PCC 0.94334 against the 0.95 bfp4 bar (top-1 3/3, other
-  two prompts pass). Settled that no precision knob closes it — nine configs measured,
-  the shipped default is the maximum. The one reducible lead is the GDN block at 10.0%
-  median relative error vs full attention's 2.4%, with 34-45% at L4.
-* **Decode is not bit-reproducible** (`NONDETERMINISM.md`) — open, characterised,
-  accepted for release.
-* **`max_num_seqs: 1`**; concurrency comes from lanes. Batched serving deadlocks in the
-  same compile-after-trace family (`tools/repro_prefill_after_trace.py`).
-* **4-lane simultaneous startup flaked twice** at the end of the session (1 of 4 ready
-  inside the 1800 s budget, the others parked at `tt/worker.py`'s DP-binding line with no
-  error). 4/4 has worked repeatedly, including earlier the same evening, and the lane that
-  came up had the new parser flags, so this is a startup flake to investigate rather than a
-  regression. Recovery: `serve_lanes.sh stop`, `tt-smi -r`, start again.
+Fixed in a34886f299d, with a `/proc/<pid>/environ` guard that refuses to continue if a
+lane did not inherit its pinning. The guard **polls**: prefix assignments are applied at
+exec, not at fork, so an immediate check false-fails a good launch — which it did on its
+first run.
 
-## Not done deliberately
+`verify_lanes.sh` also swallowed its own failure (it returned the exit status of a final
+`echo`), which is how `run_all.sh` printed `exit=0` over a 0/4 result. Also fixed.
 
-**Not pushed.** `tt-model.yaml` still has `repo: PLACEHOLDER/ornith-1.5-35b-a3b`. Set the
-repo, then:
+## Still open, all pre-existing and none blocking the shipping config
 
-```bash
-tt-model push /home/raahem/ornith-bringup/artifacts/pkgbuild-0557/ornith-1.5-35b-a3b --private
-```
-
-**Package with `--out` OUTSIDE the tt-metal tree** or the build never finishes — the
-packager stages into `build/` inside the model dir while `source.code` includes that
-dir's parent, so it copies its staging directory into itself ~40 levels deep until
-"File name too long". `build/` is gitignored, so `git status` stays clean while 1.7 GB
-accumulates.
-
-**The plugin is packaged from `/home/raahem/vllm-tt-plugin`** (`runtime.plugin.path`), and
-two capabilities this model needs live on branch `ornith-1.5-replicated-moe-capabilities`
-(`5961e48`): `kv_heads_replicated` and `supports_standard_dp`. They were previously
-UNCOMMITTED, so the image depended on a dirty working tree. Merge or cherry-pick them.
+* **Tensor parallelism is opt-in and has one blocker left**, precisely localized. The TP
+  GDN depthwise conv1d wants 1684544 B of CBs against 1572864 B of L1 (deficit 111,680 B)
+  at `gdn/tp.py:351 _conv1d_prefill`. The byte count is *identical* across `max_model_len`
+  4096/2048, with/without `l1_small_size`, trace-capture vs buckets-only, bucket caps, and
+  chunk 2048 vs 1024 — so it is the CB config at the TP head width (`qkv_dim_tp`), not a
+  knob. Reproduce with `handoff/tp_stall.sh`. Worth 2.0-3.1x prefill and 37.50 tok/s
+  served decode if closed.
+* **Prompt 2 accuracy**: logit PCC 0.94334 against the 0.95 bfp4 bar (top-1 3/3; the other
+  two prompts pass). Nine precision configs measured; the shipped default is the maximum.
+  The reducible lead is the GDN block at 10.0% median relative error vs full attention's
+  2.4%.
+* **Decode is not bit-reproducible** (`NONDETERMINISM.md`) — characterised, accepted.
+* **`max_num_seqs: 1`**, a hard limit from the GDN external-state batch-1 assert.
+  Concurrency comes from lanes.
 
 ## Hardware hygiene that cost real time
 
 * **Never `kill -9` a process holding the mesh.** It wedges `MeshCommandQueue` for every
-  later run and the next failure looks like a model bug — a cached weight upload stalled
-  six minutes in `enqueue_write_shards_nolock`, and `test_layer.py` went from 16 minutes
-  to 17 seconds after `tt-smi -r`. Use `resetdev.sh`, which SIGTERMs holders, waits, and
-  refuses to reset while any process still holds a die (checked through `/proc`, not a
-  lock file — a stale lock and a live run are indistinguishable).
-* **`tt-smi -r` on live dies destroys that process's work silently.** It cost ~8 minutes
-  of an agent's run here.
+  later run and the next failure looks like a model bug. Use `handoff/resetdev.sh`, which
+  SIGTERMs holders, waits, and refuses to reset while any process still holds a die
+  (checked through `/proc`, not a lock file).
+* **`tt-smi -r` on live dies destroys that process's work silently.**
+* **Package with `--out` OUTSIDE the tt-metal tree** or the build never finishes: the
+  packager stages into `build/` inside the model dir while `source.code` includes that
+  dir's parent, so it copies its staging directory into itself until "File name too long".
+  `build/` is gitignored, so `git status` stays clean while 1.7 GB accumulates.
+
+## Scripts
+
+All in `/home/raahem/ornith-bringup/handoff/`, deliberately outside the session
+scratchpad.
+
+| script | what it does |
+|---|---|
+| `measure_lanes.sh` | the table above: 4 lanes once, measured at 1/2/4 bases |
+| `build_pkg.sh` | rebuild the container package into `artifacts/pkgbuild-final` |
+| `verify_final.sh` | image provenance + serves-correct-text + p150 perf + 4 lanes |
+| `verify_pkg.sh` / `perf_p150.sh` / `verify_lanes.sh` | the three individual gates |
+| `resetdev.sh` | the only safe way to reset the dies |
+| `tp_stall.sh` | reproduce the TP conv1d blocker |
