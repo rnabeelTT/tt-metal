@@ -10,18 +10,18 @@
 # 64-token completions:
 #
 #     lanes (dies)      1        2        4
-#     aggregate     26.07    54.47    91.24 tok/s
-#     per stream    29.05    28.40    25.89 tok/s
-#     TTFT (med)      397      404      420 ms
+#     aggregate     31.66    61.55   109.03 tok/s
+#     per stream    33.15    32.35    28.52 tok/s
+#     TTFT (med)      394      395      410 ms
 #
-# 3.50x at four dies (one stream per lane, 256-token completions, end to end through
+# 3.44x at four dies (one stream per lane, 256-token completions, end to end through
 # vLLM). That is the ONLY way extra dies pay off for this model, and until now it was
 # documented but not scripted: an operator who ran the p300x2 profile got one four-die
 # replica at ~29 tok/s instead of four one-die replicas at 91. This script is the
 # difference.
 #
 # Aggregate carries TTFT, so it lands under per-stream x lanes -- the same four lanes
-# measure 80.63 at 64-token completions. Per-stream decaying 29.05 -> 25.89 with lane
+# measure 102.10 at 128-token completions. Per-stream decaying 33.15 -> 28.52 with lane
 # count is HOST contention between four vLLM processes, not the dies.
 #
 # Each lane is a separate vLLM process on its own port. There is no load balancer here
@@ -68,6 +68,12 @@ WEIGHTS="${ORNITH_WEIGHTS:-${WEIGHTS_VIEW:-}}"
 # not at the bundle. tt-model sets it from tt-model.yaml's extra_models_dir; launching
 # vllm directly, as here, does not, so set it ourselves.
 export EXTRA_MODELS_DIR="${EXTRA_MODELS_DIR:-$TT_METAL_HOME/models/autoports}"
+
+# Four lanes load 18.2 GB of weights each, concurrently, off the same host. vLLM's
+# default VLLM_ENGINE_READY_TIMEOUT_S is 600 s and the API server hard-fails the moment
+# it expires -- which is how a slow-but-healthy 4-lane start reads as a crash. Give the
+# engine room; `wait` still bounds the whole thing with LANE_READY_TIMEOUT.
+export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-3600}"
 
 detect_dies() {
     local n=0
@@ -118,8 +124,6 @@ cmd_start() {
         local port; port="$(lane_port "$i")"
         # Each lane is pinned to exactly one die and is a complete, independent replica;
         # nothing is shared between lanes, so one dying does not disturb the others.
-        TT_VISIBLE_DEVICES="$i" \
-        TT_MESH_GRAPH_DESC_PATH="$MESH_DESC" \
         # --reasoning-parser / --tool-parser ARE NOT OPTIONAL, and this script shipped
         # without them. tt-model.yaml declares them as `capabilities` and the launcher
         # turns them into these flags, but a hand-rolled `vllm serve` gets neither -- so
@@ -140,6 +144,18 @@ cmd_start() {
         # with "Failed to load module 'hermes' from hermes." because the name is treated
         # as a plugin PATH. First attempt at this fix brought up 1 lane of 4 that way.
         # This is the same spelling tt_kernel/packaging.py emits for the container.
+        #
+        # KEEP THE ENV ASSIGNMENTS WELDED TO `nohup` -- NO COMMENT MAY SIT BETWEEN THEM.
+        # A `#` line after a trailing backslash ENDS the continuation: bash then parses
+        # `VAR=x VAR2=y` as a standalone assignment, setting them as plain shell
+        # variables in THIS shell and never exporting them to the child. The lane then
+        # launches with no TT_VISIBLE_DEVICES and no single-die descriptor, so every
+        # lane tries to open the whole 4-die mesh at once and all four hang until
+        # vLLM's 600 s VLLM_ENGINE_READY_TIMEOUT_S fires. That is exactly what the
+        # comment block above did when it was added: 4/4 lanes had worked repeatedly
+        # before it, 0/4 after, and it read as a "startup flake".
+        TT_VISIBLE_DEVICES="$i" \
+        TT_MESH_GRAPH_DESC_PATH="$MESH_DESC" \
         nohup vllm serve "$WEIGHTS" \
             --served-model-name "$MODEL_NAME" \
             --max-num-seqs "$MAX_NUM_SEQS" \
@@ -150,8 +166,34 @@ cmd_start() {
             --enable-auto-tool-choice --tool-call-parser hermes \
             --port "$port" \
             > "$(lane_log "$i")" 2>&1 &
-        echo $! > "$(lane_pidfile "$i")"
-        echo "lane $i: die $i, port $port, pid $!, log $(lane_log "$i")"
+        local lpid=$!
+        echo "$lpid" > "$(lane_pidfile "$i")"
+        echo "lane $i: die $i, port $port, pid $lpid, log $(lane_log "$i")"
+        # Read the pinning back out of the CHILD's environment rather than trusting that
+        # we wrote it. This is the only check that would have caught the comment-in-
+        # continuation bug, which lost TT_VISIBLE_DEVICES silently and cost a full
+        # 4-lane verification run.
+        #
+        # POLL, do not sample once. A prefix assignment is applied to the environment at
+        # EXEC, not at fork, so for the moment between `&` and vllm actually starting,
+        # /proc/<pid>/environ still shows THIS shell's environment with no
+        # TT_VISIBLE_DEVICES in it. Checking immediately reports a false failure on a
+        # perfectly good launch -- which it did, on the first run of this guard.
+        local pinned=no
+        for _ in $(seq 1 100); do
+            if [ -r "/proc/$lpid/environ" ] \
+               && tr '\0' '\n' < "/proc/$lpid/environ" | grep -qx "TT_VISIBLE_DEVICES=$i"; then
+                pinned=yes; break
+            fi
+            kill -0 "$lpid" 2>/dev/null || break
+            sleep 0.1
+        done
+        if [ "$pinned" != yes ]; then
+            echo "serve_lanes: FATAL lane $i did not inherit TT_VISIBLE_DEVICES=$i;" >&2
+            echo "             it would open every die instead of one. Killing it." >&2
+            kill "$lpid" 2>/dev/null; rm -f "$(lane_pidfile "$i")"
+            die "die pinning did not reach the lane process"
+        fi
     done
     echo
     echo "Lanes are still loading weights and capturing traces; this takes minutes."
