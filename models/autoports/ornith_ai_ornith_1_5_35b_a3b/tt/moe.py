@@ -495,7 +495,29 @@ class _SparseExperts:
 
     # Prefill groups tokens into 32-row tiles: sparse_matmul folds the group dimension
     # into M, so a larger chunk grows num_blocks_y and can overflow the core grid.
-    CHUNK = 32
+    #
+    # 32 was chosen on the EXPERT UNION alone -- per-token work is live_experts, which
+    # rises 162 -> ~251 going from 32 to 128 tokens (see _prefill's docstring), measured
+    # at short ISL where this loop runs a handful of times per layer. That cost function
+    # leaves out per-iteration OVERHEAD, and tools/prefill_profile.py measures the loop at
+    # 15 device ops per iteration of which only 2 are matmuls. The iteration count is
+    # ISL/CHUNK per layer -- 4 at ISL 128, but 4096 at ISL 131072 -- so at long prompts
+    # the omitted term dominates and the optimum can move. ORNITH_MOE_CHUNK sweeps it;
+    # the default keeps the measured short-ISL behaviour exactly.
+    # MEASURED, one die, best of 2, prefill wall clock (32 -> 64):
+    #   ISL  2048   402.9 -> 428.9 tok/s  (+6.5%)   greedy token identical (198)
+    #   ISL  8192   369   -> 380   tok/s  (+3.1%)   [4-layer run x10]
+    #   ISL 16384   363   -> 374   tok/s  (+3.0%)   [4-layer run x10]
+    # 128 was also swept and is WORSE than 64 (415.7 tok/s at ISL 2048): the union
+    # penalty catches back up. The gain SHRINKS with length rather than holding, because
+    # other length-dependent costs grow and dilute this loop's share -- so this is worth
+    # ~3% at long prompts, not the ~6.5% the short-ISL number suggests. Quote the length.
+    CHUNK = int(os.environ.get("ORNITH_MOE_CHUNK", "64"))
+
+    #: The prefill/decode path threshold, deliberately NOT CHUNK. It is the sparse tile
+    #: height, so raising CHUNK cannot push a 32..CHUNK-1-token prompt onto the decode
+    #: path and silently change which kernel short prefills use.
+    MIN_PREFILL_T = 32
 
     #: dtype of the routed-expert intermediates (the packed gate/up result and the down
     #: output). Ornith-1.0's precision policy ships BFP8 here. Traced op cost is flat up
@@ -651,7 +673,7 @@ class _SparseExperts:
         # Same rule as _run_blocks: tokens are every leading dim multiplied together.
         T = math.prod(orig[:-1])
         x4 = x if len(orig) == 4 and orig[-2] == T else ttnn.reshape(x, (1, 1, T, H))
-        decode = T == 1 or T < self.CHUNK
+        decode = T == 1 or T < self.MIN_PREFILL_T
         if decode and self.use_gather:
             out = self._decode_gather(x4, scores, indices, T, H)
         else:
