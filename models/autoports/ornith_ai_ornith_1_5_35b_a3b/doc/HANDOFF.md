@@ -221,6 +221,46 @@ curve plus an average, not two dispatch modes: `multiply` measures 5.45 us at 8 
 the 1 MB GDN recurrent-state ops at 10.35 us each. Re-aligning strides cannot move ops onto
 a queue that does not exist; the 46% above is real work, wherever it turns out to live.
 
+## The sixth TP bug: diagnosed, NOT fixed, and it blocks the profiling above
+
+`TPAttention._qkv` assumes a rank-4 activation and builds four-element slice bounds:
+
+    models/demos/blackhole/qwen36/tt/attention/tp.py:192-199
+        sh = list(qkv.shape)
+        _qkv3_mc = ttnn.L1_MEMORY_CONFIG if sh[2] > tpc.TILE_SIZE else ttnn.DRAM_MEMORY_CONFIG
+        qkv3 = ttnn.slice(qkv, (0, 0, 0, 0), (sh[0], sh[1], sh[2], qkv3_dim), memory_config=_qkv3_mc)
+        gate = ttnn.slice(qkv, (0, 0, 0, qkv3_dim), (sh[0], sh[1], sh[2], qkv3_dim + gate_dim))
+
+Reached with a rank-3 `qkv` it fails in validation:
+
+    TT_FATAL: Input rank 3 and begins 4 must have the same size
+    slice.cpp:121: input_rank == begins.size()
+    via layer.py:238 forward -> attention/tp.py:428 forward_prefill -> :198 _qkv
+
+Reproduce: `ORNITH_TP=1 python3 tools/layer_sweep.py --mesh P150x4 --spec full --n 4`
+(full log: `handoff/decompose/P150x4_full_n4.log`). GDN layers under TP sweep clean; only
+full-attention layers hit this.
+
+**Same family as the five fixed in 7dbdd2de25c** -- a hardcoded rank that happens to hold
+on the vLLM server's path and not on any other. The server serves all 40 layers under TP
+perfectly well, so this is not a serving defect; it is the last thing keeping standalone
+tools off the TP full-attention path.
+
+**The fix is rank-agnostic bounds**, not a special case: build begins/ends from `len(sh)`
+so both rank-3 and rank-4 work, e.g. zeros for begins and `sh[:-1] + [qkv3_dim]` for ends,
+and take the sequence extent as `sh[-2]` rather than `sh[2]`. Note `sh[2]` is wrong twice
+over on a rank-3 input -- it selects the hidden dim, so even the L1-vs-DRAM memory-config
+choice on the line above is made on the wrong axis.
+
+**Why it matters beyond tidiness:** it is what blocks per-op DEVICE timing for
+full-attention layers under TP, which is exactly what is needed to explain the 8.43 vs
+5.75 us/op gap above. Fix this and both `tools/op_profile.py` and `tools/layer_sweep.py`
+can decompose the whole TP model instead of GDN only.
+
+Not fixed here because the shipped package is built and verified from this tree and the
+change cannot be exercised without a rebuild cycle; tree and image were kept identical
+instead. It is a small, well-understood change for whoever picks this up.
+
 ## Still open, all pre-existing and none blocking the shipping config
 
 * **Tensor parallelism is opt-in and has one blocker left**, precisely localized. The TP
