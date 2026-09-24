@@ -5,6 +5,7 @@ for `MultichipConfig` variants.
 
     MESH_DEVICE=P300x2 python models/autoports/qwen_qwen3_5_122b_a10b/tools/sweep_multichip.py --family dense_1d --layers 0,3 --out sweep.jsonl
 """
+
 import argparse
 import json
 import os
@@ -54,6 +55,32 @@ def families(base: MultichipConfig):
             ("sdpa_32_256", base.with_(sdpa_decode_q_chunk=32, sdpa_decode_k_chunk=256)),
         ],
         "conv1d": [(f"conv_blk{c}", base.with_(gdn_conv1d_max_channels=c)) for c in (1024, 1536, 3072)],
+        # --- stage 5 families ---
+        "mixer_ds": [(f"mixer_{m}", base.with_(mixer_decode_mode=m)) for m in ("1d", "ds_in", "ds_all")],
+        # review-2: Blackhole multi-reader DRAM-sharded candidates (2 and 3 readers per bank), in-projection only with the
+        # tuned 1D out-projection kept (ds_in_out1d) and all projections DRAM-sharded (ds_all)
+        "out_dtype": [("out_bf16", base), ("out_bfp8_rs", base.with_(out_proj_decode_dtype="bfp8"))],
+        "norm_ag_persistent": [("norm_ag_alloc", base), ("norm_ag_persistent", base.with_(norm_ag_persistent=True))],
+        "mixer_ds_readers": [("mixer_1d", base)]
+        + [
+            (f"mixer_ds_in_out1d_r{r}", base.with_(mixer_decode_mode="ds_in", mixer_ds_out_1d=True, mixer_ds_readers=r))
+            for r in (1, 2, 3)
+        ]
+        + [(f"mixer_ds_all_r{r}", base.with_(mixer_decode_mode="ds_all", mixer_ds_readers=r)) for r in (2, 3)],
+        "mmrs": [("mmrs_off", base), ("mmrs_on", base.with_(fuse_out_mmrs_decode=True))],
+        "mixer_fidelity": [("mixer_hifi2", base), ("mixer_lofi", base.with_(mixer_fidelity="lofi"))],
+        "mixer_in0": [
+            (f"attn_in0_{a}_gdn_in0_{g}", base.with_(attn_qkv_in0=a, gdn_qkvz_in0=g))
+            for (a, g) in [(None, None), (12, 12), (16, 16), (24, 24), (32, 32), (48, 48)]
+        ],
+        "gu_tile": [
+            ("gu_tile32x32_c16", base),
+            ("gu_tile32x16_c32", base.with_(gate_up_output_tile=(32, 16), gate_up_cores=32)),
+        ],
+        "dense_1d_long": [
+            (f"attn_qkv{a}_wo{b}", base.with_(attn_qkv_decode_cores=a, attn_wo_decode_cores=b))
+            for (a, b) in [(None, None), (88, 33), (44, 44), (None, None), (88, 33), (44, 44)]
+        ],
     }
 
 
@@ -62,7 +89,7 @@ def _pcc(a, b):
     return float(str(pcc).split()[-1]) if isinstance(pcc, str) else float(pcc)
 
 
-def measure(mesh, layer_idx, mc, name, prefill_len=128, decode_ctx=128, hf=True, max_seq_len=4096):
+def measure(mesh, layer_idx, mc, name, prefill_len=128, decode_ctx=128, hf=True, max_seq_len=4096, replays=3):
     row = {"name": name, "layer_idx": layer_idx, "config": mc.describe()}
     t0 = time.time()
     h = _MeshHarness(mesh, layer_idx, batch=1, max_seq_len=max_seq_len, real=True, hf=hf, mc=mc)
@@ -99,10 +126,11 @@ def measure(mesh, layer_idx, mc, name, prefill_len=128, decode_ctx=128, hf=True,
     ttnn.execute_trace(mesh, tid, cq_id=0, blocking=True)
     ttnn.synchronize_device(mesh)
     t0 = time.time()
-    for _ in range(3):
+    for _ in range(replays):
         ttnn.execute_trace(mesh, tid, cq_id=0, blocking=False)
     ttnn.synchronize_device(mesh)
-    row["decode_ms"] = round(1e3 * (time.time() - t0) / 3, 3)
+    row["decode_ms"] = round(1e3 * (time.time() - t0) / replays, 3)
+    row["replays"] = replays
     ttnn.release_trace(mesh, tid)
     return row
 
@@ -115,6 +143,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-hf", action="store_true")
     ap.add_argument("--decode-ctx", type=int, default=128)
     ap.add_argument("--prefill-len", type=int, default=128)
+    ap.add_argument("--replays", type=int, default=3)
     a = ap.parse_args()
     cands = families(MULTICHIP_SELECTED)[a.family]
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
@@ -138,9 +167,23 @@ if __name__ == "__main__":
                             hf=not a.no_hf,
                             decode_ctx=a.decode_ctx,
                             max_seq_len=max(4096, a.decode_ctx + 256, a.prefill_len + 256),
+                            replays=a.replays,
                         )
                     except Exception as e:
-                        row = {"name": name, "layer_idx": layer_idx, "error": str(e)[:400], "config": mc.describe()}
+                        import traceback
+
+                        frames = [
+                            f"{fr.filename.split('/models/')[-1]}:{fr.lineno} {fr.name}"
+                            for fr in traceback.extract_tb(e.__traceback__)
+                            if "/models/" in fr.filename
+                        ][-6:]
+                        row = {
+                            "name": name,
+                            "layer_idx": layer_idx,
+                            "error": str(e)[:400],
+                            "frames": frames,
+                            "config": mc.describe(),
+                        }
                         print("FAILED", name, layer_idx, str(e)[:200])
                     print(json.dumps({k: v for k, v in row.items() if k != "config"}))
                     f.write(json.dumps(row) + "\n")

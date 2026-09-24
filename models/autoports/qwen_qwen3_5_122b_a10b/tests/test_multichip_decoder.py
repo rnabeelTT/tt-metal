@@ -18,6 +18,7 @@ fractured output (``ConcatMeshToTensor(dim=-1)``), so the HF reference and the b
 from __future__ import annotations
 
 import ast
+import json
 import os
 import time
 from pathlib import Path
@@ -249,7 +250,20 @@ def _prefill_users(h: _MeshHarness, hidden):
     return ref_out, torch.cat(outs, dim=0)
 
 
+def _mc_override(mc):
+    """QWEN35_MC_OVERRIDE='{"mixer_decode_mode": "ds_in"}' applies MultichipConfig fields to the tests (Tracy of a candidate)."""
+    ov = os.environ.get("QWEN35_MC_OVERRIDE")
+    if not ov:
+        return mc
+    import json
+
+    return (mc or MULTICHIP_SELECTED).with_(
+        **{k: (tuple(v) if isinstance(v, list) else v) for k, v in json.loads(ov).items()}
+    )
+
+
 def _mc(mesh, layer_idx, *, batch, max_seq_len, real=False, hf=True, state=None, mc=None, max_batch_size=None):
+    mc = _mc_override(mc)
     return _MeshHarness(
         mesh,
         layer_idx,
@@ -647,6 +661,146 @@ def test_mc_traced_decode(mesh_device, layer_idx):
 
 
 @mesh_tp()
+@pytest.mark.parametrize("T", [512, 513, 1000, 1023, 2048])
+def test_mc_dispatch_counting_matches_sort(mesh_device, T):
+    """The counting-sort dispatch builds (default `counting_h`, transposed `counting`; no ttnn.sort) and the fp32 ttnn.sort
+    build must describe the same dispatch: identical group masks, the same multiset of (source token, weight) rows per
+    expert, and an undispatch map that points every (token, slot) at a row carrying that token. Random routing plus a
+    degenerate all-one-expert chunk (the warm-up's all-zero tokens). T = 513 and 1023 have T*k % 32 != 0, i.e. the
+    sentinel (Rp != R) branch: padded rows must land in the trailing all-padding group."""
+    import models.autoports.qwen_qwen3_5_122b_a10b.tt.moe_dispatch as md
+
+    print(f"MC dispatch module default DISPATCH_MODE={md.DISPATCH_MODE}")
+    E, k = 256, 8
+    torch.manual_seed(T)
+    ids = torch.randint(0, E, (1, 1, T, k), dtype=torch.int32)
+    ids[:, :, : T // 4] = 17  # degenerate block
+    sc = torch.rand(1, 1, T, k).to(torch.bfloat16)
+    rep = ttnn.ReplicateTensorToMesh(mesh_device)
+    outs = {}
+    saved = md.DISPATCH_MODE
+    try:
+        for mode in ("counting", "counting_h", "sort_fp32"):
+            md.DISPATCH_MODE = mode
+            md.SORT_ON_UINT16 = False
+            disp = md.SortedDispatch(mesh_device, E, k)
+            ids_t = ttnn.from_torch(
+                ids, dtype=ttnn.uint16, layout=ttnn.TILE_LAYOUT, device=mesh_device, mesh_mapper=rep
+            )
+            sc_t = ttnn.from_torch(
+                sc, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device, mesh_mapper=rep
+            )
+            m = disp.build(ids_t, sc_t, T)
+            d0 = lambda t: ttnn.to_torch(ttnn.get_device_tensors(t)[0])
+            outs[mode] = dict(
+                src_tok=d0(m["src_tok"]).reshape(-1).long(),
+                weights=d0(m["weights"]).reshape(-1).float(),
+                group_mask=d0(m["group_mask"]).reshape(m["G"], E).float(),
+                undispatch=d0(m["undispatch"]).reshape(T, k).long(),
+                G=m["G"],
+                Rd=m["Rd"],
+            )
+    finally:
+        md.DISPATCH_MODE = saved
+        md.SORT_ON_UINT16 = saved == "sort_u16"
+    assert torch.equal(outs["counting"]["undispatch"], outs["counting_h"]["undispatch"]) and torch.equal(
+        outs["counting"]["src_tok"], outs["counting_h"]["src_tok"]
+    ), "transposed and row-major counting sorts disagree"
+    a, b = outs["counting"], outs["sort_fp32"]
+    gs = 32
+    assert a["G"] == b["G"] and a["Rd"] == b["Rd"]
+    assert torch.equal(a["group_mask"], b["group_mask"]), "group masks differ"
+    assert (a["group_mask"].sum(dim=1) == 1).all(), "counting: a group without exactly one expert"
+    grp_expert = a["group_mask"].argmax(dim=1)  # expert of every group (0 = padding)
+    for name, o in (("counting", a), ("sort_fp32", b)):
+        # every (token, slot) points at a dispatched row that carries that token and its weight
+        rows = o["undispatch"]
+        assert (
+            o["src_tok"][rows] == torch.arange(T).reshape(T, 1)
+        ).all(), f"{name}: undispatch row carries another token"
+        assert torch.allclose(o["weights"][rows], sc.reshape(T, k).float(), atol=0, rtol=0), f"{name}: weight mismatch"
+        # the rows of every real group belong to tokens that routed to that group's expert
+        row_expert = grp_expert.repeat_interleave(gs)
+        real = torch.zeros(o["Rd"], dtype=torch.bool)
+        real[rows.reshape(-1)] = True
+        tok_ids = ids.reshape(T, k).long()
+        routed = torch.zeros(T, E, dtype=torch.bool)
+        routed[torch.arange(T).reshape(T, 1), tok_ids] = True
+        assert routed[o["src_tok"][real], row_expert[real]].all(), f"{name}: a row sits in the wrong expert group"
+    # same multiset of (expert, token) rows in both builds
+    key_a = torch.stack([grp_expert.repeat_interleave(gs), a["src_tok"]], dim=1)
+    key_b = torch.stack([grp_expert.repeat_interleave(gs), b["src_tok"]], dim=1)
+    real_a = torch.zeros(a["Rd"], dtype=torch.bool)
+    real_a[a["undispatch"].reshape(-1)] = True
+    real_b = torch.zeros(b["Rd"], dtype=torch.bool)
+    real_b[b["undispatch"].reshape(-1)] = True
+    sa = sorted(map(tuple, key_a[real_a].tolist()))
+    sb = sorted(map(tuple, key_b[real_b].tolist()))
+    assert sa == sb, "the two builds dispatch different (expert, token) multisets"
+    Rp = -(-T * k // 32) * 32
+    print(
+        f"MC dispatch T={T}: counting == counting_h == sort_fp32 (G={a['G']}, Rd={a['Rd']}, real rows {int(real_a.sum())}, "
+        f"sentinel rows {Rp - T * k})"
+    )
+
+
+@mesh_tp()
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_mc_prefill_after_traced_decode(mesh_device, layer_idx):
+    """Trace-lifecycle regression (stage-5 review #2 P1): prefill -> capture a decode trace -> replay it 4x -> release the
+    trace -> reset the state -> EAGER prefill of a new sequence (aligned T=128, then a start_pos=128 chunk of 100 tokens)
+    vs HF. The stage-6 two-layer stack hung in exactly this sequence when the prefill programs/persistent buffers were
+    first created AFTER the trace capture (allocations landing in the trace's scratch range, qwen36 rule #48536); at the
+    layer level the prefill programs exist before the capture, so this sequence must pass and stay bounded."""
+    h = _mc(mesh_device, layer_idx, batch=1, max_seq_len=2048)
+    seq_len = 40
+    hidden = _hidden(1, seq_len, h.H, seed=3100)
+    ref_pre, tt_pre = _prefill_users(h, hidden)
+    _pcc(f"MC {h.kind} prefill before trace", ref_pre, tt_pre)
+    step = _hidden(1, 1, h.H, seed=3200)
+    x, kw = h.decode_inputs(step, torch.tensor([seq_len]))
+    out = h.tt.decode_forward(x, **kw)  # compile
+    ttnn.deallocate(out)
+    tid = ttnn.begin_trace_capture(mesh_device, cq_id=0)
+    out = h.tt.decode_forward(x, **kw)
+    ttnn.end_trace_capture(mesh_device, tid, cq_id=0)
+    for _ in range(4):
+        ttnn.execute_trace(mesh_device, tid, cq_id=0, blocking=True)
+    ttnn.synchronize_device(mesh_device)
+    ttnn.release_trace(mesh_device, tid)
+    # new sequence: reset the mixer state (GDN recurrent/conv; attention reads only [0, pos) of the paged cache)
+    if h.kind == "linear_attention":
+        h.tt.reset_gdn_state()
+        h.hf_cache = ref.LinearCache(layer_idx)
+    else:
+        h.hf_cache = ref.DynamicCache()
+    hid2 = _hidden(1, 228, h.H, seed=3300)
+    ref2 = h.hf_prefill(hid2)  # one HF pass over the whole new sequence (as test_mc_chunked_prefill_matches_hf)
+    _pcc(f"MC {h.kind} eager prefill T=128 after traced decode", ref2[:, :128], h.tt_prefill(hid2[:, :128]))
+    _pcc(
+        f"MC {h.kind} eager chunk prefill start=128 T=100 after traced decode",
+        ref2[:, 128:228],
+        h.tt_prefill(hid2[:, 128:228], start=128),
+    )
+    # and a traced decode can be captured again after that prefill (second trace lifecycle in one process)
+    x2, kw2 = h.decode_inputs(step, torch.tensor([228]))
+    out2 = h.tt.decode_forward(x2, **kw2)  # compile pass (executes: advances the GDN state once)
+    ttnn.deallocate(out2)
+    if h.kind == "linear_attention":
+        # rebuild the GDN state from the two prefill segments so the single replay below is the first decode step
+        h.tt.reset_gdn_state()
+        h.tt_prefill(hid2[:, :128])
+        h.tt_prefill(hid2[:, 128:228], start=128)
+    tid2 = ttnn.begin_trace_capture(mesh_device, cq_id=0)
+    out2 = h.tt.decode_forward(x2, **kw2)
+    ttnn.end_trace_capture(mesh_device, tid2, cq_id=0)
+    ttnn.execute_trace(mesh_device, tid2, cq_id=0, blocking=True)
+    got = _compose(mesh_device, out2).reshape(1, 1, h.H)
+    _pcc(f"MC {h.kind} traced decode pos=228 after eager prefill", h.hf_decode(step, torch.tensor([228])), got)
+    ttnn.release_trace(mesh_device, tid2)
+
+
+@mesh_tp()
 @pytest.mark.parametrize("history", ["prefill", "prefill_decode", "prefill_continuation"])
 def test_mc_gdn_reset_after_history(mesh_device, history):
     """A fresh non-aligned GDN sequence after reset must not see the previous sequence: isolates which history (plain prefill,
@@ -765,6 +919,10 @@ def _mk_baseline(sub, layer_idx, ctx_len=4096):
 
 def _report(kind, case, base_ms, mesh_ms):
     speedup = base_ms / mesh_ms if mesh_ms > 0 else float("nan")
+    # the effective mesh config of this measurement (QWEN35_MC_OVERRIDE applied), so "final default path" is provable
+    print(
+        f"PERF_CONFIG {kind} {case}: {json.dumps(_mc_override(MULTICHIP_SELECTED).describe(), default=str, sort_keys=True)}"
+    )
     print(
         f"PERF {kind} {case}: single-chip {base_ms:.3f} ms | mesh(1x{TP}) {mesh_ms:.3f} ms | "
         f"speedup {speedup:.2f}x | efficiency {100 * speedup / TP:.0f}%"
@@ -863,6 +1021,62 @@ def test_perf_prefill_2048(mesh_device, layer_idx):
 @pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
 def test_perf_traced_decode(mesh_device, layer_idx):
     _perf_traced_decode(mesh_device, layer_idx)
+
+
+@pytest.mark.perf_probe
+@mesh_tp(MESH_PARAMS)
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_perf_prefill_512_traced(mesh_device, layer_idx):
+    if os.environ.get("QWEN35_RUN_PROBES") != "1":
+        pytest.skip("hardware probe (may hang the board): set QWEN35_RUN_PROBES=1 and run alone under a timeout")
+    """Stage 5 host-gap PROBE (not in -m perf): one aligned 512-token prefill chunk (start_pos 0) captured as a trace and
+    replayed (device-bound wall) vs the same chunk eager (host-dispatch bound). Status 2026-09-24: the chunk captures
+    (device-side zero buffers) but the first replay hangs on device (stage-5 work_log 12:55) - run alone under a hard
+    timeout and reset the board afterwards; the full-model generator stage owns traced prefill."""
+    h = _mc(mesh_device, layer_idx, batch=1, max_seq_len=4096, real=True, hf=False)
+    x = h.shard_prefill(_hidden(1, 512, h.H, seed=2200))
+    kw = dict(start_pos=0, page_table=h.page_table_dev, user_id=0)
+    out = h.tt.prefill_forward(x, **kw)  # compile
+    ttnn.deallocate(out)
+    if h.kind == "linear_attention":
+        h.tt.reset_gdn_state()
+    ttnn.synchronize_device(mesh_device)
+    t0 = time.time()
+    out = h.tt.prefill_forward(x, **kw)
+    ttnn.synchronize_device(mesh_device)
+    eager_ms = 1e3 * (time.time() - t0)
+    ref = _compose(mesh_device, out)
+    ttnn.deallocate(out)
+    if h.kind == "linear_attention":
+        h.tt.reset_gdn_state()
+    try:
+        tid = ttnn.begin_trace_capture(mesh_device, cq_id=0)
+        out = h.tt.prefill_forward(x, **kw)
+        ttnn.end_trace_capture(mesh_device, tid, cq_id=0)
+    except Exception as e:  # a host transfer or shape change inside the chunk makes it untraceable: report, do not hide
+        print(f"PERF {h.kind} prefill_512_traced: eager {eager_ms:.3f} ms | trace capture FAILED: {str(e)[:200]}")
+        # leave the command queue in a sane state (an open capture blocks every later op)
+        try:
+            ttnn.end_trace_capture(mesh_device, tid, cq_id=0)
+            ttnn.release_trace(mesh_device, tid)
+        except Exception:
+            pass
+        pytest.skip(f"{h.kind}: prefill chunk not traceable on the default path (see PERF line)")
+    if h.kind == "linear_attention":
+        h.tt.reset_gdn_state()
+    ttnn.execute_trace(mesh_device, tid, cq_id=0, blocking=True)
+    got = _compose(mesh_device, out)
+    _pcc(f"MC {h.kind} traced prefill chunk vs eager", ref, got, 0.999)
+    ttnn.synchronize_device(mesh_device)
+    t0 = time.time()
+    for _ in range(3):
+        ttnn.execute_trace(mesh_device, tid, cq_id=0, blocking=False)
+    ttnn.synchronize_device(mesh_device)
+    traced_ms = 1e3 * (time.time() - t0) / 3
+    ttnn.release_trace(mesh_device, tid)
+    print(
+        f"PERF {h.kind} prefill_512_traced: eager {eager_ms:.3f} ms | traced replay {traced_ms:.3f} ms | mesh(1x{TP})"
+    )
 
 
 # ---------------------------------------------------------------------------------------------------

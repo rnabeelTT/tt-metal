@@ -19,6 +19,8 @@ Pipeline (all on device, fp32 index arithmetic, exact for counts < 2^24):
 """
 from __future__ import annotations
 
+import os
+
 import ttnn
 
 TILE = 32
@@ -36,6 +38,17 @@ def dispatch_rows(T: int, k: int, E: int, group: int = TILE) -> int:
     R = T * k
     Rp = -(-R // TILE) * TILE
     return Rp + (-(-(group - 1) * E // group)) * group + group
+
+
+# How SortedDispatch.build orders the dispatched rows by expert (QWEN35_DISPATCH_MODE):
+#   "counting_h" (default): counting sort from the [Rp, E] one-hot with a dim-2 cumsum - no ttnn.sort at all
+#   (prefill 2048 host wall 133.0 / 128.2 ms vs 122.7 / 117.9 with the deadlocking sort);
+#   "counting": the transposed [E, Rp] one-hot with a last-dim cumsum (measured slower: 140.8 / 136.2 ms);
+#   "sort_u16": ttnn.sort on uint16 ids (DRAM multi-core factory; hang-free but ~4 ms per 512-token chunk);
+#   "sort_fp32": the original fp32 ttnn.sort (cross-core-exchange factory; its sort_barrier deadlocks intermittently on
+#   one device of the (1,4) mesh - the 48-layer warm-up hang, doc/full_model/triage/warm_hang_*.txt).
+DISPATCH_MODE = os.environ.get("QWEN35_DISPATCH_MODE", "counting_h")  # "counting" | "sort_u16" | "sort_fp32"
+SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
 
 
 class SortedDispatch:
@@ -63,6 +76,7 @@ class SortedDispatch:
             f32, u32, RM = ttnn.float32, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT
             c = {
                 "ones_row": ttnn.full((1, 1, TILE, Rp), 1.0, dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev),
+                "ones_col": ttnn.full((1, 1, Rp, TILE), 1.0, dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev),
                 "i_f": ttnn.reshape(
                     ttnn.arange(0, Rp, 1, dtype=f32, device=dev, layout=ttnn.TILE_LAYOUT), (1, 1, 1, Rp)
                 ),
@@ -108,68 +122,191 @@ class SortedDispatch:
         f32, u32 = ttnn.float32, ttnn.uint32
 
         # ---- flat, token-major (token t, slot j) -> position t*k + j
+        # reshape/pad run on the fp32 copy (reshape_view accepts bf16/fp32/int32/uint32 only)
         ids_f = self._f32(self._u32(self._tiled(ids)))  # [1,1,T,k]
         ids_flat = ttnn.reshape(ids_f, (1, 1, 1, R))
         sc_flat = ttnn.reshape(self._tiled(scores), (1, 1, 1, R))
         if Rp != R:
             ids_flat = ttnn.pad(ids_flat, [(0, 0), (0, 0), (0, 0), (0, Rp - R)], value=float(E))  # sentinel expert
             sc_flat = ttnn.pad(sc_flat, [(0, 0), (0, 0), (0, 0), (0, Rp - R)], value=0.0)
-        # ---- sort pairs by expert
-        sorted_ids, perm = ttnn.sort(ids_flat, dim=-1)  # fp32 values, uint16 indices
-        perm_u32 = self._u32(perm)
-        perm_f = self._f32(perm_u32)
-        sc_sorted = ttnn.gather(sc_flat, dim=3, index=perm_u32)  # [1,1,1,Rp] bf16
-        tok_sorted = ttnn.floor(ttnn.multiply(perm_f, 1.0 / k))  # source token of each sorted row
-        # ---- per-expert counts from the one-hot rows (exact fp32 sums)
-        oh = ttnn.eq(ttnn.reshape(sorted_ids, (1, 1, Rp, 1)), self.arange_E)  # [1,1,Rp,E] fp32 0/1 (sentinel: all 0)
         consts = self._consts(T)
-        ones_row = consts["ones_row"]
+        i_f = consts["i_f"]
         f32_ckc = ttnn.WormholeComputeKernelConfig(
             math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=False
         )
-        counts_blk = ttnn.matmul(ones_row, oh, compute_kernel_config=f32_ckc, dtype=f32)  # [1,1,32,E], every row = c
-        c = ttnn.slice(counts_blk, (0, 0, 0, 0), (1, 1, 1, E))  # [1,1,1,E]
-        ttnn.deallocate(counts_blk)
-        c_pad = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(c, float(gs - 1)), 1.0 / gs)), float(gs))
-        starts = ttnn.subtract(ttnn.cumsum(c, dim=3), c)  # exclusive prefix sums
-        offsets = ttnn.subtract(ttnn.cumsum(c_pad, dim=3), c_pad)
-        ttnn.deallocate(c_pad)
-        ttnn.deallocate(c)
-        # per sorted row: starts[e_i], offsets[e_i] selected through the one-hot rows. The matmul datapath rounds fp32
-        # operands to ~8 mantissa bits, so the table is split into high/low bytes (each < 256, exact) and recombined.
-        table = ttnn.concat(
-            [ttnn.reshape(starts, (1, 1, E, 1)), ttnn.reshape(offsets, (1, 1, E, 1))], dim=3
-        )  # [1,1,E,2]
-        ttnn.deallocate(starts)
-        ttnn.deallocate(offsets)
-        t_hi = ttnn.floor(ttnn.multiply(table, 1.0 / 256.0))
-        t_lo = ttnn.subtract(table, ttnn.multiply(t_hi, 256.0))
-        ttnn.deallocate(table)
-        sel_hi = ttnn.matmul(oh, t_hi, compute_kernel_config=f32_ckc, dtype=f32)  # [1,1,Rp,2]
-        sel_lo = ttnn.matmul(oh, t_lo, compute_kernel_config=f32_ckc, dtype=f32)
-        ttnn.deallocate(t_hi)
-        ttnn.deallocate(t_lo)
-        ttnn.deallocate(oh)
-        sel = ttnn.add(ttnn.multiply(sel_hi, 256.0), sel_lo)  # sentinel rows -> 0,0
-        ttnn.deallocate(sel_hi)
-        ttnn.deallocate(sel_lo)
-        start_i = ttnn.reshape(ttnn.slice(sel, (0, 0, 0, 0), (1, 1, Rp, 1)), (1, 1, 1, Rp))
-        off_i = ttnn.reshape(ttnn.slice(sel, (0, 0, 0, 1), (1, 1, Rp, 2)), (1, 1, 1, Rp))
-        ttnn.deallocate(sel)
-        i_f = consts["i_f"]
-        d_real = ttnn.add(off_i, ttnn.subtract(i_f, start_i))
-        ttnn.deallocate(start_i)
-        ttnn.deallocate(off_i)
-        if Rp != R:
-            # sentinel rows (positions >= R) go to the trailing all-padding group
-            is_real = ttnn.lt(i_f, float(R))
-            d_f = ttnn.where(is_real, d_real, ttnn.add(i_f, float(Rd - Rp)))
-            ttnn.deallocate(is_real)
-            ttnn.deallocate(d_real)
-            src_ids = ttnn.where(ttnn.lt(i_f, float(R)), sorted_ids, 0.0)
+        if DISPATCH_MODE in ("counting", "counting_h"):
+            # ---- counting sort (no ttnn.sort): every token-major row i keeps its position; its destination is
+            # offsets[e_i] + (rank of i among the rows of expert e_i). The rank is the running count of the one-hot
+            # along the token axis, picked through the one-hot. All integers stay exact: counts/cumsum in fp32,
+            # selections through 0/1 masks with the values split into < 256 hi/lo parts (the reduce/matmul datapaths
+            # round operands to ~8 mantissa bits).
+            # "counting_h" (default) uses the [1,1,Rp,E] one-hot with a dim-2 cumsum (permutes in and out; ~2.7 ms per
+            # 512-token chunk, Tracy 2026-09-24 22:14); "counting" keeps the one-hot TRANSPOSED, [1,1,E,Rp], with the
+            # cumsum along the last dim and the picks as reductions over the E rows — measured slower on the host wall.
+            if DISPATCH_MODE == "counting":
+                oh_t = ttnn.eq(
+                    ids_flat, ttnn.reshape(self.arange_E, (1, 1, E, 1))
+                )  # [1,1,E,Rp] fp32 0/1 (sentinel col: 0)
+                counts_blk = ttnn.matmul(
+                    oh_t, consts["ones_col"], compute_kernel_config=f32_ckc, dtype=f32
+                )  # [1,1,E,32]
+                c = ttnn.reshape(ttnn.slice(counts_blk, (0, 0, 0, 0), (1, 1, E, 1)), (1, 1, 1, E))  # [1,1,1,E]
+                ttnn.deallocate(counts_blk)
+                c_pad = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(c, float(gs - 1)), 1.0 / gs)), float(gs))
+                offsets = ttnn.subtract(ttnn.cumsum(c_pad, dim=3), c_pad)  # padded exclusive prefix sums [1,1,1,E]
+                ttnn.deallocate(c_pad)
+                ttnn.deallocate(c)
+                off_col = ttnn.reshape(offsets, (1, 1, E, 1))
+                o_hi = ttnn.floor(ttnn.multiply(off_col, 1.0 / 256.0))
+                o_lo = ttnn.subtract(off_col, ttnn.multiply(o_hi, 256.0))
+                ttnn.deallocate(off_col)
+                ttnn.deallocate(offsets)
+                # offsets[e_i] per column i: one nonzero per column, values < 256 -> exact through the H-reduction
+                sel_hi = ttnn.sum(
+                    ttnn.multiply(oh_t, o_hi), dim=2, keepdim=True, compute_kernel_config=f32_ckc
+                )  # [1,1,1,Rp]
+                sel_lo = ttnn.sum(ttnn.multiply(oh_t, o_lo), dim=2, keepdim=True, compute_kernel_config=f32_ckc)
+                ttnn.deallocate(o_hi)
+                ttnn.deallocate(o_lo)
+                off_i = ttnn.add(ttnn.multiply(sel_hi, 256.0), sel_lo)
+                ttnn.deallocate(sel_hi)
+                ttnn.deallocate(sel_lo)
+                cs = ttnn.cumsum(oh_t, dim=3, dtype=f32)  # running count per expert row along the tokens [1,1,E,Rp]
+                cs_hi = ttnn.floor(ttnn.multiply(cs, 1.0 / 256.0))
+                cs_lo = ttnn.subtract(cs, ttnn.multiply(cs_hi, 256.0))
+                ttnn.deallocate(cs)
+                r_hi = ttnn.sum(ttnn.multiply(oh_t, cs_hi), dim=2, keepdim=True, compute_kernel_config=f32_ckc)
+                r_lo = ttnn.sum(ttnn.multiply(oh_t, cs_lo), dim=2, keepdim=True, compute_kernel_config=f32_ckc)
+                ttnn.deallocate(cs_hi)
+                ttnn.deallocate(cs_lo)
+                ttnn.deallocate(oh_t)
+                rank = ttnn.add(ttnn.multiply(r_hi, 256.0), r_lo)  # [1,1,1,Rp]; sentinel columns 0
+                ttnn.deallocate(r_hi)
+                ttnn.deallocate(r_lo)
+                d_real = ttnn.subtract(ttnn.add(off_i, rank), 1.0)  # [1,1,1,Rp]
+                ttnn.deallocate(off_i)
+                ttnn.deallocate(rank)
+            else:
+                oh = ttnn.eq(
+                    ttnn.reshape(ids_flat, (1, 1, Rp, 1)), self.arange_E
+                )  # [1,1,Rp,E] fp32 0/1 (sentinel: all 0)
+                counts_blk = ttnn.matmul(consts["ones_row"], oh, compute_kernel_config=f32_ckc, dtype=f32)  # [1,1,32,E]
+                c = ttnn.slice(counts_blk, (0, 0, 0, 0), (1, 1, 1, E))  # [1,1,1,E]
+                ttnn.deallocate(counts_blk)
+                c_pad = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(c, float(gs - 1)), 1.0 / gs)), float(gs))
+                offsets = ttnn.subtract(ttnn.cumsum(c_pad, dim=3), c_pad)  # padded exclusive prefix sums [1,1,1,E]
+                ttnn.deallocate(c_pad)
+                ttnn.deallocate(c)
+                off_col = ttnn.reshape(offsets, (1, 1, E, 1))
+                o_hi = ttnn.floor(ttnn.multiply(off_col, 1.0 / 256.0))
+                o_lo = ttnn.subtract(off_col, ttnn.multiply(o_hi, 256.0))
+                ttnn.deallocate(off_col)
+                ttnn.deallocate(offsets)
+                sel_hi = ttnn.matmul(oh, o_hi, compute_kernel_config=f32_ckc, dtype=f32)  # [1,1,Rp,1]
+                sel_lo = ttnn.matmul(oh, o_lo, compute_kernel_config=f32_ckc, dtype=f32)
+                ttnn.deallocate(o_hi)
+                ttnn.deallocate(o_lo)
+                off_i = ttnn.add(ttnn.multiply(sel_hi, 256.0), sel_lo)  # [1,1,Rp,1]
+                ttnn.deallocate(sel_hi)
+                ttnn.deallocate(sel_lo)
+                cs = ttnn.cumsum(oh, dim=2, dtype=f32)  # [1,1,Rp,E]
+                cs_hi = ttnn.floor(ttnn.multiply(cs, 1.0 / 256.0))
+                cs_lo = ttnn.subtract(cs, ttnn.multiply(cs_hi, 256.0))
+                ttnn.deallocate(cs)
+                r_hi = ttnn.sum(ttnn.multiply(oh, cs_hi), dim=3, keepdim=True, compute_kernel_config=f32_ckc)
+                r_lo = ttnn.sum(ttnn.multiply(oh, cs_lo), dim=3, keepdim=True, compute_kernel_config=f32_ckc)
+                ttnn.deallocate(cs_hi)
+                ttnn.deallocate(cs_lo)
+                ttnn.deallocate(oh)
+                rank = ttnn.add(ttnn.multiply(r_hi, 256.0), r_lo)
+                ttnn.deallocate(r_hi)
+                ttnn.deallocate(r_lo)
+                d_real = ttnn.reshape(ttnn.subtract(ttnn.add(off_i, rank), 1.0), (1, 1, 1, Rp))
+                ttnn.deallocate(off_i)
+                ttnn.deallocate(rank)
+            if Rp != R:
+                # sentinel rows (positions >= R) go to the trailing all-padding group
+                is_real = ttnn.lt(i_f, float(R))
+                d_f = ttnn.where(is_real, d_real, ttnn.add(i_f, float(Rd - Rp)))
+                ttnn.deallocate(is_real)
+                ttnn.deallocate(d_real)
+                src_ids = ttnn.where(ttnn.lt(i_f, float(R)), ids_flat, 0.0)
+            else:
+                d_f = d_real
+                src_ids = ids_flat
+            tok_sorted = ttnn.floor(ttnn.multiply(i_f, 1.0 / k))  # source token of row i (token-major)
+            sc_sorted = sc_flat  # scores already token-major
+            perm_u32 = None
+            sorted_ids = ids_flat
         else:
-            d_f = d_real
-            src_ids = sorted_ids
+            if DISPATCH_MODE == "sort_u16":
+                # ttnn.sort routes uint16 TILE rows wider than 32 tiles to its DRAM multi-core factory (SingleRowMultiCore);
+                # the fp32 row of the same width (Wt 128..512) takes the cross-core-data-exchange factory whose sort_barrier
+                # deadlocked intermittently on one device of the (1,4) mesh (doc/full_model/triage/warm_hang_*.txt).
+                ids_sort_in = ttnn.typecast(self._u32(ids_flat), ttnn.uint16)
+            else:
+                ids_sort_in = ids_flat
+            # ---- sort pairs by expert (values in the sort input dtype, uint16 indices)
+            sorted_ids, perm = ttnn.sort(ids_sort_in, dim=-1)
+            if ids_sort_in is not ids_flat:
+                ttnn.deallocate(ids_sort_in)
+            if sorted_ids.dtype != ttnn.float32:
+                sorted_u = sorted_ids
+                sorted_ids = self._f32(self._u32(sorted_u))
+                ttnn.deallocate(sorted_u)
+            perm_u32 = self._u32(perm)
+            perm_f = self._f32(perm_u32)
+            sc_sorted = ttnn.gather(sc_flat, dim=3, index=perm_u32)  # [1,1,1,Rp] bf16
+            tok_sorted = ttnn.floor(ttnn.multiply(perm_f, 1.0 / k))  # source token of each sorted row
+            # ---- per-expert counts from the one-hot rows (exact fp32 sums)
+            oh = ttnn.eq(
+                ttnn.reshape(sorted_ids, (1, 1, Rp, 1)), self.arange_E
+            )  # [1,1,Rp,E] fp32 0/1 (sentinel: all 0)
+            ones_row = consts["ones_row"]
+            counts_blk = ttnn.matmul(
+                ones_row, oh, compute_kernel_config=f32_ckc, dtype=f32
+            )  # [1,1,32,E], every row = c
+            c = ttnn.slice(counts_blk, (0, 0, 0, 0), (1, 1, 1, E))  # [1,1,1,E]
+            ttnn.deallocate(counts_blk)
+            c_pad = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(c, float(gs - 1)), 1.0 / gs)), float(gs))
+            starts = ttnn.subtract(ttnn.cumsum(c, dim=3), c)  # exclusive prefix sums
+            offsets = ttnn.subtract(ttnn.cumsum(c_pad, dim=3), c_pad)
+            ttnn.deallocate(c_pad)
+            ttnn.deallocate(c)
+            # per sorted row: starts[e_i], offsets[e_i] selected through the one-hot rows. The matmul datapath rounds fp32
+            # operands to ~8 mantissa bits, so the table is split into high/low bytes (each < 256, exact) and recombined.
+            table = ttnn.concat(
+                [ttnn.reshape(starts, (1, 1, E, 1)), ttnn.reshape(offsets, (1, 1, E, 1))], dim=3
+            )  # [1,1,E,2]
+            ttnn.deallocate(starts)
+            ttnn.deallocate(offsets)
+            t_hi = ttnn.floor(ttnn.multiply(table, 1.0 / 256.0))
+            t_lo = ttnn.subtract(table, ttnn.multiply(t_hi, 256.0))
+            ttnn.deallocate(table)
+            sel_hi = ttnn.matmul(oh, t_hi, compute_kernel_config=f32_ckc, dtype=f32)  # [1,1,Rp,2]
+            sel_lo = ttnn.matmul(oh, t_lo, compute_kernel_config=f32_ckc, dtype=f32)
+            ttnn.deallocate(t_hi)
+            ttnn.deallocate(t_lo)
+            ttnn.deallocate(oh)
+            sel = ttnn.add(ttnn.multiply(sel_hi, 256.0), sel_lo)  # sentinel rows -> 0,0
+            ttnn.deallocate(sel_hi)
+            ttnn.deallocate(sel_lo)
+            start_i = ttnn.reshape(ttnn.slice(sel, (0, 0, 0, 0), (1, 1, Rp, 1)), (1, 1, 1, Rp))
+            off_i = ttnn.reshape(ttnn.slice(sel, (0, 0, 0, 1), (1, 1, Rp, 2)), (1, 1, 1, Rp))
+            ttnn.deallocate(sel)
+            d_real = ttnn.add(off_i, ttnn.subtract(i_f, start_i))
+            ttnn.deallocate(start_i)
+            ttnn.deallocate(off_i)
+            if Rp != R:
+                # sentinel rows (positions >= R) go to the trailing all-padding group
+                is_real = ttnn.lt(i_f, float(R))
+                d_f = ttnn.where(is_real, d_real, ttnn.add(i_f, float(Rd - Rp)))
+                ttnn.deallocate(is_real)
+                ttnn.deallocate(d_real)
+                src_ids = ttnn.where(ttnn.lt(i_f, float(R)), sorted_ids, 0.0)
+            else:
+                d_f = d_real
+                src_ids = sorted_ids
         # ---- dispatch maps over the Rd rows. ttnn.scatter rejects fp32 tiled operands and int32 tiled rows > 256,
         # so the scatters run on ROW_MAJOR uint32 (integers: exact) / bf16 (routing weights) tensors.
         RM = ttnn.ROW_MAJOR_LAYOUT
@@ -195,12 +332,15 @@ class SortedDispatch:
         ttnn.deallocate(grp_f)
         group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
         # ---- un-dispatch: destination row of (token t, slot j) in token-major order
-        d_tokmajor = ttnn.scatter(consts["zeros_rp"], 3, ttnn.to_layout(perm_u32, RM), d_rm)
-        d_tokmajor = ttnn.to_layout(d_tokmajor, ttnn.TILE_LAYOUT)
+        if perm_u32 is None:  # counting sort: d_f is already token-major
+            d_tokmajor = self._u32(d_f)
+        else:
+            d_tokmajor = ttnn.scatter(consts["zeros_rp"], 3, ttnn.to_layout(perm_u32, RM), d_rm)
+            d_tokmajor = ttnn.to_layout(d_tokmajor, ttnn.TILE_LAYOUT)
         if Rp != R:
             d_tokmajor = ttnn.slice(d_tokmajor, (0, 0, 0, 0), (1, 1, 1, R))
         undispatch = ttnn.reshape(d_tokmajor, (1, 1, T, k))  # uint32 tiled
-        for t in (perm, perm_u32, perm_f, sorted_ids, d_f, d_rm, ids_flat, sc_flat):
+        for t in (locals().get("perm"), perm_u32, locals().get("perm_f"), sorted_ids, d_f, d_rm, ids_flat, sc_flat):
             try:
                 ttnn.deallocate(t)
             except Exception:

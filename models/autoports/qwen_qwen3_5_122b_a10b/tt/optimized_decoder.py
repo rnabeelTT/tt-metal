@@ -14,6 +14,7 @@ Knobs (single device):
 * decode residual/norm layout: sharded RMSNorm program on a width-sharded L1 copy of the residual;
 * paged SDPA-decode chunk sizes.
 """
+
 from __future__ import annotations
 
 import math
@@ -47,6 +48,9 @@ class OptimizationConfig:
     # --- sparse matmul geometry ---
     gather_gate_up_cores: int = 64
     gather_gate_up_in0: int = 32
+    gather_gate_up_output_tile: tuple | None = (
+        None  # e.g. (32, 16): 16-wide output tiles -> 2x the gate/up grid (stage 5)
+    )
     gather_down_cores: int = 64
     gather_down_in0: int = 32
     masked_chunk: int = 64
@@ -299,18 +303,32 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         opt: OptimizationConfig = getattr(args, "opt", SELECTED)
         self.opt = opt
         args.moe_precision = opt.moe_precision()
+        args.gather_gate_up_output_tile = opt.gather_gate_up_output_tile  # read by the base loader (weight tile)
         self.PREFILL_CHUNK = opt.masked_chunk
         self.GATHER_MAX_TOKENS = opt.gather_max_tokens
         super().__init__(mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
         H, Nl = self.hidden, self.inter_local
+        tile_gu = opt.gather_gate_up_output_tile
+        if tile_gu:
+            self.tile_gu = ttnn.Tile(list(tile_gu))
         self.cfg_gate_up_gather = sparse_matmul_program_config(
-            1, 2 * Nl, H, target_cores=opt.gather_gate_up_cores, in0_block_w_cap=opt.gather_gate_up_in0
+            1,
+            2 * Nl,
+            H,
+            target_cores=opt.gather_gate_up_cores,
+            in0_block_w_cap=opt.gather_gate_up_in0,
+            tile_w=(tile_gu[1] if tile_gu else 32),
         )
         self.cfg_down_gather = sparse_matmul_program_config(
             1, H, Nl, target_cores=opt.gather_down_cores, in0_block_w_cap=opt.gather_down_in0
         )
         self.cfg_gate_up_masked = sparse_matmul_program_config(
-            opt.masked_chunk, 2 * Nl, H, target_cores=opt.masked_gate_up_cores, in0_block_w_cap=opt.masked_gate_up_in0
+            opt.masked_chunk,
+            2 * Nl,
+            H,
+            target_cores=opt.masked_gate_up_cores,
+            in0_block_w_cap=opt.masked_gate_up_in0,
+            tile_w=(tile_gu[1] if tile_gu else 32),
         )
         self.cfg_down_masked = sparse_matmul_program_config(
             opt.masked_chunk, H, Nl, target_cores=opt.masked_down_cores, in0_block_w_cap=opt.masked_down_in0
@@ -357,7 +375,12 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         if getattr(self, "_dispatch", None) is None:
             self._dispatch = SortedDispatch(self.device, E, k, group=gs)
             self._cfg_sorted_gu = sparse_matmul_program_config(
-                gs, 2 * Nl, H, target_cores=opt.sorted_gate_up_cores, in0_block_w_cap=opt.sorted_gate_up_in0
+                gs,
+                2 * Nl,
+                H,
+                target_cores=opt.sorted_gate_up_cores,
+                in0_block_w_cap=opt.sorted_gate_up_in0,
+                tile_w=self.tile_gu.tile_shape[1],
             )
             self._cfg_sorted_dn = sparse_matmul_program_config(
                 gs, H, Nl, target_cores=opt.sorted_down_cores, in0_block_w_cap=opt.sorted_down_in0
@@ -366,21 +389,16 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         Rd, G = m["Rd"], m["G"]
         x_disp = gather_rows(x4, m["src_tok"], Rd, gs)  # [1,G,gs,H]
         ttnn.deallocate(m["src_tok"])
-        out_gu = ttnn.zeros(
-            (1, G, gs, 2 * Nl),
-            dtype=act,
-            layout=ttnn.TILE_LAYOUT,
-            device=self.device,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-        )
+        narrow = self.tile_gu.tile_shape[1] != 32
+        out_gu = None if narrow else self._alloc_dev((1, G, gs, 2 * Nl), act)
         fused = ttnn.sparse_matmul(
             x_disp,
             self.up_gate,
             sparsity=m["group_mask"],
             nnz=G,
-            optional_output_tensor=out_gu,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
             program_config=self._cfg_sorted_gu,
+            **({"output_tile": self.tile_gu} if narrow else {"optional_output_tensor": out_gu}),
             compute_kernel_config=self.routed_ckc,
             dtype=act,
         )  # compact [1,G,32,2Nl]
@@ -391,9 +409,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         din = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Nl)), m["weights"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(m["weights"])
         din = ttnn.reshape(din, (1, G, gs, Nl))
-        out_dn = ttnn.zeros(
-            (1, G, gs, H), dtype=act, layout=ttnn.TILE_LAYOUT, device=self.device, memory_config=ttnn.DRAM_MEMORY_CONFIG
-        )
+        out_dn = self._alloc_dev((1, G, gs, H), act)
         down = ttnn.sparse_matmul(
             din,
             self.down,

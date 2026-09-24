@@ -1,0 +1,4 @@
+# per-device prefill_2048 reports and stacked plots exceed the repo's 500 KB hook limit; device-0 CSVs are committed instead
+prefill_2048_mesh_perf_report.txt
+*_stacked.png
+*_stacked.csv

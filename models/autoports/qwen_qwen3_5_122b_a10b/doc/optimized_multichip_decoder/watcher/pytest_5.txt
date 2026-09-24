@@ -1,0 +1,83 @@
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4] 2026-09-24 23:10:20.257 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+MC full_attention chunked prefill T=4429: PCC 0.9999829343290421
+MC chunked dev0 (head 0) K positions [0,512): PCC 0.9999164895773022
+MC chunked dev0 (head 0) V positions [0,512): PCC 0.9999255403113831
+MC chunked dev0 (head 0) K positions [512,1024): PCC 0.999916424718184
+MC chunked dev0 (head 0) V positions [512,1024): PCC 0.9999251700658138
+MC chunked dev0 (head 0) K positions [1024,1536): PCC 0.9999168092790522
+MC chunked dev0 (head 0) V positions [1024,1536): PCC 0.9999255357288296
+MC chunked dev0 (head 0) K positions [1536,2048): PCC 0.9999160711898348
+MC chunked dev0 (head 0) V positions [1536,2048): PCC 0.9999252460265452
+MC chunked dev0 (head 0) K positions [2048,2560): PCC 0.999916156647541
+MC chunked dev0 (head 0) V positions [2048,2560): PCC 0.9999253365729956
+MC chunked dev0 (head 0) K positions [2560,3072): PCC 0.9999157115988426
+MC chunked dev0 (head 0) V positions [2560,3072): PCC 0.9999250228135054
+MC chunked dev0 (head 0) K positions [3072,3584): PCC 0.9999175447824742
+MC chunked dev0 (head 0) V positions [3072,3584): PCC 0.9999250320415188
+MC chunked dev0 (head 0) K positions [3584,4096): PCC 0.9999157445964861
+MC chunked dev0 (head 0) V positions [3584,4096): PCC 0.9999246741390947
+MC chunked dev0 (head 0) K positions [4096,4429): PCC 0.9999155114553175
+MC chunked dev0 (head 0) V positions [4096,4429): PCC 0.9999255602965609
+MC chunked dev1 (head 0) K positions [0,512): PCC 0.9999164895773022
+MC chunked dev1 (head 0) V positions [0,512): PCC 0.9999255403113831
+MC chunked dev1 (head 0) K positions [512,1024): PCC 0.999916424718184
+MC chunked dev1 (head 0) V positions [512,1024): PCC 0.9999251700658138
+MC chunked dev1 (head 0) K positions [1024,1536): PCC 0.9999168092790522
+MC chunked dev1 (head 0) V positions [1024,1536): PCC 0.9999255357288296
+MC chunked dev1 (head 0) K positions [1536,2048): PCC 0.9999160711898348
+MC chunked dev1 (head 0) V positions [1536,2048): PCC 0.9999252460265452
+MC chunked dev1 (head 0) K positions [2048,2560): PCC 0.999916156647541
+MC chunked dev1 (head 0) V positions [2048,2560): PCC 0.9999253365729956
+MC chunked dev1 (head 0) K positions [2560,3072): PCC 0.9999157115988426
+MC chunked dev1 (head 0) V positions [2560,3072): PCC 0.9999250228135054
+MC chunked dev1 (head 0) K positions [3072,3584): PCC 0.9999175447824742
+MC chunked dev1 (head 0) V positions [3072,3584): PCC 0.9999250320415188
+MC chunked dev1 (head 0) K positions [3584,4096): PCC 0.9999157445964861
+MC chunked dev1 (head 0) V positions [3584,4096): PCC 0.9999246741390947
+MC chunked dev1 (head 0) K positions [4096,4429): PCC 0.9999155114553175
+MC chunked dev1 (head 0) V positions [4096,4429): PCC 0.9999255602965609
+MC chunked dev2 (head 1) K positions [0,512): PCC 0.9999166304072675
+MC chunked dev2 (head 1) V positions [0,512): PCC 0.9999252830329435
+MC chunked dev2 (head 1) K positions [512,1024): PCC 0.9999158298221118
+MC chunked dev2 (head 1) V positions [512,1024): PCC 0.9999250382401832
+MC chunked dev2 (head 1) K positions [1024,1536): PCC 0.9999173016640506
+MC chunked dev2 (head 1) V positions [1024,1536): PCC 0.9999251955528359
+MC chunked dev2 (head 1) K positions [1536,2048): PCC 0.9999156979754746
+MC chunked dev2 (head 1) V positions [1536,2048): PCC 0.9999248393448807
+MC chunked dev2 (head 1) K positions [2048,2560): PCC 0.9999172694990929
+MC chunked dev2 (head 1) V positions [2048,2560): PCC 0.999924842905277
+MC chunked dev2 (head 1) K positions [2560,3072): PCC 0.9999159315730343
+MC chunked dev2 (head 1) V positions [2560,3072): PCC 0.9999251614583103
+MC chunked dev2 (head 1) K positions [3072,3584): PCC 0.9999166432064195
+MC chunked dev2 (head 1) V positions [3072,3584): PCC 0.9999249990276055
+MC chunked dev2 (head 1) K positions [3584,4096): PCC 0.9999172434319551
+MC chunked dev2 (head 1) V positions [3584,4096): PCC 0.9999242356504799
+MC chunked dev2 (head 1) K positions [4096,4429): PCC 0.9999163502827356
+MC chunked dev2 (head 1) V positions [4096,4429): PCC 0.9999252395428156
+MC chunked dev3 (head 1) K positions [0,512): PCC 0.9999166304072675
+MC chunked dev3 (head 1) V positions [0,512): PCC 0.9999252830329435
+MC chunked dev3 (head 1) K positions [512,1024): PCC 0.9999158298221118
+MC chunked dev3 (head 1) V positions [512,1024): PCC 0.9999250382401832
+MC chunked dev3 (head 1) K positions [1024,1536): PCC 0.9999173016640506
+MC chunked dev3 (head 1) V positions [1024,1536): PCC 0.9999251955528359
+MC chunked dev3 (head 1) K positions [1536,2048): PCC 0.9999156979754746
+MC chunked dev3 (head 1) V positions [1536,2048): PCC 0.9999248393448807
+MC chunked dev3 (head 1) K positions [2048,2560): PCC 0.9999172694990929
+MC chunked dev3 (head 1) V positions [2048,2560): PCC 0.999924842905277
+MC chunked dev3 (head 1) K positions [2560,3072): PCC 0.9999159315730343
+MC chunked dev3 (head 1) V positions [2560,3072): PCC 0.9999251614583103
+MC chunked dev3 (head 1) K positions [3072,3584): PCC 0.9999166432064195
+MC chunked dev3 (head 1) V positions [3072,3584): PCC 0.9999249990276055
+MC chunked dev3 (head 1) K positions [3584,4096): PCC 0.9999172434319551
+MC chunked dev3 (head 1) V positions [3584,4096): PCC 0.9999242356504799
+MC chunked dev3 (head 1) K positions [4096,4429): PCC 0.9999163502827356
+MC chunked dev3 (head 1) V positions [4096,4429): PCC 0.9999252395428156
+MC full_attention decode after chunked prefill pos=4429: PCC 0.9999912961165692
+PASSED
+25.95s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4]
+1.51s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4]
+0.05s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4]
+================ 1 passed, 53 deselected, 3 warnings in 28.44s =================
+2026-09-24 23:11:10.222 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

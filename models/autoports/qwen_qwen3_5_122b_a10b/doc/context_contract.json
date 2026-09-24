@@ -82,5 +82,10 @@
     "capability_change": "none: the advertised 262144 context stays supported (7 concurrent users at full context = 1.835 M of 1.860 M pool tokens, or 32 users x ~58.1K tokens). No hard physical limit reached.",
     "status": "computed from the stage-4 mesh plan; the full-model stage measures the actual per-device DRAM after loading all 48 layers and replaces these figures",
     "weights_breakdown_note": "embedding bf16 hidden-sharded [248320,768] = 0.355 GiB + LM head bfp8 vocab-sharded [3072,62080] = 0.189 GiB (plan: embeddings bf16, LM head bfp8); routers bf16 [3072,256] x 48 = 0.070 GiB; attention/GDN/shared figures are rounded up (precise sum 16.95 GiB)"
+  },
+  "optimized_multichip_decoder_stage5": {
+    "status": "no change to any persistent allocation vs multichip_decoder_stage4: KV dtype/layout, GDN state dtype, weights dtypes and per-device shapes are unchanged; the stage changed decode matmul grids (attention qkv 72 cores) and replaced the host-written ttnn.zeros buffers of the MoE prefill with device-side allocations (ttnn.empty for the sparse-matmul outputs, ttnn.fill for the routing-matrix scatter target) that are freed inside the prefill call - nothing is cached across calls or layers",
+    "inter_layer_residual_contract": "fractured bf16 [1,1,B|T,768] per device between layers; one reduce-scatter per row-parallel boundary (mixer out-proj, MoE exit), one all-gather per norm; no gather/reshard/all-reduce between layers",
+    "prefill_note": "2048-token prefill as 4 x 512-token chunks on the committed default (counting-sort dispatch): host wall 133.0 (GDN) / 128.2 ms (attention) per layer = ~33 / 32 ms per chunk vs ~15.2 / 14.6 ms device per chunk (Tracy 60.97 / 58.23 ms per 2048 tokens, logs/05-perf-plain4.log and 05-final5-chain.log); the host gap is dispatch-bound eager prefill (traced prefill is the optimized-full-model item). No persistent allocation changed vs stage 4."
   }
 }

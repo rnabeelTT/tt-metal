@@ -1,0 +1,13 @@
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_real_weight_against_hf[blackhole-gdn_37-device_params0-1x4] 2026-09-24 22:59:43.181 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+MC REAL linear_attention prefill T=37: PCC 0.9999142655484868
+MC REAL linear_attention decode pos=37: PCC 0.9999920930352154
+MC REAL vs single-chip linear_attention prefill T=37: PCC 0.9991550067794375
+MC REAL vs single-chip linear_attention decode pos=37: PCC 0.9998990161245365
+PASSED
+13.80s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_real_weight_against_hf[blackhole-gdn_37-device_params0-1x4]
+1.62s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_real_weight_against_hf[blackhole-gdn_37-device_params0-1x4]
+0.05s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_real_weight_against_hf[blackhole-gdn_37-device_params0-1x4]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_real_weight_against_hf[blackhole-gdn_37-device_params0-1x4]
+================ 1 passed, 53 deselected, 3 warnings in 16.42s =================
+2026-09-24 23:00:21.089 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

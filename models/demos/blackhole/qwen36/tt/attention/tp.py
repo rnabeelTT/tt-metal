@@ -6,6 +6,7 @@ Q/K-norm: HF-correct (1+weight) uniformly at prefill and decode.
 Keep Q bf16 into SDPA unless bf8 mode (QWEN_SDPA_BF8=1).
 Weights interleaved per device; x replicated in, output reduce-scattered on dim=3.
 """
+
 import os
 
 import torch
@@ -133,7 +134,7 @@ class TPAttention:
         self.HD = args.head_dim
         self.scale = self.HD**-0.5
         self.rope_dim = args.rope_head_dim
-        self.compute_cfg = tpc.COMPUTE_HIFI2
+        self.compute_cfg = getattr(args, "mixer_compute_cfg", None) or tpc.COMPUTE_HIFI2
         # bf8 SDPA (QWEN_SDPA_BF8=1): bf8 Q + bf8 KV; keeps HiFi2 (HiFi4 was slower)
         # bf8 SDPA follows the KV-cache dtype from args (the paged cache is filled with a typecast copy); the former
         # QWEN_SDPA_BF8=1 knob is args.kv_dtype == bfloat8_b
@@ -228,7 +229,11 @@ class TPAttention:
     def _wo_proj(self, x, weight):
         """Row-parallel output projection: DRAM-sharded decode/prefill matmul (K=attn_out_dim_tp),
         matching the in-proj. Falls back to plain interleaved when no sharded memcfg."""
-        if getattr(self.args, "proj_1d_decode", False) and x.shape[-2] <= tpc.TILE_SIZE:
+        # out_proj_1d_decode (optional) decouples the out-projection from the in-projection layout choice
+        _out1d = getattr(self.args, "out_proj_1d_decode", None)
+        if _out1d is None:
+            _out1d = getattr(self.args, "proj_1d_decode", False)
+        if _out1d and x.shape[-2] <= tpc.TILE_SIZE:
             # Decode: tuned ~32-core 1D matmul (interleaved weight) -> DRAM for the reduce-scatter.
             return tpc.matmul_1d_decode(
                 x,
@@ -236,6 +241,7 @@ class TPAttention:
                 self.args.attn_wo_decode_1d_progcfg,
                 self.compute_cfg,
                 out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                dtype=getattr(self.args, "out_proj_decode_dtype", None),
             )
         if not self._wo_sharded:
             if x.shape[-2] > tpc.TILE_SIZE:
@@ -513,6 +519,23 @@ class TPAttention:
             self._kv_shard_cfg_cache[B] = cfg
         return cfg
 
+    def _out_mmrs_decode(self, gated, weight, B):
+        """Decode wo projection fused with the dim=3 reduce-scatter (``matmul_reduce_scatter_async``): x [.,B,K_local]
+        bf16 -> [1,1,B,dim/nd] fractured. Persistent intermediate/output buffers are built once per logical B."""
+        x4 = ttnn.reshape(gated, (1, 1, B, gated.shape[-1]))
+        cache = self.__dict__.setdefault("_mmrs_dec_state", {})
+        st = cache.get(B)
+        if st is None:
+            st = tpc.build_mmrs_decode_state(
+                self.mesh, B, gated.shape[-1], self.args.dim, self.args.num_devices, dtype=ttnn.bfloat16
+            )
+            cache[B] = st
+        out = tpc.matmul_reduce_scatter_decode(
+            x4, weight, self.tt_ccl, st[1], st[2], st[0], self.compute_cfg, self.args.ccl_topology()
+        )
+        ttnn.deallocate(gated)
+        return out
+
     def forward_decode(self, x, cur_pos_tt, cos_tt, sin_tt, page_table=None):
         tw, NH, NKV, HD = self.tw, self.NH, self.NKV, self.HD
         # Active decode width, taken from the input (x is [1,1,B,dim_frac]). Normally == self.B.
@@ -668,6 +691,9 @@ class TPAttention:
         else:
             gated_flat = ttnn.reshape(gated, (1, B, NH * HD))
             ttnn.deallocate(gated)
+        if getattr(self.args, "fuse_out_mmrs_decode", False):
+            # Stage-5 candidate: wo matmul fused with the reduce-scatter (one op, persistent buffers per B).
+            return self._out_mmrs_decode(gated_flat, tw["wo"], B)
         wo_partial = self._wo_proj(gated_flat, tw["wo"])
         ttnn.deallocate(gated_flat)
         wo_partial = ttnn.reshape(wo_partial, (1, 1, B, wo_partial.shape[-1]))

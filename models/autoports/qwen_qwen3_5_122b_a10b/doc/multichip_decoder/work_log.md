@@ -249,3 +249,5 @@ arithmetic and confirmed them; the kernel guard is "correct by inspection". Requ
   = JSON, one watcher block with the firmware-level explanation, PLAN supersession note, markers, watcher evidence staged.
   Residual risks recorded: watcher evidence cannot show a clean teardown on this board (upstream report pending); computed
   DRAM budget with thin 7-user headroom; stage-5 inheritances in README section 7. Local commit follows (never pushed).
+- (host 12:05) stage 4 committed locally: 1b9770ef8e6 (61 files; the per-device `prefill_2048` report `.txt`/`.csv` and the
+  `_stacked` plots exceed the 500 KB hook limit and stay in the workspace, device-0 CSVs committed instead).

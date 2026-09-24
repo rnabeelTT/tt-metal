@@ -93,8 +93,10 @@ class MultichipConfig:
     gdn_conv1d_max_channels: int = 1024
     # --- decode 1D matmul grids of the TP token mixers (None = the qwen36 _init_tp_config defaults tuned on 27B:
     # attn qkv 64, attn wo 33, GDN qkvzab 44, GDN out 33 cores). Re-sweep for K=3072 / N=4608, 2048/3072, 5152, 2048/3072.
-    attn_qkv_decode_cores: int | None = None
-    attn_wo_decode_cores: int | None = None
+    # stage 5 (`dense_1d_long`, 20 replays x2): attention qkv: 88 requested -> (11,8) grid, per_core_N=2 -> 72 of 88 cores active (144 N tiles); -7 us per
+    # step vs the 48-core default; wo 33 = the qwen36 default (kept explicit).
+    attn_qkv_decode_cores: int | None = 88
+    attn_wo_decode_cores: int | None = 33
     gdn_qkvz_decode_cores: int | None = None
     gdn_out_decode_cores: int | None = None
     # shared expert decode matmuls ([3072,513] packed and [256,3072] down per device): 1D decode configs on 16 cores
@@ -110,6 +112,35 @@ class MultichipConfig:
     gate_up_in0: int = 32
     down_cores: int = 48
     down_in0: int = 8
+    gate_up_output_tile: tuple | None = None  # stage-5 probe: (32, 16) output tiles -> 32 gate/up cores
+    # --- stage-5 (optimized multichip) families -----------------------------------------------------------------
+    # decode token-mixer matmuls: "1d" = interleaved weights + tuned 1D grids (stage 4); "ds_in" = DRAM-sharded
+    # in-projection weights (qwen36 sharded_decode_matmul, proj_1d_decode off); "ds_all" = also DRAM-sharded out/wo.
+    mixer_decode_mode: str = "1d"
+    # DRAM-sharded decode matmuls (ds_in / ds_all): Blackhole multi-reader kernel, num_workers_per_dram_bank 1..3
+    # (applied where the per-bank N shard splits evenly: qkv N=4608 -> 18 tiles/bank (2,3), out N=3072 -> 12 (2,3),
+    # GDN in N=5152 -> padded 5376 = 21 tiles/bank (3)).
+    # NOTE: r > 1 asserts on the (1,4) mesh in this checkout (matmul_utilities.cpp:446 -> get_worker_noc_hop_distance,
+    # unit-mesh only); kept as the measured review-2 candidate, default 1.
+    mixer_ds_readers: int = 1
+    # decode norm all-gathers write into persistent output buffers (tt_transformers DistributedNorm, review-2 candidate).
+    norm_ag_persistent: bool = False
+    # decode out-projection output dtype: None = bf16; "bfp8" = the matmul emits bfp8 partials straight into the
+    # reduce-scatter (CCL payload dtype family, review-2; op-level RS 22.2 -> 20.8 us).
+    out_proj_decode_dtype: str | None = None
+    # ds_in only: keep the tuned interleaved 1D out-projection (default False = qwen36 plain interleaved matmul).
+    mixer_ds_out_1d: bool = False
+    # decode out-projection (GDN out / attention wo) fused with the reduce-scatter (matmul_reduce_scatter_async).
+    fuse_out_mmrs_decode: bool = False
+    # GDN prefill out-projection: fused fp32 matmul_reduce_scatter_async (qwen36 default) or plain matmul + reduce-scatter.
+    # A trace holding the fused op AND the MoE reduce-scatter hangs at replay (stage-5 bisect `mixer_moe`); the unfused path
+    # is the candidate fix for traced prefill / prefill-after-traced-decode.
+    gdn_prefill_mmrs: bool = True
+    # token-mixer matmul fidelity (qwen36 TP default HiFi2; stage 3 selected LoFi for the single-die mixers): "hifi2" | "lofi"
+    mixer_fidelity: str = "hifi2"
+    # explicit in0_block_w (K tiles per block) of the 1D decode in-projections; None = the helper's largest divisor
+    attn_qkv_in0: int | None = None
+    gdn_qkvz_in0: int | None = None
     # --- precision knobs taken from SELECTED where they transfer (verify on the mesh: PLAN.md "Risks") -------------
     kv_dtype: object = SELECTED.kv_dtype  # bfp8 paged KV (drives the bf8 SDPA / fill cast in TPAttention)
     gdn_state_dtype: object = ttnn.float32 if SELECTED.gdn_state_fp32 else ttnn.bfloat16  # TPGatedDeltaNet.reset_state
@@ -136,6 +167,7 @@ class MultichipConfig:
             sdpa_decode_k_chunk=self.sdpa_decode_k_chunk,
             gather_gate_up_cores=self.gate_up_cores,
             gather_gate_up_in0=self.gate_up_in0,
+            gather_gate_up_output_tile=self.gate_up_output_tile,
             gather_down_cores=self.down_cores,
             gather_down_in0=self.down_in0,
             sorted_gate_up_cores=self.gate_up_cores,
@@ -167,7 +199,10 @@ class MultichipConfig:
 
 
 # The stage-4 starting policy (PLAN.md step 4); re-selected by the stage-4 sweeps (doc/multichip_decoder/README.md).
-MULTICHIP_SELECTED = MultichipConfig()
+MULTICHIP_SELECTED = (
+    MultichipConfig()
+)  # norm_ag_persistent measured -5 us/step but NOT adopted: attention traced-decode replays
+# were no longer bit-identical with the persistent all-gather output buffer (final suite 3, test_mc_traced_decode[attn])
 
 
 class MultichipDecoder(OptimizedDecoder):
@@ -276,19 +311,62 @@ class MultichipDecoder(OptimizedDecoder):
         args.kv_dtype = mc.kv_dtype  # TPAttention._sdpa_bf8 (fill cast + bf8 chunked SDPA)
         args.sdpa_decode_q_chunk = mc.sdpa_decode_q_chunk  # TPAttention.forward_decode SDPAProgramConfig
         args.sdpa_decode_k_chunk = mc.sdpa_decode_k_chunk
+        # stage-5 families
+        assert mc.mixer_decode_mode in ("1d", "ds_in", "ds_all"), mc.mixer_decode_mode
+        args.proj_1d_decode = mc.mixer_decode_mode == "1d"
+        args.out_proj_1d_decode = True if (mc.mixer_decode_mode == "ds_in" and mc.mixer_ds_out_1d) else None
+        if mc.mixer_decode_mode == "ds_all":
+            args.gdn_out_weight_memcfg = tpc.create_dram_sharded_mem_config(args.gdn_value_dim_tp, args.dim)
+            args.attn_wo_weight_memcfg = tpc.create_dram_sharded_mem_config(args.attn_out_dim_tp, args.dim)
+        if mc.mixer_decode_mode != "1d" and mc.mixer_ds_readers > 1:
+            r = mc.mixer_ds_readers
+            args.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.dim, args.gdn_qkvzab_dim_tp, readers=r
+            )
+            args.attn_qkv_fused_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.dim, args.attn_qkv_fused_dim_tp, readers=r
+            )
+            args.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.gdn_value_dim_tp, args.dim, readers=r
+            )
+            args.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.attn_out_dim_tp, args.dim, readers=r
+            )
+        args.fuse_out_mmrs_decode = mc.fuse_out_mmrs_decode
+        args.norm_ag_persistent = mc.norm_ag_persistent
+        args.out_proj_decode_dtype = {None: None, "bfp8": ttnn.bfloat8_b, "bf16": None}[mc.out_proj_decode_dtype]
+        args.gdn_prefill_mmrs = mc.gdn_prefill_mmrs
+        assert mc.mixer_fidelity in ("hifi2", "lofi"), mc.mixer_fidelity
+        args.mixer_compute_cfg = (
+            ttnn.WormholeComputeKernelConfig(
+                math_fidelity=ttnn.MathFidelity.LoFi, math_approx_mode=True, fp32_dest_acc_en=True, packer_l1_acc=True
+            )
+            if mc.mixer_fidelity == "lofi"
+            else tpc.COMPUTE_HIFI2
+        )
         # optional re-sweep of the 1D decode grids of the token mixers (interleaved weights, proj_1d_decode)
         grid_w = getattr(args, "decode_grid_w", 8)
-        if mc.attn_qkv_decode_cores:
+        if mc.attn_qkv_decode_cores or mc.attn_qkv_in0:
             args.attn_qkv_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
-                1, args.dim, args.attn_qkv_fused_dim_tp, mc.attn_qkv_decode_cores, grid_w=grid_w
+                1,
+                args.dim,
+                args.attn_qkv_fused_dim_tp,
+                mc.attn_qkv_decode_cores or 64,
+                grid_w=grid_w,
+                in0_block_w=mc.attn_qkv_in0,
             )
         if mc.attn_wo_decode_cores:
             args.attn_wo_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
                 1, args.attn_out_dim_tp, args.dim, mc.attn_wo_decode_cores, grid_w=grid_w
             )
-        if mc.gdn_qkvz_decode_cores:
+        if mc.gdn_qkvz_decode_cores or mc.gdn_qkvz_in0:
             args.gdn_qkvz_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
-                1, args.dim, args.gdn_qkvzab_dim_tp, mc.gdn_qkvz_decode_cores, grid_w=grid_w
+                1,
+                args.dim,
+                args.gdn_qkvzab_dim_tp,
+                mc.gdn_qkvz_decode_cores or 44,
+                grid_w=grid_w,
+                in0_block_w=mc.gdn_qkvz_in0,
             )
         if mc.gdn_out_decode_cores:
             args.gdn_out_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(

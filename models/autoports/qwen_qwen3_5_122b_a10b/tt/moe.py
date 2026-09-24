@@ -23,6 +23,7 @@ fuses the activation. Expert weights are laid out ``[1, E, H, 2N]`` / ``[1, E, N
 the intermediate dim ``N`` is sharded (column-parallel up/gate, row-parallel down) and the block
 returns per-device partial sums for the layer's reduce (see ``num_devices``).
 """
+
 from __future__ import annotations
 
 import math
@@ -43,9 +44,11 @@ def _largest_divisor_at_most(n: int, cap: int) -> int:
     return d
 
 
-def sparse_matmul_program_config(m: int, n: int, k: int, *, target_cores: int, in0_block_w_cap: int, grid_y: int = 8):
+def sparse_matmul_program_config(
+    m: int, n: int, k: int, *, target_cores: int, in0_block_w_cap: int, grid_y: int = 8, tile_w: int = TILE
+):
     """1D-mcast config for ``ttnn.sparse_matmul``: cores must divide Nt, ``Kt % in0_block_w == 0``."""
-    n_tiles = max(1, math.ceil(n / TILE))
+    n_tiles = max(1, math.ceil(n / tile_w))
     k_tiles = max(1, math.ceil(k / TILE))
     m_tiles = max(1, math.ceil(m / TILE))
     cores = _largest_divisor_at_most(n_tiles, max(1, target_cores))
@@ -120,11 +123,23 @@ class Qwen35MoE:
 
         mapper = (lambda dim: ttnn.ShardTensorToMesh(mesh_device, dim=dim)) if tp > 1 else (lambda dim: None)
 
-        def upload(t, dtype, name, dim=None, layout=ttnn.TILE_LAYOUT):
+        def upload(t, dtype, name, dim=None, layout=ttnn.TILE_LAYOUT, tile=None):
             kw = {}
             mm = mapper(dim) if dim is not None else (ttnn.ReplicateTensorToMesh(mesh_device) if tp > 1 else None)
             if mm is not None:
                 kw["mesh_mapper"] = mm
+            if (
+                tile is not None
+            ):  # non-default weight tile (stage-5 probe): as_tensor has no tile= -> uncached from_torch
+                return ttnn.from_torch(
+                    t,
+                    dtype=dtype,
+                    layout=layout,
+                    device=mesh_device,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                    tile=tile,
+                    **kw,
+                )
             return ttnn.as_tensor(
                 t,
                 dtype=dtype,
@@ -154,9 +169,25 @@ class Qwen35MoE:
             ],
             dim=-1,
         )  # [E, H, tp*2*Nl]
-        self.up_gate = upload(packed.unsqueeze(0).contiguous(), self.prec.routed_gate_up, "experts.up_gate", dim=-1)
+        # stage-5 probe: a 16-wide output tile on the gather-mode gate/up needs the weight stored with 16-wide tiles
+        # (matmul: out_tile_shape[1] % in1_tile_w == 0).
+        _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
+        self.up_gate = upload(
+            packed.unsqueeze(0).contiguous(),
+            self.prec.routed_gate_up,
+            "experts.up_gate",
+            dim=-1,
+            tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
+        )
         down_t = down.transpose(1, 2).unsqueeze(0).contiguous()  # [1, E, N, H]
-        self.down = upload(down_t, self.prec.routed_down, "experts.down", dim=-2)
+        # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
+        self.down = upload(
+            down_t,
+            self.prec.routed_down,
+            "experts.down",
+            dim=-2,
+            tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
+        )
         del gate_t, up_t, packed, down_t
 
         # ---- shared expert (dense SwiGLU, TP column/row parallel) + sigmoid gate -----------------------
@@ -188,6 +219,7 @@ class Qwen35MoE:
             **({"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if tp > 1 else {}),
         )
         self.tile = ttnn.Tile([TILE, TILE])
+        self.tile_gu = self.tile  # gate/up gather output tile (Qwen35MoEOptimized may narrow it)
         self.routed_ckc = ttnn.init_device_compute_kernel_config(
             mesh_device.arch(),
             math_fidelity=self.prec.routed_fidelity,
@@ -289,11 +321,21 @@ class Qwen35MoE:
             ids = ttnn.typecast(ids, ttnn.uint16)
         return scores, ids
 
+    def _alloc_dev(self, shape, dtype, zero=False, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG):
+        """Device-side buffer allocation (no host write, trace-safe, nothing cached): ``ttnn.empty`` and, when the
+        consumer needs zeros (the routing-matrix scatter target), a device ``ttnn.fill``. The sparse-matmul outputs of the
+        expert-sorted path do not need zeros: every real group is written by the op and the padded groups are never
+        read (``undispatch_rows`` gathers real rows only)."""
+        t = ttnn.empty(list(shape), dtype, layout, self.device, memory_config)
+        if zero:
+            z = ttnn.fill(t, 0.0, memory_config=memory_config)
+            ttnn.deallocate(t)
+            return z
+        return t
+
     def _routing_matrix(self, scores, ids, T):
         """Dense [1,1,T,E] routing weights (zero for unselected experts)."""
-        zeros = ttnn.zeros(
-            (1, 1, T, self.num_experts), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device
-        )
+        zeros = self._alloc_dev((1, 1, T, self.num_experts), ttnn.bfloat16, zero=True)
         idx = ttnn.typecast(ids, ttnn.uint32) if ids.dtype != ttnn.uint32 else ids
         routing = ttnn.scatter(zeros, dim=-1, index=idx, src=scores)
         ttnn.deallocate(zeros)
@@ -303,6 +345,11 @@ class Qwen35MoE:
 
     def _swiglu_rows(self, fused, lead, half):
         """SwiGLU on the packed [1, lead, 1, 2*half] projection (M=1 rows: slices avoid tile padding)."""
+        if tuple(fused.tile.tile_shape) != (32, 32):
+            # narrow-output-tile probe: ttnn.slice supports 32x32 tiles only -> the fused swiglu op (gate/up halves)
+            out = ttnn.swiglu(fused)
+            ttnn.deallocate(fused)
+            return out
         up = ttnn.slice(fused, [0, 0, 0, 0], [1, lead, 1, half])
         gate = ttnn.slice(fused, [0, 0, 0, half], [1, lead, 1, 2 * half])
         ttnn.deallocate(fused)
@@ -326,7 +373,7 @@ class Qwen35MoE:
                 is_input_a_sparse=False,
                 is_input_b_sparse=True,
                 memory_config=ttnn.L1_MEMORY_CONFIG,
-                output_tile=self.tile,
+                output_tile=self.tile_gu,
                 program_config=self.cfg_gate_up_gather,
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,
@@ -375,7 +422,9 @@ class Qwen35MoE:
         cfg_gu = (
             self.cfg_gate_up_masked
             if chunk == self.PREFILL_CHUNK
-            else sparse_matmul_program_config(chunk, 2 * Nl, H, target_cores=32, in0_block_w_cap=64)
+            else sparse_matmul_program_config(
+                chunk, 2 * Nl, H, target_cores=32, in0_block_w_cap=64, tile_w=self.tile_gu.tile_shape[1]
+            )
         )
         cfg_dn = (
             self.cfg_down_masked
@@ -396,7 +445,7 @@ class Qwen35MoE:
                 sparsity=mask,
                 nnz=None,
                 memory_config=dram,
-                output_tile=self.tile,
+                output_tile=self.tile_gu,
                 program_config=cfg_gu,
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,

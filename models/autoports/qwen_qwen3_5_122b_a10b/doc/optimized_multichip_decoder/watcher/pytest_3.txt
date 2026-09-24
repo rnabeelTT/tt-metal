@@ -1,0 +1,44 @@
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_batched_decode_b32[blackhole-attn_b32-device_params0-1x4] 2026-09-24 19:10:51.612 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+MC full_attention prefill B=32: PCC 0.9998784094457148
+MC full_attention batched decode B=32: PCC 0.9999073056385464
+MC full_attention batched decode user 0: PCC 0.9999233977807406
+MC full_attention batched decode user 1: PCC 0.9999358679803733
+MC full_attention batched decode user 2: PCC 0.9998866175849588
+MC full_attention batched decode user 3: PCC 0.9998979875871523
+MC full_attention batched decode user 4: PCC 0.9999183035936822
+MC full_attention batched decode user 5: PCC 0.9999253242336209
+MC full_attention batched decode user 6: PCC 0.9999267421127702
+MC full_attention batched decode user 7: PCC 0.9999078982721497
+MC full_attention batched decode user 8: PCC 0.9999239658332849
+MC full_attention batched decode user 9: PCC 0.9999031077883765
+MC full_attention batched decode user 10: PCC 0.9999212148526917
+MC full_attention batched decode user 11: PCC 0.9999142004799191
+MC full_attention batched decode user 12: PCC 0.9998783779200601
+MC full_attention batched decode user 13: PCC 0.9998858773132836
+MC full_attention batched decode user 14: PCC 0.9998855710098271
+MC full_attention batched decode user 15: PCC 0.9998933020374647
+MC full_attention batched decode user 16: PCC 0.9998809178481779
+MC full_attention batched decode user 17: PCC 0.9999027176353801
+MC full_attention batched decode user 18: PCC 0.9999156247078567
+MC full_attention batched decode user 19: PCC 0.9999236051904136
+MC full_attention batched decode user 20: PCC 0.999898211763883
+MC full_attention batched decode user 21: PCC 0.9999007257090646
+MC full_attention batched decode user 22: PCC 0.9999121635501892
+MC full_attention batched decode user 23: PCC 0.9999023375385252
+MC full_attention batched decode user 24: PCC 0.9998794330059011
+MC full_attention batched decode user 25: PCC 0.9999200994187778
+MC full_attention batched decode user 26: PCC 0.9999201705358989
+MC full_attention batched decode user 27: PCC 0.999922578765062
+MC full_attention batched decode user 28: PCC 0.9999087693668083
+MC full_attention batched decode user 29: PCC 0.999923651916345
+MC full_attention batched decode user 30: PCC 0.9999004513703976
+MC full_attention batched decode user 31: PCC 0.9998985615416007
+MC full_attention B=32 per-user decode PCC min 0.99988
+PASSED
+24.77s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_batched_decode_b32[blackhole-attn_b32-device_params0-1x4]
+1.57s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_batched_decode_b32[blackhole-attn_b32-device_params0-1x4]
+0.05s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_batched_decode_b32[blackhole-attn_b32-device_params0-1x4]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_batched_decode_b32[blackhole-attn_b32-device_params0-1x4]
+================ 1 passed, 46 deselected, 3 warnings in 27.35s =================
+2026-09-24 19:11:40.453 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

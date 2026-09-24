@@ -5,9 +5,11 @@
 Used only when num_devices > 1. DRAM-sharded matmul cfgs, prefill progcfgs,
 mesh shard/replicate, FP8 dequant, HF weight reorder for per-device sharding.
 """
+
 import math
 
 import torch
+from loguru import logger
 
 import ttnn
 from models.common.utility_functions import is_blackhole
@@ -108,8 +110,9 @@ def create_dram_sharded_mem_config(k, n):
     )
 
 
-def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None):
-    """DRAM-sharded matmul program config (decode, small M)."""
+def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, readers=1):
+    """DRAM-sharded matmul program config (decode, small M). ``readers`` = num_workers_per_dram_bank (Blackhole
+    multi-reader DRAM-sharded kernel, 1..3); applied only when the per-bank N shard splits evenly, else 1."""
     m_tiles = math.ceil(m / TILE_SIZE)
     k_tiles = math.ceil(k / TILE_SIZE)
     n_padded = _roundup(n, TILE_SIZE * DRAM_CORES)
@@ -126,15 +129,24 @@ def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None):
     in0_block_w = _find_largest_divisor(k_tiles_per_core)
     per_core_N = n_tiles // num_cores if n_tiles >= num_cores else 1
 
-    return ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
+    pc = ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
         in0_block_w=in0_block_w,
         per_core_M=m_tiles,
         per_core_N=per_core_N,
         fused_activation=None,
     )
+    if readers and readers > 1:
+        tiles_per_bank = n_tiles // DRAM_CORES
+        if tiles_per_bank % readers == 0:
+            pc.num_workers_per_dram_bank = int(readers)
+        else:
+            logger.warning(f"dram_sharded N={n}: {tiles_per_bank} tiles/bank not divisible by {readers} readers -> 1")
+    return pc
 
 
-def create_matmul_1d_decode_progcfg(m, k, n, num_cores, fused_activation=None, fp32_acc=True, grid_w=8):
+def create_matmul_1d_decode_progcfg(
+    m, k, n, num_cores, fused_activation=None, fp32_acc=True, grid_w=8, in0_block_w=None
+):
     """Explicit-grid 1D (mcast_in0) decode matmul progcfg on ~`num_cores` cores — small grids beat
     the ~80-core DRAM-sharded grid on the bandwidth-bound skinny decode matmuls. Weight must be interleaved.
 
@@ -149,6 +161,9 @@ def create_matmul_1d_decode_progcfg(m, k, n, num_cores, fused_activation=None, f
     n_tiles = math.ceil(n / TILE_SIZE)
     # mcast_in0: every core streams the full K, so in0_block_w must divide the full k_tiles.
     per_core_k = _find_largest_divisor(k_tiles)
+    if in0_block_w is not None:  # explicit K block (sweeps): must divide the full K
+        assert k_tiles % in0_block_w == 0, (k_tiles, in0_block_w)
+        per_core_k = in0_block_w
     per_core_n = math.ceil(n_tiles / (cols * rows))
     cap = 4 if fp32_acc else 8  # fp32_dest_acc caps subblock area at 4
     sub_w = max(i for i in range(1, cap + 1) if per_core_n % i == 0)
@@ -166,9 +181,10 @@ def create_matmul_1d_decode_progcfg(m, k, n, num_cores, fused_activation=None, f
     )
 
 
-def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_config=ttnn.L1_MEMORY_CONFIG):
+def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_config=ttnn.L1_MEMORY_CONFIG, dtype=None):
     """Small-grid 1D (mcast_in0) decode matmul on an interleaved weight; interleaves the K-sharded
-    activation first since mcast_in0 needs the full K per core. See test_mlp_matmul_sweep."""
+    activation first since mcast_in0 needs the full K per core. See test_mlp_matmul_sweep.
+    ``dtype``: optional output dtype (e.g. bfp8 partials straight into a reduce-scatter)."""
     x_il = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
     out = ttnn.linear(
         x_il,
@@ -176,6 +192,7 @@ def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_confi
         compute_kernel_config=compute_cfg,
         program_config=decode_1d_progcfg,
         memory_config=out_memory_config,
+        **({"dtype": dtype} if dtype is not None else {}),
     )
     if x_il is not x:
         ttnn.deallocate(x_il)

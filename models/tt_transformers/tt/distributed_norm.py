@@ -64,6 +64,9 @@ class DistributedNorm(LightweightModule):
 
         # Flag to control whether all_gather is performed after distributed norm (can be disabled when output should remain sharded)
         self.enable_all_gather = enable_all_gather
+        # Optional persistent all-gather output buffers for decode (args.norm_ag_persistent): one device buffer per
+        # (shape, dtype, interleaved memcfg), reused by every call -> no output allocation per gather inside the trace.
+        self._ag_bufs = {}
 
         if TG:
             core_grid_ln = galaxy_distributed_norm_core_grid(args.dim)
@@ -103,6 +106,23 @@ class DistributedNorm(LightweightModule):
             raise ValueError("Gather-only DistributedNorm (norm=None) owns no weights to update")
         self.norm.update(weight=weight)
 
+    def _persistent_ag_buffer(self, x, mode, mem_cfg):
+        """Decode-only persistent output buffer for the all-gather (interleaved placements only; None otherwise)."""
+        if mode != Mode.DECODE or not getattr(self.args, "norm_ag_persistent", False):
+            return None
+        if mem_cfg is None:
+            return None
+        # decode on a 1D mesh takes the non-distributed branch whose output is the L1 width-sharded norm layout
+        # (sharded_output_config); a sharded persistent buffer is allocated with that same spec
+        key = (tuple(x.shape), x.dtype, mem_cfg.buffer_type, repr(mem_cfg.shard_spec) if mem_cfg.is_sharded() else None)
+        buf = self._ag_bufs.get(key)
+        if buf is None:
+            shape = list(x.shape)
+            shape[-1] = shape[-1] * self.args.num_devices
+            buf = ttnn.empty(shape, x.dtype, x.layout, self.args.mesh_device, mem_cfg)
+            self._ag_bufs[key] = buf
+        return buf
+
     def forward(self, x, mode: Mode, norm_config=None):
         """Apply a norm, possibly gathering inputs if required."""
 
@@ -136,7 +156,7 @@ class DistributedNorm(LightweightModule):
         if self.args.is_multichip and not self.args.is_distributed_norm(mode):
             x = ttnn.experimental.all_gather_async(
                 x,
-                persistent_output_buffer=None,
+                persistent_output_buffer=self._persistent_ag_buffer(x, mode, input_mem_cfg),
                 dim=3,
                 multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(),
                 num_links=self.args.model_config[self.ag_config_key]["num_links"]
@@ -170,7 +190,7 @@ class DistributedNorm(LightweightModule):
         if self.args.is_distributed_norm(mode) and self.enable_all_gather:
             x = ttnn.experimental.all_gather_async(
                 x,
-                persistent_output_buffer=None,
+                persistent_output_buffer=self._persistent_ag_buffer(x, mode, x.memory_config()),
                 dim=3,
                 multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(),
                 num_links=self.tt_ccl.get_num_links(1),

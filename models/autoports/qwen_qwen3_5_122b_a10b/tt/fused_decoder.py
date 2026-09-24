@@ -17,6 +17,7 @@ numerically equivalent fused forms (see doc/fused_decoder/README.md for the befo
 
 Every rewrite is gated by :class:`FusionFlags` so each can be A/B measured against the functional graph.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -166,7 +167,9 @@ class Qwen35MoEFused(Qwen35MoE):
         cfg_gu = (
             self.cfg_gate_up_masked
             if chunk == self.PREFILL_CHUNK
-            else sparse_matmul_program_config(chunk, 2 * Nl, H, target_cores=32, in0_block_w_cap=64)
+            else sparse_matmul_program_config(
+                chunk, 2 * Nl, H, target_cores=32, in0_block_w_cap=64, tile_w=self.tile_gu.tile_shape[1]
+            )
         )
         cfg_dn = (
             self.cfg_down_masked
@@ -186,7 +189,7 @@ class Qwen35MoEFused(Qwen35MoE):
                 sparsity=mask,
                 nnz=None,
                 memory_config=dram,
-                output_tile=self.tile,
+                output_tile=self.tile_gu,
                 program_config=cfg_gu,
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,
