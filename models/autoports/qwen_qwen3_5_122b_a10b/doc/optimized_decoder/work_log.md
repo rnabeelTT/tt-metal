@@ -299,3 +299,5 @@ Times below are host-clock estimates; authoritative timestamps are inside the re
   digits, DS qkv row 129 us / 81%, B=32 probe timestamp wording, tracy_dispatch breakdown dated; guard added so
   `attn_norm_out_sharded` requires the DS hook and fused qkv; 9B B=4 check and the non-aligned GDN host selector recorded as
   follow-ups). Committing stage 3.
+- (host 08:15) stage 3 committed: 19aa5d24777 (review #4 clean-pass).
+- (host 08:16) 9B B=4 paged-decode check re-run after all shared GDN kernel edits: PASS (B=1 0.99666; B=4 0.99793/0.99684/0.99674/0.99690) — logs/04-9b-decode-check.log.

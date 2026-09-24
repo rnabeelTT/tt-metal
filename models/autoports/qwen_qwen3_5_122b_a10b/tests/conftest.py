@@ -6,6 +6,7 @@ os.environ.setdefault("HF_MODEL", "Qwen/Qwen3.5-122B-A10B")
 
 
 def pytest_configure(config):
+    config.addinivalue_line("markers", "perf_single: single-die baseline perf cases (separate process)")
     for marker in (
         "real_weights: uses the local HF checkpoint",
         "long: full advertised context",

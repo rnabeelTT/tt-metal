@@ -1,0 +1,3 @@
+all-gather ok: torch.Size([4, 1, 32, 3072]) max abs err 0.015590190887451172
+2026-09-24 11:08:13.867 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

@@ -1,0 +1,6 @@
+CCL DataType.BFLOAT8_B rows=128: reduce-scatter sum ok, rel err 0.0057
+CCL DataType.BFLOAT16 rows=128: reduce-scatter sum ok, rel err 0.0033
+CCL DataType.BFLOAT16 rows=1: reduce-scatter sum ok, rel err 0.0027
+CCL_CONTROL_DONE
+2026-09-24 11:23:26.605 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

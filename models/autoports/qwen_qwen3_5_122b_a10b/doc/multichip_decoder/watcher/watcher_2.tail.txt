@@ -1,0 +1,120 @@
+Device 0 worker core(x= 0,y= 5) virtual(x= 1,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 1,y= 5) virtual(x= 2,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 2,y= 5) virtual(x= 3,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 3,y= 5) virtual(x= 4,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 4,y= 5) virtual(x= 5,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 5,y= 5) virtual(x= 6,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 6,y= 5) virtual(x= 7,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 7,y= 5) virtual(x=10,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 8,y= 5) virtual(x=11,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 9,y= 5) virtual(x=12,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=10,y= 5) virtual(x=13,y= 7):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=11,y= 5) virtual(x=14,y= 7):   GW,   W,   W,   W,   W  rmsg:H0D|bnt h_id:  0 smsg:DDDD
+k_ids:  0|  0|  0|  0|  0
+Device 0 worker core(x= 0,y= 6) virtual(x= 1,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 1,y= 6) virtual(x= 2,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 2,y= 6) virtual(x= 3,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 3,y= 6) virtual(x= 4,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 4,y= 6) virtual(x= 5,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 5,y= 6) virtual(x= 6,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 6,y= 6) virtual(x= 7,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 7,y= 6) virtual(x=10,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 8,y= 6) virtual(x=11,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 9,y= 6) virtual(x=12,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=10,y= 6) virtual(x=13,y= 8):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=11,y= 6) virtual(x=14,y= 8):   GW,   W,   W,   W,   W  rmsg:H0D|bnt h_id:  0 smsg:DDDD
+k_ids:  0|  0|  0|  0|  0
+Device 0 worker core(x= 0,y= 7) virtual(x= 1,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 1,y= 7) virtual(x= 2,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 2,y= 7) virtual(x= 3,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 3,y= 7) virtual(x= 4,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 4,y= 7) virtual(x= 5,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 5,y= 7) virtual(x= 6,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 6,y= 7) virtual(x= 7,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 7,y= 7) virtual(x=10,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 8,y= 7) virtual(x=11,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 9,y= 7) virtual(x=12,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=10,y= 7) virtual(x=13,y= 9):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=11,y= 7) virtual(x=14,y= 9):   GW,   W,   W,   W,   W  rmsg:H0D|bnt h_id:  0 smsg:DDDD
+k_ids:  0|  0|  0|  0|  0
+Device 0 worker core(x= 0,y= 8) virtual(x= 1,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 1,y= 8) virtual(x= 2,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 2,y= 8) virtual(x= 3,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 3,y= 8) virtual(x= 4,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 4,y= 8) virtual(x= 5,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 5,y= 8) virtual(x= 6,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 6,y= 8) virtual(x= 7,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 7,y= 8) virtual(x=10,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 8,y= 8) virtual(x=11,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 9,y= 8) virtual(x=12,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=10,y= 8) virtual(x=13,y=10):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=11,y= 8) virtual(x=14,y=10):   GW,   W,   W,   W,   W  rmsg:H0D|bnt h_id:  0 smsg:DDDD
+k_ids:  0|  0|  0|  0|  0
+Device 0 worker core(x= 0,y= 9) virtual(x= 1,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 1,y= 9) virtual(x= 2,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 2,y= 9) virtual(x= 3,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 3,y= 9) virtual(x= 4,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 4,y= 9) virtual(x= 5,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 5,y= 9) virtual(x= 6,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 6,y= 9) virtual(x= 7,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 7,y= 9) virtual(x=10,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 8,y= 9) virtual(x=11,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x= 9,y= 9) virtual(x=12,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=10,y= 9) virtual(x=13,y=11):   GW,   W,   W,   W,   W  rmsg:D1D|bnt h_id:195 smsg:DDDD
+k_ids:334|333|335|335|335
+Device 0 worker core(x=11,y= 9) virtual(x=14,y=11):   GW,   W,   W,   W,   W  rmsg:H0D|BNt h_id:  0 smsg:DDDD
+k_ids: 51| 52|  0|  0|  0

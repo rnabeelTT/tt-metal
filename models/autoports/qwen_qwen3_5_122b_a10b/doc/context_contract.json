@@ -53,5 +53,34 @@
     "capacity_change": "KV pool capacity x2 vs the stage-1 bf16 contract (weights unchanged: bfp4 routed / bfp8 mixers)",
     "prefill_chunk_note": "expert-sorted MoE dispatch above 512 tokens allocates ~(8T + 8224) x 3072 bf16 rows transiently (150 MB at 2048 tokens)",
     "tested": "optimized policy incl. bfp8 KV: attention 16421-token HF parity and per-512-position K/V content windows re-run in the stage-3 final chain (see doc/optimized_decoder/README.md section 3)"
+  },
+  "multichip_decoder_stage4": {
+    "mesh": "(1,4) P300x2 (4 x Blackhole p300c dies, 31.9 GiB DRAM each), FABRIC_1D Ring; also valid for P150x4",
+    "parallelism": "TP=4 for attention (KV heads replicated per device pair -> 1 local KV head), GDN, norms, shared expert; routed experts TP on the intermediate dim (all 256 experts per device at width 256); residual fractured [.., 768] between layers",
+    "kv_cache_dtype": "bfloat8_b (unchanged from stage 3)",
+    "kv_bytes_per_token_per_device": 6528,
+    "kv_bytes_per_token_per_device_note": "12 attention layers x 1 local KV head x head_dim 256 x (K,V) x 1.0625 B; per_device_contract() reports 544 B/token/layer",
+    "gdn_state_bytes_per_user_per_device": 19759104,
+    "gdn_state_note": "36 GDN layers x (16 local v-heads x 128 x 128 bf16 recurrent state + 4 taps x 3072 local qkv channels bf16 conv shift register)",
+    "weights_gib_per_device": 17.0,
+    "weights_breakdown_gib": {
+      "routed_experts_bfp4": 15.19,
+      "attention_bfp8": 0.25,
+      "gdn_bfp8": 0.83,
+      "shared_experts_bfp8": 0.12,
+      "routers_bf16": 0.07,
+      "embedding_bf16_lm_head_bfp8_tp4": 0.544
+    },
+    "reserve_gib": 3.0,
+    "reserve_note": "trace region, CCL buffers, prefill transients (expert-sorted dispatch peaks ~330 MB at 2048 tokens)",
+    "gdn_state_gib_at_32_users": 0.59,
+    "kv_pool_gib": 11.306,
+    "kv_pool_tokens": 1859639,
+    "users_at_262144": 7,
+    "tokens_per_user_at_32_users": 58113,
+    "current_supported_context": 262144,
+    "capability_change": "none: the advertised 262144 context stays supported (7 concurrent users at full context = 1.835 M of 1.860 M pool tokens, or 32 users x ~58.1K tokens). No hard physical limit reached.",
+    "status": "computed from the stage-4 mesh plan; the full-model stage measures the actual per-device DRAM after loading all 48 layers and replaces these figures",
+    "weights_breakdown_note": "embedding bf16 hidden-sharded [248320,768] = 0.355 GiB + LM head bfp8 vocab-sharded [3072,62080] = 0.189 GiB (plan: embeddings bf16, LM head bfp8); routers bf16 [3072,256] x 48 = 0.070 GiB; attention/GDN/shared figures are rounded up (precise sum 16.95 GiB)"
   }
 }

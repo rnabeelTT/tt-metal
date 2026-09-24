@@ -1,0 +1,14 @@
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_traced_decode[blackhole-attn-device_params0-1x4] 2026-09-24 11:28:53.414 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+MC full_attention prefill: PCC 0.9998805552113941
+MC full_attention traced decode step 0 pos=40: PCC 0.999919745980912
+MC full_attention traced decode step 1 pos=41: PCC 0.9999095149004081
+MC full_attention traced decode step 2 pos=42: PCC 0.9999064314520295
+MC full_attention traced decode step 3 pos=43: PCC 0.9998938805969513
+PASSED
+23.71s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_traced_decode[blackhole-attn-device_params0-1x4]
+1.62s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_traced_decode[blackhole-attn-device_params0-1x4]
+0.05s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_traced_decode[blackhole-attn-device_params0-1x4]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_traced_decode[blackhole-attn-device_params0-1x4]
+================ 1 passed, 44 deselected, 5 warnings in 26.31s =================
+2026-09-24 11:29:41.435 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0

@@ -46,6 +46,18 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
     def is_moe_layer(self, layer_idx: int) -> bool:
         return layer_idx not in self.mlp_only_layers
 
+    # (1,4) TP: the framework rule keeps dim <= 4096 on a non-distributed prefill norm (gather before the norm). Setting
+    # ``prefill_norm_distributed`` runs the distributed prefill norm instead (fractured output, 768/die = 24 tiles), which
+    # re-enables the fused all-gather+matmul in-projections (tp_common.prefill_norm_agmm_enabled). Measured per stage 4.
+    prefill_norm_distributed: bool = False
+
+    def is_distributed_norm(self, mode):
+        from models.tt_transformers.tt.common import Mode
+
+        if mode == Mode.PREFILL and getattr(self, "prefill_norm_distributed", False) and self.is_multichip:
+            return True
+        return super().is_distributed_norm(mode)
+
     def load_state_dict(self):
         """Streaming state dict (the 250 GB checkpoint never fits in host RAM)."""
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.weights import StreamingStateDict

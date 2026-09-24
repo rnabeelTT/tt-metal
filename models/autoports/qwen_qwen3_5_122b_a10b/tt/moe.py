@@ -227,6 +227,10 @@ class Qwen35MoE:
         orig = list(x.shape)
         H = orig[-1]
         T = math.prod(orig[:-1])
+        if self.num_devices > 1 and x.is_sharded():
+            # TP: the ffn norm hands over an L1 width-sharded replicated activation; the router / sparse matmuls take
+            # interleaved inputs. One conversion at the block entry.
+            x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
         scores, ids = self._route(x4)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
@@ -242,6 +246,23 @@ class Qwen35MoE:
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
         ttnn.deallocate(shared)
+        if self.num_devices > 1:
+            # TP on the expert intermediate dim: every device holds a partial [.., H] sum (routed + shared); the layer
+            # contract wants the FRACTURED residual [.., H / tp], so reduce-scatter along the hidden dim (the same
+            # collective the dense Qwen36MLP TP path issues). On a (1,4) mesh tt_all_reduce is a reduce-scatter.
+            from models.tt_transformers.tt.ccl import tt_all_reduce
+
+            out = tt_all_reduce(
+                out,
+                self.device,
+                self.tt_ccl,
+                cluster_axis=0,
+                dim=3,
+                topology=self.args.ccl_topology(),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                dtype=ttnn.bfloat16,
+            )
+            orig = orig[:-1] + [out.shape[-1]]
         if list(out.shape) != orig:
             out = ttnn.reshape(out, orig)
         return out

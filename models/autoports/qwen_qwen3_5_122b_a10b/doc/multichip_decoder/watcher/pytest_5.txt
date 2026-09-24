@@ -1,0 +1,178 @@
+2026-09-24 11:04:36.513 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 45 items / 44 deselected / 1 selected
+
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_multichip_decoder.py::test_mc_chunked_prefill_matches_hf[blackhole-attn-device_params0-1x4] 2026-09-24 11:04:38.380 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-09-24 11:04:38.380 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-09-24 11:04:38.380 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-09-24 11:04:38.380 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-09-24 11:04:38.387 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-09-24 11:04:38.388 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-09-24 11:04:38.468 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-09-24 11:04:38.468 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-09-24 11:04:38.468 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-09-24 11:04:38.468 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-09-24 11:04:38.469 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-09-24 11:04:38.701 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-09-24 11:04:38.828 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-09-24 11:04:38.828 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-09-24 11:04:38.828 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-09-24 11:04:38.828 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-09-24 11:04:38.828 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-09-24 11:04:38.828 | INFO     | conftest:mesh_device:638 - Keeping trace_region_size=64000000 from device_params (already set)
+2026-09-24 11:04:38.829 | info     |           Metal | Fabric config changed from FabricConfig::DISABLED to FabricConfig::FABRIC_1D, reinitializing control plane (metal_env.cpp:324)
+2026-09-24 11:04:38.829 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-09-24 11:04:38.829 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-09-24 11:04:38.829 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-09-24 11:04:38.829 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-09-24 11:04:38.911 | info     |       LLRuntime | Watcher log file: /home/raahem/qwen35-122b-bringup/artifacts/04-watcher-5/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-09-24 11:04:38.911 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-09-24 11:04:38.911 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:38.917 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-09-24 11:04:38.918 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:38.928 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:38.934 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:38.959 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-09-24 11:04:38.959 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-09-24 11:04:39.761 | DEBUG    | conftest:mesh_device:668 - multidevice with 4 devices is created
+2026-09-24 11:04:49.049 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:49.058 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:49.066 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:49.074 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:50.265 | INFO     | models.tt_transformers.tt.model_config:__init__:633 - Inferring device name: P150x4
+2026-09-24 11:04:50.266 | INFO     | models.tt_transformers.tt.model_config:__init__:716 - Checkpoint directory: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 11:04:50.266 | INFO     | models.tt_transformers.tt.model_config:__init__:717 - Tokenizer file: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5/tokenizer.model
+2026-09-24 11:04:50.266 | INFO     | models.tt_transformers.tt.model_config:__init__:718 - Cache directory: /home/raahem/.cache/ttnn/qwen35_122b/P150x4
+2026-09-24 11:04:50.266 | INFO     | models.tt_transformers.tt.model_config:__init__:719 - Model name: dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 11:04:50.271 | INFO     | models.tt_transformers.tt.model_config:_set_params_from_dict:2941 - Model name from config: Qwen3.5-122B-A10B
+2026-09-24 11:04:50.271 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2610 - Unknown model Qwen3.5-122B-A10B on device P150x4, setting MAX_PREFILL_CHUNK_SIZE to 4 for compatibility
+2026-09-24 11:04:50.271 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2613 - Try setting MAX_PREFILL_CHUNK_SIZE to larger powers of 2 up to e.g. 128 for faster performance (if you run out of L1 memory it was too high)
+2026-09-24 11:04:50.271 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3983 - Tokenizer path: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 11:04:50.271 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3984 - Model name: Qwen3.5-122B-A10B
+2026-09-24 11:04:50.271 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3985 - Base model name: Qwen3.5-122B
+2026-09-24 11:04:50.579 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3996 - Successfully loaded tokenizer from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:create_processor:4067 - Successfully loaded processor from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:__init__:1263 - Attention grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:__init__:1264 - MLP grid: ttnn.CoreGrid(x=8, y=1)
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:__init__:1265 - MLP prefill grids @ 32: w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:__init__:1266 - MLP prefill grids @ max_seq_len(8192): w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 11:04:52.391 | INFO     | models.tt_transformers.tt.model_config:__init__:1269 - LM head grid: ttnn.CoreGrid(x=8, y=6)
+2026-09-24 11:04:59.090 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:59.098 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:59.106 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-09-24 11:04:59.113 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:01.339 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:222 - Qwen35MoE layer 3: E=256 k=8 N=1024 (local 256) tp=4 union~221
+[transformers] You tried to access the `ExpertsInterface` with a `config._experts_implementation` set to `None`. This is expected if you use an Expert Module as a standalone Module. If this is not the case, something went wrong with the dispatch of `config._experts_implementation`
+2026-09-24 11:05:09.128 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:09.135 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:09.142 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:09.148 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:18.475 | warning  |              Op | ttnn::to_layout: memory_config is specified but the tensor is already in the requested layout! So, the memory_config won't be changed! (to_layout_op.cpp:75)
+2026-09-24 11:05:18.476 | warning  |              Op | ttnn::to_layout: memory_config is specified but the tensor is already in the requested layout! So, the memory_config won't be changed! (to_layout_op.cpp:75)
+MC full_attention chunked prefill T=4429: PCC 0.9999829343290421
+MC chunked dev0 (head 0) K positions [0,512): PCC 0.9999164895773022
+MC chunked dev0 (head 0) V positions [0,512): PCC 0.9999255403113831
+MC chunked dev0 (head 0) K positions [512,1024): PCC 0.999916424718184
+MC chunked dev0 (head 0) V positions [512,1024): PCC 0.9999251700658138
+MC chunked dev0 (head 0) K positions [1024,1536): PCC 0.9999168092790522
+MC chunked dev0 (head 0) V positions [1024,1536): PCC 0.9999255357288296
+MC chunked dev0 (head 0) K positions [1536,2048): PCC 0.9999160711898348
+MC chunked dev0 (head 0) V positions [1536,2048): PCC 0.9999252460265452
+MC chunked dev0 (head 0) K positions [2048,2560): PCC 0.999916156647541
+MC chunked dev0 (head 0) V positions [2048,2560): PCC 0.9999253365729956
+MC chunked dev0 (head 0) K positions [2560,3072): PCC 0.9999157115988426
+MC chunked dev0 (head 0) V positions [2560,3072): PCC 0.9999250228135054
+MC chunked dev0 (head 0) K positions [3072,3584): PCC 0.9999175447824742
+MC chunked dev0 (head 0) V positions [3072,3584): PCC 0.9999250320415188
+MC chunked dev0 (head 0) K positions [3584,4096): PCC 0.9999157445964861
+MC chunked dev0 (head 0) V positions [3584,4096): PCC 0.9999246741390947
+MC chunked dev0 (head 0) K positions [4096,4429): PCC 0.9999155114553175
+MC chunked dev0 (head 0) V positions [4096,4429): PCC 0.9999255602965609
+MC chunked dev1 (head 0) K positions [0,512): PCC 0.9999164895773022
+MC chunked dev1 (head 0) V positions [0,512): PCC 0.9999255403113831
+MC chunked dev1 (head 0) K positions [512,1024): PCC 0.999916424718184
+MC chunked dev1 (head 0) V positions [512,1024): PCC 0.9999251700658138
+MC chunked dev1 (head 0) K positions [1024,1536): PCC 0.9999168092790522
+MC chunked dev1 (head 0) V positions [1024,1536): PCC 0.9999255357288296
+MC chunked dev1 (head 0) K positions [1536,2048): PCC 0.9999160711898348
+MC chunked dev1 (head 0) V positions [1536,2048): PCC 0.9999252460265452
+MC chunked dev1 (head 0) K positions [2048,2560): PCC 0.999916156647541
+MC chunked dev1 (head 0) V positions [2048,2560): PCC 0.9999253365729956
+MC chunked dev1 (head 0) K positions [2560,3072): PCC 0.9999157115988426
+MC chunked dev1 (head 0) V positions [2560,3072): PCC 0.9999250228135054
+MC chunked dev1 (head 0) K positions [3072,3584): PCC 0.9999175447824742
+MC chunked dev1 (head 0) V positions [3072,3584): PCC 0.9999250320415188
+MC chunked dev1 (head 0) K positions [3584,4096): PCC 0.9999157445964861
+MC chunked dev1 (head 0) V positions [3584,4096): PCC 0.9999246741390947
+MC chunked dev1 (head 0) K positions [4096,4429): PCC 0.9999155114553175
+MC chunked dev1 (head 0) V positions [4096,4429): PCC 0.9999255602965609
+MC chunked dev2 (head 1) K positions [0,512): PCC 0.9999166304072675
+MC chunked dev2 (head 1) V positions [0,512): PCC 0.9999252830329435
+MC chunked dev2 (head 1) K positions [512,1024): PCC 0.9999158298221118
+MC chunked dev2 (head 1) V positions [512,1024): PCC 0.9999250382401832
+MC chunked dev2 (head 1) K positions [1024,1536): PCC 0.9999173016640506
+MC chunked dev2 (head 1) V positions [1024,1536): PCC 0.9999251955528359
+MC chunked dev2 (head 1) K positions [1536,2048): PCC 0.9999156979754746
+MC chunked dev2 (head 1) V positions [1536,2048): PCC 0.9999248393448807
+MC chunked dev2 (head 1) K positions [2048,2560): PCC 0.9999172694990929
+MC chunked dev2 (head 1) V positions [2048,2560): PCC 0.999924842905277
+MC chunked dev2 (head 1) K positions [2560,3072): PCC 0.9999159315730343
+MC chunked dev2 (head 1) V positions [2560,3072): PCC 0.9999251614583103
+MC chunked dev2 (head 1) K positions [3072,3584): PCC 0.9999166432064195
+MC chunked dev2 (head 1) V positions [3072,3584): PCC 0.9999249990276055
+MC chunked dev2 (head 1) K positions [3584,4096): PCC 0.9999172434319551
+MC chunked dev2 (head 1) V positions [3584,4096): PCC 0.9999242356504799
+MC chunked dev2 (head 1) K positions [4096,4429): PCC 0.9999163502827356
+MC chunked dev2 (head 1) V positions [4096,4429): PCC 0.9999252395428156
+MC chunked dev3 (head 1) K positions [0,512): PCC 0.9999166304072675
+MC chunked dev3 (head 1) V positions [0,512): PCC 0.9999252830329435
+MC chunked dev3 (head 1) K positions [512,1024): PCC 0.9999158298221118
+MC chunked dev3 (head 1) V positions [512,1024): PCC 0.9999250382401832
+MC chunked dev3 (head 1) K positions [1024,1536): PCC 0.9999173016640506
+MC chunked dev3 (head 1) V positions [1024,1536): PCC 0.9999251955528359
+MC chunked dev3 (head 1) K positions [1536,2048): PCC 0.9999156979754746
+MC chunked dev3 (head 1) V positions [1536,2048): PCC 0.9999248393448807
+MC chunked dev3 (head 1) K positions [2048,2560): PCC 0.9999172694990929
+MC chunked dev3 (head 1) V positions [2048,2560): PCC 0.999924842905277
+MC chunked dev3 (head 1) K positions [2560,3072): PCC 0.9999159315730343
+MC chunked dev3 (head 1) V positions [2560,3072): PCC 0.9999251614583103
+MC chunked dev3 (head 1) K positions [3072,3584): PCC 0.9999166432064195
+MC chunked dev3 (head 1) V positions [3072,3584): PCC 0.9999249990276055
+MC chunked dev3 (head 1) K positions [3584,4096): PCC 0.9999172434319551
+MC chunked dev3 (head 1) V positions [3584,4096): PCC 0.9999242356504799
+MC chunked dev3 (head 1) K positions [4096,4429): PCC 0.9999163502827356
+MC chunked dev3 (head 1) V positions [4096,4429): PCC 0.9999252395428156
+MC full_attention decode after chunked prefill pos=4429: PCC 0.9999912961165692
+PASSED2026-09-24 11:05:19.160 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-09-24 11:05:19.166 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-09-24 11:05:19.166 | warning  |           Metal | Device 0 acteth core(x= 0,y= 9) virtual(x=29,y=25): subordinate_erisc detected invalid NOC command buffer state before starting the next kernel (write-capable NOC packet tags must be zero so implicit transaction ID users start with transaction ID 0). Current kernel: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp. (watcher_device_reader.cpp:861)
+2026-09-24 11:05:19.166 | info     |           Metal | Last waypoint:  SEW,NKFW,   X,   X,   X (watcher_device_reader.cpp:1155)
+2026-09-24 11:05:19.166 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-09-24 11:05:19.166 | info     |           Metal |  erisc: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp (watcher_device_reader.cpp:1399)
+2026-09-24 11:05:19.166 | info     |           Metal |  subordinate_erisc: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp (watcher_device_reader.cpp:1399)
+2026-09-24 11:05:19.166 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x787265) [0x7a837e187265]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x7a83c1af5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x7a83c4c9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x7a83c4d29ecc]
+
+timeout: the monitored command dumped core
