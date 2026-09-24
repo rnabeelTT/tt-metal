@@ -6,6 +6,8 @@ Dispatches to either Gated DeltaNet (linear attention) or Gated Full Attention
 based on the layer index. Both share the same RMSNorm + residual pattern and MLP.
 """
 
+import math
+
 import ttnn
 from models.common.rmsnorm import RMSNorm
 from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
@@ -161,6 +163,27 @@ class Qwen36DecoderLayer:
             )
         return norm
 
+    def _decode_norm(self, norm, x, norm_mode, norm_config, keep_sharded=False):
+        if not getattr(self, "_sharded_decode_norm", False):
+            return norm(x, mode=norm_mode, norm_config=norm_config)
+        cfg = self.args.get_norm_config("attn", Mode.DECODE)
+        # The sharded norm program is sized for one 32-row tile of users ([1,1,<=32,dim]). The single-device
+        # batched decode layout [1,B,1,dim] pads every user to its own tile (physical height 32*B), which the
+        # 32-row shard spec rejects; keep the interleaved norm there.
+        shard_rows = cfg["sharded_output_config"].shard_spec.shape[0]
+        phys = list(x.padded_shape)
+        if phys[-2] * math.prod(phys[:-2]) != shard_rows:
+            return norm(x, mode=norm_mode, norm_config=norm_config)
+        x_sh = ttnn.to_memory_config(x, cfg["sharded_output_config"])
+        out = norm(x_sh, mode=norm_mode, in_sharded=True, out_sharded=True, norm_config=cfg)
+        ttnn.deallocate(x_sh)
+        if keep_sharded:
+            # the consumer (DRAM-sharded decode matmul hook) reads the width-sharded tensor directly
+            return out
+        out_il = ttnn.sharded_to_interleaved(out, ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(out)
+        return out_il
+
     def forward(
         self,
         x,
@@ -196,7 +219,19 @@ class Qwen36DecoderLayer:
             _attn_norm_config = _ff_norm_config = (
                 {"output_mem_config": ttnn.L1_MEMORY_CONFIG} if mode == "decode" else None
             )
-        attn_input = self.attention_norm(x, mode=_norm_mode, norm_config=_attn_norm_config)
+        # Opt-in (args.decode_norm_sharded): single-device decode norms run the sharded RMSNorm program on a
+        # width-sharded L1 copy of the residual instead of the one-core interleaved norm; output back to L1
+        # interleaved for the (interleaved) token-mixer inputs.
+        self._sharded_decode_norm = (
+            self.num_devices == 1 and mode == "decode" and bool(getattr(self.args, "decode_norm_sharded", False))
+        )
+        attn_input = self._decode_norm(
+            self.attention_norm,
+            x,
+            _norm_mode,
+            _attn_norm_config,
+            keep_sharded=bool(self.is_full_attention and getattr(self.args, "attn_norm_out_sharded", False)),
+        )
 
         if self.num_devices > 1:
             # TP modules: input is the gathered (full-dim) norm output [1,1,B/S,dim];
@@ -258,7 +293,7 @@ class Qwen36DecoderLayer:
         h = ttnn.add(x, attn_output)
         ttnn.deallocate(attn_output)
 
-        ff_input = self.ffn_norm(h, mode=_norm_mode, norm_config=_ff_norm_config)
+        ff_input = self._decode_norm(self.ffn_norm, h, _norm_mode, _ff_norm_config)
 
         ff_output = self.feed_forward.forward(ff_input, mode=mode)
         ttnn.deallocate(ff_input)

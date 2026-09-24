@@ -52,6 +52,7 @@ class GDNWeights:
     # Fused projection weights
     ab_proj_weight: ttnn.Tensor
     mega_fused_weight: object
+    gva_expand: object
     mega_qkv_dim: object
     mega_a_dim: object
     mega_b_dim: object
@@ -76,16 +77,28 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
     conv_kernel_size = config.conv_kernel_size
     norm_eps = config.norm_eps
 
-    def load_weight_2d(name):
+    _wdt = getattr(config, "weight_dtype", None) or ttnn.bfloat8_b
+    _tag = "" if _wdt == ttnn.bfloat8_b else f".{_wdt}".replace("DataType.", "")
+    _memcfgs = getattr(config, "weight_memcfgs", None) or {}
+
+    def _memcfg(role):
+        # Per-role weight placement (default DRAM interleaved); sharded weights get their own cache file.
+        mc = _memcfgs.get(role)
+        if mc is None:
+            return ttnn.DRAM_MEMORY_CONFIG, ""
+        return mc, ".ds"
+
+    def load_weight_2d(name, role=None):
         """Load 2D weight, transpose to [in, out] for ttnn.linear."""
         t = state_dict[name].T.contiguous()
+        mc, mtag = _memcfg(role or name)
         return ttnn.as_tensor(
             t,
-            dtype=ttnn.bfloat8_b,
+            dtype=_wdt,
             layout=ttnn.TILE_LAYOUT,
             device=mesh_device,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            cache_file_name=(tensor_cache_path / f"linear_attn.{name}") if tensor_cache_path else None,
+            memory_config=mc,
+            cache_file_name=(tensor_cache_path / f"linear_attn.{name}{_tag}{mtag}") if tensor_cache_path else None,
         )
 
     def load_conv_weight(name):
@@ -115,11 +128,11 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
     t = state_dict[qkv_key].T.contiguous()  # [4096, 8192]
     qkv_proj_weight = ttnn.as_tensor(
         t,
-        dtype=ttnn.bfloat8_b,
+        dtype=_wdt,
         layout=ttnn.TILE_LAYOUT,
         device=mesh_device,
         memory_config=ttnn.DRAM_MEMORY_CONFIG,
-        cache_file_name=(tensor_cache_path / "linear_attn.qkv_proj.weight") if tensor_cache_path else None,
+        cache_file_name=(tensor_cache_path / f"linear_attn.qkv_proj.weight{_tag}") if tensor_cache_path else None,
     )
     # The split q/k/v_proj are dead (the op runs the fused QKV from the combined weight; it
     # reads the splits only in a fallback reached when qkv_proj_weight is None). Not created,
@@ -130,7 +143,7 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
     a_proj_weight = load_weight_2d("in_proj_a.weight")
     b_proj_weight = load_weight_2d("in_proj_b.weight")
     g_proj_weight = load_weight_2d("in_proj_z.weight")
-    o_proj_weight = load_weight_2d("out_proj.weight")
+    o_proj_weight = load_weight_2d("out_proj.weight", role="o")
 
     q_conv_weight = load_conv_weight("q_conv.weight")
     k_conv_weight = load_conv_weight("k_conv.weight")
@@ -220,12 +233,29 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         """
         if qkv_proj_weight is None:
             return None
-        qkv_w = ttnn.to_torch(qkv_proj_weight)  # [4096, 8192]
-        a_w = ttnn.to_torch(a_proj_weight)  # [4096, 32]
-        b_w = ttnn.to_torch(b_proj_weight)  # [4096, 32]
-        g_w = ttnn.to_torch(g_proj_weight)  # [4096, 4096]
-        fused = torch.cat([qkv_w, a_w, b_w, g_w], dim=1).contiguous()
-        return ttnn.from_torch(fused, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, device=mesh_device)
+        # Built from the checkpoint tensors (not from the device copies): keeps the configured weight
+        # dtype (bfp8 default; the decode in-projection is this matmul) and lets the fused weight be cached
+        # and placed per config.weight_memcfgs["mega"].
+        fused = torch.cat(
+            [
+                state_dict["qkv_proj.weight"],
+                state_dict["in_proj_a.weight"],
+                state_dict["in_proj_b.weight"],
+                state_dict["in_proj_z.weight"],
+            ],
+            dim=0,
+        ).T.contiguous()
+        mc, mtag = _memcfg("mega")
+        return ttnn.as_tensor(
+            fused,
+            dtype=_wdt,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=mc,
+            cache_file_name=(tensor_cache_path / f"linear_attn.mega_fused.weight{_tag}{mtag}")
+            if tensor_cache_path
+            else None,
+        )
 
     # Precompute conv weight taps and bias on device to avoid CPU round-trips during decode
     q_weight_taps = _precompute_weight_taps(q_conv_weight)
@@ -245,6 +275,21 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
     # Mega-fused weight: QKV + a + b + g in one [4096, 12352] matmul
     # Eliminates 2 separate matmuls (g_proj, ab_proj) per decode step
     mega_fused_weight = _precompute_mega_fused_weight()
+
+    # One-hot GVA expansion matrix E[Nv, Nk] (E[i, i // (Nv/Nk)] = 1): q/k head repeat as one exact matmul in decode.
+    gva_expand = None
+    if num_v_heads > num_heads:
+        rep = num_v_heads // num_heads
+        E = torch.zeros(1, 1, num_v_heads, num_heads, dtype=torch.bfloat16)
+        E[0, 0, torch.arange(num_v_heads), torch.arange(num_v_heads) // rep] = 1.0
+        gva_expand = ttnn.as_tensor(
+            E,
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            cache_file_name=(tensor_cache_path / "linear_attn.gva_expand") if tensor_cache_path else None,
+        )
     if mega_fused_weight is not None:
         mega_qkv_dim = config.q_dim + config.k_dim + config.v_dim
         mega_a_dim = num_v_heads
@@ -296,6 +341,7 @@ def load_gdn_weights(mesh_device, config: GDNConfig, state_dict, tensor_cache_pa
         mega_a_dim=mega_a_dim,
         mega_b_dim=mega_b_dim,
         mega_g_dim=mega_g_dim,
+        gva_expand=gva_expand,
         use_chunk_seq_prefill=use_chunk_seq_prefill,
         chunk_seq_masks_long=chunk_seq_masks_long,
     )

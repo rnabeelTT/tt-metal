@@ -93,6 +93,9 @@ def recurrent_forward(gdn, x, mode="recurrent", chunk_size=None, valid_len=None)
         mega_b_dim=w.mega_b_dim,
         mega_g_dim=w.mega_g_dim,
         use_inplace_state=gdn.use_inplace_state,
+        decode_matmul_fn=getattr(gdn.cfg, "decode_matmul_fn", None),
+        gva_expand=getattr(w, "gva_expand", None),
+        decode_high_precision=bool(getattr(gdn.cfg, "decode_high_precision", False)),
         chunk_seq_masks=seq_masks,
         valid_len=valid_len,
     )

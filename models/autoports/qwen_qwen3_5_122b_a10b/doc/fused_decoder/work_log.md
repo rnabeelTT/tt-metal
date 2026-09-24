@@ -61,3 +61,6 @@ Baseline: stage-1 functional decoder (doc/functional_decoder/tracy). Device: one
   first failed on a transformers-5 class rename (`Qwen3_5RotaryEmbedding` -> `Qwen3_5TextRotaryEmbedding`), rerun PASS (B=1 0.99676,
   B=4 distinct positions 0.99661..0.99739); 9B unit suite 5/5 PASS. Amending the stage-2 commit with these files and re-running the
   stage review.
+- (host 04:52) stage-review #2 on bbda338fe56: clean-pass. P3 notes applied in the stage-3 tree: layout-op counts in the README
+  audit section corrected from the committed CSVs (incl. the autoport's own scores tilize), the "router matmul ~1%" comment
+  corrected (70 us = ~5%), window completeness now cited from the committed `*_perf_report.csv`, 305 -> 306 ops.

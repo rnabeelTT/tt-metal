@@ -240,15 +240,17 @@ def l2_norm_ttnn(x, dim=-1, eps=1e-6):
     return ttnn.multiply(x, inv_norm, memory_config=mc)
 
 
-# Largest recurrent state (B*H*K*V*4 bytes) the T=1 decode keeps L1-resident. Beyond it (wide GDNs at
-# large batch, e.g. 64 heads x 128 x 128 fp32 at B=32 = 134 MiB) the state and its update stay in DRAM.
-# 96 MiB keeps every existing configuration on its previous L1 path (Qwen3.5-9B single device: 32 heads x 128 x 128
-# fp32 = 2 MiB/user -> B<=48; TP per-device states are smaller) and moves only wider-than-9B GDNs at large batch to DRAM.
-_DECODE_STATE_L1_BUDGET_BYTES = 96 * 1024 * 1024
+# Largest state-sized decode temporary (B*H*K*V*itemsize bytes: the outer-product update) kept in L1. The persistent
+# state itself is read where it lives. 24 MiB = 12 users of a 64x128x128 bf16 state (2 MiB each) or 24 of the 9B's 32-head
+# state (1 MiB each); above it the temporary and the update go to DRAM (the old budget was 96 MiB counted at 4 bytes per
+# element for every dtype, i.e. 48 MiB of real bf16 bytes; a 64 MiB L1 request at B=32 does not fit next to the resident buffers).
+_DECODE_STATE_L1_BUDGET_BYTES = 24 * 1024 * 1024
 
 
-def _decode_state_memory_config(B, H, K, V):
-    return ttnn.L1_MEMORY_CONFIG if B * H * K * V * 4 <= _DECODE_STATE_L1_BUDGET_BYTES else ttnn.DRAM_MEMORY_CONFIG
+def _decode_state_memory_config(B, H, K, V, itemsize=4):
+    return (
+        ttnn.L1_MEMORY_CONFIG if B * H * K * V * itemsize <= _DECODE_STATE_L1_BUDGET_BYTES else ttnn.DRAM_MEMORY_CONFIG
+    )
 
 
 def fused_decay_and_write_ttnn(
@@ -402,8 +404,20 @@ def recurrent_gated_delta_rule_decode_ttnn(
     initial_state=None,
     device=None,
     high_precision=False,
+    state_out=None,
+    output_head_rows=False,
 ):
-    """T=1 decode path: no loop/slice overhead. Returns o [B,1,H,V], state [B,H,K,V]."""
+    """T=1 decode path: no loop/slice overhead. Returns o [B,1,H,V] (or [B,H,1,V] tile-padded head rows when
+    ``output_head_rows``), state [B,H,K,V].
+
+    Structure (one state-sized read pass + one state-sized write pass):
+      v_read = (k @ h_old) * exp(g)            # decay applied to the read (same algebra as decaying h first)
+      delta  = (v - v_read) * beta             # [B,H,1,V]
+      outer  = k^T x delta                     # column x row broadcast multiply -> [B,H,K,V] (no padded-K matmul)
+      h_new  = h_old * exp(g) + outer          # one fused mac, written into ``state_out`` when given (no staging copy)
+      o      = q @ h_new
+    Every head-row tensor stays tile-padded [B,H,1,*]; the only dense reshape is the final output (skipped with
+    ``output_head_rows``)."""
     B = q.shape[0]
     H = q.shape[2]
     K = q.shape[3]
@@ -425,16 +439,14 @@ def recurrent_gated_delta_rule_decode_ttnn(
         scale = K**-0.5
     q = ttnn.multiply(q, scale, memory_config=ttnn.L1_MEMORY_CONFIG)
 
-    # Reshape to matmul shapes; caller already TILE_LAYOUT.
-    # Decode opt: q_row/k_row in L1 with L1-resident state h.
-    q_row = ttnn.reshape(q, [B, H, 1, K], memory_config=ttnn.L1_MEMORY_CONFIG)
-    k_row = ttnn.reshape(k, [B, H, 1, K], memory_config=ttnn.L1_MEMORY_CONFIG)
-    v_t = ttnn.reshape(v, [B, H, V], memory_config=ttnn.L1_MEMORY_CONFIG)
-    beta_t = ttnn.reshape(beta, [B, H], memory_config=ttnn.L1_MEMORY_CONFIG)
-    g_t = ttnn.reshape(g, [B, H], memory_config=ttnn.L1_MEMORY_CONFIG)
+    # Head-row layouts [B,H,1,*] (dense -> tile-padded reshapes: one output tile row per head, cheap).
+    _L1 = ttnn.L1_MEMORY_CONFIG
+    q_row = ttnn.reshape(q, [B, H, 1, K], memory_config=_L1)
+    k_row = ttnn.reshape(k, [B, H, 1, K], memory_config=_L1)
+    v_row = ttnn.reshape(v, [B, H, 1, V], memory_config=_L1)
+    beta_bh11 = ttnn.reshape(beta, [B, H, 1, 1], memory_config=_L1)
+    g_bh11 = ttnn.reshape(g, [B, H, 1, 1], memory_config=_L1)
 
-    # Decay is exp(g); fused into the decay multiply below (no standalone ttnn.exp).
-    # Ensure state is ready
     h = initial_state
     if h is None:
         h = ttnn.zeros(
@@ -442,10 +454,8 @@ def recurrent_gated_delta_rule_decode_ttnn(
         )
     elif high_precision and h.dtype != ttnn.float32:
         h = ttnn.typecast(h, ttnn.float32)
-
-    # Decode opt: keep [B,H,K,V] state in L1 (~0.8MB fp32 at B=1); DRAM when it exceeds the L1 budget.
-    _state_mc = _decode_state_memory_config(B, H, K, V)
-    h = ttnn.to_memory_config(h, _state_mc)
+    # The state is read where it lives (no staging copy); the state-sized temporaries follow the L1 budget.
+    _state_mc = _decode_state_memory_config(B, H, K, V, 4 if h.dtype == ttnn.float32 else 2)
 
     read_query_compute_cfg = ttnn.WormholeComputeKernelConfig(
         math_fidelity=ttnn.MathFidelity.HiFi2,
@@ -461,37 +471,44 @@ def recurrent_gated_delta_rule_decode_ttnn(
         except Exception:
             pass
 
-    # Decay before read; keep recurrence step L1-resident.
-    # decay = exp(g), fused as a pre-activation on the multiply's second operand — one fewer op
-    # than a standalone ttnn.exp + multiply.
-    _L1 = ttnn.L1_MEMORY_CONFIG
-    g_bhkv = ttnn.reshape(g_t, [B, H, 1, 1], memory_config=_L1)
-    h = ttnn.multiply(h, g_bhkv, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_state_mc)
-
-    # v_read = k @ h (decayed state)
+    # v_read = (k @ h_old) * exp(g): the per-head decay is applied to the read row instead of to the whole
+    # state (identical algebra), so the state is touched only by the fused update below.
     v_read = ttnn.matmul(
         k_row, h, memory_config=_L1, program_config=read_query_prog_cfg, compute_kernel_config=read_query_compute_cfg
     )
-    v_read = ttnn.reshape(v_read, [B, H, V], memory_config=_L1)
+    v_read = ttnn.multiply(v_read, g_bh11, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
+    delta = ttnn.subtract(v_row, v_read, memory_config=_L1)
+    ttnn.deallocate(v_read)
+    d_row = ttnn.multiply(delta, beta_bh11, memory_config=_L1)  # beta folded into the small operand
+    ttnn.deallocate(delta)
+    # outer = k^T x (beta*delta) as a column x row broadcast multiply (no inner-dim-1 matmul, no dense reshapes)
+    k_col = ttnn.transpose(k_row, -2, -1)  # [B,H,K,1]
+    outer = ttnn.multiply(k_col, d_row, memory_config=_state_mc)
+    ttnn.deallocate(k_col)
+    ttnn.deallocate(d_row)
+    decay = ttnn.exp(g_bh11, memory_config=_L1)
+    # h_new = h_old * decay + outer in one pass; written straight into the persistent buffer when given.
+    if state_out is not None and state_out.dtype == h.dtype:
+        # written in place; keep the caller's tensor object (the op's return value aliases the same buffer, and
+        # deallocating it would free the persistent state)
+        ttnn.mac(h, decay, outer, output_tensor=state_out)
+        h_new = state_out
+    else:
+        h_new = ttnn.mac(h, decay, outer, memory_config=_state_mc)
+    ttnn.deallocate(outer)
+    ttnn.deallocate(decay)
 
-    # Delta + state write (no re-decay).
-    delta = ttnn.subtract(v_t, v_read, memory_config=_L1)
-    k_t = ttnn.reshape(k_row, [B, H, K], memory_config=_L1)
-    # decay_t is unused downstream (apply_decay=False -> h already decayed above); pass g_bhkv to
-    # satisfy the signature without recomputing a decay tensor.
-    h = fused_decay_and_write_ttnn(
-        h=h, k_t=k_t, delta=delta, decay_t=g_bhkv, beta_t=beta_t, device=device, apply_decay=False
-    )
-
-    # o = q @ h
     o_t = ttnn.matmul(
-        q_row, h, memory_config=_L1, program_config=read_query_prog_cfg, compute_kernel_config=read_query_compute_cfg
+        q_row,
+        h_new,
+        memory_config=_L1,
+        program_config=read_query_prog_cfg,
+        compute_kernel_config=read_query_compute_cfg,
     )
-
-    # Reshape output to [B, 1, H, V]
+    if output_head_rows:
+        return o_t, h_new
     o = ttnn.reshape(o_t, [B, 1, H, V], memory_config=_L1)
-
-    return o, h
+    return o, h_new
 
 
 def recurrent_gated_delta_rule_decode_inplace_ttnn(
@@ -504,8 +521,11 @@ def recurrent_gated_delta_rule_decode_inplace_ttnn(
     scale=None,
     device=None,
     high_precision=False,
+    output_head_rows=False,
 ):
-    """Decode with in-place state copy to pre-allocated buffer (trace-safe addresses)."""
+    """Decode writing the new state into the pre-allocated buffer (trace-safe addresses). The update is written in
+    place when the buffer dtype matches the step dtype; otherwise (e.g. fp32 step on a bf16 buffer) it is copied back.
+    """
     o, new_h = recurrent_gated_delta_rule_decode_ttnn(
         q=q,
         k=k,
@@ -516,10 +536,12 @@ def recurrent_gated_delta_rule_decode_inplace_ttnn(
         initial_state=state_buffer,
         device=device,
         high_precision=high_precision,
+        state_out=state_buffer,
+        output_head_rows=output_head_rows,
     )
-    # Copy state back to pre-allocated buffer for trace replay.
-    ttnn.copy(new_h, state_buffer)
-    ttnn.deallocate(new_h)
+    if new_h is not state_buffer:
+        ttnn.copy(new_h, state_buffer)
+        ttnn.deallocate(new_h)
     return o, state_buffer
 
 

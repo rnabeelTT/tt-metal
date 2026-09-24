@@ -138,17 +138,17 @@ def _get_flexible_sdpa_program_config(device):
     )
 
 
-def _get_paged_sdpa_decode_program_config(device, max_seq_len):
+def _get_paged_sdpa_decode_program_config(device, max_seq_len, q_chunk=None, k_chunk=None):
     """Build SDPAProgramConfig for paged_scaled_dot_product_attention_decode.
 
-    Uses small chunk sizes to avoid L1 OOM on Blackhole.
+    Uses small chunk sizes to avoid L1 OOM on Blackhole (callers may pass explicit chunk sizes).
     Note: do NOT pass compute_kernel_config to paged_sdpa_decode on Blackhole —
     the default is compatible; custom configs can cause incorrect output.
     """
     return ttnn.SDPAProgramConfig(
         compute_with_storage_grid_size=ttnn.CoreCoord(8, 8),
-        q_chunk_size=32,
-        k_chunk_size=64,
+        q_chunk_size=q_chunk or 32,
+        k_chunk_size=k_chunk or 64,
         exp_approx_mode=False,
     )
 
@@ -208,6 +208,9 @@ def gated_attention_forward_ttnn(
     chunk_start_idx=None,  # int — absolute position of this chunk in the full sequence
     chunk_start_idx_tensor=None,  # device tensor [1] int32 — runtime offset for trace-replay (flexible SDPA)
     qkv_proj_weight=None,  # fused [in, 2*Hq*D + 2*Hkv*D] = [q+gate | k | v]; when given q/k/v_proj_weight are unused
+    sdpa_decode_q_chunk=None,  # optional explicit paged SDPA-decode chunk sizes
+    sdpa_decode_k_chunk=None,
+    decode_matmul_fn=None,  # optional (x, weight, role, ckc, memory_config) -> out | None for the T==1 dense projections
 ):
     """
     TTNN forward pass for Gated Attention with KV cache support.
@@ -242,17 +245,27 @@ def gated_attention_forward_ttnn(
 
     # Q projection: 2x wide
     ckc = compute_kernel_config
+
+    def _lin(x, w, role):
+        # Program-config hook (roles "qkv", "q", "o"); None from the hook -> default ttnn.linear. The hook sees
+        # every call (it decides by activation shape) so weights it placed DRAM-sharded get a legal prefill config too.
+        if decode_matmul_fn is not None:
+            out = decode_matmul_fn(x, w, role, ckc, memory_config)
+            if out is not None:
+                return out
+        return ttnn.linear(x, w, compute_kernel_config=ckc, memory_config=memory_config)
+
     if qkv_proj_weight is not None:
         # One shared-input matmul for [q+gate | k | v], then slices (graph-fusing: shared-LHS matmul).
         q_w = num_attention_heads * head_dim * 2
         kv_w = num_key_value_heads * head_dim
-        qkv = ttnn.linear(hidden_states, qkv_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+        qkv = _lin(hidden_states, qkv_proj_weight, "qkv")
         qg = ttnn.slice(qkv, [0, 0, 0], [B, T, q_w], memory_config=memory_config)
         key_states = ttnn.slice(qkv, [0, 0, q_w], [B, T, q_w + kv_w], memory_config=memory_config)
         value_states = ttnn.slice(qkv, [0, 0, q_w + kv_w], [B, T, q_w + 2 * kv_w], memory_config=memory_config)
         ttnn.deallocate(qkv)
     else:
-        qg = ttnn.linear(hidden_states, q_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+        qg = _lin(hidden_states, q_proj_weight, "q")
         key_states = None
         value_states = None
     qg = ttnn.reshape(qg, [B, T, num_attention_heads, head_dim * 2])
@@ -309,6 +322,12 @@ def gated_attention_forward_ttnn(
         key_fill = key_states[:, :, :page_len, :] if page_len < key_states.shape[2] else key_states
         value_fill = value_states[:, :, :page_len, :] if page_len < value_states.shape[2] else value_states
 
+        # A reduced-precision cache (e.g. bfloat8_b) needs the fill tensors cast to the cache dtype;
+        # decode paged_update_cache keeps bf16 inputs (its contract).
+        if key_fill.dtype != paged_kv_cache_key.dtype:
+            key_fill = ttnn.typecast(key_fill, paged_kv_cache_key.dtype)
+        if value_fill.dtype != paged_kv_cache_value.dtype:
+            value_fill = ttnn.typecast(value_fill, paged_kv_cache_value.dtype)
         ttnn.experimental.paged_fill_cache(paged_kv_cache_key, key_fill, chunk_page_table, batch_idx=0)
         ttnn.experimental.paged_fill_cache(paged_kv_cache_value, value_fill, chunk_page_table, batch_idx=0)
         ttnn.deallocate(key_states)
@@ -383,7 +402,10 @@ def gated_attention_forward_ttnn(
             is_causal=True,
             scale=scaling,
             program_config=_get_paged_sdpa_decode_program_config(
-                device, paged_kv_cache_key.shape[0] * paged_kv_cache_key.shape[2]
+                device,
+                paged_kv_cache_key.shape[0] * paged_kv_cache_key.shape[2],
+                sdpa_decode_q_chunk,
+                sdpa_decode_k_chunk,
             ),
         )
         attn_output = ttnn.permute(attn_output, (1, 2, 0, 3))  # [1, B, H_q, D] -> [B, H_q, 1, D]
@@ -581,6 +603,6 @@ def gated_attention_forward_ttnn(
     ttnn.deallocate(gate)
 
     # Output projection
-    attn_output = ttnn.linear(attn_output, o_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+    attn_output = _lin(attn_output, o_proj_weight, "o")
 
     return attn_output, new_key, new_value

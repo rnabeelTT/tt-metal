@@ -63,14 +63,14 @@ class Qwen35MoEFused(Qwen35MoE):
                     routed_scaling_factor=1.0,
                     # The gate's derived 2D program config is sized for one M tile (decode batch <= 32);
                     # prefill routes hundreds of rows through the same object, so let ttnn pick the matmul
-                    # program per shape (the router matmul is ~1% of the layer).
+                    # program per shape. (The router matmul itself is ~5% of the fused layer at 70 us on 8 cores;
+                    # the optimized decoder installs a decode-only program config for it.)
                     gate_matmul_auto_program_config=False,
                 ),
                 state_dict["gate.weight"].T.contiguous(),
             )
-            # the gate op owns its (padded) copy of the router weight; drop the functional one
-            ttnn.deallocate(self.router_w)
-            self.router_w = None
+            # The functional router weight (1.5 MB) is kept: prefill rows use it (see _route); the gate op serves the
+            # single-tile decode rows only.
         if self.flags.shared_expert_packed:
             import torch
 
@@ -104,7 +104,12 @@ class Qwen35MoEFused(Qwen35MoE):
 
     # ---- router -------------------------------------------------------------------------------------
     def _route(self, x4):
-        if not self.flags.router_gate_op:
+        # The gate op is used for the single-user decode row only. With several valid rows its output was measured
+        # bit-NONDETERMINISTIC (5 of 29 identical T=37 prefills and 4 of 11 identical B=32 decodes differed at bf16 ulp
+        # level; 0 of 29 with this functional router; 0 of 29+29 for the single-row decode) — see
+        # doc/optimized_decoder/work_log.md (2026-09-24 06:35 / 07:05).
+        phys = list(x4.padded_shape)
+        if not self.flags.router_gate_op or x4.shape[2] != 1 or phys[-2] != 32 or any(d != 1 for d in phys[:-2]):
             return super()._route(x4)
         weights, ids = self.gate.forward(x4)  # [T,1,1,k] bf16 / uint16, ROW_MAJOR
         T = weights.shape[0]

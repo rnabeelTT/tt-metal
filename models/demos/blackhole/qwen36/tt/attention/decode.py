@@ -46,5 +46,8 @@ def decode_forward(
         page_table=page_table,
         paged_kv_cache_key=paged_kv_cache_key,
         paged_kv_cache_value=paged_kv_cache_value,
+        sdpa_decode_q_chunk=getattr(config, "sdpa_decode_q_chunk", None),
+        sdpa_decode_k_chunk=getattr(config, "sdpa_decode_k_chunk", None),
+        decode_matmul_fn=getattr(config, "decode_matmul_fn", None),
     )
     return output

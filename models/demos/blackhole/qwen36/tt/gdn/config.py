@@ -16,6 +16,14 @@ class GDNConfig:
     k_dim: int
     v_dim: int
     long_prefill_chunk_size: int = 128
+    # Projection weight dtype (qkv/z/a/b/out); default keeps the validated bfloat8_b.
+    weight_dtype: object = None
+    # Optional decode matmul hook (x, weight, role, ckc, mc) -> out|None for roles "mega"/"o" (args.gdn_decode_matmul_fn).
+    decode_matmul_fn: object = None
+    # Optional per-role weight memory configs {"mega": ..., "o": ...} (args.gdn_weight_memcfgs).
+    weight_memcfgs: object = None
+    # fp32 recurrent decode step (args.gdn_decode_high_precision); pair with an fp32 external state buffer.
+    decode_high_precision: bool = False
 
     @classmethod
     def from_args(cls, args) -> "GDNConfig":
@@ -29,4 +37,8 @@ class GDNConfig:
             q_dim=args.linear_q_dim,
             k_dim=args.linear_k_dim,
             v_dim=args.linear_v_dim,
+            weight_dtype=getattr(args, "gdn_weight_dtype", None),
+            decode_matmul_fn=getattr(args, "gdn_decode_matmul_fn", None),
+            weight_memcfgs=getattr(args, "gdn_weight_memcfgs", None),
+            decode_high_precision=bool(getattr(args, "gdn_decode_high_precision", False)),
         )

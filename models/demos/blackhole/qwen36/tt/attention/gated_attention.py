@@ -22,7 +22,12 @@ class Qwen36GatedAttention:
         self.config = config
 
         self.weights = load_attention_weights(
-            mesh_device, state_dict, tensor_cache_path, fuse_qkv=getattr(config, "fuse_qkv", False)
+            mesh_device,
+            state_dict,
+            tensor_cache_path,
+            fuse_qkv=getattr(config, "fuse_qkv", False),
+            weight_dtype=getattr(config, "weight_dtype", None),
+            weight_memcfgs=getattr(config, "weight_memcfgs", None),
         )
 
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(

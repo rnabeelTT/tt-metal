@@ -32,6 +32,7 @@ def prefill_forward(
         # Branch A — paged prefill: fill K/V into paged cache + chunked SDPA
         # No memory_config, no cur_pos_tensor.
         output, _, _ = gated_attention_forward_ttnn(
+            decode_matmul_fn=getattr(config, "decode_matmul_fn", None),
             hidden_states=x,
             q_proj_weight=weights.q_proj,
             qkv_proj_weight=getattr(weights, "qkv_proj", None),
@@ -62,6 +63,7 @@ def prefill_forward(
         # Branch C — concat path: non-paged prefill and short-sequence paged prefill.
         # Has memory_config=mc, past_key/past_value; returns new_key/new_value.
         output, new_key, new_value = gated_attention_forward_ttnn(
+            decode_matmul_fn=getattr(config, "decode_matmul_fn", None),
             hidden_states=x,
             q_proj_weight=weights.q_proj,
             qkv_proj_weight=getattr(weights, "qkv_proj", None),

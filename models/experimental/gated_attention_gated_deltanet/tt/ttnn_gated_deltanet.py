@@ -56,11 +56,10 @@ def _causal_conv1d_decode_t1_split(
     """
     mc = memory_config
 
-    # out = sum(weight_taps[k] * state[k]) + weight_taps[K-1] * x
+    # out = sum(weight_taps[k] * state[k]) + weight_taps[K-1] * x  (one multiply + fused multiply-adds)
     out = ttnn.multiply(x, weight_taps[kernel_size - 1], memory_config=mc)
     for k in range(kernel_size - 1):
-        term = ttnn.multiply(conv_state_list[k], weight_taps[k], memory_config=mc)
-        out = ttnn.add(out, term, memory_config=mc)
+        out = ttnn.mac(conv_state_list[k], weight_taps[k], out, memory_config=mc)
 
     if bias_dev is not None:
         out = ttnn.add(out, bias_dev, memory_config=mc)
@@ -79,8 +78,7 @@ def _causal_conv1d_decode_t1_split_inplace(
 
     out = ttnn.multiply(x, weight_taps[kernel_size - 1], memory_config=mc)
     for k in range(kernel_size - 1):
-        term = ttnn.multiply(conv_state_list[k], weight_taps[k], memory_config=mc)
-        out = ttnn.add(out, term, memory_config=mc)
+        out = ttnn.mac(conv_state_list[k], weight_taps[k], out, memory_config=mc)
 
     if bias_dev is not None:
         out = ttnn.add(out, bias_dev, memory_config=mc)
@@ -405,6 +403,9 @@ def gated_deltanet_forward_ttnn(
     use_inplace_state=False,  # ttnn.copy for trace-stable state
     chunk_seq_masks=None,  # cached masks for gated_delta_attn_seq prefill
     valid_len=None,  # fixed-bucket padding; zeros padded positions in scan
+    decode_matmul_fn=None,  # optional (x, weight, role, ckc, memory_config) -> out | None for the T==1 dense projections
+    gva_expand=None,  # [1,1,num_v_heads,num_heads] one-hot expansion matrix: q/k GVA repeat as one matmul (T==1, B==1)
+    decode_high_precision=False,  # fp32 recurrent decode step (state buffer should be fp32 to update in place)
 ):
     """Gated DeltaNet forward. mode: recurrent (decode T=1) or chunk (prefill T>1).
 
@@ -439,7 +440,11 @@ def gated_deltanet_forward_ttnn(
     )
 
     if use_mega_fused:
-        mega_out = ttnn.linear(hidden_states, mega_fused_weight, memory_config=mc, compute_kernel_config=ckc)
+        mega_out = None
+        if decode_matmul_fn is not None:
+            mega_out = decode_matmul_fn(hidden_states, mega_fused_weight, "mega", ckc, mc)
+        if mega_out is None:
+            mega_out = ttnn.linear(hidden_states, mega_fused_weight, memory_config=mc, compute_kernel_config=ckc)
         # Split QKV | a | b | g
         qkv = mega_out[:, :, :mega_qkv_dim]
         qkv = ttnn.to_layout(qkv, ttnn.TILE_LAYOUT)
@@ -669,11 +674,22 @@ def gated_deltanet_forward_ttnn(
     k = ttnn.reshape(k, [B, T, num_heads, head_k_dim], memory_config=mc)
     v = ttnn.reshape(v, [B, T, num_v_heads, head_v_dim], memory_config=mc)
 
-    # GVA: repeat q,k
+    # GVA: repeat q,k across the value heads
     if num_v_heads > num_heads:
         repeats = num_v_heads // num_heads
-        q = ttnn.repeat_interleave(q, repeats, dim=2)
-        k = ttnn.repeat_interleave(k, repeats, dim=2)
+        if gva_expand is not None and B == 1 and T == 1:
+            # one-hot expansion matmul E[Nv,Nk] @ q[Nk,Dk] (exact) instead of the composite repeat_interleave
+            gva_ckc = ttnn.WormholeComputeKernelConfig(
+                math_fidelity=ttnn.MathFidelity.HiFi4,
+                math_approx_mode=False,
+                fp32_dest_acc_en=True,
+                packer_l1_acc=False,
+            )
+            q = ttnn.matmul(gva_expand, q, memory_config=mc, compute_kernel_config=gva_ckc)
+            k = ttnn.matmul(gva_expand, k, memory_config=mc, compute_kernel_config=gva_ckc)
+        else:
+            q = ttnn.repeat_interleave(q, repeats, dim=2)
+            k = ttnn.repeat_interleave(k, repeats, dim=2)
 
     # Beta and g
     if _mega_extracted:
@@ -720,6 +736,9 @@ def gated_deltanet_forward_ttnn(
             valid_len=valid_len,
         )
     elif T == 1:
+        # Keep the recurrence output as tile-padded head rows [B,H,1,V] when the gated output norm can consume
+        # them (mega path: the gate comes from the same projection); saves the dense head reshapes.
+        _head_rows = bool(use_gate and _mega_extracted)
         if use_inplace_state and recurrent_state is not None:
             o, new_state = recurrent_gated_delta_rule_decode_inplace_ttnn(
                 q=q,
@@ -729,6 +748,8 @@ def gated_deltanet_forward_ttnn(
                 g=g,
                 state_buffer=recurrent_state,
                 device=device,
+                high_precision=decode_high_precision,
+                output_head_rows=_head_rows,
             )
         else:
             o, new_state = recurrent_gated_delta_rule_decode_ttnn(
@@ -739,7 +760,24 @@ def gated_deltanet_forward_ttnn(
                 g=g,
                 initial_state=recurrent_state,
                 device=device,
+                high_precision=decode_high_precision,
+                output_head_rows=_head_rows,
             )
+        if _head_rows:
+            # gated RMSNorm per head on [B,H,1,V]; gate rows via a cheap dense->padded reshape; one dense reshape out
+            gate_rows = ttnn.reshape(gate_raw, [B, num_v_heads, 1, head_v_dim], memory_config=mc)
+            o = rms_norm_gated_ttnn(o, gate_rows, o_norm_weight, eps=norm_eps, memory_config=mc)
+            ttnn.deallocate(gate_rows)
+            o = ttnn.clip(o, min=-1e4, max=1e4, memory_config=mc)
+            o = ttnn.reshape(o, [B, T, num_v_heads * head_v_dim], memory_config=mc)
+            if mc is not None:
+                o = ttnn.to_memory_config(o, mc)
+            o_out = None
+            if decode_matmul_fn is not None:
+                o_out = decode_matmul_fn(o, o_proj_weight, "o", ckc, mc)
+            if o_out is None:
+                o_out = ttnn.linear(o, o_proj_weight, memory_config=mc, compute_kernel_config=ckc)
+            return o_out, new_state, new_conv_q, new_conv_k, new_conv_v, new_fused_conv_state
     else:
         o, new_state = recurrent_gated_delta_rule_ttnn(
             q=q,
@@ -766,6 +804,11 @@ def gated_deltanet_forward_ttnn(
     o = ttnn.reshape(o, [B, T, num_v_heads * head_v_dim], memory_config=mc)
     if mc is not None:
         o = ttnn.to_memory_config(o, mc)
-    o = ttnn.linear(o, o_proj_weight, memory_config=mc, compute_kernel_config=ckc)
+    o_out = None
+    if decode_matmul_fn is not None:
+        o_out = decode_matmul_fn(o, o_proj_weight, "o", ckc, mc)
+    if o_out is None:
+        o_out = ttnn.linear(o, o_proj_weight, memory_config=mc, compute_kernel_config=ckc)
+    o = o_out
 
     return o, new_state, new_conv_q, new_conv_k, new_conv_v, new_fused_conv_state

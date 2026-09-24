@@ -36,6 +36,7 @@ from models.autoports.qwen_qwen3_5_122b_a10b.tt.layer import Qwen35MoeDecoderLay
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.model_config import Qwen35MoeModelArgs
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.weights import remap_hf_layer_state
 from models.common.lightweightmodule import LightweightModule
+from models.demos.blackhole.qwen36.tt.gdn.state import restore_split_conv_from_fused
 from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
 
 GDN_CHUNK = 128  # the chunk-seq GDN prefill kernel's only supported chunk size
@@ -133,21 +134,30 @@ class FunctionalDecoder(LightweightModule):
         """Zeroed recurrent ``[B, Nv, Dk, Dv]`` and conv ``[B, K-1, q+k+v]`` buffers, bound to the layer in place."""
         assert not self.layer.is_full_attention, "only linear_attention layers hold GDN state"
         dn = self.layer.attention
+        state_dtype = getattr(self.args, "gdn_state_dtype", None) or ttnn.bfloat16
         rec = ttnn.zeros(
             (batch_size, dn.num_v_heads, dn.head_k_dim, dn.head_v_dim),
-            dtype=ttnn.bfloat16,
+            dtype=state_dtype,
             layout=ttnn.TILE_LAYOUT,
             device=self.mesh_device,
         )
+        D = dn.cfg.q_dim + dn.cfg.k_dim + dn.cfg.v_dim
         conv = ttnn.zeros(
-            (batch_size, dn.conv_kernel_size - 1, dn.cfg.q_dim + dn.cfg.k_dim + dn.cfg.v_dim),
+            (batch_size, dn.conv_kernel_size - 1, D),
             dtype=ttnn.bfloat16,
             layout=ttnn.TILE_LAYOUT,
             device=self.mesh_device,
         )
+        # Decode conv shift-register: one [B,1,D] buffer per tap (address-stable; refreshed from the fused
+        # [B,K-1,D] buffer after every prefill). Avoids the per-step row slices of the fused buffer.
+        split = [
+            ttnn.zeros((batch_size, 1, D), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh_device)
+            for _ in range(dn.conv_kernel_size - 1)
+        ]
         dn.reset_state()
         dn.set_external_state(rec, conv)
-        self.gdn_state = {"recurrent": rec, "conv": conv, "batch_size": batch_size}
+        dn.split_conv_state = split
+        self.gdn_state = {"recurrent": rec, "conv": conv, "split": split, "batch_size": batch_size}
         return self.gdn_state
 
     def reset_gdn_state(self):
@@ -156,13 +166,15 @@ class FunctionalDecoder(LightweightModule):
         assert st is not None
         self._zero_inplace(st["recurrent"])
         self._zero_inplace(st["conv"])
+        for t in st["split"]:
+            self._zero_inplace(t)
         dn = self.layer.attention
         for t in (dn.conv_state_q, dn.conv_state_k, dn.conv_state_v):
             if t is not None:
                 ttnn.deallocate(t)
         dn.recurrent_state, dn.fused_conv_state = st["recurrent"], st["conv"]
         dn.conv_state_q = dn.conv_state_k = dn.conv_state_v = None
-        dn.split_conv_state = None
+        dn.split_conv_state = st["split"]
         dn.use_inplace_state = True
 
     # ---------------------------------------------------------------------------------------------
@@ -282,6 +294,14 @@ class FunctionalDecoder(LightweightModule):
             assert dn.recurrent_state is not None and (
                 dn.fused_conv_state is not None or dn.conv_state_q is not None
             ), "no state to continue from"
+            if getattr(dn, "split_conv_state", None) is not None and dn.fused_conv_state is not None:
+                # Decode advances only the per-tap shift-register buffers; rebuild the fused [B,K-1,D] window the
+                # chunk kernel reads from them (a no-op right after a prefill, where both are in sync).
+                window = ttnn.concat(list(dn.split_conv_state), dim=1)
+                if window.layout != dn.fused_conv_state.layout:
+                    window = ttnn.to_layout(window, dn.fused_conv_state.layout)
+                ttnn.copy(window, dn.fused_conv_state)
+                ttnn.deallocate(window)
         out = self.layer.forward(x, mode="prefill", chunk_size=GDN_CHUNK, valid_len=valid_len)
         # Materialize this user's post-prefill state as [1, ...] tensors.
         rec1 = dn.recurrent_state
@@ -311,14 +331,16 @@ class FunctionalDecoder(LightweightModule):
             for t in parts:
                 if t is not src:
                     ttnn.deallocate(t)
-        # Re-point the layer at the persistent buffers: decode updates them in place, and a chunk
-        # continuation (start_pos > 0) reads them as its fused conv window + recurrent state.
+        # Re-point the layer at the persistent buffers: decode updates the recurrent state and the per-tap conv
+        # buffers in place; a chunk continuation (start_pos > 0) rebuilds the fused conv window from the taps.
         stale = [t for t in (rec1, conv1, dn.conv_state_q, dn.conv_state_k, dn.conv_state_v) if t is not None]
         if start_pos == 0 and B > 1:
             stale += [rec_in, conv_in]
         dn.recurrent_state, dn.fused_conv_state = rec_b, conv_b
         dn.conv_state_q = dn.conv_state_k = dn.conv_state_v = None
-        dn.split_conv_state = None
+        # Refresh the decode shift-register buffers from the fused conv window (address-stable copies).
+        dn.split_conv_state = st["split"]
+        restore_split_conv_from_fused(dn)
         dn.use_inplace_state = True
         seen = set()
         for t in stale:

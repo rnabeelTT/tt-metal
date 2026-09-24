@@ -61,19 +61,32 @@ stage (program configs, chunk width, dtype). Op counts rise slightly in prefill 
 Model-level estimate (36 GDN + 12 attention layers, one die, device time): 36 x 1.464 + 12 x 1.128 = 66.2 ms/token
 (stage 1: 75.2 ms), i.e. ~15 tok/s single-die-equivalent before optimization.
 
+Pointers left for the optimize stage (from these tables): the router gate matmul `32 x 3072 x 256` runs 70 us on 8 cores
+(SLOW, 4.8% of the GDN layer / 6.2% of the attention layer; the gate op removed the ~63 us softmax/top-k tail, not the
+matmul), both RMSNorms run ~49 us each on one core, and the packed shared-expert matmul is 56 us (SLOW) on 65 cores.
+Window completeness was checked on the committed `*_perf_report.csv` files (3 replays each with identical op sequences).
+
 ## Fallback / structural-op audit of the fused runtime path
 * `test_fused_runtime_fallback_audit`: 0 `from_torch`/`to_torch` in aligned prefill, chunk continuation and decode for both
   kinds (same accepted boundary as stage 1 for non-aligned GDN prefill: the host-built valid_len selector).
-* Remaining tilize/untilize/reshard ops in the fused decode graph (per replay, from the perf tables): GDN 5 untilize +
-  4 tilize (qwen36 conv-state FIR path) and the gate op's height-shard reshard (1 per step); attention 2 tilize/untilize
-  (qwen36 KV update path). They are inside the qwen36 token mixers / the gate op contract, not the autoport code; the
-  single-device GDN chain is replaced by `TPGatedDeltaNet` in stage 4.
+* Remaining layout ops in the fused decode graph (per replay, counted from `tracy/*_fused/decode_perf_report.csv`):
+  GDN 7 UntilizeWithUnpadding + 5 TilizeWithValPadding + 2 Tilize + 1 InterleavedToSharded + 2 ShardedToInterleaved;
+  attention 1 TilizeWithValPadding + 3 InterleavedToSharded + 2 ShardedToInterleaved (no untilize). All but one live in
+  the qwen36 token mixers (GDN conv-state / recurrent path, KV update) and the gate op's height-shard contract; the one
+  TilizeWithValPadding common to both kinds (~3 us, 8 cores) is the autoport's tilize of the gate op's row-major routing
+  scores for the routing-weight multiply in `_routed_gather` (`moe.py`). The single-device GDN chain is replaced by
+  `TPGatedDeltaNet` in stage 4; the stage-3 decoder still carries it (see doc/optimized_decoder).
 
 ## Router compute policy (changed by the gate op)
 `TTMoEGate` runs the router matmul at HiFi2 with fp32 accumulation and the kernel's exp over the raw selected logits
 (`softmax_position="post"`), versus the functional HiFi4 matmul + numerically-stable softmax. On the tested inputs the selected
 expert ids and weights match (fused-vs-functional PCC 0.99999998); `softmax_position="pre"` is the fallback if flips or
 overflow appear on long real prompts. The shared-expert sigmoid gate is an input activation of the final multiply.
+
+Stage-3 amendment: the gate op is now used for the single-tile decode rows only. With more than 32 rows (prefill) its output
+was measured bit-nondeterministic (5 of 29 identical T=37 layer prefills differed at bf16-ulp level, 0 of 29 with the functional
+softmax/top-k router), so `Qwen35MoEFused._route` sends prefill rows through the functional router (details in
+doc/optimized_decoder/README.md section 3 and work_log.md, 2026-09-24 06:35).
 
 ## Rejected / not applicable
 * Folding routing-weight scaling + expert sum into one matmul (`[1,1,1,k] @ [1,1,k,H]`): not attempted here — K=8 is below one
