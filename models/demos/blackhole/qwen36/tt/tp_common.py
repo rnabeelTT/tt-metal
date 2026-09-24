@@ -232,7 +232,9 @@ def create_prefill_matmul_program_config(m, k, n, grid_size=None, fused_activati
         # largest legal block rather than scaling with grid width -- see _PREFILL_TUNING.
         in0_block_w = _find_largest_divisor(k_tiles, cap)
     else:
-        in0_block_w = min(cap, max(1, k_tiles // grid_size[0]))
+        # in0_block_w MUST divide k_tiles (the 2D mcast kernel has no K tail); round the width heuristic down to
+        # the largest divisor. Legal shapes keep exactly their previous config (Ornith-1.5 fix, 2026-09).
+        in0_block_w = _find_largest_divisor(k_tiles, min(cap, max(1, k_tiles // grid_size[0])))
 
     return ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
         compute_with_storage_grid_size=grid_size,
@@ -387,9 +389,29 @@ def all_gather_matmul_prefill(
     return out
 
 
-def mlp_gateup_agmm_enabled(num_devices):
-    """Fuse the ff_norm all-gather into the MLP gate/up matmul (prefill). TP-only (needs the gather)."""
-    return num_devices > 1
+def prefill_norm_agmm_enabled(args):
+    """Can the prefill in-proj all-gather+matmul fusion (all_gather_minimal_matmul_async) be used?
+
+    The fusion needs the preceding RMSNorm to leave its output FRACTURED along the hidden dim (the AGMM performs the
+    gather) — only the DISTRIBUTED-norm path does that. ``ModelArgs.is_distributed_norm(PREFILL)`` is False for a 1D mesh
+    with ``dim <= 4096``: DistributedNorm then all-gathers BEFORE the norm and hands the module a REPLICATED activation,
+    which the AGMM would gather a second time ("inner dimensions must match, got K=dim*tp"). When this returns False the
+    modules take the plain column-parallel matmul on the gathered activation (same math, unfused gather).
+    """
+    from models.tt_transformers.tt.common import Mode
+
+    if getattr(args, "num_devices", 1) <= 1:
+        return False
+    is_dn = getattr(args, "is_distributed_norm", None)
+    return bool(is_dn(Mode.PREFILL)) if callable(is_dn) else False
+
+
+def mlp_gateup_agmm_enabled(num_devices, args=None):
+    """Fuse the ff_norm all-gather into the MLP gate/up matmul (prefill). TP-only and needs the fractured-norm contract
+    (see prefill_norm_agmm_enabled); ``args`` is optional only for legacy callers — when given it is authoritative."""
+    if num_devices <= 1:
+        return False
+    return True if args is None else prefill_norm_agmm_enabled(args)
 
 
 def all_gather_swiglu_prefill(

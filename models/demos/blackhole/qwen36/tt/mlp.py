@@ -73,7 +73,7 @@ def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None)
                 tp,
                 cache("gate_up", ".swiglu"),
             )
-            if tpc.mlp_gateup_agmm_enabled(tp)
+            if tpc.mlp_gateup_agmm_enabled(tp, args)
             else None
         )
 
@@ -175,7 +175,7 @@ class Qwen36MLP:
         # Prefill fused-swiglu AGMM (ff_norm skips its AG; layer.py sets _fuse_ff_agmm to match).
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
-        self._fuse_gateup_agmm = tpc.mlp_gateup_agmm_enabled(self.num_devices)
+        self._fuse_gateup_agmm = tpc.mlp_gateup_agmm_enabled(self.num_devices, args)
         self.weights = load_mlp_weights(mesh_device, state_dict, tensor_cache_path, args=args)
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(
             math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, packer_l1_acc=False

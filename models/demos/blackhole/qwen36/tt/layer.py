@@ -47,7 +47,11 @@ class Qwen36DecoderLayer:
         # Prefill fuses the norm all-gather into the in-proj matmul (all_gather_minimal_matmul_async):
         # GDN qkvzab and full-attn QKV. attention_norm then skips its post-norm AG (prefill only;
         # decode gathers pre-norm). Gates must match the module-side _fuse_agmm gates.
-        self._fuse_norm_agmm = self.num_devices > 1 and (
+        # The fusion also needs the norm to leave its output fractured, which only the distributed-norm path does
+        # (dim <= 4096 on a 1D mesh gathers BEFORE the norm instead) — tp_common.prefill_norm_agmm_enabled.
+        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+        self._fuse_norm_agmm = tpc.prefill_norm_agmm_enabled(args) and (
             (not self.is_full_attention and getattr(args, "gdn_qkvz_weight_memcfg", None) is not None)
             or (self.is_full_attention and getattr(args, "attn_qkv_fused_weight_memcfg", None) is not None)
         )
@@ -63,9 +67,7 @@ class Qwen36DecoderLayer:
             enable_all_gather=not self._fuse_norm_agmm,
         )
         # Prefill: ff_norm skips AG (fused into gate/up AGMM); decode gathers pre-norm so this is a no-op there.
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
-
-        self._fuse_ff_agmm = tpc.mlp_gateup_agmm_enabled(self.num_devices)
+        self._fuse_ff_agmm = tpc.mlp_gateup_agmm_enabled(self.num_devices, args)
         self.ffn_norm = self._make_norm(
             mesh_device,
             args,

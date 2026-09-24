@@ -135,7 +135,9 @@ class TPAttention:
         self.rope_dim = args.rope_head_dim
         self.compute_cfg = tpc.COMPUTE_HIFI2
         # bf8 SDPA (QWEN_SDPA_BF8=1): bf8 Q + bf8 KV; keeps HiFi2 (HiFi4 was slower)
-        self._sdpa_bf8 = os.environ.get("QWEN_SDPA_BF8", "0") == "1"
+        # bf8 SDPA follows the KV-cache dtype from args (the paged cache is filled with a typecast copy); the former
+        # QWEN_SDPA_BF8=1 knob is args.kv_dtype == bfloat8_b
+        self._sdpa_bf8 = getattr(args, "kv_dtype", None) == ttnn.bfloat8_b
         # Must match load_attention_weights_tp gates
         self._dram_sharded = getattr(args, "attn_qg_weight_memcfg", None) is not None
         self._wo_sharded = getattr(args, "attn_wo_weight_memcfg", None) is not None
@@ -143,7 +145,7 @@ class TPAttention:
         self._qg_deint = self._fused_qkv
         # Fuse prefill norm-allgather + fused-QKV in-proj (all_gather_minimal_matmul_async).
         # Norm's prefill post-AG disabled in layer.py; decode path unchanged.
-        self._fuse_agmm = self._fused_qkv
+        self._fuse_agmm = self._fused_qkv and tpc.prefill_norm_agmm_enabled(args)
         # Decode head split/merge via nlp_create/concat_heads_decode (the batched-decode idiom).
         self._use_nlp_decode_heads = True
         self.k_caches = None
@@ -174,6 +176,15 @@ class TPAttention:
             qkv = tpc.all_gather_matmul_prefill(
                 x, tw["wqkv_fused"], self.tt_ccl, self.compute_cfg, self.args.ccl_topology()
             )
+        elif x.shape[-2] > tpc.TILE_SIZE and x.shape[-1] < self.args.dim:
+            # Unfused prefill on a K-fractured input (the AGMM fusion is gated off, tp_common.prefill_norm_agmm_enabled):
+            # gather explicitly, then the plain column-parallel matmul. The layer normally hands over the already
+            # gathered norm output, so this path is taken only by callers that shard the module input themselves.
+            xg = ttnn.all_gather(
+                x, dim=-1, num_links=1, topology=self.args.ccl_topology(), memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
+            qkv = self._col_proj(xg, tw["wqkv_fused"], self.args.attn_qkv_fused_progcfg)
+            ttnn.deallocate(xg)
         elif getattr(self.args, "proj_1d_decode", False) and x.shape[-2] <= tpc.TILE_SIZE:
             # Decode: small-grid 1D matmul (interleaved weight). Output DRAM so _make_heads_decode's
             # to_memory_config(.,L1) stays a real copy before it deallocates the source.
@@ -395,6 +406,10 @@ class TPAttention:
             out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, NH * HD), memory_config=_L1)
         return ttnn.reshape(out, (1, B, NH * HD), memory_config=_L1)
 
+    def reset_cache(self):
+        """Alias for :meth:`reset_state` (model.py calls the single-device Attention's name on full-attention layers)."""
+        return self.reset_state()
+
     def reset_state(self):
         def z():
             return ttnn.from_torch(
@@ -564,8 +579,8 @@ class TPAttention:
         sdpa_dec_cfg = ttnn.SDPAProgramConfig(
             compute_with_storage_grid_size=(_sdpa_grid.x, _sdpa_grid.y),
             exp_approx_mode=False,
-            q_chunk_size=0,
-            k_chunk_size=0,
+            q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
+            k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),
         )
         if use_paged:
             # External paged KV: update at cur_pos, then paged SDPA-decode
