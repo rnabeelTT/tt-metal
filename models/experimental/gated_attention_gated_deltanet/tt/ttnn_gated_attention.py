@@ -207,6 +207,7 @@ def gated_attention_forward_ttnn(
     chunk_page_table=None,  # [1, num_blocks_in_chunk] int32 — blocks for this chunk only
     chunk_start_idx=None,  # int — absolute position of this chunk in the full sequence
     chunk_start_idx_tensor=None,  # device tensor [1] int32 — runtime offset for trace-replay (flexible SDPA)
+    qkv_proj_weight=None,  # fused [in, 2*Hq*D + 2*Hkv*D] = [q+gate | k | v]; when given q/k/v_proj_weight are unused
 ):
     """
     TTNN forward pass for Gated Attention with KV cache support.
@@ -241,7 +242,19 @@ def gated_attention_forward_ttnn(
 
     # Q projection: 2x wide
     ckc = compute_kernel_config
-    qg = ttnn.linear(hidden_states, q_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+    if qkv_proj_weight is not None:
+        # One shared-input matmul for [q+gate | k | v], then slices (graph-fusing: shared-LHS matmul).
+        q_w = num_attention_heads * head_dim * 2
+        kv_w = num_key_value_heads * head_dim
+        qkv = ttnn.linear(hidden_states, qkv_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+        qg = ttnn.slice(qkv, [0, 0, 0], [B, T, q_w], memory_config=memory_config)
+        key_states = ttnn.slice(qkv, [0, 0, q_w], [B, T, q_w + kv_w], memory_config=memory_config)
+        value_states = ttnn.slice(qkv, [0, 0, q_w + kv_w], [B, T, q_w + 2 * kv_w], memory_config=memory_config)
+        ttnn.deallocate(qkv)
+    else:
+        qg = ttnn.linear(hidden_states, q_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+        key_states = None
+        value_states = None
     qg = ttnn.reshape(qg, [B, T, num_attention_heads, head_dim * 2])
     # Split into query and gate
     query_states, gate = ttnn.chunk(qg, 2, dim=-1)
@@ -256,7 +269,8 @@ def gated_attention_forward_ttnn(
     query_states = ttnn.transpose(query_states, 1, 2)
 
     # K projection + norm + transpose to [B, H_kv, T, D]
-    key_states = ttnn.linear(hidden_states, k_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+    if key_states is None:
+        key_states = ttnn.linear(hidden_states, k_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
     key_states = ttnn.reshape(key_states, [B, T, num_key_value_heads, head_dim])
     if norm_weights_pre_offset:
         key_states = ttnn.rms_norm(key_states, weight=k_norm_weight, epsilon=norm_eps)
@@ -265,7 +279,8 @@ def gated_attention_forward_ttnn(
     key_states = ttnn.transpose(key_states, 1, 2)
 
     # V projection + transpose to [B, H_kv, T, D]
-    value_states = ttnn.linear(hidden_states, v_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
+    if value_states is None:
+        value_states = ttnn.linear(hidden_states, v_proj_weight, compute_kernel_config=ckc, memory_config=memory_config)
     value_states = ttnn.reshape(value_states, [B, T, num_key_value_heads, head_dim])
     value_states = ttnn.transpose(value_states, 1, 2)
 
@@ -551,9 +566,12 @@ def gated_attention_forward_ttnn(
     ttnn.deallocate(query_states)
 
     # Convert from [B, H, T, D] back to [B, T, H*D]
-    if use_optimized_concat:
+    if use_optimized_concat and T > 1:
         attn_output = ttnn.transformer.concatenate_heads(attn_output)
     else:
+        # T == 1 (decode): concatenate_heads runs on ONE core (~105 us at B=1, and its static dataflow
+        # buffers clash with L1-resident model buffers at B=32); a transpose of the size-1 dim + a
+        # reshape is the same permutation and stays cheap.
         attn_output = ttnn.transpose(attn_output, 1, 2)
         attn_output = ttnn.reshape(attn_output, [B, T, num_attention_heads * head_dim])
 

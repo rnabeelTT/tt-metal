@@ -127,3 +127,6 @@ the authoritative timestamps are the ones inside the referenced log files (host 
 - (host 04:00) watcher rerun on the final code (logs/01-watcher2.log): real-weight T=37 both kinds + chunked attention K/V check, pytest exit 0,
   watcher.log 10,894 lines, 0 exception/fatal/sanitize/overflow matches. Copies refreshed in doc/functional_decoder/watcher/.
 - stage-1 commit amended with the P1 fix, new tests, width rule, evidence csv/logs (SHA recorded in STATUS.md / stage-2 work log).
+- (host 04:15) stage-review #3 on 530cc27a48c: clean-pass. Carried forward (not stage-1 required work): multi-user GDN chunk-prefill
+  continuation (assert B==1) -> full-model stage; non-aligned GDN prefill host selector -> optimize stage; decode RoPE device lookup ->
+  full-model stage; assert start_pos+T_pad within the user's page-table row; 9B full-model regression still OPEN.

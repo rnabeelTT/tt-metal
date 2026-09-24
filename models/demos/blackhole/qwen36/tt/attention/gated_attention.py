@@ -21,7 +21,9 @@ class Qwen36GatedAttention:
         self.device = mesh_device
         self.config = config
 
-        self.weights = load_attention_weights(mesh_device, state_dict, tensor_cache_path)
+        self.weights = load_attention_weights(
+            mesh_device, state_dict, tensor_cache_path, fuse_qkv=getattr(config, "fuse_qkv", False)
+        )
 
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(
             math_fidelity=ttnn.MathFidelity.LoFi,

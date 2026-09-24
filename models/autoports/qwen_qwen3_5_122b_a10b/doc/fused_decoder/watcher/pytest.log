@@ -1,0 +1,157 @@
+2026-09-24 04:08:55.829 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 28 items / 25 deselected / 3 selected
+
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_batched_decode_against_hf[attn_b32-device_params0] 2026-09-24 04:09:09.530 | INFO     | models.tt_transformers.tt.model_config:__init__:633 - Inferring device name: P150
+2026-09-24 04:09:09.530 | INFO     | models.tt_transformers.tt.model_config:__init__:716 - Checkpoint directory: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:09.530 | INFO     | models.tt_transformers.tt.model_config:__init__:717 - Tokenizer file: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5/tokenizer.model
+2026-09-24 04:09:09.530 | INFO     | models.tt_transformers.tt.model_config:__init__:718 - Cache directory: /home/raahem/.cache/ttnn/qwen35_122b/P150
+2026-09-24 04:09:09.530 | INFO     | models.tt_transformers.tt.model_config:__init__:719 - Model name: dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:09.535 | INFO     | models.tt_transformers.tt.model_config:_set_params_from_dict:2941 - Model name from config: Qwen3.5-122B-A10B
+2026-09-24 04:09:09.535 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2610 - Unknown model Qwen3.5-122B-A10B on device P150, setting MAX_PREFILL_CHUNK_SIZE to 4 for compatibility
+2026-09-24 04:09:09.535 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2613 - Try setting MAX_PREFILL_CHUNK_SIZE to larger powers of 2 up to e.g. 128 for faster performance (if you run out of L1 memory it was too high)
+2026-09-24 04:09:09.536 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3983 - Tokenizer path: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:09.536 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3984 - Model name: Qwen3.5-122B-A10B
+2026-09-24 04:09:09.536 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3985 - Base model name: Qwen3.5-122B
+2026-09-24 04:09:09.846 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3996 - Successfully loaded tokenizer from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:11.796 | INFO     | models.tt_transformers.tt.model_config:create_processor:4067 - Successfully loaded processor from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:11.796 | INFO     | models.tt_transformers.tt.model_config:__init__:1263 - Attention grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:11.797 | INFO     | models.tt_transformers.tt.model_config:__init__:1264 - MLP grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:11.797 | INFO     | models.tt_transformers.tt.model_config:__init__:1265 - MLP prefill grids @ 32: w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:11.797 | INFO     | models.tt_transformers.tt.model_config:__init__:1266 - MLP prefill grids @ max_seq_len(1024): w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:11.797 | INFO     | models.tt_transformers.tt.model_config:__init__:1269 - LM head grid: ttnn.CoreGrid(x=8, y=6)
+2026-09-24 04:09:19.002 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:222 - Qwen35MoE layer 3: E=256 k=8 N=1024 (local 1024) tp=1 union~162
+[transformers] You tried to access the `ExpertsInterface` with a `config._experts_implementation` set to `None`. This is expected if you use an Expert Module as a standalone Module. If this is not the case, something went wrong with the dispatch of `config._experts_implementation`
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="generalized_moe_gate_kernel/16096929137273904246/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc0/trisck.8465343997769275490_642389.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc0/trisck.8465343997769275490_642389.d
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/../unified_kernels/generalized_moe_gate.hpp:29,
+                 from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/generalized_moe_gate_kernel.cpp:23,
+                 from ../chlkc_unpack.cpp:5,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h: In function 'void ckernel::generalized_moe_gate_init(uint32_t, uint32_t)':
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:26:32: warning: 'void ckernel::transpose_wh_init_short(uint32_t, uint32_t)' is deprecated: Use transpose_init(icb). See api/compute/transpose.h. [-Wdeprecated-declarations]
+   26 |         transpose_wh_init_short(icb0);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In file included from /home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:9:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/transpose_wh.h:110:83: note: declared here
+  110 | [[deprecated("Use transpose_init(icb). See api/compute/transpose.h.")]] ALWI void transpose_wh_init_short(
+      |                                                                                   ^~~~~~~~~~~~~~~~~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="generalized_moe_gate_kernel/16096929137273904246/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc2/trisck.8465343997769275490_642389.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc2/trisck.8465343997769275490_642389.d
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/../unified_kernels/generalized_moe_gate.hpp:29,
+                 from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/generalized_moe_gate_kernel.cpp:23,
+                 from ../chlkc_pack.cpp:5,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h: In function 'void ckernel::generalized_moe_gate_init(uint32_t, uint32_t)':
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:26:32: warning: 'void ckernel::transpose_wh_init_short(uint32_t, uint32_t)' is deprecated: Use transpose_init(icb). See api/compute/transpose.h. [-Wdeprecated-declarations]
+   26 |         transpose_wh_init_short(icb0);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In file included from /home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:9:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/transpose_wh.h:110:83: note: declared here
+  110 | [[deprecated("Use transpose_init(icb). See api/compute/transpose.h.")]] ALWI void transpose_wh_init_short(
+      |                                                                                   ^~~~~~~~~~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="generalized_moe_gate_kernel/16096929137273904246/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc1/trisck.8465343997769275490_642389.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/generalized_moe_gate_kernel/16096929137273904246/trisc1/trisck.8465343997769275490_642389.d
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/../unified_kernels/generalized_moe_gate.hpp:29,
+                 from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek/moe/generalized_moe_gate/device/kernels/generalized_moe_gate_kernel.cpp:23,
+                 from ../chlkc_math.cpp:5,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h: In function 'void ckernel::generalized_moe_gate_init(uint32_t, uint32_t)':
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:26:32: warning: 'void ckernel::transpose_wh_init_short(uint32_t, uint32_t)' is deprecated: Use transpose_init(icb). See api/compute/transpose.h. [-Wdeprecated-declarations]
+   26 |         transpose_wh_init_short(icb0);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+In file included from /home/raahem/tt-metal/tt_metal/hw/inc/api/compute/experimental/generalized_moe_gate.h:9:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/transpose_wh.h:110:83: note: declared here
+  110 | [[deprecated("Use transpose_init(icb). See api/compute/transpose.h.")]] ALWI void transpose_wh_init_short(
+      |                                                                                   ^~~~~~~~~~~~~~~~~~~~~~~
+FUSED full_attention prefill B=32: PCC 0.999685015024289
+FUSED full_attention batched decode B=32: PCC 0.9997815253520191
+PASSED
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[gdn_37-device_params0] [transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+2026-09-24 04:09:40.572 | INFO     | models.tt_transformers.tt.model_config:__init__:633 - Inferring device name: P150
+2026-09-24 04:09:40.572 | INFO     | models.tt_transformers.tt.model_config:__init__:716 - Checkpoint directory: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:40.572 | INFO     | models.tt_transformers.tt.model_config:__init__:717 - Tokenizer file: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5/tokenizer.model
+2026-09-24 04:09:40.572 | INFO     | models.tt_transformers.tt.model_config:__init__:718 - Cache directory: /home/raahem/.cache/ttnn/qwen35_122b/P150
+2026-09-24 04:09:40.572 | INFO     | models.tt_transformers.tt.model_config:__init__:719 - Model name: dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:40.577 | INFO     | models.tt_transformers.tt.model_config:_set_params_from_dict:2941 - Model name from config: Qwen3.5-122B-A10B
+2026-09-24 04:09:40.577 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2610 - Unknown model Qwen3.5-122B-A10B on device P150, setting MAX_PREFILL_CHUNK_SIZE to 4 for compatibility
+2026-09-24 04:09:40.577 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2613 - Try setting MAX_PREFILL_CHUNK_SIZE to larger powers of 2 up to e.g. 128 for faster performance (if you run out of L1 memory it was too high)
+2026-09-24 04:09:40.577 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3983 - Tokenizer path: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:40.577 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3984 - Model name: Qwen3.5-122B-A10B
+2026-09-24 04:09:40.577 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3985 - Base model name: Qwen3.5-122B
+2026-09-24 04:09:40.866 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3996 - Successfully loaded tokenizer from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:41.144 | INFO     | models.tt_transformers.tt.model_config:create_processor:4067 - Successfully loaded processor from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:41.145 | INFO     | models.tt_transformers.tt.model_config:__init__:1263 - Attention grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:41.145 | INFO     | models.tt_transformers.tt.model_config:__init__:1264 - MLP grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:41.145 | INFO     | models.tt_transformers.tt.model_config:__init__:1265 - MLP prefill grids @ 32: w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:41.145 | INFO     | models.tt_transformers.tt.model_config:__init__:1266 - MLP prefill grids @ max_seq_len(4096): w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:41.145 | INFO     | models.tt_transformers.tt.model_config:__init__:1269 - LM head grid: ttnn.CoreGrid(x=8, y=6)
+2026-09-24 04:09:49.522 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:222 - Qwen35MoE layer 0: E=256 k=8 N=1024 (local 1024) tp=1 union~162
+FUSED REAL linear_attention prefill T=37: PCC 0.9982389034569757
+FUSED REAL linear_attention decode pos=37: PCC 0.9994708128891363
+PASSED
+models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[attn_37-device_params0] 2026-09-24 04:09:54.616 | INFO     | models.tt_transformers.tt.model_config:__init__:633 - Inferring device name: P150
+2026-09-24 04:09:54.617 | INFO     | models.tt_transformers.tt.model_config:__init__:716 - Checkpoint directory: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:54.617 | INFO     | models.tt_transformers.tt.model_config:__init__:717 - Tokenizer file: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5/tokenizer.model
+2026-09-24 04:09:54.617 | INFO     | models.tt_transformers.tt.model_config:__init__:718 - Cache directory: /home/raahem/.cache/ttnn/qwen35_122b/P150
+2026-09-24 04:09:54.617 | INFO     | models.tt_transformers.tt.model_config:__init__:719 - Model name: dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:54.622 | INFO     | models.tt_transformers.tt.model_config:_set_params_from_dict:2941 - Model name from config: Qwen3.5-122B-A10B
+2026-09-24 04:09:54.622 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2610 - Unknown model Qwen3.5-122B-A10B on device P150, setting MAX_PREFILL_CHUNK_SIZE to 4 for compatibility
+2026-09-24 04:09:54.622 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2613 - Try setting MAX_PREFILL_CHUNK_SIZE to larger powers of 2 up to e.g. 128 for faster performance (if you run out of L1 memory it was too high)
+2026-09-24 04:09:54.622 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3983 - Tokenizer path: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:54.622 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3984 - Model name: Qwen3.5-122B-A10B
+2026-09-24 04:09:54.622 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3985 - Base model name: Qwen3.5-122B
+2026-09-24 04:09:54.915 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3996 - Successfully loaded tokenizer from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:55.204 | INFO     | models.tt_transformers.tt.model_config:create_processor:4067 - Successfully loaded processor from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-24 04:09:55.205 | INFO     | models.tt_transformers.tt.model_config:__init__:1263 - Attention grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:55.205 | INFO     | models.tt_transformers.tt.model_config:__init__:1264 - MLP grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-24 04:09:55.205 | INFO     | models.tt_transformers.tt.model_config:__init__:1265 - MLP prefill grids @ 32: w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:55.205 | INFO     | models.tt_transformers.tt.model_config:__init__:1266 - MLP prefill grids @ max_seq_len(4096): w1/w3: (8, 8), w2: (8, 8)
+2026-09-24 04:09:55.205 | INFO     | models.tt_transformers.tt.model_config:__init__:1269 - LM head grid: ttnn.CoreGrid(x=8, y=6)
+2026-09-24 04:10:02.731 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:222 - Qwen35MoE layer 3: E=256 k=8 N=1024 (local 1024) tp=1 union~162
+FUSED REAL full_attention prefill T=37: PCC 0.9995716309868776
+FUSED REAL full_attention decode pos=37: PCC 0.9993590300029931
+PASSED
+
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+models/tt_transformers/tt/common.py:28
+  /home/raahem/tt-metal/models/tt_transformers/tt/common.py:28: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ImageMedia(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+39.43s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_batched_decode_against_hf[attn_b32-device_params0]
+13.51s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[gdn_37-device_params0]
+10.75s call     models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[attn_37-device_params0]
+1.32s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_batched_decode_against_hf[attn_b32-device_params0]
+0.56s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[attn_37-device_params0]
+0.55s setup    models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[gdn_37-device_params0]
+0.03s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[gdn_37-device_params0]
+0.03s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_batched_decode_against_hf[attn_b32-device_params0]
+0.03s teardown models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[attn_37-device_params0]
+=========================== short test summary info ============================
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_batched_decode_against_hf[attn_b32-device_params0]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[gdn_37-device_params0]
+PASSED models/autoports/qwen_qwen3_5_122b_a10b/tests/test_fused_decoder.py::test_fused_real_weight_against_hf[attn_37-device_params0]
+=========== 3 passed, 25 deselected, 3 warnings in 67.14s (0:01:07) ============
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

@@ -34,6 +34,7 @@ def prefill_forward(
         output, _, _ = gated_attention_forward_ttnn(
             hidden_states=x,
             q_proj_weight=weights.q_proj,
+            qkv_proj_weight=getattr(weights, "qkv_proj", None),
             k_proj_weight=weights.k_proj,
             v_proj_weight=weights.v_proj,
             o_proj_weight=weights.o_proj,
@@ -63,6 +64,7 @@ def prefill_forward(
         output, new_key, new_value = gated_attention_forward_ttnn(
             hidden_states=x,
             q_proj_weight=weights.q_proj,
+            qkv_proj_weight=getattr(weights, "qkv_proj", None),
             k_proj_weight=weights.k_proj,
             v_proj_weight=weights.v_proj,
             o_proj_weight=weights.o_proj,

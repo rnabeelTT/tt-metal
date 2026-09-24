@@ -67,7 +67,7 @@ random-permutation page table, K and V are read back through the page table and 
 window (`test_chunked_prefill_kv_cache_matches_hf`; also with real weights for 2048+333 in
 `test_real_weight_chunked_attention_prefill`). This check was added after the stage review found that later chunks had
 been written to the first chunk's blocks (fixed: the chunk page table now starts at `start_pos // block_size`).
-Results: synthetic 2048+2048+333, every 512-position window K and V PCC 0.99986 (10 windows), decode at 4429 PCC 0.99999;
+Results: synthetic 2048+2048+333, every 512-position window K and V PCC 0.99986 (9 windows), decode at 4429 PCC 0.99999;
 real weights 2048+333: layer prefill PCC 0.99979, all K/V windows 0.99986, decode at 2381 PCC 0.99988 (`logs/01-fix2-attn.log`).
 Full-attention tests use a random-permutation page table (`_page_table`), block size 64, paged prefill through
 `paged_fill_cache` (chunk_page_table/chunk_start_idx) and paged decode through `paged_update_cache` +
