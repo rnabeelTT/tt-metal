@@ -188,7 +188,9 @@ class Qwen36MLP:
             math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, packer_l1_acc=True
         )
 
-    def forward(self, x):
+    def forward(self, x, mode=None):
+        # `mode` is accepted for the DecoderLayer feed-forward hook contract; the dense
+        # MLP infers prefill vs decode from the activation shape.
         if self.num_devices > 1:
             return self._forward_tp(x)
         w = self.weights

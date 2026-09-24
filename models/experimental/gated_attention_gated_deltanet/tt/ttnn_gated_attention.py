@@ -339,7 +339,9 @@ def gated_attention_forward_ttnn(
         k_for_paged = ttnn.reshape(key_states, [1, B, num_key_value_heads, head_dim])
         v_for_paged = ttnn.reshape(value_states, [1, B, num_key_value_heads, head_dim])
         # Shard to L1 (HEIGHT_SHARDED on B cores) for paged_update_cache
-        _shard_grid = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(B - 1, 0))})
+        # One user per core, laid out row-wise over the worker grid (B may exceed the grid width).
+        _grid = device.compute_with_storage_grid_size()
+        _shard_grid = ttnn.num_cores_to_corerangeset(B, _grid, row_wise=True)
         _shard_spec = ttnn.ShardSpec(_shard_grid, [32, head_dim], ttnn.ShardOrientation.ROW_MAJOR)
         _sharded_mc = ttnn.MemoryConfig(ttnn.TensorMemoryLayout.HEIGHT_SHARDED, ttnn.BufferType.L1, _shard_spec)
         k_sharded = ttnn.to_memory_config(k_for_paged, _sharded_mc)
@@ -352,7 +354,8 @@ def gated_attention_forward_ttnn(
             paged_kv_cache_value, v_sharded, update_idxs_tensor=cur_pos_tensor, page_table=page_table
         )
         # Paged SDPA decode
-        q_decode = ttnn.transpose(query_states, 1, 2)  # [B, H_q, 1, D] -> [B, 1, H_q, D] = [1, B, H_q, D] for B=1
+        # sdpa_decode wants Q as [1, B, H_q, D]; query_states is [B, H_q, 1, D] (a transpose only works at B=1).
+        q_decode = ttnn.permute(query_states, (2, 0, 1, 3))
         # paged_scaled_dot_product_attention_decode requires Q in DRAM when not sharded
         # (sdpa_decode_device_operation.cpp:89). transpose preserves L1 layout from query_states.
         q_decode = ttnn.to_memory_config(q_decode, ttnn.DRAM_MEMORY_CONFIG)
@@ -368,7 +371,7 @@ def gated_attention_forward_ttnn(
                 device, paged_kv_cache_key.shape[0] * paged_kv_cache_key.shape[2]
             ),
         )
-        attn_output = ttnn.transpose(attn_output, 1, 2)  # back to [B, H_q, 1, D]
+        attn_output = ttnn.permute(attn_output, (1, 2, 0, 3))  # [1, B, H_q, D] -> [B, H_q, 1, D]
         new_key = paged_kv_cache_key
         new_value = paged_kv_cache_value
         _paged_sdpa_done = True  # Skip the bottom SDPA section (attn_output already computed)

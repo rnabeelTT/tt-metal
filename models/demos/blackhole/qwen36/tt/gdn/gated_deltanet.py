@@ -75,10 +75,12 @@ class Qwen36GatedDeltaNet:
         Sets use_inplace_state=True so all forward passes write state inplace (preserving buffer addresses).
         Does NOT create split_conv_state — that happens after prefill when there is real data to split.
         """
-        expected_rec = [1, self.num_v_heads, self.head_k_dim, self.head_v_dim]
+        # Any batch: the recurrent kernel is batched over dim 0, and batched serving hands the layer
+        # a [B, Nv, Dk, Dv] buffer whose rows are per-user slots.
+        expected_rec = [self.num_v_heads, self.head_k_dim, self.head_v_dim]
         assert (
-            list(recurrent_state.shape) == expected_rec
-        ), f"recurrent_state shape mismatch: {list(recurrent_state.shape)} != {expected_rec}"
+            len(recurrent_state.shape) == 4 and list(recurrent_state.shape)[1:] == expected_rec
+        ), f"recurrent_state shape mismatch: {list(recurrent_state.shape)} != [B, {expected_rec}]"
         assert (
             conv_state.shape[1] == self.conv_kernel_size - 1
         ), f"conv_state dim 1 mismatch: {conv_state.shape[1]} != {self.conv_kernel_size - 1}"

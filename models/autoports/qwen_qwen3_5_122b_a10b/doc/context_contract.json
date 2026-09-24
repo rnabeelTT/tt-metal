@@ -1,0 +1,50 @@
+{
+  "hf_model": "Qwen/Qwen3.5-122B-A10B",
+  "hf_revision": "dc4d348443bc740c68e2d77492492c11606384d5",
+  "hf_advertised_context": 262144,
+  "current_supported_context": 262144,
+  "limiting_reason": null,
+  "capacity_evidence": {
+    "kv_layers": 12,
+    "gdn_layers": 36,
+    "kv_heads": 2,
+    "head_dim": 256,
+    "kv_bytes_per_token_bf16_all_layers": 24576,
+    "note": "12 of 48 layers hold a paged KV cache (24 KiB/token bf16 replicated; 12 KiB/token/chip under TP4 with KV heads split across device pairs); 36 GDN layers hold context-independent state (~144 MiB/user fp32)."
+  },
+  "functional_decoder": {
+    "prefill_context_tested": 262107,
+    "decode_context_tested": 262107,
+    "hf_parity_context_tested": {
+      "linear_attention": 262107,
+      "full_attention": 16421
+    },
+    "note": "262107 = 262144-37 prefilled in 2048-token chunks then decoded at that position, both layer kinds, outputs finite (capacity). HF parity (PCC>=0.995, last-2048 / all positions / decode): GDN 65573 and 262107 tokens (the full context) with the recurrent+conv state carried across 32 / 128 chunks; attention 16421 tokens (HF eager attention scores are B*Hq*T^2 fp32: 16K -> 34 GB, 32K -> 137 GB on this 249 GB host, so 16K is the CPU limit). Short-length parity: 5..4429 tokens.",
+    "long_prefill_tok_s_single_layer": {
+      "linear_attention": 3415,
+      "full_attention": 2229
+    },
+    "eager_decode_ms_at_262107_single_layer": {
+      "linear_attention": 66.1,
+      "full_attention": 59.9
+    },
+    "hf_parity_pcc": {
+      "linear_attention_65573": [
+        0.99732,
+        0.99741,
+        0.9979
+      ],
+      "full_attention_16421": [
+        0.99999,
+        0.99998,
+        0.99999
+      ],
+      "linear_attention_262107": [
+        0.99744,
+        0.99737,
+        0.99745
+      ]
+    },
+    "kv_cache_content_check": "chunked 2048+2048+333 and real-weight 2048+333: K/V read back through the page table match HF per 512-position window, PCC 0.99986"
+  }
+}

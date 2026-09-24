@@ -17,6 +17,9 @@ import torch
 
 import ttnn
 
+# Largest B*T*H*V*4 (fp32 output shuffle) that the seq adapter stages through interleaved L1.
+_L1_RELAYOUT_BUDGET_BYTES = 32 * 1024 * 1024
+
 _DBG = _os.environ.get("QWEN9B_GDN_DBG")
 
 
@@ -129,7 +132,10 @@ def chunk_gated_delta_rule_seq_adapter(
         k = l2_norm_ttnn(k, dim=-1)
 
     # Relayout untilize/permute in L1; land kernel inputs in DRAM (CBs ~1.36MB/core clash with L1).
-    _L1 = ttnn.L1_MEMORY_CONFIG
+    # The relayout intermediates scale with B*T*H*V (the fp32 output shuffle is the largest); wide GDNs
+    # (e.g. 64 v-heads x 128 at T=2048 -> 64 MiB) do not fit interleaved L1, so fall back to DRAM
+    # above a budget that keeps the validated 32-head configurations on their L1 path.
+    _L1 = ttnn.L1_MEMORY_CONFIG if B * T * H * V * 4 <= _L1_RELAYOUT_BUDGET_BYTES else _DRAM
 
     def _tilize_f32(t):
         # Tilize + fp32 cast in one op (main #49565), avoiding a separate typecast pass.

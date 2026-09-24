@@ -240,6 +240,17 @@ def l2_norm_ttnn(x, dim=-1, eps=1e-6):
     return ttnn.multiply(x, inv_norm, memory_config=mc)
 
 
+# Largest recurrent state (B*H*K*V*4 bytes) the T=1 decode keeps L1-resident. Beyond it (wide GDNs at
+# large batch, e.g. 64 heads x 128 x 128 fp32 at B=32 = 134 MiB) the state and its update stay in DRAM.
+# 96 MiB keeps every existing configuration on its previous L1 path (Qwen3.5-9B single device: 32 heads x 128 x 128
+# fp32 = 2 MiB/user -> B<=48; TP per-device states are smaller) and moves only wider-than-9B GDNs at large batch to DRAM.
+_DECODE_STATE_L1_BUDGET_BYTES = 96 * 1024 * 1024
+
+
+def _decode_state_memory_config(B, H, K, V):
+    return ttnn.L1_MEMORY_CONFIG if B * H * K * V * 4 <= _DECODE_STATE_L1_BUDGET_BYTES else ttnn.DRAM_MEMORY_CONFIG
+
+
 def fused_decay_and_write_ttnn(
     h,
     k_t,
@@ -261,8 +272,9 @@ def fused_decay_and_write_ttnn(
     # beta: [B,H] -> [B,H,1,1]
     beta_expanded = ttnn.reshape(beta_t, [B, H, 1, 1], memory_config=ttnn.L1_MEMORY_CONFIG)
 
-    # Decode opt: keep state-write operands in L1 (tiny at B=1).
-    _L1 = ttnn.L1_MEMORY_CONFIG
+    # Decode opt: keep state-write operands in L1 (tiny at B=1); the state-sized operands follow the
+    # state budget (DRAM for wide GDNs at large batch).
+    _L1 = _decode_state_memory_config(B, H, K, V)
     k_col = ttnn.reshape(k_t, [B, H, K, 1], memory_config=_L1)
     d_row = ttnn.reshape(delta, [B, H, 1, V], memory_config=_L1)
 
@@ -431,8 +443,9 @@ def recurrent_gated_delta_rule_decode_ttnn(
     elif high_precision and h.dtype != ttnn.float32:
         h = ttnn.typecast(h, ttnn.float32)
 
-    # Decode opt: keep [B,H,K,V] state in L1 (~0.8MB fp32 at B=1).
-    h = ttnn.to_memory_config(h, ttnn.L1_MEMORY_CONFIG)
+    # Decode opt: keep [B,H,K,V] state in L1 (~0.8MB fp32 at B=1); DRAM when it exceeds the L1 budget.
+    _state_mc = _decode_state_memory_config(B, H, K, V)
+    h = ttnn.to_memory_config(h, _state_mc)
 
     read_query_compute_cfg = ttnn.WormholeComputeKernelConfig(
         math_fidelity=ttnn.MathFidelity.HiFi2,
@@ -453,7 +466,7 @@ def recurrent_gated_delta_rule_decode_ttnn(
     # than a standalone ttnn.exp + multiply.
     _L1 = ttnn.L1_MEMORY_CONFIG
     g_bhkv = ttnn.reshape(g_t, [B, H, 1, 1], memory_config=_L1)
-    h = ttnn.multiply(h, g_bhkv, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
+    h = ttnn.multiply(h, g_bhkv, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_state_mc)
 
     # v_read = k @ h (decayed state)
     v_read = ttnn.matmul(

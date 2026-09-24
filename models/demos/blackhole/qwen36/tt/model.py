@@ -24,6 +24,9 @@ from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in
 class Qwen36Model:
     """Qwen3.5-9B text LM on Blackhole P150. HF_MODEL env var selects checkpoint."""
 
+    # Decoder-layer class hook: MoE autoports substitute a subclass whose feed-forward is routed.
+    DECODER_LAYER_CLS = Qwen36DecoderLayer
+
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None):
         self.args = args
         self.device = mesh_device
@@ -91,7 +94,9 @@ class Qwen36Model:
         logger.info(f"Loading {len(self.layer_indices)} transformer layers (indices={self.layer_indices})...")
         self.layers = []
         for i in tqdm(self.layer_indices, desc="Loading layers"):
-            layer = Qwen36DecoderLayer(mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl)
+            layer = self.DECODER_LAYER_CLS(
+                mesh_device, args, self._layer_state_dict(state_dict, i), i, tensor_cache_path, tt_ccl=self.tt_ccl
+            )
             self.layers.append(layer)
 
         # Framework RMSNorm (add_unit_offset=True). Single device: is_distributed=None.
@@ -195,6 +200,15 @@ class Qwen36Model:
         self._vis_buf = None  # [1, chunk_size, dim] bf16, image rows placed at their positions
         self._vis_mask_buf = None  # [1, chunk_size, 1] bf16, 1 at image positions else 0
         self._vis_zero_mask_host = None  # cached host zero mask for the clear (text/tail) path
+
+    @staticmethod
+    def _layer_state_dict(state_dict, layer_idx):
+        """State dict handed to layer `layer_idx`'s constructor.
+
+        Hook for checkpoints too large for one host dict: a streaming state dict can
+        return a materialized per-layer sub-dict here. Default: the full dict.
+        """
+        return state_dict
 
     def init_vision_model(self, reference_visual=None, vision_args=None, dtype=ttnn.bfloat8_b, debug=False):
         """Build and attach the TT vision tower (DropInVisionTransformer).

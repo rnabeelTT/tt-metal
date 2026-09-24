@@ -20,8 +20,16 @@ from .ttnn_delta_rule_seq import chunk_gated_delta_rule_seq_adapter
 _L1_SEQ_THRESHOLD = 512
 
 
-def _seq_memory_config(seq_len):
-    """L1 for short sequences (faster), DRAM for long (avoids OOM)."""
+# Widest GDN (num_v_heads * head_v_dim) whose prefill activations may stage through L1. Wider GDNs
+# (e.g. 64 x 128 = 8192) collide with the seq kernel's ~1.36 MB of static circular buffers
+# ("Statically allocated circular buffers ... clash with L1 buffers") once anything else is L1-resident.
+_L1_SEQ_MAX_WIDTH = 4096
+
+
+def _seq_memory_config(seq_len, width=None):
+    """L1 for short sequences (faster), DRAM for long or wide (avoids OOM / CB clashes)."""
+    if width is not None and width > _L1_SEQ_MAX_WIDTH:
+        return None
     return ttnn.L1_MEMORY_CONFIG if seq_len <= _L1_SEQ_THRESHOLD else None
 
 
@@ -408,7 +416,7 @@ def gated_deltanet_forward_ttnn(
     B = hidden_states.shape[0]
     T = hidden_states.shape[1]
     # valid_len path forces DRAM (bucket 512 hits L1 CB clash on _seq_memory_config threshold)
-    mc = None if valid_len is not None else _seq_memory_config(T)
+    mc = None if valid_len is not None else _seq_memory_config(T, num_v_heads * head_v_dim)
 
     ckc = compute_kernel_config
 
