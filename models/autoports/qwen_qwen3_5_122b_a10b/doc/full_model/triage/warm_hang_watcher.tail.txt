@@ -1,0 +1,60 @@
+k_ids:  0
+Device 3 dram core(x= 0,y= 1) virtual(x=17,y=13):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 1,y= 1) virtual(x=17,y=16):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 1,y= 2) virtual(x=17,y=17):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 2,y= 1) virtual(x=17,y=19):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 2,y= 2) virtual(x=17,y=20):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 3,y= 1) virtual(x=17,y=22):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 3,y= 2) virtual(x=17,y=23):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 4,y= 2) virtual(x=18,y=12):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 4,y= 1) virtual(x=18,y=13):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 5,y= 2) virtual(x=18,y=15):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 5,y= 1) virtual(x=18,y=16):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 6,y= 2) virtual(x=18,y=18):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 6,y= 1) virtual(x=18,y=19):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 7,y= 2) virtual(x=18,y=21):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+Device 3 dram core(x= 7,y= 1) virtual(x=18,y=22):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
+k_ids:  0
+k_id[  0]: blank
+k_id[  3]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[  8]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 12]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 15]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 18]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 22]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 25]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 29]: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp
+k_id[ 45]: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+k_id[ 46]: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+k_id[ 47]: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+k_id[ 48]: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+k_id[ 53]: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+k_id[ 54]: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+k_id[2249]: ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/dataflow/reader_unary_interleaved_start_id_metal2.cpp
+k_id[2250]: ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/dataflow/writer_unary_interleaved_start_id_metal2.cpp
+k_id[2251]: ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp
+Stack usage summary:
+	BRISC highest stack usage: 3756 bytes free, on core 1-10, running kernel tt_metal/fabric/impl/kernels/tt_fabric_mux_v2.cpp
+	NCRISC highest stack usage: 3120 bytes free, on core 1-2, running kernel tt_metal/fabric/impl/kernels/tt_fabric_mux_v2.cpp
+	TRISC0 highest stack usage: 1248 bytes free, on core 1-2, running kernel ttnn/cpp/ttnn/operations/transformer/sdpa/device/kernels/compute/sdpa.cpp
+	TRISC1 highest stack usage: 3224 bytes free, on core 1-2, running kernel ttnn/cpp/ttnn/operations/transformer/sdpa/device/kernels/compute/sdpa.cpp
+	TRISC2 highest stack usage: 1424 bytes free, on core 1-2, running kernel ttnn/cpp/ttnn/operations/transformer/sdpa/device/kernels/compute/sdpa.cpp
+Dump #58 completed at 573.933s
+At 582.172s detach device 0
+At 582.172s detach device 1
+At 582.172s detach device 2
+At 582.172s detach device 3

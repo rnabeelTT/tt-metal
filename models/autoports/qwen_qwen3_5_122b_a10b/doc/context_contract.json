@@ -87,5 +87,24 @@
     "status": "no change to any persistent allocation vs multichip_decoder_stage4: KV dtype/layout, GDN state dtype, weights dtypes and per-device shapes are unchanged; the stage changed decode matmul grids (attention qkv 72 cores) and replaced the host-written ttnn.zeros buffers of the MoE prefill with device-side allocations (ttnn.empty for the sparse-matmul outputs, ttnn.fill for the routing-matrix scatter target) that are freed inside the prefill call - nothing is cached across calls or layers",
     "inter_layer_residual_contract": "fractured bf16 [1,1,B|T,768] per device between layers; one reduce-scatter per row-parallel boundary (mixer out-proj, MoE exit), one all-gather per norm; no gather/reshard/all-reduce between layers",
     "prefill_note": "2048-token prefill as 4 x 512-token chunks on the committed default (counting-sort dispatch): host wall 133.0 (GDN) / 128.2 ms (attention) per layer = ~33 / 32 ms per chunk vs ~15.2 / 14.6 ms device per chunk (Tracy 60.97 / 58.23 ms per 2048 tokens, logs/05-perf-plain4.log and 05-final5-chain.log); the host gap is dispatch-bound eager prefill (traced prefill is the optimized-full-model item). No persistent allocation changed vs stage 4."
+  },
+  "full_model_stage6": {
+    "status": "measured on the 48-layer build (2026-09-24, logs/06-warm-fixed-1.log and 06-prefill-check-qwen35_122b_aime24_chat_g100.log MEMORY_REPORT), B=1, max_seq_len 262144",
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_after_build_and_prefill_warmup_gib": 19.669,
+    "kv_pool_b1_full_context_gib": 1.594,
+    "kv_bytes_per_token_per_device": 6528,
+    "non_kv_footprint_gib": 18.075,
+    "trace_region_reserved_mib": 512,
+    "trace_region_used_mib": 27.3,
+    "l1_bytes_per_core_held": 10496,
+    "kv_pool_available_gib": 12.75,
+    "kv_pool_tokens_all_users": 2095000,
+    "avg_tokens_per_user_at_32": 62000,
+    "current_supported_context": 262144,
+    "limiting_reason": "dram (the pool is shared by concurrent users: one user reaches the full 262144; 32 users share ~2.0M tokens)",
+    "capacity_evidence": "MEMORY_REPORT lines in logs/06-warm-fixed-{1,2}.log and logs/06-prefill-check-*.log; doc/full_model/README.md section 2",
+    "changes_vs_stage5": "none in persistent allocations; the router-gate L1 buffers are shared across layers (fused_decoder._share_gate_buffers)",
+    "note_trace_region": "total_bytes_per_bank already excludes the reserved trace region (verified: 4,234,838,400 B with a 300 MB region vs 4,205,232,512 B with 512 MiB); GDN state grows 19.8 MB per extra user per device (0.57 GiB at 32 users), included in the per-user average"
   }
 }

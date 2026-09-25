@@ -1,0 +1,39 @@
+2026-09-25 02:33:29.532 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-09-25 02:33:30.922 | INFO     | models.tt_transformers.tt.model_config:__init__:633 - Inferring device name: P150x4
+2026-09-25 02:33:30.922 | INFO     | models.tt_transformers.tt.model_config:__init__:716 - Checkpoint directory: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-25 02:33:30.923 | INFO     | models.tt_transformers.tt.model_config:__init__:717 - Tokenizer file: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5/tokenizer.model
+2026-09-25 02:33:30.923 | INFO     | models.tt_transformers.tt.model_config:__init__:718 - Cache directory: /home/raahem/.cache/ttnn/qwen35_122b/P150x4
+2026-09-25 02:33:30.923 | INFO     | models.tt_transformers.tt.model_config:__init__:719 - Model name: dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-25 02:33:32.108 | INFO     | models.tt_transformers.tt.model_config:_set_params_from_dict:2941 - Model name from config: Qwen3.5-122B-A10B
+2026-09-25 02:33:32.108 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2610 - Unknown model Qwen3.5-122B-A10B on device P150x4, setting MAX_PREFILL_CHUNK_SIZE to 4 for compatibility
+2026-09-25 02:33:32.108 | WARNING  | models.tt_transformers.tt.model_config:get_max_prefill_chunk_size:2613 - Try setting MAX_PREFILL_CHUNK_SIZE to larger powers of 2 up to e.g. 128 for faster performance (if you run out of L1 memory it was too high)
+2026-09-25 02:33:32.114 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3983 - Tokenizer path: /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-25 02:33:32.114 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3984 - Model name: Qwen3.5-122B-A10B
+2026-09-25 02:33:32.114 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3985 - Base model name: Qwen3.5-122B
+2026-09-25 02:33:32.442 | INFO     | models.tt_transformers.tt.model_config:create_tokenizer:3996 - Successfully loaded tokenizer from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:create_processor:4067 - Successfully loaded processor from /home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc4d348443bc740c68e2d77492492c11606384d5
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:__init__:1263 - Attention grid: ttnn.CoreGrid(x=8, y=4)
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:__init__:1264 - MLP grid: ttnn.CoreGrid(x=8, y=1)
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:__init__:1265 - MLP prefill grids @ 32: w1/w3: (8, 8), w2: (8, 8)
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:__init__:1266 - MLP prefill grids @ max_seq_len(4096): w1/w3: (8, 8), w2: (8, 8)
+2026-09-25 02:33:33.938 | INFO     | models.tt_transformers.tt.model_config:__init__:1269 - LM head grid: ttnn.CoreGrid(x=8, y=6)
+2026-09-25 02:33:35.332 | INFO     | models.demos.blackhole.qwen36.tt.model:__init__:94 - Loading 2 transformer layers (indices=[0, 3])...
+Loading layers:   0%|          | 0/2 [00:00<?, ?it/s]2026-09-25 02:33:43.699 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:254 - Qwen35MoE layer 0: E=256 k=8 N=1024 (local 256) tp=4 union~221
+Loading layers:  50%|█████     | 1/2 [00:08<00:08,  8.39s/it]2026-09-25 02:33:52.029 | DEBUG    | models.autoports.qwen_qwen3_5_122b_a10b.tt.moe:__init__:254 - Qwen35MoE layer 3: E=256 k=8 N=1024 (local 256) tp=4 union~221
+Loading layers: 100%|██████████| 2/2 [00:16<00:00,  8.35s/it]Loading layers: 100%|██████████| 2/2 [00:16<00:00,  8.36s/it]
+2026-09-25 02:33:54.843 | INFO     | models.autoports.qwen_qwen3_5_122b_a10b.tt.generator:__init__:79 - Qwen35MoeGenerator: B=1 max_seq_len=4096 kv (64, 1, 64, 256) DataType.BFLOAT8_B (1 attention layers), layers=2
+2026-09-25 02:33:54.883 | INFO     | models.demos.blackhole.qwen36.tt.gdn.fused_chunk:chunk_gated_delta_rule_fused_adapter:105 - [GDN] fused chunk_gated_delta_rule active: path=PHASED (chunk-parallel prep + V-block scan), chunk_size=32, flat_qkv=True, input q/k/v dtype=DataType.BFLOAT16/DataType.BFLOAT16/DataType.BFLOAT16
+2026-09-25 02:33:55.918 | INFO     | models.autoports.qwen_qwen3_5_122b_a10b.tt.generator:_warm_prefill:147 - prefill buckets warmed in 1.1s
+2026-09-25 02:33:56.042 | INFO     | models.tt_transformers.tt.generator:_prepare_decode_trace_text:2066 - Done Compiling Model
+2026-09-25 02:33:56.096 | INFO     | models.tt_transformers.tt.generator:_record_decode_trace_text:2158 - Done Capturing Decode Trace
+2026-09-25 02:33:56.099 | INFO     | models.autoports.qwen_qwen3_5_122b_a10b.tt.generator:_warm_decode_trace:172 - decode trace (model + on-device sampling) captured
+2026-09-25 02:33:56.099 | INFO     | models.autoports.qwen_qwen3_5_122b_a10b.tt.generator:_memory_report:211 - MEMORY_REPORT {"dram": {"total_bytes_per_bank": 4234838400, "allocated_bytes_per_bank": 191516544, "banks": 8}, "l1": {"total_bytes_per_bank": 1436672, "allocated_bytes_per_bank": 10496, "banks": 110}, "trace": {"total_bytes_per_bank": 37502976, "allocated_bytes_per_bank": 188416, "banks": 8}, "dram_allocated_gib_per_device": 1.427, "dram_total_gib_per_device": 31.552}
+TRACE step1 sampled=8599 device_tokens=8599 device_pos=20 device_rot=20 (expect pos=20, rot=20, tokens==sampled)
+TRACE step2 sampled=43506 device_tokens=43506 device_pos=21 device_rot=21 (expect pos=21, tokens==sampled2) same_input_buffers=True
+TRACE step3 sampled=3149 device_tokens=3149 device_pos=22 (expect pos=22)
+TRACE unchanged page table: prev_page_table object kept=True device pt equal=True
+TRACE changed page table: device pt tail=[63, 62] (expect [63, 62]) refreshed=True device_tokens=95746 (expect 95746: token feedback survives the page-table copy)
+TRACE determinism identical=True different_prompt_differs=True a=[1146, 8599, 43506, 3149, 79731, 95746, 95746, 95746] c=[593, 77820, 57677, 62065, 62065, 62065, 8430, 59239]
+TRACE token-out step (2 layers, incl. sampler + 1-token readback) 2.350 ms
+TRACE_DONE

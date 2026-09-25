@@ -20,6 +20,7 @@ Every rewrite is gated by :class:`FusionFlags` so each can be A/B measured again
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import ttnn
@@ -39,6 +40,33 @@ class FusionFlags:
     @classmethod
     def none(cls):
         return cls(False, False, False, False)
+
+
+# TTMoEGate keeps four persistent L1-sharded buffers per instance (score-correction bias, input indices, output scores,
+# output indices: one 32x32 tile per core for `buffer_rows` = all 110 cores, ~10.5 KB of L1 per core per layer). They are
+# layer-independent constants / scratch outputs consumed right after the gate op, so one set is shared by every layer of a
+# MODEL: with 48 layers the per-layer copies held 395 KB of L1 per core and the 2048-token prefill matmul programs no
+# longer fit their circular buffers beside them (stage-6 full-model bring-up, 2026-09-24). The share is scoped to the
+# model's args object (one per model build): a process that builds several models on one mesh (pytest sessions) must
+# not hand a later model the first model's - by then deallocated - buffers (seen as wrong logits in the generator tests).
+_GATE_SHARED_ATTRS = ("tt_bias", "tt_input_indices", "tt_output", "tt_output_indices")
+
+
+def _share_gate_buffers(gate, args):
+    key = (getattr(gate, "_buffer_rows", None), getattr(gate, "num_blocks", None), gate.use_fallback)
+    cache = getattr(args, "_qwen35_shared_gate_buffers", None)
+    if cache is None:
+        cache = {}
+        args._qwen35_shared_gate_buffers = cache
+    shared = cache.get(key)
+    if shared is None:
+        cache[key] = {a: getattr(gate, a) for a in _GATE_SHARED_ATTRS if getattr(gate, a, None) is not None}
+        return
+    for a, t in shared.items():
+        mine = getattr(gate, a, None)
+        if mine is not None and mine is not t:
+            ttnn.deallocate(mine)
+        setattr(gate, a, t)
 
 
 class Qwen35MoEFused(Qwen35MoE):
@@ -70,6 +98,8 @@ class Qwen35MoEFused(Qwen35MoE):
                 ),
                 state_dict["gate.weight"].T.contiguous(),
             )
+            if os.environ.get("QWEN35_SHARE_GATE_BUFFERS", "1") == "1":
+                _share_gate_buffers(self.gate, args)
             # The functional router weight (1.5 MB) is kept: prefill rows use it (see _route); the gate op serves the
             # single-tile decode rows only.
         if self.flags.shared_expert_packed:
