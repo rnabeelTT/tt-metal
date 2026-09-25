@@ -1,0 +1,14 @@
+Thinking Process:
+
+1.  **Analyze the Request:**
+    *   Source text: "Hello, how are you today?"
+    *   Target language: French
+    *   Task: Translate the text.
+
+2.  **Analyze the Source Text:**
+    *   "Hello": A common greeting.
+    *   "how are you": Asking about well-being.
+    *   "today": Specifying the time frame (though often implied in the greeting).
+    *   Tone: Casual, friendly, standard.
+
+3.  **Determine the Appropriate French Translation:**

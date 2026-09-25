@@ -1,0 +1,13 @@
+The user wants me to write a Python function to calculate the Fibonacci sequence. I should provide a clear, well-documented solution. There are multiple ways to implement this:
+
+1. Recursive approach (simple but inefficient for large numbers)
+2. Iterative approach (efficient)
+3. Memoization/caching approach (good balance)
+4. Using generators (for getting sequence values)
+
+I'll provide multiple approaches so the user can choose based on their needs. I'll start with the most common iterative approach, then show other variations.
+
+Let me write clean, well-commented code with examples.
+</think>
+
+Here are

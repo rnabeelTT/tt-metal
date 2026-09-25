@@ -162,6 +162,14 @@ class MultichipConfig:
     gdn_decode_high_precision: bool = SELECTED.gdn_state_fp32  # fp32 recurrent decode step (TP default was True)
     sdpa_decode_q_chunk: int | None = SELECTED.sdpa_decode_q_chunk  # TP default was 0/0 (auto); SELECTED = 32/256
     sdpa_decode_k_chunk: int | None = SELECTED.sdpa_decode_k_chunk
+    # --- datatype-sweep (stage 8) weight groups outside the MoE block: token-mixer projections and the LM head; None =
+    # the validated bfp8 default of the qwen36 TP loaders; the loaders tag the tensor cache with any other dtype -------
+    attn_weight_dtype: object = None
+    gdn_weight_dtype: object = None
+    lm_head_dtype: object = None
+    lm_head_fidelity: str | None = None  # None = ttnn.linear default; "hifi2_default" (the resolved default, explicit) | "lofi" | "hifi2" | "hifi4"
+    # per-layer MoE precision overrides: ((layer_idx, {"routed_gate_up": dtype, ...}), ...) -> MoEPrecision.from_args
+    precision_layer_exceptions: tuple = ()
     # the stage-3 policy every other MoE knob is inherited from (precision, fidelity, prefill mode, router pc, ...)
     base: OptimizationConfig = SELECTED
 
@@ -327,10 +335,32 @@ class MultichipDecoder(OptimizedDecoder):
         args.opt = opt
         args.fusion_flags = opt.fusion
         args.attn_fuse_qkv = opt.fusion.attn_fused_qkv  # single-device attention only; harmless on TP
-        args.attn_weight_dtype = (
-            opt.attn_weight_dtype
-        )  # recorded; the TP loaders hardcode bfp8 mixer weights (= policy)
-        args.gdn_weight_dtype = opt.gdn_weight_dtype
+        # token-mixer / LM-head weight dtypes (stage 8): consumed by load_attention_weights_tp / load_gdn_weights_tp /
+        # Qwen36Model (None -> bfp8); the stage-3 opt fields stay bfp8 and are not consulted on the mesh
+        args.attn_weight_dtype = mc.attn_weight_dtype or opt.attn_weight_dtype
+        args.gdn_weight_dtype = mc.gdn_weight_dtype or opt.gdn_weight_dtype
+        args.lm_head_dtype = mc.lm_head_dtype
+        # None = ttnn.linear's own default (resolves to HiFi2, fp32 dest off, packer L1 acc on for a bf16 x block-float
+        # matmul in this ttnn build); "hifi2_default" spells that resolved config out explicitly (a pin that changes nothing);
+        # "lofi" | "hifi2" | "hifi4" build the mixers' style config (fp32 dest accumulation ON) — a two-setting change vs default
+        _fid = {"lofi": ttnn.MathFidelity.LoFi, "hifi2": ttnn.MathFidelity.HiFi2, "hifi4": ttnn.MathFidelity.HiFi4}
+        if mc.lm_head_fidelity == "hifi2_default":
+            args.lm_head_compute_cfg = ttnn.WormholeComputeKernelConfig(
+                math_fidelity=ttnn.MathFidelity.HiFi2,
+                math_approx_mode=False,
+                fp32_dest_acc_en=False,
+                packer_l1_acc=True,
+            )
+        elif mc.lm_head_fidelity:
+            args.lm_head_compute_cfg = ttnn.WormholeComputeKernelConfig(
+                math_fidelity=_fid[mc.lm_head_fidelity],
+                math_approx_mode=False,
+                fp32_dest_acc_en=True,
+                packer_l1_acc=True,
+            )
+        else:
+            args.lm_head_compute_cfg = None
+        args.precision_layer_exceptions = {int(k): dict(v) for k, v in mc.precision_layer_exceptions}
         # single-device-only layouts off (layer.forward gates them on num_devices == 1 anyway)
         args.decode_norm_sharded = False
         args.attn_norm_out_sharded = False

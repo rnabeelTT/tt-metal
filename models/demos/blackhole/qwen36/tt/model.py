@@ -132,16 +132,20 @@ class Qwen36Model:
                 f"LM-head vocab {lm_head_weight.shape[-1]} not divisible by num_devices "
                 f"{self.num_devices}; falling back to replicated LM head."
             )
+        # LM-head weight dtype: args.lm_head_dtype (None -> bfp8, the validated default); non-default dtypes get their own
+        # cache name (as_tensor reloads a cached file as-is).
+        lm_dtype = getattr(args, "lm_head_dtype", None) or ttnn.bfloat8_b
+        lm_tag = "" if lm_dtype == ttnn.bfloat8_b else "." + str(lm_dtype).replace("DataType.", "").lower()
         if self._lmhead_vocab_sharded:
             # Separate cache (.vshard): as_tensor ignores mesh_mapper on reload.
             lm_mapper = ttnn.ShardTensorToMesh(mesh_device, dim=-1)
-            lm_cache = tensor_cache_path / "output.weight.vshard" if tensor_cache_path else None
+            lm_cache = tensor_cache_path / ("output.weight.vshard" + lm_tag) if tensor_cache_path else None
         else:
             lm_mapper = ttnn.ReplicateTensorToMesh(mesh_device) if self.num_devices > 1 else None
-            lm_cache = tensor_cache_path / "output.weight" if tensor_cache_path else None
+            lm_cache = tensor_cache_path / ("output.weight" + lm_tag) if tensor_cache_path else None
         self.lm_head_weight = ttnn.as_tensor(
             lm_head_weight,
-            dtype=ttnn.bfloat8_b,
+            dtype=lm_dtype,
             layout=ttnn.TILE_LAYOUT,
             device=mesh_device,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
@@ -506,10 +510,14 @@ class Qwen36Model:
         """Generator mode-change hook; no-op (no prefetcher)."""
         return None
 
+    def _lm_head_ckc(self):
+        """LM-head matmul compute config: args.lm_head_compute_cfg (datatype-sweep fidelity policy), None = ttnn default."""
+        return getattr(self.args, "lm_head_compute_cfg", None)
+
     def _lm_head(self, x):
         """LM-head matmul. Vocab-sharded mesh: partial logits + all-gather to full replicated.
         Single device: plain matmul."""
-        logits = ttnn.linear(x, self.lm_head_weight)
+        logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
         if self._lmhead_vocab_sharded:
             from models.tt_transformers.tt.ccl import tt_all_gather
 
@@ -942,7 +950,7 @@ class Qwen36Model:
         x = self._final_norm_decode(x)
         if self._ondev_argmax:
             # Pre-gather vocab-sharded logits; caller argmaxes shards, skips all-gather + readback.
-            logits = ttnn.linear(x, self.lm_head_weight)
+            logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
         else:
             logits = self._lm_head(x)
         ttnn.deallocate(x)
@@ -967,7 +975,7 @@ class Qwen36Model:
         x = self._final_norm_decode(x)
         if sharded_lm_head or self._ondev_argmax:
             # Pre-gather vocab-sharded logits (on-device sampling / greedy argmax).
-            logits = ttnn.linear(x, self.lm_head_weight)
+            logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
         else:
             logits = self._lm_head(x)
         ttnn.deallocate(x)
@@ -3057,7 +3065,7 @@ class Qwen36Model:
                 xn_b = ttnn.reshape(xn, (1, Bg, bucket, xn.shape[-1]))
                 for i, u in enumerate(grp):
                     x_last = xn_b[:, i : i + 1, vlens[u] - 1 : vlens[u], :]  # [1,1,1,full] (slice copy)
-                    lg = ttnn.linear(x_last, self.lm_head_weight)
+                    lg = ttnn.linear(x_last, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
                     ttnn.deallocate(x_last)
                     host_logits[u] = (
                         ttnn.to_torch(lg, mesh_composer=comp).reshape(1, 1, -1)[:, :, : self.args.vocab_size].clone()

@@ -1,0 +1,8 @@
+{
+  "_note": "qualitative chat suite (6 prompts through the HF chat template, 128 new tokens, HF CPU controls; artifacts/qualitative_<id>/, logs/08/qualitative_<id>.log): pass = every completion coherent and on topic with the same structure as the HF control, no degenerate output; the collector fails a candidate whose value starts with 'fail'",
+  "mixer_bfp4_lofi": "pass (6/6 coherent; first divergence from HF at 58/60/6/29/36/59)",
+  "combo_mixer_lmhead_bfp4": "pass (6/6 coherent; 58/60/6/29/36/26)",
+  "combo_mixer_lmhead_bfp4_ccl_bfp8": "pass (6/6 coherent; 62/60/6/29/36/29)",
+  "lm_head_bfp4": "pass (6/6 coherent; 58/101/84/43/36/15)",
+  "baseline_s7": "pass (stage-7 suite, doc/optimized_full_model/qualitative: 98/101/6/43/36/15; re-run through the shipped path in stage 8 only for the selected policy)"
+}

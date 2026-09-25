@@ -1,0 +1,12 @@
+Thinking Process:
+
+1.  **Analyze the Request:**
+    *   Topic: Machine Learning.
+    *   Format: Haiku (5-7-5 syllables).
+
+2.  **Brainstorming Imagery & Concepts:**
+    *   Data, learning, patterns, code, neural nets, training, prediction, future, intelligence, silicon, mind.
+    *   Keywords: Data, learns, grows, thinks, code, patterns, hidden, layers, mind.
+
+3.  **Drafting - Attempt 1:**
+    *   Data flows in streams (5)

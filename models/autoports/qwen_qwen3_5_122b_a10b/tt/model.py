@@ -17,12 +17,15 @@ sampled token written into ``tokens`` by ``tt_out_tok`` and the positions stay c
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import torch
+from loguru import logger
 
 import ttnn
+from models.autoports.qwen_qwen3_5_122b_a10b.tt import precision
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.model_config import Qwen35MoeModelArgs
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.multichip_decoder import (
     MULTICHIP_SELECTED,
@@ -530,14 +533,20 @@ def create_model(
     """Build (args, model) for the mesh. ``layer_indices`` (checkpoint indices) selects a reduced model for probes/profiling."""
     mc = mc or MULTICHIP_SELECTED
     if os.environ.get("QWEN35_MC_OVERRIDE"):  # experiments: '{"gdn_prefill_mmrs": false}'
-        import json
-
         mc = mc.with_(
             **{
                 k: (tuple(v) if isinstance(v, list) else v)
                 for k, v in json.loads(os.environ["QWEN35_MC_OVERRIDE"]).items()
             }
         )
+    # datatype-sweep precision policy (stage 8): the shipped doc/datatype_sweep/selected_precision_config.json, or the file
+    # named by QWEN35_PRECISION_CONFIG (``none`` = code defaults), mapped onto the MultichipConfig knobs the runtime reads.
+    policy, policy_path = precision.load_policy()
+    mc = precision.apply_policy(mc, policy)
+    logger.info(
+        f"precision policy {policy.get('config_id')} ({policy_path or 'code defaults'}): "
+        f"{json.dumps(precision.describe_config(mc), sort_keys=True)}"
+    )
     if tuple(mesh_device.shape) != tuple(mc.mesh_shape):
         raise ValueError(f"mesh {tuple(mesh_device.shape)} != MultichipConfig.mesh_shape {tuple(mc.mesh_shape)}")
     args = Qwen35MoeModelArgs(mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len or 262144)
@@ -569,4 +578,14 @@ def create_model(
     state_dict = args.load_state_dict()
     model = Qwen35MoeModel(mesh_device, args, state_dict, tensor_cache_path=cache_path)
     model.mc = mc
+    model.precision_policy = policy
+    # the policy read back from the built tensors / kernel configs; every mismatch is a construction bug
+    eff = precision.effective_policy(model, args)
+    bad = precision.check_effective(policy, eff)
+    print(
+        "PRECISION_EFFECTIVE "
+        + json.dumps({"config_id": policy.get("config_id"), "mismatches": bad, **eff}, sort_keys=True)
+    )
+    if bad:
+        raise RuntimeError(f"precision policy {policy.get('config_id')} not constructed as requested: {bad}")
     return args, model

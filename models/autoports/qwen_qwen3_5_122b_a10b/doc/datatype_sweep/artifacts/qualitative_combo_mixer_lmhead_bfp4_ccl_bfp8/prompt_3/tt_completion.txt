@@ -1,0 +1,10 @@
+Here's a thinking process that leads to the suggested answer:
+
+1.  **Analyze the Request:**
+    *   **Topic:** Thermodynamics.
+    *   **Specific Question:** What are the three laws of thermodynamics?
+    *   **Goal:** Provide a clear, accurate, and easy-to-understand explanation of the three laws (and often the "Zeroth" law, as it's fundamental).
+
+2.  **Recall/Retrieve Knowledge:**
+    *   *Zeroth Law:* Thermal equilibrium. If A=B and B=C, then A=C. Defines temperature.
+    *

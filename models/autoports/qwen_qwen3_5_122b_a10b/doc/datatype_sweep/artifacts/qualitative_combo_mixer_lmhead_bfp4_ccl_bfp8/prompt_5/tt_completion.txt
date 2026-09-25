@@ -1,0 +1,11 @@
+The user wants me to write a Python function to calculate the Fibonacci sequence. I should provide a clear, well-documented solution. There are multiple approaches to calculate Fibonacci numbers:
+
+1. Recursive approach (simple but inefficient for large n)
+2. Iterative approach (efficient and straightforward)
+3. Memoization/DP approach (good for multiple calls)
+4. Matrix exponentiation (for very large n)
+
+I'll provide multiple implementations with explanations so the user can choose based on their needs. I'll start with the most common and efficient iterative approach, then show other variations.
+</think>
+
+# Fibonacci Sequence Calculator in

@@ -73,8 +73,13 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
 
         os.makedirs(cache_dir, exist_ok=True)
 
+    # projection weight dtype: args.gdn_weight_dtype (None -> bfp8, the validated default); a non-default dtype gets its
+    # own cache names (as_tensor reloads a cached file as-is, whatever dtype is requested)
+    _wdt = getattr(args, "gdn_weight_dtype", None) or ttnn.bfloat8_b
+    _wtag = "" if _wdt == ttnn.bfloat8_b else "." + str(_wdt).replace("DataType.", "").lower()
+
     def c(n):
-        return str(cache_dir / n) if cache_dir is not None else None
+        return str(cache_dir / (n + _wtag)) if cache_dir is not None else None
 
     # State-dict keys vary by loader: optional linear_attn. prefix; conv1d may be fused or q/k/v split.
     P = "linear_attn." if any(k.startswith("linear_attn.") for k in sd) else ""
@@ -136,7 +141,7 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
             dim=-1,
             memory_config=ttnn.DRAM_MEMORY_CONFIG if _proj1d else args.gdn_qkvzab_weight_memcfg,
             cache_path=c("qkvzab" + (".il" if _proj1d else ".dramshard") + (".abpad" if _ab_pad else "")),
-            dtype=ttnn.bfloat8_b,
+            dtype=_wdt,
         )
     else:
         fused = torch.cat(
@@ -153,7 +158,7 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
             dim=-1,
             memory_config=qkvz_mc,
             cache_path=c("qkvz" + (".dramshard" if qkvz_sharded else "")),
-            dtype=ttnn.bfloat8_b,
+            dtype=_wdt,
         )
         # Separate A+B projection (column-parallel fallback)
         ab = torch.cat(
@@ -163,9 +168,7 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
             ],
             dim=0,
         )
-        tw["ab"] = tpc.shard_w(
-            ab, mesh, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG, cache_path=c("ab"), dtype=ttnn.bfloat8_b
-        )
+        tw["ab"] = tpc.shard_w(ab, mesh, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG, cache_path=c("ab"), dtype=_wdt)
     # Row-parallel out projection: DRAM-width-sharded (like the in-proj) — decode tput win.
     _out_sharded = getattr(args, "gdn_out_weight_memcfg", None) is not None
     tw["out"] = tpc.shard_w(
@@ -174,7 +177,7 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
         dim=0,
         memory_config=args.gdn_out_weight_memcfg if _out_sharded else ttnn.DRAM_MEMORY_CONFIG,
         cache_path=c("out.dramshard" if _out_sharded else "out"),
-        dtype=ttnn.bfloat8_b,
+        dtype=_wdt,
     )
     # Per-head params
     tw["dt_bias"] = tpc.shard_small(sd[P + "dt_bias"].float(), mesh, c("dt_bias"))

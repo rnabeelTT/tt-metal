@@ -1,0 +1,10 @@
+Here's a thinking process that leads to the suggested explanation:
+
+1.  **Analyze the Request:**
+    *   **Topic:** Difference between supervised and unsupervised learning.
+    *   **Constraint:** Explain in "simple terms."
+    *   **Goal:** Make it accessible to someone without a technical background.
+
+2.  **Identify Key Concepts:**
+    *   **Supervised Learning:** Labeled data, teacher/student analogy, prediction/classification, input-output pairs.
+    *   **Unsupervised Learning:** Unlabeled data, pattern finding, clustering, no teacher, input-only

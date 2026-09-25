@@ -1,0 +1,88 @@
+{
+  "policy": "models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/combo_mixer_lmhead_bfp4_ccl_bfp8.json",
+  "prompt": "The capital of France is Paris, the capital of Germany is Berlin, the capital of Italy is",
+  "runs": [
+    {
+      "prefill_top2": [
+        21047,
+        1076
+      ],
+      "prefill_top2_text": [
+        " Rome",
+        "..."
+      ],
+      "prefill_margin": 5.3125,
+      "decode": [
+        {
+          "top2": [
+            11,
+            13
+          ],
+          "margin": 1.75
+        },
+        {
+          "top2": [
+            321,
+            279
+          ],
+          "margin": 0.625
+        }
+      ]
+    },
+    {
+      "prefill_top2": [
+        21047,
+        1076
+      ],
+      "prefill_top2_text": [
+        " Rome",
+        "..."
+      ],
+      "prefill_margin": 5.3125,
+      "decode": [
+        {
+          "top2": [
+            11,
+            13
+          ],
+          "margin": 1.875
+        },
+        {
+          "top2": [
+            321,
+            279
+          ],
+          "margin": 0.25
+        }
+      ]
+    },
+    {
+      "prefill_top2": [
+        21047,
+        1076
+      ],
+      "prefill_top2_text": [
+        " Rome",
+        "..."
+      ],
+      "prefill_margin": 5.3125,
+      "decode": [
+        {
+          "top2": [
+            11,
+            13
+          ],
+          "margin": 1.625
+        },
+        {
+          "top2": [
+            321,
+            279
+          ],
+          "margin": 0.75
+        }
+      ]
+    }
+  ],
+  "config_id": "combo_mixer_lmhead_bfp4_ccl_bfp8"
+}

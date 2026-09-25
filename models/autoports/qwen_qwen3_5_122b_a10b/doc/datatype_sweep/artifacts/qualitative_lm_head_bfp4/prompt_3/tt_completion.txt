@@ -1,0 +1,9 @@
+Here's a thinking process that leads to the suggested answer:
+
+1.  **Analyze the Request:**
+    *   **Topic:** The three laws of thermodynamics.
+    *   **Goal:** Define and explain them clearly.
+
+2.  **Recall/Retrieve Knowledge:**
+    *   *Zeroth Law:* Thermal equilibrium. If A is in equilibrium with B, and B with C, then A is with C. (Temperature definition).
+    *   *First Law:* Conservation of energy. Energy cannot be created or destroyed, only transferred/transformed. $\Delta U = Q - W$.

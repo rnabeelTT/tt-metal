@@ -1,0 +1,40 @@
+{
+  "config": "models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/shared_bfp8_lofi.json",
+  "layers": "0,3",
+  "build_s": 35.1,
+  "config_id": "shared_bfp8_lofi",
+  "prefill_ms": 31.5,
+  "decode_ms_per_step": 2.75,
+  "tokens": [
+    56636,
+    99211,
+    82981,
+    552,
+    7330,
+    7330,
+    7330,
+    7330,
+    7330
+  ],
+  "text": " Dort\u8bb0\u5fc6ibiliardikiikiikiikiiki",
+  "program_cache": 898,
+  "memory": {
+    "dram": {
+      "total_bytes_per_bank": 4205232512,
+      "allocated_bytes_per_bank": 202323648,
+      "banks": 8
+    },
+    "l1": {
+      "total_bytes_per_bank": 1436672,
+      "allocated_bytes_per_bank": 18688,
+      "banks": 110
+    },
+    "trace": {
+      "total_bytes_per_bank": 67108864,
+      "allocated_bytes_per_bank": 2146304,
+      "banks": 8
+    },
+    "dram_allocated_gib_per_device": 1.507,
+    "dram_total_gib_per_device": 31.331
+  }
+}

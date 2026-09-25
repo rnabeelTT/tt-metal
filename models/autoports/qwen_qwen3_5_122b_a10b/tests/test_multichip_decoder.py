@@ -33,15 +33,15 @@ from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_functional_decoder impor
     DEVICE_PARAMS,
     L0,
     L3,
+    PCC_BAR,
     _flush_profiler,
     _Harness,
     _hidden,
     _HostTransferCounter,
     _page_table,
-    _pcc,
-    _state,
-    signpost,
 )
+from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_functional_decoder import _pcc as _pcc_ref
+from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_functional_decoder import _state, signpost
 from models.autoports.qwen_qwen3_5_122b_a10b.tools.baseline_dump import (
     CHUNK_LENS,
     CHUNKED_DECODE_SEED,
@@ -59,6 +59,7 @@ from models.autoports.qwen_qwen3_5_122b_a10b.tt.multichip_decoder import (
     MultichipDecoder,
 )
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.optimized_decoder import SELECTED, OptimizedDecoder
+from models.common.utility_functions import comp_pcc
 from models.demos.blackhole.qwen36.tt.model_config import GDN_CONV1D_L1_SMALL_SIZE
 
 os.environ.setdefault("HF_MODEL", "Qwen/Qwen3.5-122B-A10B")
@@ -250,16 +251,61 @@ def _prefill_users(h: _MeshHarness, hidden):
     return ref_out, torch.cat(outs, dim=0)
 
 
+# The layer PCC bars of this suite (0.995 vs HF / the single-chip dump) were set in stages 1-5 on the bfp8 token-mixer
+# policy; the datatype-sweep stage ships bfp4 token mixers, whose layer PCC is 0.985-0.995 (README doc/datatype_sweep
+# section 7). The suite therefore builds the stage-7 REFERENCE policy by default (configs/baseline_s7.json) and
+# QWEN35_LAYER_TESTS_POLICY=shipped (or a policy path) switches it to the shipped selected_precision_config.json;
+# test_mc_shipped_policy_pcc measures the shipped policy on real weights with its own documented bar.
+LAYER_TESTS_REFERENCE_POLICY = (
+    Path(__file__).resolve().parents[1] / "doc" / "datatype_sweep" / "configs" / "baseline_s7.json"
+)
+# descriptive bar for policies with bfp4 token mixers (stage 8: test_mc_shipped_policy_pcc measured 0.9931 / 0.9933 prefill and
+# 0.9949 / 0.9997 decode at pos 37 on real weights; the whole suite's lowest value under the shipped policy was 0.9849 for the
+# GDN recurrent state vs the single-chip dump and 0.9916 for real-weight decode at pos 333) — not a requirement
+PCC_BAR_BFP4_MIXERS = 0.99
+# GDN recurrent-state comparison vs the single-chip (bfp8-mixer) dump under bfp4 mixers: the raw state tensor carries the
+# projection quantisation directly (measured 0.9786 at T=37, 0.9843-0.9849 at T=5 in the shipped-policy suite run) — descriptive
+PCC_BAR_BFP4_STATE = 0.975  # 0.0036 under the worst observed value: a thin margin on purpose (a regression shows up)
+
+
+def _layer_tests_policy():
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import precision
+
+    sel = os.environ.get("QWEN35_LAYER_TESTS_POLICY", "")
+    if sel == "shipped":
+        return precision.load_policy()[0]
+    if sel:
+        return precision.load_policy(sel)[0]
+    if LAYER_TESTS_REFERENCE_POLICY.is_file():
+        return precision.load_policy(LAYER_TESTS_REFERENCE_POLICY)[0]
+    return precision.BASELINE_POLICY
+
+
+def _layer_tests_policy_has_bfp4_mixers():
+    pol = _layer_tests_policy()
+    wg = pol["weight_groups"]
+    return "bfp4" in (str(wg["attention"]["dtype"]).lower(), str(wg["linear_attention"]["dtype"]).lower())
+
+
+def _pcc(label, expected, actual, bar=PCC_BAR):
+    """The suite's PCC check with a policy-aware default bar: 0.995 on the reference (bfp8-mixer) policy, PCC_BAR_BFP4_MIXERS
+    when the active layer-test policy has bfp4 token mixers (QWEN35_LAYER_TESTS_POLICY=shipped), so the functional assertions
+    behind the PCC pre-checks run under either policy. Explicit bars (BASELINE_BAR) are lowered the same way."""
+    if _layer_tests_policy_has_bfp4_mixers():
+        bar = min(bar, PCC_BAR_BFP4_STATE if "recurrent state" in label else PCC_BAR_BFP4_MIXERS)
+    return _pcc_ref(label, expected, actual, bar)
+
+
 def _mc_override(mc):
-    """QWEN35_MC_OVERRIDE='{"mixer_decode_mode": "ds_in"}' applies MultichipConfig fields to the tests (Tracy of a candidate)."""
+    """MULTICHIP_SELECTED + the layer-test precision policy (see LAYER_TESTS_REFERENCE_POLICY) + the
+    QWEN35_MC_OVERRIDE='{"mixer_decode_mode": "ds_in"}' field overrides (Tracy of a candidate)."""
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import precision
+
+    mc = precision.apply_policy(mc or MULTICHIP_SELECTED, _layer_tests_policy())
     ov = os.environ.get("QWEN35_MC_OVERRIDE")
     if not ov:
         return mc
-    import json
-
-    return (mc or MULTICHIP_SELECTED).with_(
-        **{k: (tuple(v) if isinstance(v, list) else v) for k, v in json.loads(ov).items()}
-    )
+    return mc.with_(**{k: (tuple(v) if isinstance(v, list) else v) for k, v in json.loads(ov).items()})
 
 
 def _mc(mesh, layer_idx, *, batch, max_seq_len, real=False, hf=True, state=None, mc=None, max_batch_size=None):
@@ -514,6 +560,52 @@ def test_mc_real_weight_against_hf(mesh_device, layer_idx, seq_len):
             _pcc(f"MC REAL vs single-chip {h.kind} decode pos={seq_len}", case["decode_out"], tt_dec, BASELINE_BAR)
     else:
         print(f"(no real-weight baseline dump at {path}; HF comparison only)")
+
+
+@mesh_tp()
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_mc_shipped_policy_pcc(mesh_device, layer_idx):
+    """The SHIPPED precision policy (doc/datatype_sweep/selected_precision_config.json: bfp4 LoFi token-mixer projections,
+    bfp4 LM head) on real checkpoint weights: prefill T=37 + decode vs HF with the bfp4-mixer layer bar
+    (PCC_BAR_BFP4_MIXERS, measured in stage 8), and the PCC gap to the reference (bfp8-mixer) policy printed for the record.
+    The full-model acceptance of the shipped policy is the datatype-sweep teacher forcing, not this layer bar."""
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import precision
+
+    shipped = precision.apply_policy(MULTICHIP_SELECTED, precision.load_policy()[0])
+    # the reference arm is pinned to the reference policy file, independent of QWEN35_LAYER_TESTS_POLICY (review round 2)
+    reference = precision.apply_policy(MULTICHIP_SELECTED, precision.load_policy(LAYER_TESTS_REFERENCE_POLICY)[0])
+    seq_len = 37
+    hidden = _hidden(1, seq_len, 3072, seed=prefill_seed(seq_len))
+    dec = _hidden(1, 1, 3072, seed=decode_seed(seq_len))
+    pos = torch.tensor([seq_len])
+    got = {}
+    for name, mc in (("reference", reference), ("shipped", shipped)):
+        h = _MeshHarness(
+            mesh_device,
+            layer_idx,
+            batch=1,
+            max_seq_len=4096,
+            real=True,
+            hf=True,
+            state=None,
+            mc=mc,
+            max_batch_size=None,
+        )
+        ref_pre, tt_pre = _prefill_users(h, hidden)
+        tt_dec = h.tt_decode(dec, pos)
+        ref_dec = h.hf_decode(dec, pos)
+        got[name] = (
+            float(comp_pcc(ref_pre.float(), tt_pre.float(), 0.0)[1]),
+            float(comp_pcc(ref_dec.float(), tt_dec.float(), 0.0)[1]),
+        )
+        print(
+            f"SHIPPED_POLICY_PCC {h.kind} {name}: prefill T={seq_len} PCC {got[name][0]:.6f}, decode pos={seq_len} PCC {got[name][1]:.6f}"
+        )
+        del h
+    for what, k in (("prefill", 0), ("decode", 1)):
+        assert (
+            got["shipped"][k] >= PCC_BAR_BFP4_MIXERS
+        ), f"shipped policy {what}: PCC {got['shipped'][k]} < {PCC_BAR_BFP4_MIXERS}"
 
 
 @mesh_tp()

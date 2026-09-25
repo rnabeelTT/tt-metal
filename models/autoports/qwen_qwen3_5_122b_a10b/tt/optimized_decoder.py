@@ -39,6 +39,8 @@ class OptimizationConfig:
     routed_fidelity: object = ttnn.MathFidelity.LoFi
     shared_dtype: object = ttnn.bfloat8_b
     shared_fidelity: object = ttnn.MathFidelity.HiFi2
+    router_dtype: object = ttnn.bfloat16  # router logits matmul weight (never bfp4: routing numerics)
+    router_fidelity: object = ttnn.MathFidelity.HiFi4
     act_dtype: object = ttnn.bfloat16
     attn_weight_dtype: object = ttnn.bfloat8_b
     gdn_weight_dtype: object = ttnn.bfloat8_b
@@ -115,8 +117,10 @@ class OptimizationConfig:
             routed_gate_up=self.routed_gate_up_dtype,
             routed_down=self.routed_down_dtype,
             shared=self.shared_dtype,
+            router=self.router_dtype,
             routed_fidelity=self.routed_fidelity,
             shared_fidelity=self.shared_fidelity,
+            router_fidelity=self.router_fidelity,
             act_dtype=self.act_dtype,
         )
 

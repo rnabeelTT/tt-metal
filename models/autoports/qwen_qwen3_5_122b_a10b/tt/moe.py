@@ -27,7 +27,7 @@ returns per-device partial sums for the layer's reduce (see ``num_devices``).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from loguru import logger
@@ -83,12 +83,24 @@ class MoEPrecision:
     router: object = ttnn.bfloat16
     routed_fidelity: object = ttnn.MathFidelity.HiFi2
     shared_fidelity: object = ttnn.MathFidelity.HiFi2
+    router_fidelity: object = ttnn.MathFidelity.HiFi4
     act_dtype: object = ttnn.bfloat16
 
     @classmethod
-    def from_args(cls, args):
+    def from_args(cls, args, layer_num=None):
+        """The block's policy: ``args.moe_precision`` (stage-3 config) with the datatype-sweep layer exceptions
+        (``args.precision_layer_exceptions``: {layer_idx: {field: value}}, e.g. first/last layer routed experts in bfp8)
+        applied for ``layer_num``."""
         p = getattr(args, "moe_precision", None)
-        return p if p is not None else cls()
+        p = p if p is not None else cls()
+        exc = {int(k): v for k, v in (getattr(args, "precision_layer_exceptions", None) or {}).items()}
+        if layer_num is not None and int(layer_num) in exc:
+            over = exc[int(layer_num)]
+            unknown = [k for k in over if not hasattr(p, k)]
+            if unknown:
+                raise ValueError(f"precision_layer_exceptions[{layer_num}]: unknown MoEPrecision fields {unknown}")
+            p = replace(p, **over)
+        return p
 
 
 class Qwen35MoE:
@@ -111,7 +123,7 @@ class Qwen35MoE:
         self.top_k = args.num_experts_per_tok
         self.inter = args.moe_intermediate_size
         self.shared_inter = args.shared_expert_intermediate_size
-        self.prec = MoEPrecision.from_args(args)
+        self.prec = MoEPrecision.from_args(args, layer_num)
         tp = self.num_devices
         assert self.inter % (tp * TILE) == 0, f"moe_intermediate_size {self.inter} must split into tiles over TP={tp}"
         self.inter_local = self.inter // tp
@@ -236,7 +248,7 @@ class Qwen35MoE:
         )
         self.router_ckc = ttnn.init_device_compute_kernel_config(
             mesh_device.arch(),
-            math_fidelity=ttnn.MathFidelity.HiFi4,
+            math_fidelity=self.prec.router_fidelity,
             math_approx_mode=False,
             fp32_dest_acc_en=True,
             packer_l1_acc=False,
