@@ -24,6 +24,14 @@ os.environ.setdefault("HF_MODEL", "Qwen/Qwen3.5-122B-A10B")
 
 
 def families(base: MultichipConfig):
+    _ALL7 = base.with_(
+        gdn_gqa_matmul=True,
+        gdn_ab_tile_pad=True,
+        gdn_state_inplace=True,
+        moe_gate_fast=True,
+        moe_router_l1=True,
+        moe_gather_tail=True,
+    )
     return {
         "baseline": [("mc_selected", base)],
         "dense_1d": [
@@ -61,6 +69,83 @@ def families(base: MultichipConfig):
         # tuned 1D out-projection kept (ds_in_out1d) and all projections DRAM-sharded (ds_all)
         "out_dtype": [("out_bf16", base), ("out_bfp8_rs", base.with_(out_proj_decode_dtype="bfp8"))],
         "norm_ag_persistent": [("norm_ag_alloc", base), ("norm_ag_persistent", base.with_(norm_ag_persistent=True))],
+        # --- stage 7 families: decode op-count reductions (each knob A/B'd against the stage-5 default) ---
+        "decode_ops": [
+            ("ops_base", base),
+            ("ops_gdn_gqa", base.with_(gdn_gqa_matmul=True)),
+            ("ops_gdn_abpad", base.with_(gdn_ab_tile_pad=True)),
+            ("ops_gdn_inplace", base.with_(gdn_state_inplace=True)),
+            ("ops_gdn_all", base.with_(gdn_gqa_matmul=True, gdn_ab_tile_pad=True, gdn_state_inplace=True)),
+            ("ops_moe_gate", base.with_(moe_gate_fast=True)),
+            ("ops_moe_gate_l1", base.with_(moe_gate_fast=True, moe_router_l1=True)),
+            ("ops_moe_tail", base.with_(moe_gather_tail=True)),
+            (
+                "ops_all",
+                base.with_(
+                    gdn_gqa_matmul=True,
+                    gdn_ab_tile_pad=True,
+                    gdn_state_inplace=True,
+                    moe_gate_fast=True,
+                    moe_router_l1=True,
+                    moe_gather_tail=True,
+                ),
+            ),
+        ],
+        "decode_ops_r2": [  # round 2: bfp4 expansion matrix, v head rows, view fallback
+            ("ops_base", base),
+            ("ops_gdn_gqa", base.with_(gdn_gqa_matmul=True)),
+            ("ops_gdn_all", base.with_(gdn_gqa_matmul=True, gdn_ab_tile_pad=True, gdn_state_inplace=True)),
+            ("ops_moe_tail", base.with_(moe_gather_tail=True)),
+            (
+                "ops_all",
+                base.with_(
+                    gdn_gqa_matmul=True,
+                    gdn_ab_tile_pad=True,
+                    gdn_state_inplace=True,
+                    moe_gate_fast=True,
+                    moe_router_l1=True,
+                    moe_gather_tail=True,
+                ),
+            ),
+        ],
+        "decode_ops_r3": [
+            ("ops_base", base),
+            ("ops_moe_tail", base.with_(moe_gather_tail=True)),
+            (
+                "ops_all",
+                base.with_(
+                    gdn_gqa_matmul=True,
+                    gdn_ab_tile_pad=True,
+                    gdn_state_inplace=True,
+                    moe_gate_fast=True,
+                    moe_router_l1=True,
+                    moe_gather_tail=True,
+                ),
+            ),
+        ],
+        "decode_ops_r4": [
+            ("ops_base", base),
+            ("ops_all", _ALL7),
+            ("ops_all_normfold", _ALL7.with_(gdn_norm_fold=True)),
+            ("ops_all_convl1", _ALL7.with_(gdn_conv_l1=True)),
+            ("ops_all_normfold_convl1", _ALL7.with_(gdn_norm_fold=True, gdn_conv_l1=True)),
+        ],
+        "prefill_sorted": [  # prefill MoE path at short buckets: masked 64-token chunks (default) vs expert-sorted dispatch
+            ("sorted_min512", base),
+            ("sorted_min128", base.with_(sorted_min_tokens=128)),
+        ],
+        "decode_ops_moe_r2": [
+            ("ops_base", base),
+            ("ops_moe_tail", base.with_(moe_gather_tail=True)),
+            ("ops_moe_all", base.with_(moe_gate_fast=True, moe_router_l1=True, moe_gather_tail=True)),
+        ],
+        "decode_ops_moe": [
+            ("ops_base", base),
+            ("ops_moe_gate", base.with_(moe_gate_fast=True)),
+            ("ops_moe_gate_l1", base.with_(moe_gate_fast=True, moe_router_l1=True)),
+            ("ops_moe_tail", base.with_(moe_gather_tail=True)),
+            ("ops_moe_all", base.with_(moe_gate_fast=True, moe_router_l1=True, moe_gather_tail=True)),
+        ],
         "mixer_ds_readers": [("mixer_1d", base)]
         + [
             (f"mixer_ds_in_out1d_r{r}", base.with_(mixer_decode_mode="ds_in", mixer_ds_out_1d=True, mixer_ds_readers=r))

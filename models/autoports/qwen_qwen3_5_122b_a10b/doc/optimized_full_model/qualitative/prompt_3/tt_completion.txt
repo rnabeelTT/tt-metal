@@ -1,0 +1,10 @@
+Here's a thinking process that leads to the suggested answer:
+
+1.  **Analyze the Request:**
+    *   **Topic:** The three laws of thermodynamics.
+    *   **Goal:** Provide a clear, accurate, and concise explanation of each law.
+
+2.  **Recall/Identify the Laws:**
+    *   *Zeroth Law:* Thermal equilibrium (temperature definition).
+    *   *First Law:* Conservation of energy (energy cannot be created/destroyed, only changed).
+    *   *Second Law:* Entropy (disorder increases, heat flows hot to cold).

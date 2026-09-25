@@ -406,9 +406,14 @@ def recurrent_gated_delta_rule_decode_ttnn(
     high_precision=False,
     state_out=None,
     output_head_rows=False,
+    norm_weights=None,
 ):
     """T=1 decode path: no loop/slice overhead. Returns o [B,1,H,V] (or [B,H,1,V] tile-padded head rows when
     ``output_head_rows``), state [B,H,K,V].
+
+    ``norm_weights``: optional ``(w_q, w_k)`` [1,1,1,K] tensors (dtype of the normed q/k) holding the constants the
+    L2 norm and the query scale would multiply by (w_q = K**-0.5 * scale, w_k = K**-0.5): the norms then run as ONE
+    ``rms_norm(weight=...)`` each instead of rms_norm + multiply (+ multiply), same math.
 
     Structure (one state-sized read pass + one state-sized write pass):
       v_read = (k @ h_old) * exp(g)            # decay applied to the read (same algebra as decaying h first)
@@ -422,6 +427,9 @@ def recurrent_gated_delta_rule_decode_ttnn(
     H = q.shape[2]
     K = q.shape[3]
     V = v.shape[3]
+    # v may arrive already in the head-row layout [B,H,1,V] (the caller then skips one relayout); q/k stay [B,1,H,K]
+    # because their per-head L2 norm is cheapest in the compact layout.
+    v_is_head_rows = len(v.shape) == 4 and v.shape[1] == H and v.shape[2] == 1 and H != 1
 
     # high_precision: fp32 step avoids bf16 decay quantization error over long decode.
     if high_precision:
@@ -431,19 +439,24 @@ def recurrent_gated_delta_rule_decode_ttnn(
         beta = ttnn.typecast(beta, ttnn.float32)
         g = ttnn.typecast(g, ttnn.float32)
 
-    # L2 norm
-    q = l2_norm_ttnn(q, dim=-1)
-    k = l2_norm_ttnn(k, dim=-1)
-
     if scale is None:
         scale = K**-0.5
-    q = ttnn.multiply(q, scale, memory_config=ttnn.L1_MEMORY_CONFIG)
+    if norm_weights is not None:
+        # L2 norm = rms_norm(eps/K) * K**-0.5, folded with the query scale into the norm weights (one op per tensor)
+        w_q, w_k = norm_weights
+        q = ttnn.rms_norm(q, epsilon=1e-6 / K, weight=w_q, memory_config=ttnn.L1_MEMORY_CONFIG)
+        k = ttnn.rms_norm(k, epsilon=1e-6 / K, weight=w_k, memory_config=ttnn.L1_MEMORY_CONFIG)
+    else:
+        # L2 norm
+        q = l2_norm_ttnn(q, dim=-1)
+        k = l2_norm_ttnn(k, dim=-1)
+        q = ttnn.multiply(q, scale, memory_config=ttnn.L1_MEMORY_CONFIG)
 
     # Head-row layouts [B,H,1,*] (dense -> tile-padded reshapes: one output tile row per head, cheap).
     _L1 = ttnn.L1_MEMORY_CONFIG
     q_row = ttnn.reshape(q, [B, H, 1, K], memory_config=_L1)
     k_row = ttnn.reshape(k, [B, H, 1, K], memory_config=_L1)
-    v_row = ttnn.reshape(v, [B, H, 1, V], memory_config=_L1)
+    v_row = v if v_is_head_rows else ttnn.reshape(v, [B, H, 1, V], memory_config=_L1)
     beta_bh11 = ttnn.reshape(beta, [B, H, 1, 1], memory_config=_L1)
     g_bh11 = ttnn.reshape(g, [B, H, 1, 1], memory_config=_L1)
 

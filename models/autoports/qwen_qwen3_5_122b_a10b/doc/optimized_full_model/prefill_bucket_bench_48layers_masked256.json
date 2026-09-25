@@ -1,0 +1,33 @@
+{
+ "layers": "all",
+ "equiv": [],
+ "timing": [
+  {
+   "len": 128,
+   "traced_ms": 344.0,
+   "traced_ms_all": [
+    346.3,
+    344.0,
+    346.0
+   ]
+  },
+  {
+   "len": 161,
+   "traced_ms": 571.1,
+   "traced_ms_all": [
+    571.2,
+    571.4,
+    571.1
+   ]
+  },
+  {
+   "len": 500,
+   "traced_ms": 752.5,
+   "traced_ms_all": [
+    754.0,
+    753.3,
+    752.5
+   ]
+  }
+ ]
+}

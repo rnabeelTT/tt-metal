@@ -136,6 +136,21 @@ class MultichipConfig:
     # A trace holding the fused op AND the MoE reduce-scatter hangs at replay (stage-5 bisect `mixer_moe`); the unfused path
     # is the candidate fix for traced prefill / prefill-after-traced-decode.
     gdn_prefill_mmrs: bool = True
+    # --- stage-7 (optimized full model) decode op-count families -------------------------------------------------
+    # Every decode op costs ~1 us of trace-replay dispatch on the mesh on top of its device time (stage-5 Tracy: 103 /
+    # 84 ops per GDN / attention layer, 131 / 87 us of op-to-op gaps); these remove layout traffic, not math.
+    gdn_gqa_matmul: bool = False  # GQA head expansion as one exact one-hot matmul per q/k (replaces repeat_interleave)
+    gdn_ab_tile_pad: bool = False  # a/b fields tile-aligned in the fused in-projection (no untilize/tilize per step)
+    gdn_state_inplace: bool = False  # recurrent state update written in place by the kernel (no staging copy)
+    moe_gate_fast: bool = False  # gate op on the full persistent buffers (no per-step constant slices / reshards)
+    moe_router_l1: bool = False  # router logits in L1 (multi-core relayout into the gate op's token faces)
+    moe_gather_tail: bool = False  # views instead of reshapes on the gather rows; fast_reduce_nc instead of ttnn.sum
+    gdn_norm_fold: bool = False  # decode q/k L2-norm scale + query scale folded into rms_norm weights (-3 ops)
+    gdn_conv_l1: bool = False  # decode conv FIR chain (mac x3) kept in L1
+    # prefill MoE routing: the expert-sorted dispatch below this many tokens as well (stage-3 default 512: the masked
+    # 64-token-chunk path re-reads every active expert's weights per chunk; at 128-256 tokens the bucket prefill is
+    # DRAM-bound on those re-reads — stage-7 README section 4)
+    sorted_min_tokens: int | None = None
     # token-mixer matmul fidelity (qwen36 TP default HiFi2; stage 3 selected LoFi for the single-die mixers): "hifi2" | "lofi"
     mixer_fidelity: str = "hifi2"
     # explicit in0_block_w (K tiles per block) of the 1D decode in-projections; None = the helper's largest divisor
@@ -160,7 +175,10 @@ class MultichipConfig:
         ``proj_1d_decode`` matmuls and ignore ``attn_decode_matmul_fn``), the sharded decode norm and the sharded
         attention-norm output (``DistributedNorm`` already emits the width-sharded decode activation).
         """
-        return self.base.with_(
+        base = self.base
+        if self.sorted_min_tokens is not None:
+            base = base.with_(sorted_min_tokens=int(self.sorted_min_tokens))  # prefill MoE path threshold (stage 7)
+        return base.with_(
             kv_dtype=self.kv_dtype,
             gdn_state_fp32=(self.gdn_state_dtype == ttnn.float32),
             sdpa_decode_q_chunk=self.sdpa_decode_q_chunk,
@@ -199,8 +217,21 @@ class MultichipConfig:
 
 
 # The stage-4 starting policy (PLAN.md step 4); re-selected by the stage-4 sweeps (doc/multichip_decoder/README.md).
-MULTICHIP_SELECTED = (
-    MultichipConfig()
+MULTICHIP_SELECTED = MultichipConfig(  # stage-7 selected policy: seven decode op-count reductions + the prefill dispatch
+    # threshold, measured in doc/optimized_full_model/README.md section 3 (GDN layer 0.579 -> 0.523 ms, attention 0.446 ->
+    # 0.430 ms, sweeps/final_policy.jsonl; PCC unchanged except gdn_norm_fold's 1e-6 rounding-order shift)
+    gdn_gqa_matmul=True,
+    gdn_ab_tile_pad=True,
+    gdn_state_inplace=True,
+    moe_gate_fast=True,
+    # moe_router_l1 NOT adopted: with the once-built gate buffers (moe_gate_fast) the attention layer's decode output
+    # stopped being bit-identical across identical prefill+decode cycles (87 / 3072 elements at 1 bf16 LSB,
+    # test_mc_stress_repeated_runs[attn]; either knob alone is deterministic); it bought 2 us per layer
+    moe_gather_tail=True,
+    gdn_norm_fold=True,
+    gdn_conv_l1=True,
+    sorted_min_tokens=256,  # expert-sorted prefill dispatch from bucket 256 (161-token TTFT 567.9 -> 551.3 ms; at 128 the masked
+    # chunks win: 344 vs 456 ms) — README section 4
 )  # norm_ag_persistent measured -5 us/step but NOT adopted: attention traced-decode replays
 # were no longer bit-identical with the persistent all-gather output buffer (final suite 3, test_mc_traced_decode[attn])
 
@@ -331,6 +362,24 @@ class MultichipDecoder(OptimizedDecoder):
             )
             args.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(
                 1, args.attn_out_dim_tp, args.dim, readers=r
+            )
+        # stage-7 decode op-count knobs (read by qwen36 gdn/tp.py and the MoE block)
+        args.gdn_gqa_matmul = mc.gdn_gqa_matmul
+        args.gdn_ab_tile_pad = mc.gdn_ab_tile_pad
+        args.gdn_state_inplace = mc.gdn_state_inplace
+        args.moe_gate_fast = mc.moe_gate_fast
+        args.moe_router_l1 = mc.moe_router_l1
+        args.moe_gather_tail = mc.moe_gather_tail
+        args.gdn_norm_fold = mc.gdn_norm_fold
+        args.gdn_conv_l1 = mc.gdn_conv_l1
+        if mc.gdn_ab_tile_pad:
+            # the fused [qkv|z|a|b] width grows by the a/b tile padding; every consumer derives from this dim
+            pad = -(-args.gdn_nv_tp // tpc.TILE_SIZE) * tpc.TILE_SIZE
+            args.gdn_qkvzab_dim_tp = args.gdn_qkvz_dim_tp + 2 * pad
+            args.gdn_qkvzab_weight_memcfg = tpc.create_dram_sharded_mem_config(args.dim, args.gdn_qkvzab_dim_tp)
+            args.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(1, args.dim, args.gdn_qkvzab_dim_tp)
+            args.gdn_qkvz_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1, args.dim, args.gdn_qkvzab_dim_tp, num_cores=44, grid_w=getattr(args, "decode_grid_w", 8)
             )
         args.fuse_out_mmrs_decode = mc.fuse_out_mmrs_decode
         args.norm_ag_persistent = mc.norm_ag_persistent

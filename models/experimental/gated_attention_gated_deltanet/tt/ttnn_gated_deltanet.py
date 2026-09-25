@@ -194,19 +194,31 @@ def _causal_conv1d_fir(
         # only the one-hot VALUES depend on valid_len.
         # valid_len may be a scalar (one length for all B rows) or a per-row list/tuple of length
         # B (batched prefill: each user's own real length picks that user's decode conv window).
-        sel = torch.zeros(B, kernel_size - 1, total_len, dtype=torch.float32)
-        if isinstance(valid_len, (list, tuple)):
-            for bi in range(B):
-                for j in range(kernel_size - 1):
-                    sel[bi, j, int(valid_len[bi]) + j] = 1.0
+        if hasattr(valid_len, "conv_sel"):
+            # device-resident one-hot (PrefillLen, traced masked prefill): staged by the caller, no host write
+            sel_tt = valid_len.conv_sel
+            assert tuple(sel_tt.shape) == (B, kernel_size - 1, total_len), (
+                tuple(sel_tt.shape),
+                B,
+                kernel_size,
+                total_len,
+            )
+            xp = ttnn.to_layout(x_padded, ttnn.TILE_LAYOUT)
+            new_state = ttnn.matmul(sel_tt, xp, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         else:
-            for j in range(kernel_size - 1):
-                sel[:, j, valid_len + j] = 1.0
-        sel_tt = ttnn.from_torch(sel, dtype=x_padded.dtype, layout=ttnn.TILE_LAYOUT, device=device)
-        xp = ttnn.to_layout(x_padded, ttnn.TILE_LAYOUT)
-        # cross-chunk carry -> DRAM
-        new_state = ttnn.matmul(sel_tt, xp, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        ttnn.deallocate(sel_tt)
+            sel = torch.zeros(B, kernel_size - 1, total_len, dtype=torch.float32)
+            if isinstance(valid_len, (list, tuple)):
+                for bi in range(B):
+                    for j in range(kernel_size - 1):
+                        sel[bi, j, int(valid_len[bi]) + j] = 1.0
+            else:
+                for j in range(kernel_size - 1):
+                    sel[:, j, valid_len + j] = 1.0
+            sel_tt = ttnn.from_torch(sel, dtype=x_padded.dtype, layout=ttnn.TILE_LAYOUT, device=device)
+            xp = ttnn.to_layout(x_padded, ttnn.TILE_LAYOUT)
+            # cross-chunk carry -> DRAM
+            new_state = ttnn.matmul(sel_tt, xp, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(sel_tt)
 
     # Precompute weight taps if not provided
     if weight_taps is None:

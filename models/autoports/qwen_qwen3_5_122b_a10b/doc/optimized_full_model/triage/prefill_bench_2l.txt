@@ -1,0 +1,931 @@
+
+dump_configuration.py:
+Scope,Name,Value
+environment,TT_AUTODEBUG_ROOT,/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-autodebug/0.1.5
+environment,TT_CACHE_PATH,/home/raahem/.cache/ttnn/qwen35_122b
+environment,TT_METAL_HOME,/home/raahem/tt-metal
+environment,TT_METAL_LOGGER_LEVEL,Error
+environment,TT_MODEL_BRINGUP_ROOT,/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3
+rtOptions,arc_debug_buffer_size,0
+rtOptions,arch_name,blackhole
+rtOptions,build_map_enabled,false
+rtOptions,cache_dir,(unset)
+rtOptions,clear_dram,false
+rtOptions,clear_l1,false
+rtOptions,compile_hash_string,0000000000000_0nulloptnulloptnulloptnulloptnulloptnullopt_false_false_true_true_false_0_false_false_false_0
+rtOptions,core_grid_override_todeprecate,(unset)
+rtOptions,custom_fabric_mesh_graph_desc_path,
+rtOptions,disable_dma_ops,false
+rtOptions,disable_fabric_2_erisc_mode,false
+rtOptions,disable_precompiled_fw,false
+rtOptions,disable_sfploadmacro,false
+rtOptions,disable_xip_dump,false
+rtOptions,dispatch_core_config_type,WORKER
+rtOptions,dispatch_data_collection_enabled,false
+rtOptions,dispatch_progress_update_ms,100
+rtOptions,dispatch_timeout_command_to_execute,
+rtOptions,dram_backed_cq,false
+rtOptions,dump_build_commands,false
+rtOptions,enable_2_erisc_mode,true
+rtOptions,enable_channel_trimming_capture,false
+rtOptions,enable_fabric_bw_telemetry,false
+rtOptions,enable_fabric_code_profiling_rx_ch_fwd,false
+rtOptions,enable_fabric_mesh_pass_through,false
+rtOptions,enable_fabric_telemetry,false
+rtOptions,enable_fabric_vc2,false
+rtOptions,erisc_iram_enabled,true
+rtOptions,experimental_noc_debug_dump_enabled,false
+rtOptions,fabric_kernel_opt_level,(unset)
+rtOptions,fabric_router_sync_timeout_ms,(unset)
+rtOptions,fabric_telemetry_channels_monitor_all,true
+rtOptions,fabric_telemetry_chips_monitor_all,true
+rtOptions,fabric_telemetry_enabled,false
+rtOptions,fabric_telemetry_eriscs_monitor_all,true
+rtOptions,fabric_telemetry_stats_mask,15
+rtOptions,fabric_trimming_override_path,
+rtOptions,fabric_trimming_profile_path,
+rtOptions,fast_dispatch,true
+rtOptions,feature_ATOMIC_DEBUG_DELAY_all_chips,true
+rtOptions,feature_ATOMIC_DEBUG_DELAY_enabled,false
+rtOptions,feature_ATOMIC_DEBUG_DELAY_file_name,
+rtOptions,feature_ATOMIC_DEBUG_DELAY_one_file_per_risc,false
+rtOptions,feature_ATOMIC_DEBUG_DELAY_prepend_device_core_risc,true
+rtOptions,feature_DPRINT_all_chips,true
+rtOptions,feature_DPRINT_enabled,false
+rtOptions,feature_DPRINT_file_name,
+rtOptions,feature_DPRINT_one_file_per_risc,false
+rtOptions,feature_DPRINT_prepend_device_core_risc,true
+rtOptions,feature_ENABLE_L1_DATA_CACHE_all_chips,true
+rtOptions,feature_ENABLE_L1_DATA_CACHE_enabled,false
+rtOptions,feature_ENABLE_L1_DATA_CACHE_file_name,
+rtOptions,feature_ENABLE_L1_DATA_CACHE_one_file_per_risc,false
+rtOptions,feature_ENABLE_L1_DATA_CACHE_prepend_device_core_risc,true
+rtOptions,feature_READ_DEBUG_DELAY_all_chips,true
+rtOptions,feature_READ_DEBUG_DELAY_enabled,false
+rtOptions,feature_READ_DEBUG_DELAY_file_name,
+rtOptions,feature_READ_DEBUG_DELAY_one_file_per_risc,false
+rtOptions,feature_READ_DEBUG_DELAY_prepend_device_core_risc,true
+rtOptions,feature_WRITE_DEBUG_DELAY_all_chips,true
+rtOptions,feature_WRITE_DEBUG_DELAY_enabled,false
+rtOptions,feature_WRITE_DEBUG_DELAY_file_name,
+rtOptions,feature_WRITE_DEBUG_DELAY_one_file_per_risc,false
+rtOptions,feature_WRITE_DEBUG_DELAY_prepend_device_core_risc,true
+rtOptions,force_context_reinit,false
+rtOptions,force_jit_compile,false
+rtOptions,gathering_enabled,false
+rtOptions,hw_cache_invalidation_enabled,false
+rtOptions,inspector_capture_tensor_specs,true
+rtOptions,inspector_enabled,true
+rtOptions,inspector_initialization_is_important,false
+rtOptions,inspector_log_mesh_buffers,false
+rtOptions,inspector_log_mesh_sockets,false
+rtOptions,inspector_log_path,/home/raahem/tt-metal/generated/inspector
+rtOptions,inspector_log_runtime_entries,false
+rtOptions,inspector_rpc_server_enabled,true
+rtOptions,inspector_rpc_server_host,localhost
+rtOptions,inspector_rpc_server_port,50051
+rtOptions,inspector_warn_on_write_exceptions,true
+rtOptions,jit_analytics_enabled,false
+rtOptions,kernel_dir,(unset)
+rtOptions,kernels_early_return,false
+rtOptions,kernels_nullified,false
+rtOptions,lightweight_kernel_asserts,false
+rtOptions,llk_asserts,false
+rtOptions,log_kernels_compilation_commands,false
+rtOptions,logs_dir,/home/raahem/tt-metal/
+rtOptions,mock_cluster_desc_path,
+rtOptions,mock_enabled,false
+rtOptions,num_hw_cqs,1
+rtOptions,numa_based_affinity,false
+rtOptions,profiler_buffer_usage_enabled,false
+rtOptions,profiler_cpp_post_process,false
+rtOptions,profiler_disable_dump_to_files,false
+rtOptions,profiler_disable_push_to_tracy,false
+rtOptions,profiler_do_dispatch_cores,false
+rtOptions,profiler_enabled,false
+rtOptions,profiler_mid_run_dump,false
+rtOptions,profiler_noc_events_enabled,false
+rtOptions,profiler_noc_events_report_path,
+rtOptions,profiler_perf_counter_mode,0
+rtOptions,profiler_program_support_count,1000
+rtOptions,profiler_sum,false
+rtOptions,profiler_sync_enabled,false
+rtOptions,profiler_trace_only,false
+rtOptions,profiler_trace_tracking,false
+rtOptions,record_noc_transfers,false
+rtOptions,relaxed_memory_ordering_disabled,false
+rtOptions,reliability_mode,(unset)
+rtOptions,riscv_debug_info_enabled,true
+rtOptions,root_dir,/home/raahem/tt-metal/
+rtOptions,serialize_inspector_on_dispatch_timeout,true
+rtOptions,simulator_enabled,false
+rtOptions,simulator_path,
+rtOptions,skip_eth_cores_with_retrain,false
+rtOptions,skip_loading_fw,false
+rtOptions,system_kernel_dir,/usr/share/tenstorrent/kernels/
+rtOptions,target_device,0
+rtOptions,test_mode_enabled,false
+rtOptions,timeout_duration_for_operations,0s
+rtOptions,tracy_mid_run_push,false
+rtOptions,use_mesh_graph_descriptor_2_0,false
+rtOptions,validate_kernel_binaries,false
+rtOptions,visible_devices,
+rtOptions,watcher_append,false
+rtOptions,watcher_auto_unpause,false
+rtOptions,watcher_debug_delay,0
+rtOptions,watcher_disabled_features,(empty)
+rtOptions,watcher_dump_all,false
+rtOptions,watcher_enabled,false
+rtOptions,watcher_hash,0000000000000
+rtOptions,watcher_interval,0
+rtOptions,watcher_noc_sanitize_linked_transaction,false
+rtOptions,watcher_noinline,false
+rtOptions,watcher_phys_coords,false
+rtOptions,watcher_skip_logging,false
+rtOptions,watcher_text_start,false
+ttnnConfig,cache_path,/home/raahem/.cache/ttnn
+ttnnConfig,comparison_mode_pcc,0.9999
+ttnnConfig,comparison_mode_should_raise_exception,false
+ttnnConfig,enable_comparison_mode,false
+ttnnConfig,enable_detailed_buffer_report,false
+ttnnConfig,enable_detailed_tensor_report,false
+ttnnConfig,enable_fast_runtime_mode,true
+ttnnConfig,enable_graph_python_stack_traces,false
+ttnnConfig,enable_graph_report,false
+ttnnConfig,enable_logging,false
+ttnnConfig,enable_model_cache,false
+ttnnConfig,model_cache_path,/home/raahem/.cache/ttnn/models
+ttnnConfig,report_name,std::nullopt
+ttnnConfig,root_report_path,generated/ttnn/reports
+ttnnConfig,throw_exception_on_fallback,false
+ttnnConfig,tmp_dir,/tmp/ttnn
+ttnnConfig,validate_program_args,false
+Device 2: All NOCs hung. Raising exception: TimeoutDeviceRegisterError: Timeout during read operation on device 2, coord (1, 0, TENSIX), address 0xffb20040, size 4 bytes.  UMD error: MMIO per-op timeout: 4B load took 220643 us (budget=2 ms), 4 of 4 bytes remaining.
+Location: /project/device/pcie/device_memcpy.cpp:38
+ 1. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x13e594) [0x7dcb2233e594]
+ 2. tt::umd::TlbWindow::read_block_reconfigure(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long)
+ 3. decltype(auto) tt::umd::SiliconTlbWindow::execute_safe<void (tt::umd::TlbWindow::*)(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long), void*&, tt::xy_pair&, unsigned long&, unsigned long&, tt::umd::NocId&, unsigned long&>(void (tt::umd::TlbWindow::*&&)(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long), void*&, tt::xy_pair&, unsigned long&, unsigned long&, tt::umd::NocId&, unsigned long&)
+ 4. tt::umd::SiliconTlbWindow::safe_read_block_reconfigure(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long)
+ 5. tt::umd::PcieProtocol::read_from_device(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId)
+ 6. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x1b3c54) [0x7dcb223b3c54]
+ 7. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x1c10f3) [0x7dcb223c10f3]
+ 8. _PyEval_EvalFrameDefault
+ 9. PyEval_EvalCode
+10. _PyRun_SimpleFileObject
+11. _PyRun_AnyFileObject
+12. /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7dcb2362a1ca]
+13. __libc_start_main
+14. _start
+
+Device 3: All NOCs hung. Raising exception: TimeoutDeviceRegisterError: Timeout during read operation on device 3, coord (2, 0, TENSIX), address 0xffb20040, size 4 bytes.  UMD error: MMIO per-op timeout: 4B load took 220639 us (budget=2 ms), 4 of 4 bytes remaining.
+Location: /project/device/pcie/device_memcpy.cpp:38
+ 1. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x13e594) [0x7dcb2233e594]
+ 2. tt::umd::TlbWindow::read_block_reconfigure(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long)
+ 3. decltype(auto) tt::umd::SiliconTlbWindow::execute_safe<void (tt::umd::TlbWindow::*)(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long), void*&, tt::xy_pair&, unsigned long&, unsigned long&, tt::umd::NocId&, unsigned long&>(void (tt::umd::TlbWindow::*&&)(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long), void*&, tt::xy_pair&, unsigned long&, unsigned long&, tt::umd::NocId&, unsigned long&)
+ 4. tt::umd::SiliconTlbWindow::safe_read_block_reconfigure(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId, unsigned long)
+ 5. tt::umd::PcieProtocol::read_from_device(void*, tt::xy_pair, unsigned long, unsigned long, tt::umd::NocId)
+ 6. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x1b3c54) [0x7dcb223b3c54]
+ 7. /home/raahem/tt-metal/python_env/lib/python3.12/site-packages/tt_umd/tt_umd.cpython-312-x86_64-linux-gnu.so(+0x1c10f3) [0x7dcb223c10f3]
+ 8. _PyEval_EvalFrameDefault
+ 9. PyEval_EvalCode
+10. _PyRun_SimpleFileObject
+11. _PyRun_AnyFileObject
+12. /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7dcb2362a1ca]
+13. __libc_start_main
+14. _start
+
+
+check_cb_inactive.py:
+  fail
+    Device 0: functional_workers [1-2 (0,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [1-2 (0,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [1-2 (0,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [1-2 (0,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [2-2 (1,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [2-2 (1,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [2-2 (1,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [2-2 (1,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [3-2 (2,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [3-2 (2,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [3-2 (2,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [3-2 (2,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [4-2 (3,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [4-2 (3,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [4-2 (3,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [4-2 (3,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [5-2 (4,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [5-2 (4,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [5-2 (4,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [5-2 (4,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [6-2 (5,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [6-2 (5,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [6-2 (5,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [6-2 (5,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [7-2 (6,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [7-2 (6,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [7-2 (6,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [7-2 (6,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [10-2 (7,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [10-2 (7,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [10-2 (7,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [10-2 (7,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [12-2 (8,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [12-2 (8,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [12-2 (8,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [12-2 (8,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [14-2 (9,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [14-2 (9,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [14-2 (9,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [14-2 (9,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [15-2 (10,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [15-2 (10,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [15-2 (10,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [15-2 (10,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [16-2 (11,0)]: NOC0 CB0 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [16-2 (11,0)]: NOC0 CB1 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [16-2 (11,0)]: NOC0 CB2 active (0xFFFFFFFF). NoC is likely hung.
+    Device 0: functional_workers [16-2 (11,0)]: NOC0 CB3 active (0xFFFFFFFF). NoC is likely hung.
+
+check_dram_health.py:
+  Device 0: GDDR instance 0 (DDR bank 0): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 0 (DDR bank 0) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 1 (DDR bank 1): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 1 (DDR bank 1) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 2 (DDR bank 2): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 2 (DDR bank 2) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 3 (DDR bank 3): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 3 (DDR bank 3) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 4 (DDR bank 4): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 4 (DDR bank 4) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 5 (DDR bank 5): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 5 (DDR bank 5) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 6 (DDR bank 6): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 6 (DDR bank 6) did not come up cleanly: training=FAIL bist=FAIL
+  Device 0: GDDR instance 7 (DDR bank 7): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 0: GDDR instance 7 (DDR bank 7) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 0 (DDR bank 0): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 0 (DDR bank 0) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 1 (DDR bank 1): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 1 (DDR bank 1) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 2 (DDR bank 2): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 2 (DDR bank 2) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 3 (DDR bank 3): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 3 (DDR bank 3) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 4 (DDR bank 4): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 4 (DDR bank 4) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 5 (DDR bank 5): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 5 (DDR bank 5) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 6 (DDR bank 6): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 6 (DDR bank 6) did not come up cleanly: training=FAIL bist=FAIL
+  Device 1: GDDR instance 7 (DDR bank 7): uncorrected EDC errors rd/wr 1/1 - corruption was detected and not fixed, so wrong data reached the consumer.
+  Device 1: GDDR instance 7 (DDR bank 7) did not come up cleanly: training=FAIL bist=FAIL
+Dev,GDDR Inst,DDR Bank,Corrected Reads,Corrected Writes,Uncorrected Reads,Uncorrected Writes,Train,BIST,Endpoints,Temp Top,Temp Bot,Speed MT/s
+0,0,0,255,255,1,1,FAIL,FAIL,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",255,255,4294967295
+0,1,1,255,255,1,1,FAIL,FAIL,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",255,255,4294967295
+0,2,2,255,255,1,1,FAIL,FAIL,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",255,255,4294967295
+0,3,3,255,255,1,1,FAIL,FAIL,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",255,255,4294967295
+0,4,4,255,255,1,1,FAIL,FAIL,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",255,255,4294967295
+0,5,5,255,255,1,1,FAIL,FAIL,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",255,255,4294967295
+0,6,6,255,255,1,1,FAIL,FAIL,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",255,255,4294967295
+0,7,7,255,255,1,1,FAIL,FAIL,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",255,255,4294967295
+1,0,0,255,255,1,1,FAIL,FAIL,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",255,255,4294967295
+1,1,1,255,255,1,1,FAIL,FAIL,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",255,255,4294967295
+1,2,2,255,255,1,1,FAIL,FAIL,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",255,255,4294967295
+1,3,3,255,255,1,1,FAIL,FAIL,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",255,255,4294967295
+1,4,4,255,255,1,1,FAIL,FAIL,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",255,255,4294967295
+1,5,5,255,255,1,1,FAIL,FAIL,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",255,255,4294967295
+1,6,6,255,255,1,1,FAIL,FAIL,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",255,255,4294967295
+1,7,7,255,255,1,1,FAIL,FAIL,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",255,255,4294967295
+
+check_eth_status.py:
+Dev,Loc,Port Status,Retrain Count,RX Link Up,Heartbeat,Mailbox
+0,"11-1 (e0,9)",Unknown,N/A,N/A,True,N/A
+0,"6-1 (e0,8)",Unknown,N/A,N/A,True,N/A
+0,"3-1 (e0,4)",Unknown,N/A,N/A,True,N/A
+0,"2-1 (e0,2)",Unknown,N/A,N/A,True,N/A
+1,"4-1 (e0,5)",Unknown,N/A,N/A,True,N/A
+1,"3-1 (e0,4)",Unknown,N/A,N/A,True,N/A
+1,"15-1 (e0,3)",Unknown,N/A,N/A,True,N/A
+1,"2-1 (e0,2)",Unknown,N/A,N/A,True,N/A
+
+check_l1_status.py:
+  fail
+    Device 0: functional_workers [1-2 (0,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-2 (1,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-2 (2,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-2 (3,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-2 (4,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-2 (5,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-2 (6,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-2 (7,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-2 (8,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-2 (9,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-2 (10,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-2 (11,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-3 (0,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-3 (1,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-3 (2,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-3 (3,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-3 (4,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-3 (5,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-3 (6,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-3 (7,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-3 (8,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-3 (9,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-3 (10,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-3 (11,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-4 (0,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-4 (1,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-4 (2,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-4 (3,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-4 (4,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-4 (5,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-4 (6,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-4 (7,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-4 (8,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-4 (9,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-4 (10,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-4 (11,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-5 (0,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-5 (1,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-5 (2,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-5 (3,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-5 (4,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-5 (5,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-5 (6,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-5 (7,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-5 (8,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-5 (9,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-5 (10,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-5 (11,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-6 (0,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-6 (1,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-6 (2,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-6 (3,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-6 (4,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-6 (5,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-6 (6,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-6 (7,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-6 (8,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-6 (9,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-6 (10,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-6 (11,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-7 (0,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-7 (1,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-7 (2,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-7 (3,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-7 (4,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-7 (5,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-7 (6,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-7 (7,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-7 (8,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-7 (9,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-7 (10,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-7 (11,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-8 (0,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-8 (1,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-8 (2,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-8 (3,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-8 (4,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-8 (5,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-8 (6,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-8 (7,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-8 (8,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-8 (9,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-8 (10,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-8 (11,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-9 (0,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-9 (1,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-9 (2,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-9 (3,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-9 (4,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-9 (5,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-9 (6,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-9 (7,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-9 (8,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-9 (9,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-9 (10,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-9 (11,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-10 (0,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-10 (1,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-10 (2,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-10 (3,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-10 (4,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-10 (5,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-10 (6,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-10 (7,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-10 (8,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-10 (9,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-10 (10,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-10 (11,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [1-11 (0,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [2-11 (1,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [3-11 (2,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [4-11 (3,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [5-11 (4,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [6-11 (5,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [7-11 (6,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [10-11 (7,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [12-11 (8,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [14-11 (9,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [15-11 (10,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 0: functional_workers [16-11 (11,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-2 (0,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-2 (1,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-2 (2,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-2 (3,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-2 (4,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-2 (5,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-2 (6,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-2 (7,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-2 (8,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-2 (9,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-2 (10,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-2 (11,0)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-3 (0,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-3 (1,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-3 (2,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-3 (3,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-3 (4,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-3 (5,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-3 (6,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-3 (7,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-3 (8,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-3 (9,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-3 (10,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-3 (11,1)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-4 (0,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-4 (1,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-4 (2,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-4 (3,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-4 (4,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-4 (5,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-4 (6,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-4 (7,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-4 (8,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-4 (9,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-4 (10,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-4 (11,2)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-5 (0,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-5 (1,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-5 (2,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-5 (3,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-5 (4,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-5 (5,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-5 (6,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-5 (7,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-5 (8,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-5 (9,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-5 (10,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-5 (11,3)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-6 (0,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-6 (1,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-6 (2,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-6 (3,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-6 (4,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-6 (5,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-6 (6,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-6 (7,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-6 (8,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-6 (9,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-6 (10,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-6 (11,4)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-7 (0,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-7 (1,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-7 (2,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-7 (3,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-7 (4,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-7 (5,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-7 (6,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-7 (7,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-7 (8,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-7 (9,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-7 (10,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-7 (11,5)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-8 (0,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-8 (1,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-8 (2,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-8 (3,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-8 (4,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-8 (5,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-8 (6,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-8 (7,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-8 (8,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-8 (9,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-8 (10,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-8 (11,6)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-9 (0,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-9 (1,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-9 (2,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-9 (3,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-9 (4,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-9 (5,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-9 (6,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-9 (7,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-9 (8,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-9 (9,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-9 (10,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-9 (11,7)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-10 (0,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-10 (1,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-10 (2,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-10 (3,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-10 (4,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-10 (5,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-10 (6,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-10 (7,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-10 (8,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-10 (9,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-10 (10,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-10 (11,8)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [1-11 (0,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [2-11 (1,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [3-11 (2,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [4-11 (3,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [5-11 (4,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [6-11 (5,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [7-11 (6,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [10-11 (7,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [11-11 (8,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [13-11 (9,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [15-11 (10,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+    Device 1: functional_workers [16-11 (11,9)]: Worker L1[0] mismatch: read 0xffffffff, expected 0x2e10306f
+
+check_noc_locations.py:
+  fail
+
+device_info.py:
+Dev,Tray/Board,Chip,ASIC,Arch,Board,Bus ID,PCI BDF,Unique ID,ARC FW,Postcode
+0,Board 0x461319340c9,0,0,blackhole,p300,0x01,0000:01:00.0,0x8c2632681921,19.13.1,N/A
+1,Board 0x461319340c9,1,0,blackhole,p300,0x02,0000:02:00.0,0x8c2632681920,19.13.1,N/A
+
+device_telemetry.py:
+Dev,AI Clk,ARC Clk,ASIC Temp,Board Temp,ETH Live,DDR Status,DDR Speed,ARC Uptime
+0,4294967295 MHz,4294967295 MHz,65536.0 C,65536.0 C,0xFFFFFFFF (32 live),0xffffffff,4294967295 MT/s,"1754 days, 11:31:21"
+1,4294967295 MHz,4294967295 MHz,65536.0 C,65536.0 C,0xFFFFFFFF (32 live),0xffffffff,4294967295 MT/s,"1754 days, 11:31:21"
+
+dump_op_mesh.py:
+R\C,C0,C1
+0,"(Device 1)\n(idle)","(Device 0)\n(idle)"
+1,"(Device 2)\n(idle)","(Device 3)\n(idle)"
+
+dump_op_window.py:
+  pass
+
+dump_running_operations.py:
+  pass
+
+check_binary_integrity.py:
+  fail
+    Device 0: functional_workers [1-2 (0,0)]: brisc: Data mismatch in section .text at address 0x00003ae0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/brisc/brisc.elf.
+    Device 0: functional_workers [1-2 (0,0)]: trisc0: Data mismatch in section .text at address 0x000066e0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc0/trisc0.elf.
+    Device 0: functional_workers [1-2 (0,0)]: trisc1: Data mismatch in section .text at address 0x000070e0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc1/trisc1.elf.
+    Device 0: functional_workers [1-2 (0,0)]: trisc2: Data mismatch in section .text at address 0x00007ae0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc2/trisc2.elf.
+    Device 0: functional_workers [1-2 (0,0)]: ncrisc: Data mismatch in section .text at address 0x00005ce0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/ncrisc/ncrisc.elf.
+    Device 0: functional_workers [2-2 (1,0)]: brisc: Data mismatch in section .text at address 0x00003ae0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/brisc/brisc.elf.
+    Device 0: functional_workers [2-2 (1,0)]: trisc0: Data mismatch in section .text at address 0x000066e0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc0/trisc0.elf.
+    Device 0: functional_workers [2-2 (1,0)]: trisc1: Data mismatch in section .text at address 0x000070e0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc1/trisc1.elf.
+    Device 0: functional_workers [2-2 (1,0)]: trisc2: Data mismatch in section .text at address 0x00007ae0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc2/trisc2.elf.
+    Device 0: functional_workers [2-2 (1,0)]: ncrisc: Data mismatch in section .text at address 0x00005ce0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/ncrisc/ncrisc.elf.
+    Device 0: functional_workers [3-2 (2,0)]: brisc: Data mismatch in section .text at address 0x00003ae0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/brisc/brisc.elf.
+    Device 0: functional_workers [3-2 (2,0)]: trisc0: Data mismatch in section .text at address 0x000066e0 in ELF file /home/raahem/tt-metal/tt_metal/pre-compiled/4279420110461955803/trisc0/trisc0.elf.
+
+check_core_magic.py:
+  fail
+    Device 0: functional_workers [1-2 (0,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-2 (1,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-2 (2,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-2 (3,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-2 (4,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-2 (5,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-2 (6,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-2 (7,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-2 (8,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-2 (9,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-2 (10,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-2 (11,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-3 (0,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-3 (1,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-3 (2,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-3 (3,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-3 (4,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-3 (5,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-3 (6,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-3 (7,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-3 (8,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-3 (9,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-3 (10,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-3 (11,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-4 (0,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-4 (1,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-4 (2,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-4 (3,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-4 (4,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-4 (5,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-4 (6,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-4 (7,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-4 (8,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-4 (9,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-4 (10,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-4 (11,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-5 (0,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-5 (1,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-5 (2,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-5 (3,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-5 (4,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-5 (5,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-5 (6,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-5 (7,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-5 (8,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-5 (9,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-5 (10,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-5 (11,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-6 (0,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-6 (1,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-6 (2,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-6 (3,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-6 (4,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-6 (5,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-6 (6,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-6 (7,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-6 (8,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-6 (9,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-6 (10,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-6 (11,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-7 (0,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-7 (1,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-7 (2,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-7 (3,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-7 (4,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-7 (5,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-7 (6,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-7 (7,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-7 (8,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-7 (9,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-7 (10,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-7 (11,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-8 (0,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-8 (1,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-8 (2,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-8 (3,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-8 (4,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-8 (5,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-8 (6,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-8 (7,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-8 (8,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-8 (9,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-8 (10,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-8 (11,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-9 (0,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-9 (1,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-9 (2,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-9 (3,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-9 (4,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-9 (5,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-9 (6,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-9 (7,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-9 (8,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-9 (9,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-9 (10,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-9 (11,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-10 (0,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-10 (1,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-10 (2,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-10 (3,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-10 (4,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-10 (5,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-10 (6,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-10 (7,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-10 (8,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-10 (9,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-10 (10,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-10 (11,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [1-11 (0,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [2-11 (1,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [3-11 (2,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [4-11 (3,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [5-11 (4,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [6-11 (5,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [7-11 (6,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [10-11 (7,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [12-11 (8,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [14-11 (9,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [15-11 (10,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: functional_workers [16-11 (11,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [10-1 (e0,11)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [12-1 (e0,7)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [13-1 (e0,6)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [7-1 (e0,10)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [4-1 (e0,5)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [15-1 (e0,3)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [16-1 (e0,1)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [1-1 (e0,0)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [11-1 (e0,9)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [6-1 (e0,8)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [3-1 (e0,4)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: eth [2-1 (e0,2)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-0 (d0,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-1 (d0,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-10 (d1,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-3 (d1,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-4 (d2,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-8 (d2,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-7 (d3,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [0-6 (d3,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-0 (d4,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-1 (d4,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-2 (d5,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-10 (d5,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-9 (d6,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-4 (d6,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-5 (d7,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 0: dram [9-7 (d7,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-2 (0,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-2 (1,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-2 (2,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-2 (3,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-2 (4,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-2 (5,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-2 (6,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-2 (7,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-2 (8,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-2 (9,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-2 (10,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-2 (11,0)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-3 (0,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-3 (1,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-3 (2,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-3 (3,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-3 (4,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-3 (5,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-3 (6,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-3 (7,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-3 (8,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-3 (9,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-3 (10,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-3 (11,1)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-4 (0,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-4 (1,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-4 (2,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-4 (3,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-4 (4,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-4 (5,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-4 (6,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-4 (7,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-4 (8,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-4 (9,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-4 (10,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-4 (11,2)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-5 (0,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-5 (1,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-5 (2,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-5 (3,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-5 (4,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-5 (5,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-5 (6,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-5 (7,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-5 (8,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-5 (9,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-5 (10,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-5 (11,3)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-6 (0,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-6 (1,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-6 (2,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-6 (3,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-6 (4,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-6 (5,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-6 (6,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-6 (7,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-6 (8,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-6 (9,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-6 (10,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-6 (11,4)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-7 (0,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-7 (1,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-7 (2,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-7 (3,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-7 (4,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-7 (5,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-7 (6,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-7 (7,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-7 (8,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-7 (9,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-7 (10,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-7 (11,5)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-8 (0,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-8 (1,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-8 (2,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-8 (3,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-8 (4,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-8 (5,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-8 (6,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-8 (7,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-8 (8,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-8 (9,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-8 (10,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-8 (11,6)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-9 (0,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-9 (1,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-9 (2,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-9 (3,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-9 (4,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-9 (5,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-9 (6,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-9 (7,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-9 (8,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-9 (9,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-9 (10,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-9 (11,7)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-10 (0,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-10 (1,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-10 (2,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-10 (3,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-10 (4,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-10 (5,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-10 (6,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-10 (7,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-10 (8,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-10 (9,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-10 (10,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-10 (11,8)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [1-11 (0,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [2-11 (1,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [3-11 (2,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [4-11 (3,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [5-11 (4,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [6-11 (5,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [7-11 (6,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [10-11 (7,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [11-11 (8,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [13-11 (9,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [15-11 (10,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: functional_workers [16-11 (11,9)]: brisc: core_magic_number mismatch! Expected WORKER (0x50EC09A3), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [10-1 (e0,11)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [7-1 (e0,10)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [11-1 (e0,9)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [6-1 (e0,8)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [12-1 (e0,7)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [13-1 (e0,6)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [16-1 (e0,1)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [1-1 (e0,0)]: erisc0: core_magic_number mismatch! Expected IDLE_ETH (0x837B6CAE), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [4-1 (e0,5)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [3-1 (e0,4)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [15-1 (e0,3)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: eth [2-1 (e0,2)]: erisc0: core_magic_number mismatch! Expected ACTIVE_ETH (0xC63050D1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-0 (d0,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-1 (d0,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-10 (d1,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-3 (d1,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-4 (d2,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-8 (d2,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-7 (d3,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [0-6 (d3,2)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-0 (d4,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-1 (d4,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-2 (d5,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-10 (d5,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-9 (d6,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-4 (d6,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-5 (d7,0)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+    Device 1: dram [9-7 (d7,1)]: drisc: core_magic_number mismatch! Expected DRAM (0x4D92F8E1), found unknown value 0xFFFFFFFF. Could not identify firmware type at other locations. Mailbox is likely corrupted, potentially due to NoC writes to an invalid location.
+
+check_noc_status.py:
+  pass
+
+dump_callstacks.py:
+Dev,Loc,RiscV,Kernel ID,Kernel Name,Subdevice,Go Message,Preload,Waypoint,PC,Kernel Callstack
+
+dump_fast_dispatch.py:
+  pass
+
+dump_lightweight_asserts.py:
+  pass
+
+dump_mesh_sockets.py:
+  pass
+
+dump_watcher_ringbuffer.py:
+  pass
+
+firmware_versions.py:
+Dev,ETH FW,DM App FW,DM BL FW,Flash Bundle,CM FW
+0,1.12.0,0.29.1.0,0.0.0.0,19.13.1.0,0.35.1.0
+1,1.12.0,0.29.1.0,0.0.0.0,19.13.1.0,0.35.1.0
+
+system_info.py:
+OS,Version,Kernel,Machine,KMD,UMD,tt-exalens
+Linux,24.04,7.0.0-31-generic,x86_64,2.10.0,0.9.9,0.3.32
+
+check_arc.py:
+  Device 0: ARC heartbeat is too low: 0.0hb/s. Expected at least 9hb/s
+  Device 1: ARC heartbeat is too high: 1408060750.618023hb/s. Expected at most 11hb/s
+Dev,Loc,Postcode,Up time,Clock MHz,Heartbeats/s
+0,"8-0 (a0,0)",N/A,"1754 days, 11:31:21",4294967295,0.0
+1,"8-0 (a0,0)",N/A,"1754 days, 11:31:21",4294967295,1408060750.618023
+
+check_broken_components.py:
+Device,Broken Cores
+2,Device is broken so it is skipped.
+3,Device is broken so it is skipped.
+
+[trimmed: per-core OK rows, callstacks of cores in reset and the configuration dump removed; the full dump is in ~/qwen35-122b-bringup/artifacts/07-triage-full/]

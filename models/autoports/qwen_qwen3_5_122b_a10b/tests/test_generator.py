@@ -153,17 +153,22 @@ def test_generator_long_prompt_segments(mesh_device, T):
     gen.prefill_forward(tokens, page_table=gen.page_table[:1], prompt_lens=[T])
     dec2 = int(gen.decode_forward(torch.tensor([[tok_seg]]), torch.tensor([T]), enable_trace=True)[0])
     gen.reset()
-    gen.prefill_forward(
+    lg2 = gen.prefill_forward(
         torch.tensor(prompt + [tok_seg]).reshape(1, -1), page_table=gen.page_table[:1], prompt_lens=[T + 1]
+    )[0, -1].float()
+    v2, i2 = torch.topk(lg2, 2)
+    margin2 = float(v2[0] - v2[1])
+    truth2 = int(i2[0])
+    # near-tie aware like _truth_set: the decode step and the prefill path take different matmul programs, so two
+    # near-equal logits (random-token prompts are full of them) can legitimately order differently in bf16
+    allowed2 = {truth2} if margin2 > 1.0 else {truth2, int(i2[1])}
+    print(
+        f"GEN long prompt T={T}: decode after prefill {dec}/{dec2}, prefill(T+1) top-2 {i2.tolist()} margin {margin2:.3f}"
     )
-    truth2 = int(
-        torch.argmax(
-            gen.prefill_forward(
-                torch.tensor(prompt + [tok_seg]).reshape(1, -1), page_table=gen.page_table[:1], prompt_lens=[T + 1]
-            )[0, -1]
-        )
-    )
-    assert dec == dec2 == truth2, f"T={T}: traced decode after the long prefill {dec}/{dec2} != prefill truth {truth2}"
+    assert dec == dec2, f"T={T}: traced decode after the long prefill is not reproducible ({dec} vs {dec2})"
+    assert (
+        dec in allowed2
+    ), f"T={T}: traced decode after the long prefill {dec} not in prefill truth {allowed2} (margin {margin2:.3f})"
 
 
 @mesh_tp()
@@ -256,3 +261,72 @@ def test_generator_all_logits_after_traced_decode(mesh_device):
     print(f"GEN all-logits vs masked prefill: PCC {pcc}, top-2 {top2_all} vs {top2_masked}, margin {margin:.3f}")
     assert ok, f"all-positions vs masked-bucket prefill logits PCC {pcc} < 0.999"
     assert int(torch.argmax(masked)) in top2_all, "masked-path argmax not in the all-positions top-2"
+
+
+@mesh_tp()
+def test_generator_sampler_variants_after_replays(mesh_device):
+    """Every sampling-trace variant is compiled BEFORE the decode trace is captured (stage-7 rule: no program compiled
+    after a parked trace). After greedy traced replays, a penalties request and a log-probs request run on the traced
+    path without compiling anything (program-cache count unchanged) and sample the same tokens as the eager sampler."""
+    from models.common.sampling.sampling_params import SamplingParams
+
+    gen = _build(mesh_device, max_seq_len=4096)
+    prompt = _prompt(gen, 1, 40)
+    gen.reset()
+    lg = gen.prefill_forward(
+        torch.tensor(prompt).reshape(1, -1), page_table=gen.page_table[:1], prompt_lens=[len(prompt)]
+    )
+    tok = int(torch.argmax(lg[0, -1]))
+    for i in range(4):  # greedy replays with the default sampler trace
+        tok = int(gen.decode_forward(torch.tensor([[tok]]), torch.tensor([len(prompt) + i]), enable_trace=True)[0])
+    n0 = gen.program_cache_entries()
+    variants = {
+        "penalties": SamplingParams(temperature=0.0, top_k=1, top_p=1.0, repetition_penalty=1.3, presence_penalty=0.5),
+        "log_probs": SamplingParams(temperature=0.0, top_k=1, top_p=1.0, enable_log_probs=True, num_logprobs=5),
+    }
+    pos = len(prompt) + 4
+    for name, sp in variants.items():
+        gen.reset()
+        gen.prefill_forward(
+            torch.tensor(prompt).reshape(1, -1), page_table=gen.page_table[:1], prompt_lens=[len(prompt)]
+        )
+        pt_tok = torch.tensor([prompt], dtype=torch.long)  # penalties count prompt + output tokens per slot
+        traced = gen._tt.decode_forward(
+            torch.tensor([[tok]]),
+            torch.tensor([len(prompt)]),
+            page_table=gen.page_table[:1],
+            kv_cache=gen.kv_cache,
+            enable_trace=True,
+            read_from_device=True,
+            sampling_params=sp,
+            reset_batch=True,
+            prompt_tokens=pt_tok,
+            output_tokens=None,
+        )
+        gen.reset()
+        gen.prefill_forward(
+            torch.tensor(prompt).reshape(1, -1), page_table=gen.page_table[:1], prompt_lens=[len(prompt)]
+        )
+        eager = gen._tt.decode_forward(
+            torch.tensor([[tok]]),
+            torch.tensor([len(prompt)]),
+            page_table=gen.page_table[:1],
+            kv_cache=gen.kv_cache,
+            enable_trace=False,
+            read_from_device=True,
+            sampling_params=sp,
+            reset_batch=True,
+            prompt_tokens=pt_tok,
+            output_tokens=None,
+        )
+        t_tr = traced[0] if isinstance(traced, (tuple, list)) else traced
+        t_ea = eager[0] if isinstance(eager, (tuple, list)) else eager
+        t_tr = int(torch.as_tensor(t_tr).reshape(-1)[0])
+        t_ea = int(torch.as_tensor(t_ea).reshape(-1)[0])
+        n1 = gen.program_cache_entries()
+        print(f"GEN sampler variant {name}: traced token {t_tr}, eager token {t_ea}, program cache {n0} -> {n1}")
+        assert t_tr == t_ea, f"{name}: traced sampler {t_tr} != eager sampler {t_ea}"
+        assert (
+            n1 == n0 == gen._program_cache_after_warmup
+        ), f"{name}: programs compiled after warm-up ({gen._program_cache_after_warmup} -> {n0} -> {n1})"
+    gen.assert_no_new_programs("(sampler variants)")

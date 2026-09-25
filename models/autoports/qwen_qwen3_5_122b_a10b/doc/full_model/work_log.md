@@ -335,3 +335,4 @@
   re-run on the committed token-buffer shape / sampler (`trace_evidence.log` refreshed) before the commit.
 - 02:45 Trace evidence re-run (`trace_evidence.log`): token feedback, positions, unchanged/changed page table, determinism all
   PASS on the committed rank-4 token buffer + top-k sampler; token-out step 2.35 ms on the 2-layer model.
+- 02:50 Stage 6 committed locally: 215075683d2 (38 files). Stage 7 begins (doc/optimized_full_model/).

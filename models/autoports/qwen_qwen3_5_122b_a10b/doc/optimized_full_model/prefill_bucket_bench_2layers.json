@@ -1,0 +1,223 @@
+{
+ "layers": "0,3",
+ "equiv": [
+  {
+   "len": 1,
+   "argmax": 220,
+   "next_token_stock": 96549,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 17,
+   "argmax": 101382,
+   "next_token_stock": 3771,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 128,
+   "argmax": 1810,
+   "next_token_stock": 54056,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 129,
+   "argmax": 28981,
+   "next_token_stock": 28981,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 161,
+   "argmax": 96614,
+   "next_token_stock": 96614,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 500,
+   "argmax": 30052,
+   "next_token_stock": 10003,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 2048,
+   "argmax": 10003,
+   "next_token_stock": 12144,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 2049,
+   "argmax": 3035,
+   "next_token_stock": 59210,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 4097,
+   "argmax": 2553,
+   "next_token_stock": 2553,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  }
+ ],
+ "timing": [
+  {
+   "len": 128,
+   "stock_ms": 32.8,
+   "stock_ms_all": [
+    33.1,
+    32.9,
+    32.8
+   ],
+   "dev_ms": 33.6,
+   "dev_ms_all": [
+    33.8,
+    33.6,
+    37.8
+   ],
+   "traced_ms": 29.2,
+   "traced_ms_all": [
+    29.5,
+    32.1,
+    29.2
+   ]
+  },
+  {
+   "len": 161,
+   "stock_ms": 42.5,
+   "stock_ms_all": [
+    42.5,
+    43.4,
+    42.7
+   ],
+   "dev_ms": 43.1,
+   "dev_ms_all": [
+    43.1,
+    43.1,
+    43.1
+   ],
+   "traced_ms": 38.9,
+   "traced_ms_all": [
+    38.9,
+    39.1,
+    39.3
+   ]
+  },
+  {
+   "len": 2048,
+   "stock_ms": 94.5,
+   "stock_ms_all": [
+    94.5,
+    95.2,
+    94.7
+   ],
+   "dev_ms": 94.9,
+   "dev_ms_all": [
+    94.9,
+    95.1,
+    95.3
+   ],
+   "traced_ms": 93.0,
+   "traced_ms_all": [
+    93.3,
+    93.0,
+    93.3
+   ]
+  }
+ ]
+}

@@ -225,16 +225,24 @@ class SortedDispatch:
                 ttnn.deallocate(off_i)
                 ttnn.deallocate(rank)
             if Rp != R:
-                # sentinel rows (positions >= R) go to the trailing all-padding group
+                # sentinel rows (positions >= R) go to the trailing all-padding group; their source token is masked to
+                # token 0 (in range) so gather_rows never reads past the T real rows (the group is never consumed)
                 is_real = ttnn.lt(i_f, float(R))
                 d_f = ttnn.where(is_real, d_real, ttnn.add(i_f, float(Rd - Rp)))
-                ttnn.deallocate(is_real)
                 ttnn.deallocate(d_real)
-                src_ids = ttnn.where(ttnn.lt(i_f, float(R)), ids_flat, 0.0)
+                src_ids = ttnn.where(is_real, ids_flat, 0.0)
+                ttnn.deallocate(is_real)
             else:
                 d_f = d_real
                 src_ids = ids_flat
             tok_sorted = ttnn.floor(ttnn.multiply(i_f, 1.0 / k))  # source token of row i (token-major)
+            if Rp != R:
+                # sentinel rows: source token masked to 0 (in range) so gather_rows never reads past the T real rows
+                is_real = ttnn.lt(i_f, float(R))
+                tok_masked = ttnn.where(is_real, tok_sorted, 0.0)
+                ttnn.deallocate(tok_sorted)
+                ttnn.deallocate(is_real)
+                tok_sorted = tok_masked
             sc_sorted = sc_flat  # scores already token-major
             perm_u32 = None
             sorted_ids = ids_flat
@@ -298,12 +306,15 @@ class SortedDispatch:
             ttnn.deallocate(start_i)
             ttnn.deallocate(off_i)
             if Rp != R:
-                # sentinel rows (positions >= R) go to the trailing all-padding group
+                # sentinel rows (positions >= R) go to the trailing all-padding group; source token masked to 0
                 is_real = ttnn.lt(i_f, float(R))
                 d_f = ttnn.where(is_real, d_real, ttnn.add(i_f, float(Rd - Rp)))
-                ttnn.deallocate(is_real)
                 ttnn.deallocate(d_real)
-                src_ids = ttnn.where(ttnn.lt(i_f, float(R)), sorted_ids, 0.0)
+                src_ids = ttnn.where(is_real, sorted_ids, 0.0)
+                tok_masked = ttnn.where(is_real, tok_sorted, 0.0)
+                ttnn.deallocate(tok_sorted)
+                tok_sorted = tok_masked
+                ttnn.deallocate(is_real)
             else:
                 d_f = d_real
                 src_ids = sorted_ids

@@ -1,0 +1,29 @@
+{
+  "layers": "all",
+  "batch": 1,
+  "steps": 64,
+  "prompt_tokens": 19,
+  "ms_per_step": {
+    "blocking_readback": 27.309,
+    "deferred_readback": 27.15,
+    "replay_model_plus_sampler": 27.142,
+    "replay_model_only": 26.609,
+    "replay_sampler_only": 0.542
+  },
+  "tokens_per_s_per_user": {
+    "blocking_readback": 36.62,
+    "deferred_readback": 36.83
+  },
+  "tokens_identical_blocking_vs_deferred": false,
+  "first_tokens": [
+    321,
+    279,
+    6511,
+    314,
+    17163,
+    369,
+    23327,
+    13
+  ],
+  "text": " and the capital of Spain is Madrid. What is the capital of the United Kingdom?\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:** The user provides a series of statements about the capitals of various European countries (France, Germany, Italy, Spain) and then asks for the capital of the"
+}

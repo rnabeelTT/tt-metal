@@ -147,7 +147,18 @@ def chunk_gated_delta_rule_fused_adapter(
     # Scalar (one length for all rows) or a per-row list/tuple of B lengths (grouped batched prefill:
     # each user its own real length within the shared bucket).
     _is_per_row = isinstance(valid_len, (list, tuple))
-    if _is_per_row or (valid_len is not None and valid_len < T):
+    _dev_len = valid_len is not None and hasattr(valid_len, "mask_f32")  # device-resident masks (traced prefill)
+    if _dev_len:
+        # PrefillLen: persistent [1,T,1] masks staged by the caller — no host write, fixed program for any length
+        # (the mask is all ones for a full bucket; the multiplies are then exact identities).
+        assert B == 1 and valid_len.bucket == T and len(q.shape) == 3, (B, valid_len, T, tuple(q.shape))
+        _dram = ttnn.DRAM_MEMORY_CONFIG
+        beta = ttnn.multiply(beta, valid_len.mask_f32, memory_config=_dram)
+        g = ttnn.multiply(g, valid_len.mask_f32, memory_config=_dram)
+        q = ttnn.multiply(q, valid_len.mask_q, memory_config=_dram)
+        k = ttnn.multiply(k, valid_len.mask_q, memory_config=_dram)
+        v = ttnn.multiply(v, valid_len.mask_q, memory_config=_dram)
+    elif _is_per_row or (valid_len is not None and valid_len < T):
         _dram = ttnn.DRAM_MEMORY_CONFIG  # op CBs clash with L1 inputs at small buckets
         _mt = torch.zeros(B, T, 1, dtype=torch.float32)
         if _is_per_row:

@@ -106,5 +106,36 @@
     "capacity_evidence": "MEMORY_REPORT lines in logs/06-warm-fixed-{1,2}.log and logs/06-prefill-check-*.log; doc/full_model/README.md section 2",
     "changes_vs_stage5": "none in persistent allocations; the router-gate L1 buffers are shared across layers (fused_decoder._share_gate_buffers)",
     "note_trace_region": "total_bytes_per_bank already excludes the reserved trace region (verified: 4,234,838,400 B with a 300 MB region vs 4,205,232,512 B with 512 MiB); GDN state grows 19.8 MB per extra user per device (0.57 GiB at 32 users), included in the per-user average"
+  },
+  "optimized_full_model_stage7": {
+    "status": "measured on the 48-layer build with the stage-7 selected policy (2026-09-25, logs/07-prefill-check-qwen35_122b_aime24_chat_g100.log MEMORY_REPORT after the decode trace AND the five prefill bucket traces were parked), B=1, max_seq_len 262144",
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_all_traces_parked_gib": 19.829,
+    "dram_allocated_stage6_gib": 19.669,
+    "kv_bytes_per_token_per_device": 6528,
+    "kv_pool_available_gib": 13.096,
+    "kv_pool_tokens_all_users": 2154062,
+    "avg_tokens_per_user_at_32": 67314,
+    "kv_scratch_block": "1 block (64 tokens) reserved by the generator for the fixed-width bucket KV fill (pad rows), id = blocks_per_seq * max_batch_size",
+    "trace_region_reserved_mib": 512,
+    "trace_region_used_mib": 405.4,
+    "trace_region_decode_only_mib": 24.9,
+    "trace_region_prefill_buckets_mib": 380.5,
+    "l1_bytes_per_core_held": 18688,
+    "current_supported_context": 262144,
+    "limiting_reason": "dram (shared KV pool: one user reaches 262144; 32 users share ~2.1M tokens (1.89M on the conservative basis)); the trace region (512 MiB) holds the decode trace + 5 bucket traces at 79 % - a serving stack must reserve at least 512 MiB or capture fewer buckets (QWEN35_PREFILL_TRACE_MAX_BUCKET)",
+    "capacity_evidence": "MEMORY_REPORT lines in logs/07-prefill-check-*.log (two reports: after the decode capture, after the bucket captures); doc/optimized_full_model/README.md section 7",
+    "changes_vs_stage6": "+0.16 GiB persistent DRAM (per-bucket persistent prefill inputs and trace outputs, all-positions norm/LM-head programs, one KV scratch block); trace region 26 MiB -> 405 MiB (bucket traces 128/256/512/1024/2048); L1 held per core 10.5 KB -> 18.3 KB (gate op per-iteration buffers built once instead of per step)",
+    "token_out_ms_per_step_b1": 25.058,
+    "ttft_ms_traced": {
+      "128": 344.0,
+      "161": 555.8,
+      "2048": 1934.8
+    },
+    "kv_pool_b1_full_context_gib": 1.594,
+    "non_kv_footprint_gib": 18.235,
+    "kv_pool_conservative_gib": 11.502,
+    "kv_pool_conservative_tokens": 1891877,
+    "kv_pool_basis_note": "kv_pool_available_gib = dram_total - non_kv_footprint, the stage-6 basis (the B=1 full-context KV of 1.594 GiB inside the measured allocation is pool, not footprint); the conservative figures keep that KV inside the footprint (11.502 GiB, 1.89 M tokens), which is what the stage-7 README headline quoted before review round 3"
   }
 }

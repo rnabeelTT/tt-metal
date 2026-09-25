@@ -343,6 +343,26 @@ class Qwen35MoE:
             ttnn.deallocate(idx)
         return routing
 
+    def _rows_view(self, t, shape):
+        """Reinterpret the compact gather-mode sparse-matmul output (one tile-padded row per selected expert) as
+        ``shape`` without moving data (``moe_gather_tail``: ``ttnn.view``, the last two dims are unchanged);
+        otherwise the stock ``ttnn.reshape``."""
+        if getattr(self.args, "moe_gather_tail", False):
+            use_view = getattr(self, "_rows_view_ok", None)
+            if use_view is None:  # decided on the first (eager) call, fixed before any trace capture
+                try:
+                    out = ttnn.view(t, shape)
+                    self._rows_view_ok = True
+                    return out
+                except Exception as e:  # noqa: BLE001 - op support probe
+                    logger.warning(
+                        f"moe_gather_tail: ttnn.view {tuple(t.shape)} -> {shape} rejected ({str(e)[:100]}); reshape"
+                    )
+                    self._rows_view_ok = False
+            elif use_view:
+                return ttnn.view(t, shape)
+        return ttnn.reshape(t, shape)
+
     def _swiglu_rows(self, fused, lead, half):
         """SwiGLU on the packed [1, lead, 1, 2*half] projection (M=1 rows: slices avoid tile padding)."""
         if tuple(fused.tile.tile_shape) != (32, 32):
@@ -378,7 +398,7 @@ class Qwen35MoE:
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,
             )  # compact [1,1,1,k,1,2Nl]
-            din = self._swiglu_rows(ttnn.reshape(fused, (1, k, 1, 2 * Nl)), k, Nl)
+            din = self._swiglu_rows(self._rows_view(fused, (1, k, 1, 2 * Nl)), k, Nl)
             down = ttnn.sparse_matmul(
                 din,
                 self.down,
@@ -395,9 +415,21 @@ class Qwen35MoE:
             ttnn.deallocate(din)
             sc_u = scores if T == 1 else ttnn.slice(scores, [0, 0, u, 0], [1, 1, u + 1, k])
             sc_u = ttnn.reshape(sc_u, (1, k, 1, 1))
-            weighted = ttnn.multiply(ttnn.reshape(down, (1, k, 1, H)), sc_u)
-            ttnn.deallocate(down)
-            outs.append(ttnn.sum(weighted, dim=1, keepdim=True, compute_kernel_config=self.routed_ckc))  # [1,1,1,H]
+            down_rows = self._rows_view(down, (1, k, 1, H))
+            weighted = ttnn.multiply(down_rows, sc_u)
+            ttnn.deallocate(down_rows)
+            if getattr(self.args, "moe_gather_tail", False):
+                # sum over the k expert rows with the plain NC reduction: ttnn.sum(dim=1) adds a fill_pad of the
+                # tile padding around the same kernel; row 0 (the only logical row) is identical. The reduction
+                # keeps the tile-padded row count, so trim to the one logical row when it does.
+                acc_u = ttnn.experimental.fast_reduce_nc(weighted, dims=[1], compute_kernel_config=self.routed_ckc)
+                if acc_u.shape[-2] != 1:
+                    acc_t = ttnn.slice(acc_u, [0, 0, 0, 0], [1, 1, 1, H])
+                    ttnn.deallocate(acc_u)
+                    acc_u = acc_t
+                outs.append(acc_u)
+            else:
+                outs.append(ttnn.sum(weighted, dim=1, keepdim=True, compute_kernel_config=self.routed_ckc))  # [1,1,1,H]
             ttnn.deallocate(weighted)
             if T != 1:
                 ttnn.deallocate(ids_u)

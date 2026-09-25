@@ -1,0 +1,29 @@
+{
+  "layers": "0,3",
+  "batch": 1,
+  "steps": 64,
+  "prompt_tokens": 19,
+  "ms_per_step": {
+    "blocking_readback": 2.318,
+    "deferred_readback": 2.308,
+    "replay_model_plus_sampler": 2.21,
+    "replay_model_only": 1.68,
+    "replay_sampler_only": 0.541
+  },
+  "tokens_per_s_per_user": {
+    "blocking_readback": 431.38,
+    "deferred_readback": 433.35
+  },
+  "tokens_identical_blocking_vs_deferred": true,
+  "first_tokens": [
+    43506,
+    3149,
+    79731,
+    95746,
+    95746,
+    95746,
+    95746,
+    95746
+  ],
+  "text": "erusrior/sl\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd"
+}

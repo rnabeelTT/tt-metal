@@ -1,0 +1,71 @@
+{
+ "layers": "all",
+ "policy": "stage-7 selected (eight decode knobs, sorted_min_tokens=256, traced prefill)",
+ "equiv": [],
+ "timing": [
+  {
+   "len": 128,
+   "stock_ms": 349.6,
+   "stock_ms_all": [
+    355.0,
+    349.6,
+    350.2
+   ],
+   "dev_ms": 350.0,
+   "dev_ms_all": [
+    352.2,
+    350.3,
+    350.0
+   ],
+   "traced_ms": 344.0,
+   "traced_ms_all": [
+    344.4,
+    344.0,
+    344.0
+   ]
+  },
+  {
+   "len": 161,
+   "stock_ms": 561.2,
+   "stock_ms_all": [
+    564.5,
+    561.4,
+    561.2
+   ],
+   "dev_ms": 562.7,
+   "dev_ms_all": [
+    564.0,
+    562.7,
+    563.4
+   ],
+   "traced_ms": 555.8,
+   "traced_ms_all": [
+    556.1,
+    555.8,
+    555.9
+   ]
+  },
+  {
+   "len": 2048,
+   "stock_ms": 1932.6,
+   "stock_ms_all": [
+    1936.6,
+    1932.6,
+    1935.2
+   ],
+   "dev_ms": 1935.7,
+   "dev_ms_all": [
+    1935.7,
+    1939.3,
+    1939.4
+   ],
+   "traced_ms": 1934.8,
+   "traced_ms_all": [
+    1936.3,
+    1934.8,
+    1935.5
+   ]
+  }
+ ],
+ "note": "rows recovered from logs/07-prefill-bench-48l.log (final-policy run, 06:02 UTC); the 4097-token row is missing: the run hung in its STOCK mode there (bench-only compile-after-capture clobber, work_log 06:25) and was killed"
+}

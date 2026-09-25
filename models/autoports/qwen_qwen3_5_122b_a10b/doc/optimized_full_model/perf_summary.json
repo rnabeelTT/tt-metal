@@ -1,0 +1,343 @@
+{
+ "model": "Qwen/Qwen3.5-122B-A10B",
+ "mesh": "(1,4) P300x2",
+ "stage": 7,
+ "sources": {
+  "tokenout_before": "doc/optimized_full_model/tokenout_before_48layers.json",
+  "tokenout_after": "doc/optimized_full_model/tokenout_after_48layers.json",
+  "ttft": "doc/optimized_full_model/prefill_bucket_bench_48layers.json",
+  "prefill_equivalence": "doc/optimized_full_model/prefill_bucket_bench_2layers.json",
+  "decode_ops": "doc/optimized_full_model/decode_op_count*.json",
+  "readiness": "doc/optimized_full_model/readiness/"
+ },
+ "tokenout_before": {
+  "ms_per_step": {
+   "blocking_readback": 27.309,
+   "deferred_readback": 27.15,
+   "replay_model_plus_sampler": 27.142,
+   "replay_model_only": 26.609,
+   "replay_sampler_only": 0.542
+  },
+  "tokens_per_s_per_user": {
+   "blocking_readback": 36.62,
+   "deferred_readback": 36.83
+  },
+  "tokens_identical_blocking_vs_deferred": false,
+  "first_divergence_blocking_rerun": null
+ },
+ "tokenout_after": {
+  "ms_per_step": {
+   "blocking_readback": 25.058,
+   "deferred_readback": 24.901,
+   "replay_model_plus_sampler": 24.887,
+   "replay_model_only": 24.357,
+   "replay_sampler_only": 0.547
+  },
+  "tokens_per_s_per_user": {
+   "blocking_readback": 39.91,
+   "deferred_readback": 40.16
+  },
+  "tokens_identical_blocking_vs_deferred": false,
+  "first_divergence_blocking_rerun": null
+ },
+ "ttft_ms": {
+  "128": {
+   "stock_ms": 349.6,
+   "dev_ms": 350.0,
+   "traced_ms": 344.0
+  },
+  "161": {
+   "stock_ms": 561.2,
+   "dev_ms": 562.7,
+   "traced_ms": 555.8
+  },
+  "2048": {
+   "stock_ms": 1932.6,
+   "dev_ms": 1935.7,
+   "traced_ms": 1934.8
+  }
+ },
+ "prefill_equivalence_2layers": [
+  {
+   "len": 1,
+   "argmax": 220,
+   "next_token_stock": 96549,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 17,
+   "argmax": 101382,
+   "next_token_stock": 3771,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 128,
+   "argmax": 1810,
+   "next_token_stock": 54056,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 129,
+   "argmax": 28981,
+   "next_token_stock": 28981,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 161,
+   "argmax": 96614,
+   "next_token_stock": 96614,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 500,
+   "argmax": 30052,
+   "next_token_stock": 10003,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 2048,
+   "argmax": 10003,
+   "next_token_stock": 12144,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 2049,
+   "argmax": 3035,
+   "next_token_stock": 59210,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  },
+  {
+   "len": 4097,
+   "argmax": 2553,
+   "next_token_stock": 2553,
+   "dev_max_abs_diff": 0.0,
+   "dev_pcc": 1.0,
+   "dev_argmax_equal": true,
+   "dev_state_equal": true,
+   "dev_state_max_diff": 0.0,
+   "dev_next_token_equal": true,
+   "traced_max_abs_diff": 0.0,
+   "traced_pcc": 1.0,
+   "traced_argmax_equal": true,
+   "traced_state_equal": true,
+   "traced_state_max_diff": 0.0,
+   "traced_next_token_equal": true
+  }
+ ],
+ "decode_ops_per_layer": {
+  "ops_base/linear_attention": 103,
+  "ops_moe_tail/linear_attention": 102,
+  "ops_all/linear_attention": 85,
+  "ops_base/full_attention": 84,
+  "ops_moe_tail/full_attention": 83,
+  "ops_all/full_attention": 77,
+  "ops_all_normfold_convl1/linear_attention": 82
+ },
+ "decode_ops_final_policy": {
+  "linear_attention": 82,
+  "full_attention": 77,
+  "source": "decode_op_count_r4.json (ops_all_normfold_convl1 = the selected knobs; moe_router_l1 is a memory-config knob and changes no op count) + decode_op_count.json ops_all/full_attention"
+ },
+ "decode_knob_sweeps": {
+  "ops_base/layer0": {
+   "decode_ms": 0.579,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r4.jsonl"
+  },
+  "ops_gdn_gqa/layer0": {
+   "decode_ms": 0.577,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r2.jsonl"
+  },
+  "ops_gdn_abpad/layer0": {
+   "decode_ms": 0.561,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_gdn_inplace/layer0": {
+   "decode_ms": 0.574,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_gdn_all/layer0": {
+   "decode_ms": 0.553,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r2.jsonl"
+  },
+  "ops_moe_gate/layer0": {
+   "decode_ms": 0.571,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_moe_gate_l1/layer0": {
+   "decode_ms": 0.569,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_base/layer3": {
+   "decode_ms": 0.446,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r3.jsonl"
+  },
+  "ops_moe_gate/layer3": {
+   "decode_ms": 0.435,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_moe_gate_l1/layer3": {
+   "decode_ms": 0.434,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops.jsonl"
+  },
+  "ops_moe_tail/layer3": {
+   "decode_ms": 0.437,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r3.jsonl"
+  },
+  "ops_moe_all/layer3": {
+   "decode_ms": 0.428,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r2.jsonl"
+  },
+  "ops_moe_tail/layer0": {
+   "decode_ms": 0.572,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r3.jsonl"
+  },
+  "ops_all/layer0": {
+   "decode_ms": 0.545,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r4.jsonl"
+  },
+  "ops_all/layer3": {
+   "decode_ms": 0.429,
+   "pcc_decode": 0.9999337580085337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r3.jsonl"
+  },
+  "ops_all_normfold/layer0": {
+   "decode_ms": 0.524,
+   "pcc_decode": 0.9999617583949707,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r4.jsonl"
+  },
+  "ops_all_convl1/layer0": {
+   "decode_ms": 0.536,
+   "pcc_decode": 0.9999631287507337,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r4.jsonl"
+  },
+  "ops_all_normfold_convl1/layer0": {
+   "decode_ms": 0.521,
+   "pcc_decode": 0.9999617583949707,
+   "file": "doc/optimized_full_model/sweeps/decode_ops_r4.jsonl"
+  }
+ },
+ "readiness_reports": [
+  "prefill_check_qwen35_122b_aime24_chat_g100.json",
+  "prefill_check_qwen35_122b_book_p128_g100.json",
+  "teacher_forcing_qwen35_122b_aime24_chat_g100.json",
+  "teacher_forcing_qwen35_122b_book_p128_g100.json"
+ ],
+ "lower_bound": {
+  "layer_stack_lower_bound_ms": 21.136,
+  "per_kind": {
+   "gdn": {
+    "device_ms_max": 0.4541,
+    "ops_per_replay": 82,
+    "layers": 36
+   },
+   "attn": {
+    "device_ms_max": 0.399,
+    "ops_per_replay": 77,
+    "layers": 12
+   }
+  },
+  "source": "doc/optimized_full_model/tracy/*_traced_decode_mesh_perf_report.csv"
+ }
+}

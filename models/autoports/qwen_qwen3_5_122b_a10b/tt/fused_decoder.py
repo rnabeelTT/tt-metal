@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from loguru import logger
+
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.functional_decoder import FunctionalDecoder
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.layer import Qwen35MoeDecoderLayer
@@ -142,12 +144,101 @@ class Qwen35MoEFused(Qwen35MoE):
         phys = list(x4.padded_shape)
         if not self.flags.router_gate_op or x4.shape[2] != 1 or phys[-2] != 32 or any(d != 1 for d in phys[:-2]):
             return super()._route(x4)
-        weights, ids = self.gate.forward(x4)  # [T,1,1,k] bf16 / uint16, ROW_MAJOR
+        if getattr(self.args, "moe_gate_fast", False) and self.gate.num_blocks == 1 and self.gate.n_group != 8:
+            weights, ids = self._gate_fast_forward(x4)  # [T,1,1,k] bf16 / uint16, ROW_MAJOR
+        else:
+            weights, ids = self.gate.forward(x4)  # [T,1,1,k] bf16 / uint16, ROW_MAJOR
         T = weights.shape[0]
         # Metadata-only views into the [1,1,T,k] layout the expert paths consume.
         scores = ttnn.reshape(weights, (1, 1, T, self.top_k))
         ids = ttnn.reshape(ids, (1, 1, T, self.top_k))
         return scores, ids
+
+    def _gate_fast_buffers(self, bpi):
+        """The gate op's bias / input-index / output / output-index tensors for a ``bpi``-token iteration, built ONCE
+        (sliced out of the TTMoEGate persistent buffers) and shared by every layer of the model (keyed on args). The op
+        requires all five tensors to have the same leading (token) shape, so the stock forward slices them per step."""
+        g = self.gate
+        key = (bpi, g.num_blocks)
+        cache = getattr(self.args, "_qwen35_gate_fast_bufs", None)
+        if cache is None:
+            cache = {}
+            self.args._qwen35_gate_fast_bufs = cache
+        bufs = cache.get(key)
+        if bufs is None:
+            mem_in = g._sharded_mem_config(bpi, (g.num_blocks * 32, 32))
+            mem_out = g._sharded_mem_config(bpi, (32, 32))
+            bias = ttnn.slice(g.tt_bias, [0, 0, 0], [bpi, 16, 16], memory_config=mem_in)
+            in_idx = ttnn.slice(g.tt_input_indices, [0, 0, 0], [bpi, 16, 16], memory_config=mem_in)
+            out = ttnn.slice(g.tt_output, [0, 0, 0], [bpi, 32, 32], memory_config=mem_out)
+            out_idx = ttnn.slice(g.tt_output_indices, [0, 0, 0], [bpi, 32, 32], memory_config=mem_out)
+            bufs = {"mem_in": mem_in, "bias": bias, "in_idx": in_idx, "out": out, "out_idx": out_idx}
+            cache[key] = bufs
+        return bufs
+
+    def _gate_fast_forward(self, x4):
+        """Decode router through the gate op with the per-step constant traffic removed (stage 7, ``moe_gate_fast``).
+
+        ``TTMoEGate.forward`` slices its four persistent buffers (bias, input indices, output scores, output indices)
+        down to the iteration batch EVERY step (4 ops) and moves both outputs sharded->interleaved before slicing the
+        top-k columns (2 ops). Here the per-iteration tensors are built once (:meth:`_gate_fast_buffers`) and the
+        top-k columns are sliced straight out of the sharded row-major output buffers into L1 when the slice op
+        supports it. ``moe_router_l1`` puts the router logits in L1 so the (bpi,16,16) relayout runs on the L1 path.
+        Numerics are the stock path's: same op, same inputs, same output rows."""
+        g = self.gate
+        logits = ttnn.matmul(
+            x4,
+            g.tt_gate_weight,
+            compute_kernel_config=g.compute_kernel_config,
+            program_config=g.matmul_program_config,
+            memory_config=ttnn.L1_MEMORY_CONFIG if getattr(self.args, "moe_router_l1", False) else None,
+        )
+        if g.score_transform == "softmax":
+            logits = ttnn.softmax(logits, dim=-1)
+        bpi = logits.shape[2]  # one iteration: decode rows (32) <= cores and <= buffer rows
+        assert bpi <= min(g.num_device_cores, g._buffer_rows), (bpi, g.num_device_cores, g._buffer_rows)
+        bufs = self._gate_fast_buffers(bpi)
+        cur = ttnn.reshape(logits, (bpi, 16, 16))
+        cur = ttnn.to_memory_config(cur, memory_config=bufs["mem_in"])  # height-shard: one token per core
+        ttnn.deallocate(logits)
+        w, idx = ttnn.experimental.deepseek.moe.generalized_moe_gate(
+            cur,
+            bias_tensor=bufs["bias"],
+            input_indices_tensor=bufs["in_idx"],
+            output_tensor=bufs["out"],
+            output_indices_tensor=bufs["out_idx"],
+            eps=g.eps,
+            scaling_factor=g.scaling_factor,
+            enable_sigmoid=g.enable_sigmoid,
+            topk=g.k,
+            output_softmax=g.output_softmax,
+        )
+        ttnn.deallocate(cur)
+        T = x4.shape[2]
+        k = g.k
+        if not hasattr(self, "_gate_fast_direct_slice"):
+            # first (eager) call decides whether ttnn.slice reads the height-sharded row-major output buffers straight
+            # into interleaved L1; the decision is fixed before any trace capture (same path every step).
+            try:
+                weights = ttnn.slice(w, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+                indices = ttnn.slice(idx, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+                self._gate_fast_direct_slice = True
+            except Exception as e:  # noqa: BLE001 - op support probe
+                logger.warning(
+                    f"moe_gate_fast: sharded->interleaved slice unsupported ({str(e)[:120]}); using S2I + slice"
+                )
+                self._gate_fast_direct_slice = False
+        if self._gate_fast_direct_slice:
+            weights = ttnn.slice(w, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+            indices = ttnn.slice(idx, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+        else:
+            w_il = ttnn.to_memory_config(w, memory_config=ttnn.L1_MEMORY_CONFIG)
+            i_il = ttnn.to_memory_config(idx, memory_config=ttnn.L1_MEMORY_CONFIG)
+            weights = ttnn.slice(w_il, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+            indices = ttnn.slice(i_il, [0, 0, 0], [T, 1, k], memory_config=ttnn.L1_MEMORY_CONFIG)
+            ttnn.deallocate(w_il)
+            ttnn.deallocate(i_il)
+        return ttnn.view(weights, (T, 1, 1, k)), ttnn.view(indices, (T, 1, 1, k))
 
     def _routing_matrix(self, scores, ids, T):
         if self.flags.router_gate_op:
