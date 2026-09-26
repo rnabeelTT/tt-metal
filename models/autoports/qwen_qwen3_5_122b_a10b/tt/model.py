@@ -323,15 +323,33 @@ class Qwen35MoeModel(Qwen36Model):
 
     def _run_bucket_dev(self, bi, bucket, chunk_start):
         """The fixed bucket program over the staged inputs: embedding -> layers -> one-hot row select -> norm ->
-        LM head. Returns the replicated next-token logits [1, 1, vocab] (device)."""
+        LM head. Returns ``(logits, logits_sharded)``: the replicated next-token logits [1, 1, vocab] (host / readiness
+        path) and the pre-gather vocab-sharded logits [1, 1, 32, vocab/TP] whose row 0 is the next token (rows 1..31 are
+        the zero rows of the 32-row selector) — the exact spec of the decode sampler's input, so the serving adapter can
+        sample the prefill token on device with the programs the decode warm-up compiled (stage 9)."""
         x = self._run_bucket_hidden(bi, bucket, chunk_start)
         vlen = bi["len"]
-        x_last = ttnn.matmul(vlen.logit_sel, x)  # [1,1,1,dim]: row actual_len-1
+        x_last = ttnn.matmul(vlen.logit_sel, x)  # [1,1,32,dim]: row 0 = hidden row actual_len-1, rows 1..31 zero
         ttnn.deallocate(x)
         x_last = ttnn.to_memory_config(x_last, ttnn.DRAM_MEMORY_CONFIG)
         x_last = self.norm(x_last, mode=Mode.PREFILL)
-        logits = self._lm_head(x_last)
-        return ttnn.reshape(logits, (1, 1, logits.shape[-1]))
+        logits_sh = ttnn.linear(x_last, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())  # [1,1,32,V/TP]
+        if self._lmhead_vocab_sharded:
+            from models.tt_transformers.tt.ccl import tt_all_gather
+
+            # the all-gather frees its input: gather a copy so the sharded logits stay alive for the on-device sampler
+            logits = tt_all_gather(
+                ttnn.clone(logits_sh, memory_config=ttnn.DRAM_MEMORY_CONFIG),
+                self.mesh_device,
+                self.tt_ccl,
+                cluster_axis=None,
+                dim=3,
+                topology=self.args.ccl_topology(),
+            )
+        else:
+            logits = ttnn.clone(logits_sh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        logits = ttnn.slice(logits, (0, 0, 0, 0), (1, 1, 1, logits.shape[-1]))  # row 0 -> [1,1,1,vocab]
+        return ttnn.reshape(logits, (1, 1, logits.shape[-1])), logits_sh
 
     def _run_bucket_hidden(self, bi, bucket, chunk_start):
         """Embedding -> all layers over the staged bucket inputs; returns hidden [1, 1, bucket, dim] (device)."""
@@ -369,11 +387,18 @@ class Qwen35MoeModel(Qwen36Model):
         flex_sdpa=True,
         vision_tokens=None,
         vis_row_offset=0,
+        return_sharded=False,
     ):
         """Masked fixed-bucket prefill on persistent device inputs; replays the bucket's trace when one was captured
         (:meth:`capture_prefill_bucket_traces`). Falls back to the stock path for multimodal segments or when no KV
-        scratch block is reserved (``_kv_scratch_block``). Returns the replicated next-token logits [1, 1, vocab]."""
+        scratch block is reserved (``_kv_scratch_block``). Returns the replicated next-token logits [1, 1, vocab];
+        with ``return_sharded`` the pair ``(logits, logits_sharded [1,1,32,vocab/TP])`` (see :meth:`_run_bucket_dev`).
+        """
         if vision_tokens is not None or getattr(self, "_kv_scratch_block", None) is None or not flex_sdpa:
+            if return_sharded:
+                raise NotImplementedError(
+                    "sharded prefill logits need the persistent-input bucket path (KV scratch block)"
+                )
             return super().prefill_masked_bucket(
                 token_ids,
                 page_table,
@@ -399,10 +424,10 @@ class Qwen35MoeModel(Qwen36Model):
         tr = self.__dict__.get("_bucket_traces", {}).get(bucket)
         if tr is not None:
             ttnn.execute_trace(self.device, tr[0], cq_id=0, blocking=False)
-            return tr[1]
-        out = self._run_bucket_dev(bi, bucket, chunk_start)
+            return (tr[1], tr[2]) if return_sharded else tr[1]
+        out, out_sh = self._run_bucket_dev(bi, bucket, chunk_start)
         ttnn.synchronize_device(self.device)
-        return out
+        return (out, out_sh) if return_sharded else out
 
     def capture_prefill_bucket_traces(self, page_table_row, buckets=None):
         """Capture one trace per masked bucket (after every prefill program is warm and every persistent allocation is
@@ -420,14 +445,14 @@ class Qwen35MoeModel(Qwen36Model):
             self._stage_bucket_inputs(bi, toks, pt, max(1, b // 2), 0, b)
             ttnn.synchronize_device(self.device)
             tid = ttnn.begin_trace_capture(self.device, cq_id=0)
-            out = self._run_bucket_dev(bi, b, 0)
+            out, out_sh = self._run_bucket_dev(bi, b, 0)
             ttnn.end_trace_capture(self.device, tid, cq_id=0)
-            traces[b] = (tid, out)
+            traces[b] = (tid, out, out_sh)
             self._reset_gdn_state_for_new_sequence()
         return traces
 
     def release_prefill_bucket_traces(self):
-        for tid, _ in self.__dict__.get("_bucket_traces", {}).values():
+        for tid, *_ in self.__dict__.get("_bucket_traces", {}).values():
             ttnn.release_trace(self.device, tid)
         self._bucket_traces = {}
 

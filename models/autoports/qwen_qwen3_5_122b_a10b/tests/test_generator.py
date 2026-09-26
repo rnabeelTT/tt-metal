@@ -74,8 +74,17 @@ def test_generator_cross_request_token_feedback(mesh_device):
         assert (
             got[1] in allowed2
         ), f"len(B)={lb}: second token {got[1]} not in prefill truth set {allowed2} (margin {m2:.3f})"
-    # determinism of the whole path
-    assert gen.generate(A, n, enable_trace=True) == out_a
+    # determinism of the whole path, up to the documented LSB non-determinism at near ties (doc/optimized_full_model
+    # README section 7): a re-run may fork at a step whose top-2 margin is within the near-tie band; both branches must
+    # then be in the eager truth set of that prefix (the same rule as test_generator_long_prompt_segments)
+    again = gen.generate(A, n, enable_trace=True)
+    if again != out_a:
+        i = next(k for k in range(n) if again[k] != out_a[k])
+        _, allowed, m = _truth_set(gen, A + out_a[:i])
+        assert (
+            again[i] in allowed and out_a[i] in allowed
+        ), f"re-run forks at step {i}: {out_a[i]} vs {again[i]}, truth set {allowed} (margin {m:.3f}) - not a near tie"
+        print(f"GEN cross-request: re-run forked at step {i} on a near tie (margin {m:.3f}): {out_a[i]} vs {again[i]}")
 
 
 @mesh_tp()
@@ -165,7 +174,12 @@ def test_generator_long_prompt_segments(mesh_device, T):
     print(
         f"GEN long prompt T={T}: decode after prefill {dec}/{dec2}, prefill(T+1) top-2 {i2.tolist()} margin {margin2:.3f}"
     )
-    assert dec == dec2, f"T={T}: traced decode after the long prefill is not reproducible ({dec} vs {dec2})"
+    # reproducibility of the traced decode after the long prefill, up to a near tie (documented LSB non-determinism):
+    # both decodes must be in the near-tie set of the prefill truth
+    assert dec == dec2 or (dec in allowed2 and dec2 in allowed2), (
+        f"T={T}: traced decode after the long prefill is not reproducible ({dec} vs {dec2}), truth set {allowed2} "
+        f"(margin {margin2:.3f})"
+    )
     assert (
         dec in allowed2
     ), f"T={T}: traced decode after the long prefill {dec} not in prefill truth {allowed2} (margin {margin2:.3f})"
@@ -185,7 +199,19 @@ def test_generator_greedy_sampler_paths(mesh_device, force_argmax, monkeypatch):
     prompt = _prompt(gen, 0, 24)
     truth = _truth_next(gen, prompt)
     out = gen.generate(prompt, 8, enable_trace=True)
-    assert out[0] == truth and out == gen.generate(prompt, 8, enable_trace=True)
+    assert out[0] == truth
+    # determinism up to the documented LSB non-determinism at near ties (the token-out bench's blocking re-run forks at a
+    # near tie in every policy incl. stage 7; on this 2-layer model with a repetitive prompt the ties come early)
+    again = gen.generate(prompt, 8, enable_trace=True)
+    if again != out:
+        i = next(k for k in range(8) if again[k] != out[k])
+        _, allowed, m = _truth_set(gen, prompt + out[:i])
+        assert (
+            again[i] in allowed and out[i] in allowed
+        ), f"re-run forks at step {i}: {out[i]} vs {again[i]}, truth set {allowed} (margin {m:.3f}) - not a near tie"
+        print(
+            f"GEN sampler force_argmax={force_argmax}: re-run forked at step {i} on a near tie (margin {m:.3f}): {out[i]} vs {again[i]}"
+        )
     # token feedback on both paths: the second token must be the eager truth of prompt + first token (near-tie aware)
     _, allowed1, m1 = _truth_set(gen, prompt + [out[0]])
     assert out[1] in allowed1, f"token feedback: {out[1]} not in {allowed1} (margin {m1:.3f})"

@@ -1,0 +1,79 @@
+{
+ "prefix_len": 1009,
+ "fork_token_index": 9,
+ "path": "standalone generator prefill_logits (masked 1024 bucket), last position",
+ "run0": {
+  "top5_ids": [
+   58463,
+   26648,
+   664,
+   20282,
+   22809
+  ],
+  "top5_tokens": [
+   "east",
+   "earth",
+   "ear",
+   "external",
+   "eph"
+  ],
+  "top5_logits": [
+   19.625,
+   19.5,
+   18.375,
+   16.625,
+   16.25
+  ],
+  "margin_top1_top2": 0.125,
+  "candidates": {
+   "served_next": {
+    "id": 26648,
+    "token": "earth",
+    "logit": 19.5
+   },
+   "standalone_next": {
+    "id": 58463,
+    "token": "east",
+    "logit": 19.625
+   }
+  },
+  "served_minus_standalone": -0.125
+ },
+ "run1": {
+  "top5_ids": [
+   58463,
+   26648,
+   664,
+   20282,
+   22809
+  ],
+  "top5_tokens": [
+   "east",
+   "earth",
+   "ear",
+   "external",
+   "eph"
+  ],
+  "top5_logits": [
+   19.625,
+   19.5,
+   18.375,
+   16.625,
+   16.25
+  ],
+  "margin_top1_top2": 0.125,
+  "candidates": {
+   "served_next": {
+    "id": 26648,
+    "token": "earth",
+    "logit": 19.5
+   },
+   "standalone_next": {
+    "id": 58463,
+    "token": "east",
+    "logit": 19.625
+   }
+  },
+  "served_minus_standalone": -0.125
+ }
+}

@@ -67,16 +67,29 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         warm_host_trace=False,
         warm_prefill=True,
         warm_prefill_trace=True,
+        external_kv=False,
+        tt_generator=None,
+        prebuilt=None,
     ):
+        """``external_kv=True`` (vLLM serving): no KV pool, page table or warm-up here — the serving adapter hands the
+        vLLM-owned cache to :meth:`bind_kv_cache` and drives :meth:`warm_programs` / :meth:`capture_traces` from the
+        plugin's warm-up hooks. ``tt_generator``: an existing ``tt_transformers`` Generator (the adapter itself) to use
+        as ``self._tt`` so there is ONE Generator object holding the trace / sampling state."""
         self.mesh_device = mesh_device
-        self.args, self.model = create_model(
-            mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len, layer_indices=layer_indices
-        )
+        if prebuilt is not None:  # (args, model) already built through create_model (the serving adapter's path)
+            self.args, self.model = prebuilt
+        else:
+            self.args, self.model = create_model(
+                mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len, layer_indices=layer_indices
+            )
         self.tokenizer = self.args.tokenizer
         self.max_batch_size = int(max_batch_size)
         self.max_seq_len = int(self.args.max_seq_len)
         self.block_size = int(block_size)
-        self._tt = TTGenerator([self.model], [self.args], mesh_device)
+        self._tt = tt_generator if tt_generator is not None else TTGenerator([self.model], [self.args], mesh_device)
+        if tt_generator is not None:
+            assert self._tt.model[0] is self.model, "tt_generator must wrap this generator's model"
+        self.external_kv = bool(external_kv)
         # Split-sampling token feedback: the sampler writes the sampled token straight into the persistent decode token
         # input. The force-argmax path (ttnn.argmax) accepts the [B,1] token input as its output tensor; the top-k
         # candidate path (ttnn.sampling) requires a rank-4 [1,1,1,B] output -> hand it a zero-copy view of the same buffer.
@@ -86,18 +99,30 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         # + 1 reserved scratch block: the persistent-input masked-bucket prefill fills the KV rows of the whole bucket,
         # and the pad rows past the real tokens are routed to this block (never read: decode overwrites a position
         # before it attends to it, and the causal prefill mask hides pad keys from real queries)
+        self.kv_dtype = self.args.kv_dtype
+        self.positions = torch.zeros(self.max_batch_size, dtype=torch.int64)
+        self._host_trace_warm = False
+        self._program_guard = os.environ.get("QWEN35_PROGRAM_GUARD", "0") == "1"
+        self._program_cache_after_warmup = None
+        if self.external_kv:
+            self.kv_cache = None
+            self.page_table = None
+            self.kv_scratch_block = None
+            logger.info(
+                f"Qwen35MoeGenerator (external KV): B={self.max_batch_size} max_seq_len={self.max_seq_len} "
+                f"{self.kv_dtype} layers={len(self.model.layers)} - waiting for bind_kv_cache / warm_programs / capture_traces"
+            )
+            return
         num_blocks = math.ceil((self.blocks_per_seq * self.max_batch_size + 1) / 32) * 32
         self.kv_scratch_block = self.blocks_per_seq * self.max_batch_size
         self.model._kv_scratch_block = self.kv_scratch_block
         self.kv_cache_shape = (num_blocks, int(self.args.n_local_kv_heads), self.block_size, int(self.args.head_dim))
-        self.kv_dtype = self.args.kv_dtype
         self.kv_cache = self.model.allocate_kv_caches(
             self.kv_cache_shape, self.kv_dtype, batch_size=self.max_batch_size
         )
         self.page_table = torch.arange(self.blocks_per_seq * self.max_batch_size, dtype=torch.int32).reshape(
             self.max_batch_size, self.blocks_per_seq
         )
-        self.positions = torch.zeros(self.max_batch_size, dtype=torch.int64)
         logger.info(
             f"Qwen35MoeGenerator: B={self.max_batch_size} max_seq_len={self.max_seq_len} kv {self.kv_cache_shape} {self.kv_dtype} "
             f"({len(self.kv_cache)} attention layers), layers={len(self.model.layers)}"
@@ -107,7 +132,6 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         # trace is captured. A prefill that first runs after the capture allocates into the trace's freed scratch range;
         # the next decode replays overwrite those buffers and the following prefill hangs on corrupted indices
         # (stage-6 work_log 17:55).
-        self._host_trace_warm = False
         if os.environ.get("QWEN35_WARM_LOG") == "1":
             self._memory_report()  # footprint before any prefill program / trace exists
         if warm_prefill:
@@ -131,7 +155,6 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             f"(before the bucket captures: {self._program_cache_before_bucket_traces})"
         )
         # QWEN35_PROGRAM_GUARD=1: assert after every prefill / decode call that no program was compiled since warm-up
-        self._program_guard = os.environ.get("QWEN35_PROGRAM_GUARD", "0") == "1"
 
     # ---- setup -------------------------------------------------------------------------------------------------------
     def _token_feedback_buffer(self, model, device_inputs):
@@ -182,6 +205,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 self.model._unbind_gdn_prefill_scratch(prev)
             self._alloc_batched_zero_templates()  # B-sized zero templates for reset(), allocated before any trace
             self._warm_slot_writes()  # every slot's GDN state write (slice/concat programs are slot-specific)
+            self._warm_slot_remap()  # vLLM batch-condense slot_remap of the GDN state (slice / concat / copy programs)
         else:
             self.model.warmup_prefill_masked_buckets(self.page_table[:1])
             self._warm_all_logits()
@@ -204,6 +228,20 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.model._unbind_gdn_prefill_scratch(prev)
         for u in range(self.max_batch_size):
             self.model._write_gdn_slot(u, rec, conv)
+        ttnn.synchronize_device(self.mesh_device)
+
+    def _warm_slot_remap(self):
+        """Compile the GDN slot-remap programs (`TPGatedDeltaNet.remap_slots`: one slice per slot, a concat and an in-place
+        copy on the recurrent state and every conv state) with a rotation and its inverse, before any trace. vLLM's
+        batch condense hands a non-identity ``slot_remap`` to the first decode after requests leave the batch (the
+        first served mixed batch did: [1, 2, 3, 0]) - unwarmed, those programs compiled after the captures."""
+        B = self.max_batch_size
+        if B < 2:
+            return
+        rot = [(i + 1) % B for i in range(B)]
+        inv = [(i - 1) % B for i in range(B)]
+        self.model._remap_gdn_slots(torch.tensor(rot, dtype=torch.int32))
+        self.model._remap_gdn_slots(torch.tensor(inv, dtype=torch.int32))
         ttnn.synchronize_device(self.mesh_device)
 
     def _warm_all_logits(self):
@@ -290,21 +328,60 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         except Exception:
             pass
 
-    def _warm_decode_trace(self, warm_host_trace=False):
-        """Compile + capture the decode trace (model + sampler) at position 0 with dummy tokens, then reset the state the
-        forwards touched. Trace capture runs the step TWICE on device (the framework's compile pass executes, the capture
-        records, the first replay executes again), which advances the GDN recurrent/conv state twice: a trace captured in
-        the middle of a generation therefore produces wrong logits for that step (stage-6 mode probe: the host-logits trace
-        captured at the first real decode step gave a different top-1 than the eager step and the prefill truth). Both trace
-        variants are captured here, on dummy inputs, and the state is reset; the host-logits variant is optional
-        (``warm_host_trace``): without it the compatibility mode runs untraced."""
+    # --- vLLM serving mode (external KV): the adapter drives these from the plugin's warm-up hooks -------------------
+    def bind_kv_cache(self, kv_cache, num_blocks, page_table_width):
+        """Adopt the vLLM-owned paged KV cache (list of per-attention-layer (K, V) mesh tensors allocated by
+        ``allocate_vllm_kv_cache``: ``num_blocks`` usable blocks + the reserved scratch block at id ``num_blocks``) and
+        build the warm-up page table at vLLM's per-request width. Must run before any warm-up."""
+        assert self.external_kv and self.kv_cache is None
+        self.kv_cache = kv_cache
+        self.kv_scratch_block = int(num_blocks)
+        self.model._kv_scratch_block = self.kv_scratch_block
+        k0 = kv_cache[0][0]
+        self.kv_cache_shape = tuple(int(d) for d in k0.shape)
+        # warm-up table: rows own distinct blocks for the longest warm-up bucket (2048 tokens = 32 blocks); every other
+        # column points at the scratch block (valid, never read)
+        B, W = self.max_batch_size, int(page_table_width)
+        per_user = min(32, W)
+        assert per_user * B <= num_blocks, f"KV cache too small for the warm-up: {num_blocks} blocks < {per_user * B}"
+        pt = torch.full((B, W), self.kv_scratch_block, dtype=torch.int32)
+        for u in range(B):
+            pt[u, :per_user] = torch.arange(u * per_user, (u + 1) * per_user, dtype=torch.int32)
+        self.page_table = pt
+        logger.info(
+            f"bound external KV cache {self.kv_cache_shape} {self.kv_dtype} ({len(kv_cache)} layers), scratch block "
+            f"{self.kv_scratch_block}, page-table width {W}"
+        )
+
+    def warm_programs(self):
+        """Phase 1 of the serving warm-up (no trace live): every prefill program + persistent allocation, the eager decode
+        step and every sampling-trace variant (the counted penalties step included). Same order as the standalone
+        constructor."""
+        assert self.kv_cache is not None, "bind_kv_cache first"
+        self._warm_prefill()
+        self._warm_decode_eager()
+        self._program_cache_before_captures = self.program_cache_entries()
+        logger.info(f"serving warm-up phase 1 done: {self._program_cache_before_captures} programs compiled")
+
+    def capture_traces(self, warm_host_trace=True):
+        """Phase 2 of the serving warm-up: the decode trace (model + sampler) THEN the prefill bucket traces (last, so
+        their intermediates only alias freed scratch), then the program-cache guard baseline."""
+        self._capture_decode_trace(warm_host_trace)
+        self._program_cache_before_bucket_traces = self.program_cache_entries()
+        self._warm_prefill_traces()
+        self._program_cache_after_warmup = self.program_cache_entries()
+        if self._program_cache_after_warmup != self._program_cache_before_bucket_traces:
+            logger.warning(
+                f"{self._program_cache_after_warmup - self._program_cache_before_bucket_traces} program(s) compiled during "
+                "the bucket-trace captures (compile-after-capture risk)"
+            )
+        logger.info(f"serving warm-up phase 2 done: program cache entries {self._program_cache_after_warmup}")
+
+    def _warm_decode_eager(self):
+        """Eager decode compile pass with the sampling deferred + every sampling-trace variant precompiled (no trace live)."""
         B = self.max_batch_size
         tokens = torch.zeros(B, 1, dtype=torch.int64)
         pos = torch.zeros(B, dtype=torch.int64)
-        # 1) eager compile pass with the sampling deferred: its logits have the spec the traced sampler will see, and NO
-        #    trace is live yet -> every sampling-trace variant (penalties / log-probs / force-argmax where allowed) is
-        #    compiled here (SamplingGenerator.precompile all_configs). A variant first compiled at request time would be
-        #    a compile after a parked trace (README section 4); the sampler docstring asks for exactly this ordering.
         logits = self._tt.decode_forward(
             tokens,
             pos,
@@ -320,8 +397,27 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         self._precompile_sampler_variants(logits0)
         ttnn.synchronize_device(self.mesh_device)
         self.reset()
-        logger.info("all sampling-trace variants precompiled (before any trace)")
-        # 2) capture the decode trace (model + default sampler)
+        # the host-logits compatibility decode (vLLM host sampling: min_p / logit bias / logprobs on this 4-device mesh /
+        # structured outputs): its full-vocab LM-head all-gather is a program the on-device-sampling step never runs
+        self._tt.decode_forward(
+            tokens,
+            pos,
+            page_table=self.page_table,
+            kv_cache=self.kv_cache,
+            enable_trace=False,
+            read_from_device=True,
+            sampling_params=None,
+            reset_batch=True,
+        )
+        ttnn.synchronize_device(self.mesh_device)
+        self.reset()
+        logger.info("all sampling-trace variants + the host-logits decode precompiled (before any trace)")
+
+    def _capture_decode_trace(self, warm_host_trace=False):
+        """Capture the decode trace (model + default sampler) on dummy inputs, then reset the state it advanced."""
+        B = self.max_batch_size
+        tokens = torch.zeros(B, 1, dtype=torch.int64)
+        pos = torch.zeros(B, dtype=torch.int64)
         self._tt.decode_forward(
             tokens,
             pos,
@@ -351,6 +447,17 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self._host_trace_warm = True
             logger.info("decode trace (host-logits compatibility mode) captured")
         self.memory_report = self._memory_report()
+
+    def _warm_decode_trace(self, warm_host_trace=False):
+        """Compile + capture the decode trace (model + sampler) at position 0 with dummy tokens, then reset the state the
+        forwards touched. Trace capture runs the step TWICE on device (the framework's compile pass executes, the capture
+        records, the first replay executes again), which advances the GDN recurrent/conv state twice: a trace captured in
+        the middle of a generation therefore produces wrong logits for that step (stage-6 mode probe). Both trace variants
+        are captured here, on dummy inputs, and the state is reset; the host-logits variant is optional
+        (``warm_host_trace``): without it the compatibility mode runs untraced. Split into :meth:`_warm_decode_eager`
+        (every sampling variant precompiled while no trace is live) and :meth:`_capture_decode_trace`."""
+        self._warm_decode_eager()
+        self._capture_decode_trace(warm_host_trace)
 
     def _memory_report(self):
         """Measured per-device footprint after build + warm-up (weights, KV pool, GDN state, sampler, trace): the numbers
@@ -477,18 +584,74 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         t = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh_device, dim=0))
         return t.float().reshape(-1, self.args.vocab_size)[:1].reshape(1, 1, -1)
 
-    def _prefill_single(self, tokens, page_table, segment=2048):
+    def _prefill_single(self, tokens, page_table, segment=2048, want_sharded=False):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
-        logits ``[1, 1, vocab]`` after the last real token."""
+        logits ``[1, 1, vocab]`` after the last real token; with ``want_sharded`` the pair ``(host logits, device
+        vocab-sharded logits [1,1,32,vocab/TP] of the last segment)`` for on-device sampling (row 0)."""
         T = tokens.shape[1]
-        logits = None
+        logits, sh = None, None
         for cs in range(0, T, segment):
             seg = tokens[:, cs : min(cs + segment, T)]
-            lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs)
+            last = cs + segment >= T
+            if want_sharded and last:
+                lg, sh = self.model.prefill_masked_bucket(
+                    seg, page_table, actual_len=seg.shape[1], chunk_start=cs, return_sharded=True
+                )
+            else:
+                lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs)
             logits = self._host_logits(lg)
-        return logits
+        return (logits, sh) if want_sharded else logits
+
+    def prefill_serving(self, tokens, page_table, prompt_lens, slots, sampler=None):
+        """vLLM prefill: ``tokens`` [N, max_T] host ids (row u valid up to ``prompt_lens[u]``), ``page_table`` [N, width]
+        (row u = request u's blocks), ``slots`` = the decode slot of each request. Runs each request through the warmed
+        masked-bucket path against its own page-table row and writes its GDN state into its slot (live slots untouched:
+        the prefill runs on the model's B=1 scratch). ``sampler(logits_sharded, u)`` -> host token (the adapter applies
+        the request's sampling params to the on-device sampler and samples row 0 of the [1,1,32,vocab/TP] logits while
+        the bucket output is still live); without it returns the host logits ``[N, 1, vocab]``.
+        Returns ``[N, 1]`` int64 tokens (sampler) or ``[N, 1, vocab]`` float logits."""
+        N = tokens.shape[0]
+        lens = [int(prompt_lens[u]) for u in range(N)]
+        slots = [int(s) for s in slots]
+        assert len(slots) == N and all(0 <= s < self.max_batch_size for s in slots), (slots, self.max_batch_size)
+        pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
+        outs = []
+        if self.max_batch_size == 1:
+            assert N == 1 and slots == [0]
+            lg, sh = self._prefill_single(tokens[:1, : lens[0]].to(torch.int32), pt[:1], want_sharded=True)
+            outs.append(torch.tensor([[sampler(sh, 0)]], dtype=torch.int64) if sampler else lg)
+        else:
+            comp = ttnn.ConcatMeshToTensor(self.mesh_device, dim=0)
+            dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+            prev = self.model._bind_gdn_prefill_scratch()
+            snaps = []
+            try:
+                for u in range(N):
+                    self.model._reset_gdn_state_for_new_sequence()
+                    lg, sh = self._prefill_single(
+                        tokens[u : u + 1, : lens[u]].to(torch.int32), pt[u : u + 1], want_sharded=True
+                    )
+                    outs.append(torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg)
+                    snaps.append(
+                        (
+                            [ttnn.to_torch(dn.rec_state, mesh_composer=comp) for dn in dn_layers],
+                            [[ttnn.to_torch(c, mesh_composer=comp) for c in dn.conv_states] for dn in dn_layers],
+                        )
+                    )
+            finally:
+                self.model._unbind_gdn_prefill_scratch(prev)
+            for u in range(N):
+                self.model._write_gdn_slot(slots[u], *snaps[u])
+        for u in range(N):
+            self.positions[slots[u]] = lens[u]
+        if getattr(self, "_program_guard", False):
+            self.assert_no_new_programs("(prefill_serving)")
+        if not hasattr(self._tt, "_slots_prefilled_since_decode"):
+            self._tt._slots_prefilled_since_decode = set()
+        self._tt._slots_prefilled_since_decode.update(slots)
+        return torch.cat(outs, dim=0)
 
     def decode_forward(
         self,
