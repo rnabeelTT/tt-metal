@@ -217,17 +217,16 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         """Compile the per-slot GDN state writes of the batched decode buffers (`_write_gdn_slot`: slice / concat programs
         whose shapes depend on the slot index) before any trace is captured — the first batched prefill after the
         captures would otherwise compile them (caught by the program guard in the stage-7 generator tests)."""
-        comp = ttnn.ConcatMeshToTensor(self.mesh_device, dim=0)
-        prev = self.model._bind_gdn_prefill_scratch()
-        try:
-            self.model._reset_gdn_state_for_new_sequence()
-            dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
-            rec = [ttnn.to_torch(dn.rec_state, mesh_composer=comp) for dn in dn_layers]
-            conv = [[ttnn.to_torch(c, mesh_composer=comp) for c in dn.conv_states] for dn in dn_layers]
-        finally:
-            self.model._unbind_gdn_prefill_scratch(prev)
-        for u in range(self.max_batch_size):
-            self.model._write_gdn_slot(u, rec, conv)
+        for u in range(
+            self.max_batch_size
+        ):  # the served path: device snapshot of the scratch, device write into slot u
+            prev = self.model._bind_gdn_prefill_scratch()
+            try:
+                self.model._reset_gdn_state_for_new_sequence()
+                snap = self.model._snapshot_gdn_scratch_device()
+            finally:
+                self.model._unbind_gdn_prefill_scratch(prev)
+            self.model._write_gdn_slot_device(u, *snap)
         ttnn.synchronize_device(self.mesh_device)
 
     def _warm_slot_remap(self):
@@ -363,10 +362,24 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         self._program_cache_before_captures = self.program_cache_entries()
         logger.info(f"serving warm-up phase 1 done: {self._program_cache_before_captures} programs compiled")
 
-    def capture_traces(self, warm_host_trace=True):
-        """Phase 2 of the serving warm-up: the decode trace (model + sampler) THEN the prefill bucket traces (last, so
-        their intermediates only alias freed scratch), then the program-cache guard baseline."""
-        self._capture_decode_trace(warm_host_trace)
+    def capture_traces(self, warm_host_trace=True, widths=None):
+        """Phase 2 of the serving warm-up: the decode trace(s) (model + sampler) THEN the prefill bucket traces (last, so
+        their intermediates only alias freed scratch), then the program-cache guard baseline. ``widths`` (stage 10 decode
+        bucketing): one decode trace per width, each in its own trace store of the shared Generator (``decode_buckets``);
+        the host-logits compatibility trace only at the full width (its store is the one selected for host sampling)."""
+        widths = sorted(set(int(w) for w in (widths or [self.max_batch_size])))
+        if widths == [self.max_batch_size]:
+            self._capture_decode_trace(warm_host_trace)
+        else:
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt import decode_buckets
+
+            for w in widths:
+                decode_buckets.select(self._tt, w, carry_over=False)
+                self._capture_decode_trace(warm_host_trace and w == self.max_batch_size, B=w)
+            decode_buckets.select(self._tt, self.max_batch_size, carry_over=False)
+            logger.info(
+                f"decode traces captured for widths {widths} (host-logits variant at width {self.max_batch_size})"
+            )
         self._program_cache_before_bucket_traces = self.program_cache_entries()
         self._warm_prefill_traces()
         self._program_cache_after_warmup = self.program_cache_entries()
@@ -377,15 +390,16 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             )
         logger.info(f"serving warm-up phase 2 done: program cache entries {self._program_cache_after_warmup}")
 
-    def _warm_decode_eager(self):
-        """Eager decode compile pass with the sampling deferred + every sampling-trace variant precompiled (no trace live)."""
-        B = self.max_batch_size
+    def _warm_decode_eager(self, B=None):
+        """Eager decode compile pass with the sampling deferred + every sampling-trace variant precompiled (no trace live).
+        ``B`` < max_batch_size compiles the programs of one decode-bucket width (rows [0:B) of the slot state)."""
+        B = self.max_batch_size if B is None else int(B)
         tokens = torch.zeros(B, 1, dtype=torch.int64)
         pos = torch.zeros(B, dtype=torch.int64)
         logits = self._tt.decode_forward(
             tokens,
             pos,
-            page_table=self.page_table,
+            page_table=self.page_table[:B],
             kv_cache=self.kv_cache,
             enable_trace=False,
             read_from_device=False,
@@ -399,29 +413,33 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         self.reset()
         # the host-logits compatibility decode (vLLM host sampling: min_p / logit bias / logprobs on this 4-device mesh /
         # structured outputs): its full-vocab LM-head all-gather is a program the on-device-sampling step never runs
-        self._tt.decode_forward(
-            tokens,
-            pos,
-            page_table=self.page_table,
-            kv_cache=self.kv_cache,
-            enable_trace=False,
-            read_from_device=True,
-            sampling_params=None,
-            reset_batch=True,
+        if B == self.max_batch_size:
+            self._tt.decode_forward(
+                tokens,
+                pos,
+                page_table=self.page_table,
+                kv_cache=self.kv_cache,
+                enable_trace=False,
+                read_from_device=True,
+                sampling_params=None,
+                reset_batch=True,
+            )
+            ttnn.synchronize_device(self.mesh_device)
+            self.reset()
+        logger.info(
+            f"width {B}: eager decode + sampling-trace variants{' + host-logits decode' if B == self.max_batch_size else ''} precompiled (before any trace)"
         )
-        ttnn.synchronize_device(self.mesh_device)
-        self.reset()
-        logger.info("all sampling-trace variants + the host-logits decode precompiled (before any trace)")
 
-    def _capture_decode_trace(self, warm_host_trace=False):
-        """Capture the decode trace (model + default sampler) on dummy inputs, then reset the state it advanced."""
-        B = self.max_batch_size
+    def _capture_decode_trace(self, warm_host_trace=False, B=None):
+        """Capture the decode trace (model + default sampler) on dummy inputs at width ``B`` (default max_batch_size), then
+        reset the state it advanced."""
+        B = self.max_batch_size if B is None else int(B)
         tokens = torch.zeros(B, 1, dtype=torch.int64)
         pos = torch.zeros(B, dtype=torch.int64)
         self._tt.decode_forward(
             tokens,
             pos,
-            page_table=self.page_table,
+            page_table=self.page_table[:B],
             kv_cache=self.kv_cache,
             enable_trace=True,
             read_from_device=True,
@@ -430,12 +448,12 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         )
         ttnn.synchronize_device(self.mesh_device)
         self.reset()
-        logger.info("decode trace (model + on-device sampling) captured")
+        logger.info(f"decode trace (model + on-device sampling) captured at width {B}")
         if warm_host_trace:
             self._tt.decode_forward(
                 tokens,
                 pos,
-                page_table=self.page_table,
+                page_table=self.page_table[:B],
                 kv_cache=self.kv_cache,
                 enable_trace=True,
                 read_from_device=True,
@@ -623,27 +641,23 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             lg, sh = self._prefill_single(tokens[:1, : lens[0]].to(torch.int32), pt[:1], want_sharded=True)
             outs.append(torch.tensor([[sampler(sh, 0)]], dtype=torch.int64) if sampler else lg)
         else:
-            comp = ttnn.ConcatMeshToTensor(self.mesh_device, dim=0)
-            dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
-            prev = self.model._bind_gdn_prefill_scratch()
-            snaps = []
-            try:
-                for u in range(N):
+            # per request: prefill on the bound B=1 scratch, snapshot the scratch ON DEVICE (clones), rebind the batched
+            # buffers and write the snapshot into the request's slot on device, BEFORE any further trace replay (a clone
+            # held across the next replay would alias the trace's baked intermediates - qwen36 model.py note). Stage 10:
+            # no host round trip (stage 9 read every GDN layer's state to host and uploaded it: ~120 ms of TTFT per
+            # admission at 32 slots).
+            for u in range(N):
+                prev = self.model._bind_gdn_prefill_scratch()
+                try:
                     self.model._reset_gdn_state_for_new_sequence()
                     lg, sh = self._prefill_single(
                         tokens[u : u + 1, : lens[u]].to(torch.int32), pt[u : u + 1], want_sharded=True
                     )
                     outs.append(torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg)
-                    snaps.append(
-                        (
-                            [ttnn.to_torch(dn.rec_state, mesh_composer=comp) for dn in dn_layers],
-                            [[ttnn.to_torch(c, mesh_composer=comp) for c in dn.conv_states] for dn in dn_layers],
-                        )
-                    )
-            finally:
-                self.model._unbind_gdn_prefill_scratch(prev)
-            for u in range(N):
-                self.model._write_gdn_slot(slots[u], *snaps[u])
+                    snap = self.model._snapshot_gdn_scratch_device()
+                finally:
+                    self.model._unbind_gdn_prefill_scratch(prev)
+                self.model._write_gdn_slot_device(slots[u], *snap)
         for u in range(N):
             self.positions[slots[u]] = lens[u]
         if getattr(self, "_program_guard", False):

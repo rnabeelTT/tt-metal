@@ -18,6 +18,7 @@ Knobs (single device):
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, replace
 
 from loguru import logger
@@ -309,7 +310,9 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         args.moe_precision = opt.moe_precision()
         args.gather_gate_up_output_tile = opt.gather_gate_up_output_tile  # read by the base loader (weight tile)
         self.PREFILL_CHUNK = opt.masked_chunk
-        self.GATHER_MAX_TOKENS = opt.gather_max_tokens
+        self.GATHER_MAX_TOKENS = int(
+            os.environ.get("QWEN35_MOE_GATHER_MAX_TOKENS", opt.gather_max_tokens)
+        )  # probe knob
         super().__init__(mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
         H, Nl = self.hidden, self.inter_local
         tile_gu = opt.gather_gate_up_output_tile

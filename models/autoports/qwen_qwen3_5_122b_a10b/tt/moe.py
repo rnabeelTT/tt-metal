@@ -27,6 +27,7 @@ returns per-device partial sums for the layer's reduce (see ``num_devices``).
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, replace
 
 import torch
@@ -110,7 +111,8 @@ class Qwen35MoE:
     # live-expert union per token. Tuned in the optimize stages.
     PREFILL_CHUNK = 32
     # Decode: tokens <= this take the per-token gather path; more tokens take one masked group.
-    GATHER_MAX_TOKENS = 4
+    # QWEN35_MOE_GATHER_MAX_TOKENS overrides (stage-10 probe knob: 0 = always the masked path).
+    GATHER_MAX_TOKENS = int(os.environ.get("QWEN35_MOE_GATHER_MAX_TOKENS", "4"))
 
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None, tt_ccl=None, layer_num=None):
         self.device = mesh_device
@@ -390,13 +392,49 @@ class Qwen35MoE:
         ttnn.deallocate(up)
         return out
 
+    # Stage 10 note: the served width-1 (single live user) decode step is intermittently non-deterministic on the
+    # 48-layer model (doc/optimized_vllm/work_log.md 05:50-07:40). It is NOT this shortcut: T = 1 through explicit copies,
+    # through the T = 2 code with a duplicated token, with DRAM outputs or the plain reshape/sum tail, and with the
+    # attention / GDN blocks padded to two rows all stayed non-deterministic, while two real users (width 2) are
+    # bit-reproducible. The adapter therefore serves single users on the width-2 decode trace (QWEN35_DECODE_MIN_WIDTH).
+    # The shortcut (stage-9 behaviour, the standalone B=1 generator's path) stays the default;
+    # QWEN35_MOE_GATHER_T1_SHORTCUT=0 takes the copy path (probe knob).
+    GATHER_T1_SHORTCUT = os.environ.get("QWEN35_MOE_GATHER_T1_SHORTCUT", "1") == "1"
+    # stage-10 probe knobs for the gather path (instance attribute overrides the class default):
+    #   out_dram: sparse-matmul outputs in DRAM instead of L1; plain_tail: ttnn.reshape + ttnn.sum instead of the
+    #   moe_gather_tail view + fast_reduce_nc; dup2: a single token is processed as two identical rows (T = 2 path, row 0 kept)
+    GATHER_KNOBS = {"out_dram": False, "plain_tail": False, "dup2": False}
+
     def _routed_gather(self, x4, scores, ids, T):
         k, Nl, H = self.top_k, self.inter_local, self.hidden
+        knobs = self.GATHER_KNOBS
+        if T == 1 and knobs.get("dup2"):
+            # probe variant: duplicate the single token into a 2-row batch, run the T = 2 code, keep row 0
+            x2 = ttnn.concat([x4, x4], dim=2)
+            sc2 = ttnn.concat([scores, scores], dim=2)
+            id2 = ttnn.concat([ids, ids], dim=2)
+            out2 = self._routed_gather(x2, sc2, id2, 2)
+            for t in (x2, sc2, id2):
+                ttnn.deallocate(t)
+            out1 = ttnn.slice(out2, [0, 0, 0, 0], [1, 1, 1, H])
+            ttnn.deallocate(out2)
+            return out1
+        mm_mc = ttnn.DRAM_MEMORY_CONFIG if knobs.get("out_dram") else ttnn.L1_MEMORY_CONFIG
+        plain_tail = knobs.get("plain_tail")
         ids_rm = ids if ids.layout == ttnn.ROW_MAJOR_LAYOUT else ttnn.to_layout(ids, ttnn.ROW_MAJOR_LAYOUT)
         outs = []
+        shortcut = T == 1 and self.GATHER_T1_SHORTCUT
         for u in range(T):
-            ids_u = ids_rm if T == 1 else ttnn.slice(ids_rm, [0, 0, u, 0], [1, 1, u + 1, k])
-            x_u = x4 if T == 1 else ttnn.slice(x4, [0, 0, u, 0], [1, 1, u + 1, H])
+            # T == 1 without the shortcut: a full-extent ttnn.slice returns its INPUT (no copy), so take explicit copies
+            # (the activation into DRAM, where the T > 1 slices land)
+            if shortcut:
+                ids_u, x_u = ids_rm, x4
+            elif T == 1:
+                ids_u = ttnn.clone(ids_rm)
+                x_u = ttnn.clone(x4, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            else:
+                ids_u = ttnn.slice(ids_rm, [0, 0, u, 0], [1, 1, u + 1, k])
+                x_u = ttnn.slice(x4, [0, 0, u, 0], [1, 1, u + 1, H])
             fused = ttnn.sparse_matmul(
                 x_u,
                 self.up_gate,
@@ -404,13 +442,16 @@ class Qwen35MoE:
                 indices=ids_u,
                 is_input_a_sparse=False,
                 is_input_b_sparse=True,
-                memory_config=ttnn.L1_MEMORY_CONFIG,
+                memory_config=mm_mc,
                 output_tile=self.tile_gu,
                 program_config=self.cfg_gate_up_gather,
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,
             )  # compact [1,1,1,k,1,2Nl]
-            din = self._swiglu_rows(self._rows_view(fused, (1, k, 1, 2 * Nl)), k, Nl)
+            fused_rows = (
+                ttnn.reshape(fused, (1, k, 1, 2 * Nl)) if plain_tail else self._rows_view(fused, (1, k, 1, 2 * Nl))
+            )
+            din = self._swiglu_rows(fused_rows, k, Nl)
             down = ttnn.sparse_matmul(
                 din,
                 self.down,
@@ -418,19 +459,24 @@ class Qwen35MoE:
                 indices=ids_u,
                 is_input_a_sparse=True,
                 is_input_b_sparse=True,
-                memory_config=ttnn.L1_MEMORY_CONFIG,
+                memory_config=mm_mc,
                 output_tile=self.tile,
                 program_config=self.cfg_down_gather,
                 compute_kernel_config=self.routed_ckc,
                 dtype=self.prec.act_dtype,
             )  # [1,k,1,H]
             ttnn.deallocate(din)
-            sc_u = scores if T == 1 else ttnn.slice(scores, [0, 0, u, 0], [1, 1, u + 1, k])
+            if shortcut:
+                sc_u = scores
+            elif T == 1:
+                sc_u = ttnn.clone(scores)
+            else:
+                sc_u = ttnn.slice(scores, [0, 0, u, 0], [1, 1, u + 1, k])
             sc_u = ttnn.reshape(sc_u, (1, k, 1, 1))
-            down_rows = self._rows_view(down, (1, k, 1, H))
+            down_rows = ttnn.reshape(down, (1, k, 1, H)) if plain_tail else self._rows_view(down, (1, k, 1, H))
             weighted = ttnn.multiply(down_rows, sc_u)
             ttnn.deallocate(down_rows)
-            if getattr(self.args, "moe_gather_tail", False):
+            if getattr(self.args, "moe_gather_tail", False) and not plain_tail:
                 # sum over the k expert rows with the plain NC reduction: ttnn.sum(dim=1) adds a fill_pad of the
                 # tile padding around the same kernel; row 0 (the only logical row) is identical. The reduction
                 # keeps the tile-padded row count, so trim to the one logical row when it does.
@@ -443,13 +489,15 @@ class Qwen35MoE:
             else:
                 outs.append(ttnn.sum(weighted, dim=1, keepdim=True, compute_kernel_config=self.routed_ckc))  # [1,1,1,H]
             ttnn.deallocate(weighted)
-            if T != 1:
+            if not shortcut:
                 ttnn.deallocate(ids_u)
                 ttnn.deallocate(x_u)
         if ids_rm is not ids:
             ttnn.deallocate(ids_rm)
-        acc = outs[0] if T == 1 else ttnn.concat(outs, dim=2)
-        if T != 1:
+        if shortcut:
+            acc = outs[0]
+        else:
+            acc = ttnn.concat(outs, dim=2) if T > 1 else ttnn.clone(outs[0])
             for o in outs:
                 ttnn.deallocate(o)
         return ttnn.reshape(acc, (1, 1, T, H))

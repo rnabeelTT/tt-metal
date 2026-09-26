@@ -132,12 +132,36 @@ class Qwen35MoeModel(Qwen36Model):
             return int(self.sampling.tt_sampling.max_batch_size)
         return int(self.args.max_batch_size)
 
+    def _snapshot_gdn_scratch_device(self):
+        """Device clones of the B=1 GDN prefill scratch (recurrent state + the K conv taps of every GDN layer) - the
+        request's state right after its prefill, while the scratch is bound. ~1 MiB per layer per device; consumed by
+        :meth:`_write_gdn_slot_device`."""
+        dn_layers = [layer.attention for layer in self.layers if not layer.is_full_attention]
+        return (
+            [ttnn.clone(dn.rec_state) for dn in dn_layers],
+            [[ttnn.clone(c) for c in dn.conv_states] for dn in dn_layers],
+        )
+
+    def _write_gdn_slot_device(self, slot, recs, convs):
+        """Write a device snapshot (:meth:`_snapshot_gdn_scratch_device`) into decode ``slot`` of the batched GDN buffers
+        on device (``TPGatedDeltaNet.write_slot``: slice / concat / in-place copy; consumes the snapshot). Stage 10: replaces
+        the per-request host round trip (to_torch of 36 layers' states + from_torch uploads, ~80 MB, ~120 ms of served TTFT
+        at 32 slots) of the qwen36 ``_write_gdn_slot``."""
+        dn_layers = [layer.attention for layer in self.layers if not layer.is_full_attention]
+        assert len(recs) == len(dn_layers) == len(convs)
+        for dn, rec, conv in zip(dn_layers, recs, convs):
+            dn.write_slot(slot, rec, conv)
+
     def _decode_tokens_view(self, tokens, B):
-        """The B decode tokens ([B,1] uint32) out of the persistent [1,1,1,S] buffer (a legacy [B,1] buffer passes through)."""
+        """The B decode tokens out of the persistent [1,1,1,S] buffer as a ``[1, B]`` uint32 row (a legacy [B,1] buffer
+        passes through). Stage 10: the row layout makes the embedding emit ``[1, B, dim]``, so the decode step's
+        ``reshape`` to ``[1, 1, B, dim]`` is a free view at EVERY width; the former ``[B, 1]`` layout gave ``[B, 1, dim]``
+        (one tile row per token) and a real tiled re-pack for 1 < B < 32 - the kernel that hung the width probe
+        (``doc/optimized_vllm/triage/width2_reshape_hang_triage.txt``: reader_reshape_tiled in cb_reserve_back)."""
         if len(tokens.shape) == 4:
             S = tokens.shape[-1]
-            view = ttnn.reshape(tokens, (S, 1))  # row-major view of the same buffer
-            return view if S == B else ttnn.slice(view, (0, 0), (B, 1))
+            view = ttnn.reshape(tokens, (1, S))  # row-major view of the same buffer
+            return view if S == B else ttnn.slice(view, (0, 0), (1, B))
         return tokens
 
     def _rope_from_idxs(self, rot_idxs):

@@ -47,6 +47,7 @@ No host/torch work happens inside a forward pass (the only accepted boundary is 
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -371,6 +372,9 @@ class MultichipDecoder(OptimizedDecoder):
         args.gdn_decode_high_precision = mc.gdn_decode_high_precision  # recurrent_gated_delta_rule_decode_ttnn
         args.kv_dtype = mc.kv_dtype  # TPAttention._sdpa_bf8 (fill cast + bf8 chunked SDPA)
         args.sdpa_decode_q_chunk = mc.sdpa_decode_q_chunk  # TPAttention.forward_decode SDPAProgramConfig
+        _g = os.environ.get("QWEN35_SDPA_DECODE_GRID")  # stage-10 probe knob: "x,y" caps the SDPA-decode core grid
+        if _g:
+            args.sdpa_decode_grid = tuple(int(v) for v in _g.split(","))
         args.sdpa_decode_k_chunk = mc.sdpa_decode_k_chunk
         # stage-5 families
         assert mc.mixer_decode_mode in ("1d", "ds_in", "ds_all"), mc.mixer_decode_mode

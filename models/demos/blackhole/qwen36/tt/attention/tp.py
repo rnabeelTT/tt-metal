@@ -604,8 +604,12 @@ class TPAttention:
         # 215.5us (-2.4%, no regression). Using the full grid unconditionally since it never hurts
         # and helps significantly at long context, where batched decode is otherwise slowest.
         _sdpa_grid = self.mesh.compute_with_storage_grid_size()
+        _grid_xy = (_sdpa_grid.x, _sdpa_grid.y)
+        _grid_override = getattr(self.args, "sdpa_decode_grid", None)  # (x, y) cap, e.g. for narrow-batch probes
+        if _grid_override:
+            _grid_xy = (min(int(_grid_override[0]), _sdpa_grid.x), min(int(_grid_override[1]), _sdpa_grid.y))
         sdpa_dec_cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=(_sdpa_grid.x, _sdpa_grid.y),
+            compute_with_storage_grid_size=_grid_xy,
             exp_approx_mode=False,
             q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
             k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),

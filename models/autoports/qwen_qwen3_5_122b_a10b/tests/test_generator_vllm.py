@@ -164,7 +164,7 @@ def test_vllm_adapter_prefill_decode(mesh_device, B):
     print(f"VLLM_ADAPTER B={B} program cache {gen._program_cache_after_warmup} -> {gen.program_cache_entries()} OK")
 
 
-def _greedy_stream(adapter, kv, pt, toks, plens, B, steps, *, wrong_host=False, page_table_at=None):
+def _greedy_stream(adapter, kv, pt, toks, plens, B, steps, *, wrong_host=False, page_table_at=None, contract_v1=False):
     """Prefill + ``steps`` traced greedy decodes through the adapter's plugin contract, synchronous reads. Returns the
     [steps+1] x B token stream. ``wrong_host=True`` feeds a deliberately wrong host token / position on every non-reset
     step (the device-resident inputs must win); ``page_table_at=(step, table)`` hands a changed page table at that step
@@ -183,6 +183,15 @@ def _greedy_stream(adapter, kv, pt, toks, plens, B, steps, *, wrong_host=False, 
         if wrong_host and step > 0:
             host_tok = torch.full_like(cur, 11)  # a wrong token id on every row
             host_pos = pos + 777  # a wrong position on every row
+        if contract_v1:  # the plugin's explicit decode-input contract (version 1): four commands, no reset_batch
+            flags = dict(
+                reload_inputs=(step == 0),
+                reload_page_table=(page_table_at is not None and step == page_table_at[0]),
+                reload_sampling_params=(step == 0),
+                reset_sampling_state=(step == 0),
+            )
+        else:
+            flags = dict(reset_batch=(step == 0), reload_inputs=(step == 0))
         out = adapter.decode_forward(
             host_tok,
             host_pos,
@@ -191,8 +200,7 @@ def _greedy_stream(adapter, kv, pt, toks, plens, B, steps, *, wrong_host=False, 
             enable_trace=True,
             read_from_device=True,
             sampling_params=_tt_params(B),
-            reset_batch=(step == 0),
-            reload_inputs=(step == 0),
+            **flags,
         )
         out = out[0] if isinstance(out, (tuple, list)) else out  # (tokens, log_probs) from the synchronous read
         nxt = torch.as_tensor(out).reshape(-1)[:B].to(torch.int64)
@@ -246,5 +254,267 @@ def test_vllm_adapter_stale_inputs(mesh_device, B):
     pt_shared[:, 1] = 250
     grown = _greedy_stream(adapter, kv, pt_shared, toks, plens, B, steps, page_table_at=(1, pt))
     assert grown == control, f"stream changed after the page-table refresh:\n control {control}\n grown   {grown}"
+    # (c) the same two arms through the explicit decode-input contract (version 1 commands instead of reset_batch)
+    stale_v1 = _greedy_stream(adapter, kv, pt, toks, plens, B, steps, wrong_host=True, contract_v1=True)
+    assert (
+        stale_v1 == control
+    ), f"contract-v1 stream followed the stale HOST inputs:\n control {control}\n stale   {stale_v1}"
+    grown_v1 = _greedy_stream(adapter, kv, pt_shared, toks, plens, B, steps, page_table_at=(1, pt), contract_v1=True)
+    assert (
+        grown_v1 == control
+    ), f"contract-v1 stream changed after the page-table refresh:\n control {control}\n grown   {grown_v1}"
+    assert getattr(adapter, "_contract_v1_steps", 0) == 2 * steps, adapter._contract_v1_steps
     assert gen.program_cache_entries() == n0, "stale-input steps compiled new programs after the captures"
     print(f"VLLM_ADAPTER_STALE B={B} control(slot0)={[t[0] for t in control]} == stale == page-table-changed OK")
+
+
+@mesh_tp()
+@pytest.mark.parametrize("B", [4], ids=["b4"])
+def test_vllm_adapter_decode_buckets(mesh_device, B):
+    """Stage 10 decode bucketing (widths 1 / 2 / 4 on a B=4 build): the plugin's front-packed active prefix selects the
+    trace width per step. Streams decoded at narrow widths must equal the full-width streams for the rows they cover,
+    across width switches in both directions (with and without the plugin's reset_batch flag), with every trace captured
+    in the warm-up (no program compiled afterwards) and the device tokens / positions carried over on a switch."""
+    os.environ["QWEN35_PROGRAM_GUARD"] = "1"
+    os.environ["QWEN35_DECODE_BUCKETING"] = "1"
+    os.environ["QWEN35_DECODE_MIN_WIDTH"] = "1"  # mechanics test of every width incl. 1 (the served default is 2)
+    adapter, gen, kv = _build(mesh_device, B)
+    assert adapter._decode_widths == [1, 2, 4], adapter._decode_widths
+    import bz2
+
+    book = bz2.open("models/tt_transformers/tests/tale-of-two-cities.txt.bz2", "rt", errors="ignore").read()
+    prompts = [gen.tokenizer.encode(book[20000 + 3000 * u : 20000 + 3000 * u + 2000])[: 58 + u] for u in range(B)]
+    plens = [len(p) for p in prompts]
+    toks = torch.zeros(B, max(plens), dtype=torch.long)
+    for u, p in enumerate(prompts):
+        toks[u, : len(p)] = torch.tensor(p)
+    pt = _page_table(B, 64, 8)
+    n0 = gen.program_cache_entries()
+    assert n0 == gen._program_cache_after_warmup
+
+    def run(active_seq, resets, wrong_host_tokens=False):
+        """active_seq[i] = number of live rows at step i (front-packed: rows >= active carry position -1); resets[i] =
+        the plugin's reset_batch flag. Returns the per-step tokens of the live rows."""
+        sampled, _ = adapter.prefill_forward(
+            toks, pt, kv, plens, empty_slots=list(range(B)), start_pos=torch.zeros(B), sampling_params=_tt_params(B)
+        )
+        cur = sampled.reshape(B).clone()
+        pos = torch.tensor(plens, dtype=torch.long)
+        stream = []
+        for i, (n, reset) in enumerate(zip(active_seq, resets)):
+            host_pos = pos.clone()
+            host_pos[n:] = -1  # idle rows, as the plugin marks them
+            # stale-host arm: a wrong host token on every non-reset step (positions correct, as the plugin's are); the
+            # device-resident token must win, also across width switches (carry-over + forced host-authoritative merge)
+            host_tok = cur.reshape(B, 1).clone()
+            if wrong_host_tokens and i > 0:
+                host_tok[
+                    0
+                ] = 11  # row 0 is live at every width in these sequences (rows that pause resume with host tokens)
+            out = adapter.decode_forward(
+                tokens=host_tok,
+                start_pos=host_pos,
+                page_table=pt,
+                kv_cache=kv,
+                enable_trace=True,
+                read_from_device=True,
+                sampling_params=_tt_params(B),
+                reset_batch=(i == 0) or reset,
+                reload_inputs=(i == 0),
+            )
+            out = out[0] if isinstance(out, (tuple, list)) else out
+            nxt = torch.as_tensor(out).reshape(-1)[:n].to(torch.int64)
+            stream.append(nxt.tolist())
+            cur = cur.clone()
+            cur[:n] = nxt
+            pos = pos.clone()
+            pos[:n] += 1
+        return stream
+
+    steps = 8
+    full = run([4] * steps, [False] * steps)
+    # the 2-layer model repeats tokens; require the control to vary somewhere (across steps or rows) so equality means something
+    assert len(set(tuple(s) for s in full)) > 2, f"constant control stream: {full}"
+
+    def logits_at(width_steps, tokens_fed):
+        """Rebuild the slot state (prefill + width-1 steps feeding ``tokens_fed``), then ONE host-logits step (full width,
+        the compatibility mode) -> row-0 logits at the position of the next token."""
+        adapter.prefill_forward(
+            toks, pt, kv, plens, empty_slots=list(range(B)), start_pos=torch.zeros(B), sampling_params=_tt_params(B)
+        )
+        cur = torch.tensor(tokens_fed[0], dtype=torch.long)
+        pos = torch.tensor(plens, dtype=torch.long)
+        host_pos = pos.clone()
+        host_pos[1:] = -1
+        for k in range(width_steps):
+            adapter.decode_forward(
+                tokens=torch.full((B, 1), int(tokens_fed[k])),
+                start_pos=host_pos,
+                page_table=pt,
+                kv_cache=kv,
+                enable_trace=True,
+                read_from_device=True,
+                sampling_params=_tt_params(B),
+                reset_batch=(k == 0),
+                reload_inputs=(k == 0),
+            )
+            host_pos[0] += 1
+        out = adapter.decode_forward(
+            tokens=torch.full((B, 1), int(tokens_fed[width_steps])),
+            start_pos=host_pos,
+            page_table=pt,
+            kv_cache=kv,
+            enable_trace=True,
+            read_from_device=True,
+            sampling_params=None,
+            reset_batch=True,
+            reload_inputs=True,
+        )
+        out = out[0] if isinstance(out, (tuple, list)) else out
+        return torch.as_tensor(out).float().reshape(-1, gen.args.vocab_size)[0]
+
+    # (a) one live row for the whole stream (width-1 trace), twice: deterministic; equal to row 0 of the full-width run
+    #     up to the first fork, and the fork (if any) must be a near tie of the eager logits at that state: the width-w
+    #     step on a B-slot build reproduces the B=w build's numerics (MoE accumulation order follows the token count), so
+    #     streams at different widths agree bit-for-bit only until the first near tie - the same effect as the B=1 vs B=32
+    #     servers of stage 9 (900-token continuation identical, 1000-token fork at a 0.125-logit tie).
+    one = run([1] * steps, [False] * steps)
+    assert one == run([1] * steps, [False] * steps), "width-1 stream not deterministic"
+    row0_one, row0_full = [s[0] for s in one], [s[0] for s in full]
+    d = next((k for k in range(steps) if row0_one[k] != row0_full[k]), None)
+    assert d is None or d >= 1, f"width-1 and width-4 streams differ from the first token: {row0_one} vs {row0_full}"
+    if d is not None:
+        sampled0, _ = adapter.prefill_forward(
+            toks, pt, kv, plens, empty_slots=list(range(B)), start_pos=torch.zeros(B), sampling_params=_tt_params(B)
+        )
+        fed = [int(sampled0.reshape(-1)[0])] + row0_one[:d]  # tokens fed at steps 0..d (fed[k] produces one[k])
+        lg = logits_at(d, fed)
+        a, b = lg[row0_one[d]].item(), lg[row0_full[d]].item()
+        top = torch.topk(lg, 2).values.tolist()
+        print(
+            f"VLLM_ADAPTER_BUCKETS fork at token {d}: width-1 {row0_one[d]} ({a:.3f}) vs width-4 {row0_full[d]} ({b:.3f}); top-2 {top}"
+        )
+        assert (
+            abs(a - b) < 1.0 and max(a, b) >= top[1] - 1e-3
+        ), f"width fork at token {d} is not a near tie: {a} vs {b}, top-2 {top}"
+
+    def check(seq, stream, label):
+        """Idle rows pause (their slot state is untouched): row u's k-th token must equal the reference's k-th token for
+        that row until the first near-tie fork; every row must agree on at least its first two tokens."""
+        counts = [0] * B
+        forked = [False] * B
+        for i, (n, s) in enumerate(zip(seq, stream)):
+            for u in range(n):
+                ref = full[counts[u]][u]
+                if not forked[u] and s[u] != ref:
+                    assert counts[u] >= 2, f"{label}: row {u} differs at token {counts[u]} (step {i}): {s[u]} != {ref}"
+                    forked[u] = True
+                counts[u] += 1
+
+    # (b) width switches: 4 -> 2 -> 1 -> 2 -> 4 rows live (completions, then re-admissions), flagged as layout changes;
+    #     deterministic across two runs (carry-over + per-slot state continuity), agreeing with the full run to the fork
+    seq = [4, 4, 2, 2, 1, 2, 4, 4]
+    resets = [False, False, True, False, True, True, True, False]
+    mixed = run(seq, resets)
+    assert mixed == run(seq, resets), "mixed-width stream not deterministic"
+    check(seq, mixed, "flagged switches")
+    # (c) width switches the plugin did not flag (no reset_batch): the adapter forces the host-authoritative step
+    seq2 = [4, 4, 1, 1, 4, 4, 4, 4]
+    ref2 = run(seq2, [False] * steps)
+    check(seq2, ref2, "unflagged switches")
+    # (d) stale host tokens across flagged and unflagged width switches: the streams must equal their correctly fed
+    #     references (the device token buffer of the previous width is carried over before the merge)
+    assert run(seq, resets, wrong_host_tokens=True) == mixed, "stale host tokens changed the flagged-switch stream"
+    assert (
+        run(seq2, [False] * steps, wrong_host_tokens=True) == ref2
+    ), "stale host tokens changed the unflagged-switch stream"
+    assert gen.program_cache_entries() == n0, "decode bucketing compiled programs after the captures"
+    hist = adapter._bucket_hist
+    print(
+        f"VLLM_ADAPTER_BUCKETS B={B} widths used {hist} switches {adapter._bucket_switches} full(slot0)={[s[0] for s in full]}"
+    )
+    assert set(hist) == {1, 2, 4}, hist
+
+
+@mesh_tp()
+@pytest.mark.parametrize("B", [4], ids=["b4"])
+def test_vllm_adapter_seeded_buckets(mesh_device, B):
+    """Seeded sampling (temperature 2, top-k 50, seed 42) must reproduce across re-runs of the same request at every
+    decode width: the plugin suite's test_batch1_seed_reproducible failed on the first bucketed 48-layer server (10 unique
+    streams of a single seeded user = the width-1 path), while seeded batches at one width agreed within the batch."""
+    os.environ["QWEN35_PROGRAM_GUARD"] = "1"
+    os.environ["QWEN35_DECODE_BUCKETING"] = "1"
+    os.environ.pop("QWEN35_DECODE_MIN_WIDTH", None)  # the served default (minimum width 2)
+    adapter, gen, kv = _build(mesh_device, B)
+    assert adapter._decode_widths == [2, 4], adapter._decode_widths
+    import bz2
+
+    book = bz2.open("models/tt_transformers/tests/tale-of-two-cities.txt.bz2", "rt", errors="ignore").read()
+    prompts = [gen.tokenizer.encode(book[20000 + 3000 * u : 20000 + 3000 * u + 2000])[: 58 + u] for u in range(B)]
+    plens = [len(p) for p in prompts]
+    toks = torch.zeros(B, max(plens), dtype=torch.long)
+    for u, p in enumerate(prompts):
+        toks[u, : len(p)] = torch.tensor(p)
+    pt = _page_table(B, 64, 8)
+    n0 = gen.program_cache_entries()
+
+    def run(n_live, steps=6, seed=42):
+        params = _tt_params(B, temperature=2.0, top_k=50, seed=seed)
+        sampled, _ = adapter.prefill_forward(
+            toks, pt, kv, plens, empty_slots=list(range(B)), start_pos=torch.zeros(B), sampling_params=params
+        )
+        cur = sampled.reshape(B).clone()
+        pos = torch.tensor(plens, dtype=torch.long)
+        stream = [cur[:n_live].tolist()]
+        for i in range(steps):
+            host_pos = pos.clone()
+            host_pos[n_live:] = -1
+            out = adapter.decode_forward(
+                tokens=cur.reshape(B, 1),
+                start_pos=host_pos,
+                page_table=pt,
+                kv_cache=kv,
+                enable_trace=True,
+                read_from_device=True,
+                sampling_params=params,
+                reset_batch=(i == 0),
+                reload_inputs=(i == 0),
+            )
+            out = out[0] if isinstance(out, (tuple, list)) else out
+            nxt = torch.as_tensor(out).reshape(-1)[:n_live].to(torch.int64)
+            stream.append(nxt.tolist())
+            cur = cur.clone()
+            cur[:n_live] = nxt
+            pos = pos.clone()
+            pos[:n_live] += 1
+        return stream
+
+    for n_live in (1, 2, B):
+        a, b = run(n_live), run(n_live)
+        print(f"VLLM_ADAPTER_SEEDED width for {n_live} live: run1 {a}\n run2 {b}")
+        assert a == b, f"seeded stream at {n_live} live rows not reproducible:\n {a}\n {b}"
+    # seeded rows force the full width (composition-independent numerics): every served step so far ran at width B (the
+    # histogram also counts the one warm-up step of each width); an unseeded greedy single user then takes width 2
+    before2 = adapter._bucket_hist.get(2, 0)
+    assert before2 <= 1 and adapter._bucket_hist.get(B, 0) > 1, adapter._bucket_hist
+    greedy = _tt_params(B)
+    sampled, _ = adapter.prefill_forward(
+        toks, pt, kv, plens, empty_slots=list(range(B)), start_pos=torch.zeros(B), sampling_params=greedy
+    )
+    host_pos = torch.tensor(plens, dtype=torch.long)
+    host_pos[1:] = -1
+    adapter.decode_forward(
+        tokens=sampled.reshape(B, 1),
+        start_pos=host_pos,
+        page_table=pt,
+        kv_cache=kv,
+        enable_trace=True,
+        read_from_device=True,
+        sampling_params=greedy,
+        reset_batch=True,
+        reload_inputs=True,
+    )
+    assert adapter._bucket_hist.get(2) == before2 + 1, adapter._bucket_hist
+    # a different seed must give a different stream (the seed is in effect)
+    assert run(1, seed=7) != run(1, seed=42), "seed has no effect"
+    assert gen.program_cache_entries() == n0, "seeded decode compiled programs after the captures"

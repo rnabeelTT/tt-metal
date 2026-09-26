@@ -35,6 +35,7 @@ from vllm.model_executor.models.qwen3_5 import (
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 import ttnn
+from models.autoports.qwen_qwen3_5_122b_a10b.tt import decode_buckets
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import BLOCK_SIZE, Qwen35MoeGenerator
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.model import create_model
 from models.common.sampling.generator import broadcast_sampling_params, format_sampling_params
@@ -73,10 +74,21 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     model_capabilities = {
         "supports_prefix_caching": False,
         "supports_async_decode": True,
-        "supports_async_decode_overlap": False,
+        # Not read by this plugin revision (5961e48): overlap = vLLM's async scheduling (on by default, "Asynchronous
+        # scheduling is enabled" in every served log) + supports_async_decode; the plugin's steady-decode fast path then
+        # submits step N+1 before step N is read whenever its reload plan says the step is overlap-safe. Kept for the
+        # skill's capability vocabulary; stage 10 proved the overlapped path with per-stream controls (doc/optimized_vllm).
+        "supports_async_decode_overlap": True,
         "supports_sample_on_device": True,
         "supports_chunked_prefill": False,
     }
+    # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
+    # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
+    # and gates its overlapped steps on the plan being overlap-safe (no reload). Mapping onto the shared Generator:
+    # reload_inputs -> host tokens / positions authoritative (reload_inputs=True + the reset_batch merge / seed re-anchor),
+    # reload_sampling_params | reset_sampling_state -> reset_batch (the sampler re-applies the batch's params and seeds),
+    # reload_page_table -> nothing extra (the base Generator refreshes the page-table input on every host-side change).
+    decode_input_update_contract = 1
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -127,7 +139,40 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             "asserts that no program was compiled after the trace captures"
         )
         self._decode_steps = 0
+        # stage 10: decode bucketing - one decode trace per power-of-two width up to B, selected per step from the plugin's
+        # front-packed active prefix (QWEN35_DECODE_BUCKETING=0 -> the single full-width trace of stage 9)
+        self._decode_widths = decode_buckets.widths(B) if (decode_buckets.enabled() and B > 1) else [B]
+        # QWEN35_DECODE_MIN_WIDTH (default 2): smallest decode trace width kept; a single live user runs on the width-2
+        # trace with one idle row (37.7 ms per step vs 25.1 ms at width 1 and 124 ms at width 32). Width 1 is
+        # intermittently non-deterministic on device on the 48-layer model (greedy re-runs fork; doc/optimized_vllm
+        # work_log 05:50-07:40); every width >= 2 was bit-reproducible in > 150 streams.
+        min_width = int(os.environ.get("QWEN35_DECODE_MIN_WIDTH", "2"))
+        self._decode_widths = [w for w in self._decode_widths if w >= min_width] or [B]
+        self._seeded_full_width = os.environ.get("QWEN35_SEEDED_FULL_WIDTH", "1") == "1"
+        self._trace_region_mib = cls._trace_region_mib(mesh_device)
+        budgeted = cls._budget_trace_region_mib  # set when get_max_tokens_all_users ran in this process (serving)
+        if budgeted is not None and abs(self._trace_region_mib - budgeted) > 1:
+            raise ValueError(
+                f"trace region is {self._trace_region_mib} MiB but the KV budget assumed QWEN35_TRACE_REGION_MIB={budgeted}: "
+                "pass the same value in the TT config (trace_region_size) and the environment"
+            )
+        logger.info(
+            f"decode bucket widths {self._decode_widths}; trace region {self._trace_region_mib} MiB"
+            f"{'' if budgeted is not None else ' (no KV budget computed in this process: tests / standalone use)'}"
+        )
         return self
+
+    @staticmethod
+    def _trace_region_mib(mesh_device):
+        """The opened mesh's trace region (MiB per device) from the allocator statistics."""
+        try:
+            mv = ttnn.get_memory_view(mesh_device, ttnn.BufferType.TRACE)
+            return int(mv.total_bytes_per_bank) * int(mv.num_banks) // 2**20
+        except Exception as e:  # noqa: BLE001 - diagnostics only
+            logger.warning(f"trace region size not readable ({e!r}); assuming the configured value")
+            return int(
+                os.environ.get("QWEN35_TRACE_REGION_MIB", Qwen35MoeForConditionalGeneration._DEFAULT_TRACE_REGION_MIB)
+            )
 
     def _log_program_cache(self, where):
         """PROGRAM_CACHE evidence line: entries now vs. after the warm-up captures (equal == nothing compiled since)."""
@@ -136,6 +181,16 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         logger.info(
             f"PROGRAM_CACHE {now} entries {where} (after the warm-up captures: {base}; new: {now - base if base is not None else 'n/a'})"
         )
+        if getattr(self, "_contract_v1_steps", None):
+            logger.info(
+                f"DECODE_CONTRACT v1 steps {self._contract_v1_steps}, host-authoritative reloads {getattr(self, '_contract_v1_reloads', 0)}"
+            )
+        if getattr(self, "_bucket_hist", None):
+            logger.info(
+                f"DECODE_BUCKETS steps per width {dict(sorted(self._bucket_hist.items()))}, switches {getattr(self, '_bucket_switches', 0)}, "
+                f"full-width steps forced by seeded rows {getattr(self, '_seeded_full_width_steps', 0)}, "
+                f"slot_remap full-width steps {getattr(self, '_remap_full_width_steps', 0)}, forced resets {getattr(self, '_forced_resets', 0)}"
+            )
 
     # Per-device DRAM budget of the serving build (GiB), measured: the stage-8 context contract gives the non-KV footprint
     # of the B=1 build with every trace parked (17.660) and the total (31.331); the first 48-layer server build at
@@ -145,6 +200,11 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
     _TRANSIENT_HEADROOM_GIB = 1.25
+    # The context contract's DRAM total (31.331 GiB) was measured with a 512 MiB trace region; a larger region (stage 10:
+    # 768 MiB for the per-width decode traces) shrinks the allocator's DRAM by the difference.
+    _CONTRACT_TRACE_REGION_MIB = 512
+    _DEFAULT_TRACE_REGION_MIB = 768
+    _budget_trace_region_mib = None  # the trace region the last get_max_tokens_all_users call assumed (per process)
 
     @classmethod
     def get_max_tokens_all_users(
@@ -155,18 +215,23 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         datatype_sweep_stage8), rounded down to blocks. QWEN35_MAX_TOKENS_ALL_USERS overrides. Independent of
         max_model_len x max_num_seqs (8.4 M tokens = 51 GiB per device at 262144 x 32 would never fit); one user still
         reaches the full 262144 context, 32 users share the pool."""
+        cls._budget_trace_region_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
         override = os.environ.get("QWEN35_MAX_TOKENS_ALL_USERS")
         if override:
             return int(override)
         c = _context_contract()["datatype_sweep_stage8"]
         B = int(max_num_seqs or 1)
         nonkv = float(c["non_kv_footprint_gib"]) + (B - 1) * cls._PER_SLOT_GIB
-        pool_gib = float(c["dram_total_gib_per_device"]) - nonkv - cls._TRANSIENT_HEADROOM_GIB
+        trace_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
+        cls._budget_trace_region_mib = trace_mib
+        trace_extra_gib = (trace_mib - cls._CONTRACT_TRACE_REGION_MIB) / 1024
+        pool_gib = float(c["dram_total_gib_per_device"]) - trace_extra_gib - nonkv - cls._TRANSIENT_HEADROOM_GIB
         tokens = int(pool_gib * 2**30 / int(c["kv_bytes_per_token_per_device"]))
         tokens = max(tokens // BLOCK_SIZE * BLOCK_SIZE, BLOCK_SIZE * B)
         logger.info(
             f"KV token pool for {B} slots: {pool_gib:.3f} GiB = {tokens} tokens ({tokens / max(B, 1):.0f} per user at full "
-            f"occupancy; non-KV footprint {nonkv:.3f} GiB incl. slots, headroom {cls._TRANSIENT_HEADROOM_GIB} GiB)"
+            f"occupancy; non-KV footprint {nonkv:.3f} GiB incl. slots, headroom {cls._TRANSIENT_HEADROOM_GIB} GiB, trace region "
+            f"{trace_mib} MiB = {trace_extra_gib:+.3f} GiB vs the contract's {cls._CONTRACT_TRACE_REGION_MIB} MiB)"
         )
         return tokens
 
@@ -214,12 +279,13 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 if not self._warm_phase["prefill_programs"]:
                     self._gen._warm_prefill()
                     self._warm_phase["prefill_programs"] = True
-                self._gen._warm_decode_eager()
+                for w in self._decode_widths:  # every width's programs BEFORE any trace is parked
+                    self._gen._warm_decode_eager(B=w)
                 self._gen._program_cache_before_captures = self._gen.program_cache_entries()
                 self._warm_phase["decode_programs"] = True
             return
         if not self._warm_phase["traces"]:
-            self._gen.capture_traces()
+            self._gen.capture_traces(widths=self._decode_widths)
             self._warm_phase["traces"] = True
 
     # ------------------------------------------------------------------ prefill
@@ -297,6 +363,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             logger.info(
                 f"VLLM_DECODE_KWARGS args={[desc(a) for a in args]} kwargs={ {k: desc(v) for k, v in kwargs.items() if k != 'kv_cache'} }"
             )
+        # decode_input_update_contract v1 -> the base Generator's legacy keywords (see the class attribute)
+        if any(k in kwargs for k in ("reload_page_table", "reload_sampling_params", "reset_sampling_state")):
+            reload_inputs = bool(kwargs.get("reload_inputs", False))
+            sampling_reset = bool(kwargs.pop("reload_sampling_params", False)) | bool(
+                kwargs.pop("reset_sampling_state", False)
+            )
+            kwargs.pop("reload_page_table", None)
+            kwargs["reload_inputs"] = reload_inputs
+            kwargs["reset_batch"] = bool(kwargs.get("reset_batch", False)) or reload_inputs or sampling_reset
+            self._contract_v1_steps = getattr(self, "_contract_v1_steps", 0) + 1
+            if reload_inputs or sampling_reset:
+                self._contract_v1_reloads = getattr(self, "_contract_v1_reloads", 0) + 1
         slot_remap = kwargs.get("slot_remap")
         if slot_remap is None and len(args) > 10:
             slot_remap = args[10]
@@ -305,6 +383,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
         if start_pos is not None:
             self._live_slots = {i for i, p in enumerate(torch.as_tensor(start_pos).reshape(-1).tolist()) if int(p) >= 0}
+        if len(self._decode_widths) > 1:
+            args, kwargs = self._select_decode_bucket(list(args), kwargs, start_pos, slot_remap)
         out = Generator.decode_forward(self, *args, **kwargs)
         if getattr(self._gen, "_program_guard", False):
             self._gen.assert_no_new_programs("(vllm decode_forward)")
@@ -312,3 +392,54 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if self._decode_steps % 2000 == 0:
             self._log_program_cache(f"after {self._decode_steps} served decode steps")
         return out
+
+    def _select_decode_bucket(self, args, kwargs, start_pos, slot_remap):
+        """Decode bucketing: pick the smallest captured width >= the plugin's front-packed active prefix, bind that
+        width's trace store (tokens / positions carried over from the previous width on a switch) and slice the host
+        inputs to it. Full width for the host-logits compatibility mode (its store holds the only host-logits trace) and
+        for a step carrying a ``slot_remap`` (the remap indexes the full slot space; bucketing resumes next step). A width
+        switch the plugin did not flag as a layout change is forced to ``reset_batch`` (host-authoritative step)."""
+        Bmax = int(self.model_args[0].max_batch_size)
+        sampling_params = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
+        host_mode = sampling_params is None
+        # Seeded requests promise bit-reproducible streams. Per-row numerics differ between decode widths (gather-mode
+        # MoE at widths 2-4 vs the masked path at 8+, SDPA-decode cores per head), so a request whose batch changes width
+        # (admission order, others finishing) could flip a sampled token at a near tie (plugin test_mixed_params_batch).
+        # Any live seeded row therefore runs the batch at the full width = the stage-9 numerics, composition-independent.
+        # QWEN35_SEEDED_FULL_WIDTH=0 disables (bucketed seeded requests, reproducible only within one width history).
+        seeded = False
+        if not host_mode and self._seeded_full_width:
+            seeds = getattr(sampling_params, "seed", None) or []
+            live = torch.as_tensor(start_pos).reshape(-1) >= 0 if start_pos is not None else None
+            seeded = any(
+                sd is not None and (live is None or (i < live.numel() and bool(live[i]))) for i, sd in enumerate(seeds)
+            )
+        if host_mode or slot_remap is not None or seeded:
+            width = Bmax
+            if seeded:
+                self._seeded_full_width_steps = getattr(self, "_seeded_full_width_steps", 0) + 1
+            elif slot_remap is not None:
+                self._remap_full_width_steps = getattr(self, "_remap_full_width_steps", 0) + 1
+        else:
+            width = decode_buckets.width_for(decode_buckets.active_prefix(start_pos, Bmax), Bmax)
+            width = min(w for w in self._decode_widths if w >= width)
+        changed = decode_buckets.select(self, width)
+        if changed:
+            reset = kwargs.get("reset_batch", args[7] if len(args) > 7 else False)
+            if not reset:
+                if not getattr(self, "_forced_reset_logged", False):
+                    self._forced_reset_logged = True
+                    logger.info(
+                        "decode bucket switch without a layout change: forcing reset_batch (host-authoritative)"
+                    )
+                if "reset_batch" in kwargs or len(args) <= 7:
+                    kwargs["reset_batch"] = True
+                else:
+                    args[7] = True
+                self._forced_resets = getattr(self, "_forced_resets", 0) + 1
+            self._bucket_switches = getattr(self, "_bucket_switches", 0) + 1
+        self._bucket_hist = getattr(self, "_bucket_hist", {})
+        self._bucket_hist[width] = self._bucket_hist.get(width, 0) + 1
+        if width < Bmax:
+            args, kwargs = decode_buckets.slice_inputs(args, kwargs, width)
+        return args, kwargs

@@ -1,0 +1,109 @@
+{
+ "book_tokens": 194119,
+ "long_131072": {
+  "prompt_tokens": 131072,
+  "ttft_s": 132.2353958360618,
+  "wall_s": 134.76536126399878,
+  "chunks": 64,
+  "text": ", and their\nheated faces were distorted and convulsed. The teeth were bared, glaring\nlike the teeth of a wild animal; the wild red eyes, the wild hair, and\nthe wild garments; the wild swaying and dancing to the grindstone's\npace; the wild blood on their"
+ },
+ "long_262080": {
+  "prompt_tokens": 262080,
+  "ttft_s": 283.4059285830008,
+  "wall_s": 286.0769231909653,
+  "chunks": 64,
+  "text": "surprise you, and that perhaps will make you think me not quite as\nshrewd as you usually do think me. I intend to marry.\"\n\n\"_Do_ you?\"\n\n\"Yes. And not for money. What do you say now?\"\n\n\"I don't feel disposed to say much. Who is she"
+ },
+ "page_growth_chat_buckets": {
+  "completion_tokens": [
+   400,
+   400,
+   400
+  ],
+  "solo": [
+   "Have you ever wondered how a refrigerator can keep your milk cold and your ice cream frozen when the kitchen around it is warm? It seems like magic, but it is actually a brilliant application of physics, specifically the laws of thermodynamics. The secret isn't that the fridge creates cold; rather, it is a machine designed to move heat.\n\nAt the heart of this process is a special chemical called a refrigerant. This substance is unique because it can easily change its state between a liquid and a gas. The entire system operates in a continuous loop involving four main components: the compressor, the condenser coils, the expansion valve, and the evaporator coils.\n\nThe journey begins with the compressor, which acts like the heart of the system. It squeezes the refrigerant gas, increasing its pressure and temperature significantly. You might notice the back or bottom of your fridge getting warm; that is the heat being pushed out. This hot, high-pressure gas then travels through the condenser coils, usually located on the back or underneath the unit. As air from the room flows over these coils, the refrigerant releases its heat into the kitchen and condenses into a high-pressure liquid.\n\nNext, this liquid moves toward the expansion valve, a tiny nozzle that acts like a dam breaking. When the liquid rushes through this narrow opening, the pressure drops dramatically. This sudden drop causes the refrigerant to expand and cool down rapidly, turning into a cold, low-pressure gas. This is the crucial step where the \"cold\" is generated.\n\nNow, this super-cold gas enters the evaporator coils located inside the freezer and refrigerator compartments. As the warm air from inside the fridge circulates over these cold coils, the refrigerant absorbs the heat from the air, cooling the interior space down. The refrigerant itself warms up and turns back into a gas. A fan then blows this cooled air throughout the fridge to keep your food fresh. Finally, the now-warm gas returns to",
+   "The wind howled off the Atlantic, a relentless beast that battered the granite spine of Blackwood Lighthouse. Elias, a man whose skin had been cured by salt and sun for forty years, climbed the spiral stairs, his boots heavy with the rhythm of the sea. His life was a cycle of polishing the great lens, trimming the wick, and watching the horizon for the ghostly glint of a ship in distress. But tonight, the sea was a churning void, and the only light came from the beam cutting through the storm.\n\nThe next morning, the storm had broken, leaving the beach littered with debris. Elias descended the tower, his eyes scanning the wet sand. There, wedged between two jagged rocks, sat a bottle. It was not the clear glass of modern medicine or the green of cheap wine, but thick, amber glass, corked with wax that had long since hardened.\n\nCuriosity, a rare visitor in his isolated life, pulled him toward it. He pried the cork loose with his pocketknife, the sound sharp against the crashing waves. Inside, a single sheet of parchment, yellowed and brittle, waited. He unrolled it carefully, his rough fingers trembling slightly.\n\nThe handwriting was elegant, looping and precise, written in ink that had faded to a soft brown.\n\n*\"To the Keeper of the Light,\"* it began. *\"If you are reading this, the storm has passed, and the light still burns. I am Elara, writing from the year 1892. My ship, the *Gilded Wren*, is lost to the fog. I have no hope of rescue, but I have hope for you. Do not let the silence of the tower consume you. The sea gives, and the sea takes, but the light remains. Remember that you are never truly alone as long as the beam cuts the dark. Keep the flame alive, not just for the ships, but for",
+   "The changing colors of the sky, from the brilliant blue of midday to the fiery reds of sunset, are primarily caused by a phenomenon known as **Rayleigh scattering**. This physical process occurs when sunlight interacts with the molecules of gas (primarily nitrogen and oxygen) that make up Earth's atmosphere.\n\nSunlight appears white to the human eye, but it is actually a spectrum of colors, each corresponding to a specific wavelength. Red light has the longest wavelength in the visible spectrum, while violet and blue light have the shortest. According to Rayleigh's law, the intensity of scattered light is inversely proportional to the fourth power of its wavelength ($I \\propto 1/\\lambda^4$). This mathematical relationship means that shorter wavelengths (blue and violet) are scattered much more strongly than longer wavelengths (red and orange). Specifically, blue light is scattered roughly ten times more efficiently than red light.\n\nDuring the day, when the sun is high in the sky, sunlight travels through a relatively thin layer of the atmosphere to reach our eyes. Because blue light is scattered in all directions by the atmospheric molecules, it dominates the sky we see. While violet light has an even shorter wavelength and scatters even more than blue, the sky does not appear violet for two reasons: the sun emits less violet light to begin with, and the human eye is significantly more sensitive to blue light than violet. Consequently, the combination of solar emission spectra and human visual perception results in the familiar blue sky.\n\nSunsets, however, present a different scenario due to the geometry of the Earth. As the sun approaches the horizon, its light must travel through a much thicker layer of the atmosphere to reach an observer. This increased path length causes the shorter blue and violet wavelengths to be scattered so extensively that they are effectively removed from the direct line of sight before they reach the observer's eyes. By the time the sunlight finally arrives, most of the blue light has been scattered away in other directions, leaving"
+  ],
+  "concurrent": [
+   "Have you ever wondered how a refrigerator can keep your food cold when the kitchen is warm? It seems like magic, but it is actually a brilliant application of physics, specifically the laws of thermodynamics. The secret isn't that the fridge creates cold; rather, it works by actively removing heat from the inside and dumping it outside.\n\nAt the heart of this process is a special chemical called a refrigerant, which circulates through a closed loop of copper coils. This substance has a unique ability to change its state between a liquid and a gas very easily. The cycle begins with a component called the compressor, usually located at the bottom back of the unit. Think of the compressor as the heart of the system. It squeezes the refrigerant gas, increasing its pressure and temperature significantly. This hot, high-pressure gas then travels through the coils on the back or bottom of the fridge, where it releases its heat into your kitchen air. As it cools down, it condenses into a high-pressure liquid.\n\nNext, this liquid moves toward the inside of the fridge, passing through a tiny, narrow opening called an expansion valve. This is where the magic happens. Because the pressure drops so suddenly, the liquid refrigerant expands rapidly and turns into a cold gas. This phase change is crucial because when a liquid turns into a gas, it absorbs a massive amount of thermal energy from its surroundings. As this cold gas flows through the evaporator coils lining the interior walls of your fridge, it sucks the heat out of the air and your food, leaving everything inside chilly.\n\nOnce the refrigerant has absorbed all the heat it can hold, it travels back to the compressor to start the cycle all over again. This continuous loop ensures that heat is constantly being pumped from the cold interior to the warm exterior.\n\nYou might notice the fan humming or the compressor kicking on and off. This is the thermostat at work. It acts as the brain, monitoring the internal temperature. When the fridge gets",
+   "The wind howled off the Atlantic, a relentless beast that battered the granite spine of Blackwood Lighthouse. Elias, a man whose skin had been cured by salt and sun for forty years, climbed the spiral stairs, his boots heavy with the rhythm of the routine. The great lens above him rotated with a hypnotic *click-hiss*, slicing the darkness into rhythmic beams that warned ships of the jagged teeth of the reef below.\n\nIt was during his evening rounds, checking the fuel reserves, that he saw it. Tucked into a crevice of the stone gallery, battered by the gale, sat a bottle. It wasn't the usual driftwood or plastic debris; it was thick glass, corked with wax, and glowing faintly in the beam's sweep.\n\nElias's heart, usually as steady as the tide, skipped a beat. He had spent decades watching the sea give and take, but it rarely gave back anything but wreckage. He pried the cork loose with a trembling thumb. Inside, a scroll of yellowed paper, sealed in oilcloth, waited.\n\nHe unrolled it carefully, the paper brittle as dried leaves. The ink was faded, but the handwriting was sharp, urgent. *\"To the Keeper of the Light,\"* it began. *\"If you are reading this, the storm has taken the *Aurora*. We are adrift, three miles east of the Needle. My daughter, Elara, is feverish. The light is our only hope. Please, do not let us fade into the dark.\"*\n\nThe date at the bottom was from 1924. A century ago.\n\nElias froze. The *Aurora* was a ghost story, a tragedy whispered in the taverns of the mainland. He had heard the tale as a boy: a ship lost in a hurricane, never found, its crew vanished without a trace. But the bottle was here, now, in",
+   "The changing colors of the sky, from the brilliant blue of midday to the fiery reds of sunset, are primarily caused by a phenomenon known as **Rayleigh scattering**. This physical process occurs when sunlight interacts with the molecules of gas (primarily nitrogen and oxygen) in Earth's atmosphere, which are much smaller than the wavelength of visible light.\n\nSunlight appears white to the human eye, but it is actually a spectrum of colors, each corresponding to a specific wavelength. Red light has the longest wavelength, while blue and violet light have the shortest. According to the physics of Rayleigh scattering, the intensity of scattered light is inversely proportional to the fourth power of its wavelength ($I \\propto 1/\\lambda^4$). This mathematical relationship means that shorter wavelengths (blue and violet) are scattered much more strongly\u2014roughly 10 times more\u2014than longer wavelengths (red and orange).\n\nDuring the day, when the sun is high in the sky, sunlight travels through a relatively thin layer of the atmosphere to reach our eyes. As this light passes through the air, the shorter blue wavelengths collide with gas molecules and scatter in all directions. Because blue light is scattered so much more effectively than other colors, it dominates the sky we see from any angle. You might wonder why the sky isn't violet, which has an even shorter wavelength than blue. The answer lies in two factors: the sun emits less violet light to begin with, and the human eye is significantly more sensitive to blue light than violet. Consequently, our brains perceive the scattered light as a deep, vibrant blue.\n\nThe situation changes dramatically at sunset or sunrise. At these times, the sun is positioned near the horizon, meaning sunlight must travel through a much thicker layer of the atmosphere to reach an observer. As the light traverses this extended path, the shorter blue and violet wavelengths are scattered so extensively that they are effectively removed from the direct line of sight before they reach our eyes. They are"
+  ],
+  "control_equal": [
+   false,
+   false,
+   false
+  ],
+  "divergence": [
+   {
+    "char_index": 56,
+    "token_index_approx": 11,
+    "solo": "Have you ever wondered how a refrigerator can keep your milk cold and your ice cream frozen when the kitchen around ",
+    "concurrent": "Have you ever wondered how a refrigerator can keep your food cold when the kitchen is warm? It seems like magic, but"
+   },
+   {
+    "char_index": 248,
+    "token_index_approx": 53,
+    "solo": "d the spiral stairs, his boots heavy with the rhythm of the sea. His life was a cycle of polishing the great lens, trimm",
+    "concurrent": "d the spiral stairs, his boots heavy with the rhythm of the routine. The great lens above him rotated with a hypnotic *c"
+   },
+   {
+    "char_index": 277,
+    "token_index_approx": 55,
+    "solo": "s with the molecules of gas (primarily nitrogen and oxygen) that make up Earth's atmosphere.\n\nSunlight appears white to ",
+    "concurrent": "s with the molecules of gas (primarily nitrogen and oxygen) in Earth's atmosphere, which are much smaller than the wavel"
+   }
+  ]
+ },
+ "per_width_latency": {
+  "1": {
+   "wall_s": 5.201936851022765,
+   "ttft_s_max": 0.41031127399764955,
+   "ttft_s_min": 0.41031127399764955,
+   "tpot_ms_mean": 37.727405031131006,
+   "agg_tok_s": 24.60621950357464,
+   "tokens": 128
+  },
+  "2": {
+   "wall_s": 5.94404970400501,
+   "ttft_s_max": 1.0818665070692077,
+   "ttft_s_min": 0.8052448680391535,
+   "tpot_ms_mean": 39.36916152721154,
+   "agg_tok_s": 43.068280507060884,
+   "tokens": 256
+  },
+  "4": {
+   "wall_s": 8.415417011012323,
+   "ttft_s_max": 1.9080927489558235,
+   "ttft_s_min": 1.6338939969427884,
+   "tpot_ms_mean": 51.77184574624091,
+   "agg_tok_s": 60.84071642914455,
+   "tokens": 512
+  },
+  "8": {
+   "wall_s": 15.318544066976756,
+   "ttft_s_max": 3.526194525999017,
+   "ttft_s_min": 3.250580894993618,
+   "tpot_ms_mean": 93.11535935649579,
+   "agg_tok_s": 66.84708386925018,
+   "tokens": 1024
+  },
+  "16": {
+   "wall_s": 20.36119514692109,
+   "ttft_s_max": 6.7109888000413775,
+   "ttft_s_min": 6.433329413062893,
+   "tpot_ms_mean": 107.61032856044756,
+   "agg_tok_s": 100.58348663829233,
+   "tokens": 2048
+  },
+  "32": {
+   "wall_s": 29.123992403037846,
+   "ttft_s_max": 13.246617615106516,
+   "ttft_s_min": 12.966725398087874,
+   "tpot_ms_mean": 125.07214907838186,
+   "agg_tok_s": 140.6400586608022,
+   "tokens": 4096
+  }
+ }
+}

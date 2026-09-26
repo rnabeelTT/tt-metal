@@ -1,0 +1,158 @@
+{
+ "model": "Qwen/Qwen3.5-122B-A10B",
+ "mesh": "(1,4) P300x2",
+ "stage": 10,
+ "measured_path": "vLLM 0.26.0 + TT plugin 5961e48, tt/generator_vllm.py, --max-num-seqs 32 --max-model-len 262144 --block-size 64, sample_on_device_mode all, async scheduling on",
+ "workloads": {
+  "primary": "vllm bench serve 128 prompt / 128 output / 1 request / concurrency 1 / greedy",
+  "ci_burst": "100 / 100 / 32 requests, no concurrency cap, greedy"
+ },
+ "primary_before": {
+  "ttft_ms_p50": 474.0637349896133,
+  "ttft_ms_p99": 474.0637349896133,
+  "tpot_ms_mean": 124.19447919636173,
+  "tpot_ms_p99": 124.19447919636173,
+  "itl_ms_p50": 124.19096298981458,
+  "itl_ms_p99": 126.59819458378479,
+  "tpot_derived_decode_tps_per_user": 8.051887704435858,
+  "output_throughput_tok_per_s": 7.878329426114142,
+  "completed_requests": 1
+ },
+ "primary_after": {
+  "ttft_ms_p50": 426.40901706181467,
+  "ttft_ms_p99": 426.40901706181467,
+  "tpot_ms_mean": 37.70361818816865,
+  "tpot_ms_p99": 37.70361818816865,
+  "itl_ms_p50": 37.754504941403866,
+  "itl_ms_p99": 41.1660908255726,
+  "tpot_derived_decode_tps_per_user": 26.522653476100572,
+  "output_throughput_tok_per_s": 24.544123184552785,
+  "completed_requests": 1
+ },
+ "ci_burst_before": {
+  "ttft_ms_p50": 13565.734685980715,
+  "ttft_ms_p99": 13566.701817247085,
+  "tpot_ms_mean": 130.84712507645804,
+  "tpot_ms_p99": 132.8827790364228,
+  "itl_ms_p50": 133.30488454084843,
+  "itl_ms_p99": 136.2106347619556,
+  "tpot_derived_decode_tps_per_user": 7.6425064701702,
+  "output_throughput_tok_per_s": 120.70082785091492,
+  "completed_requests": 32
+ },
+ "ci_burst_after": {
+  "ttft_ms_p50": 11495.013479492627,
+  "ttft_ms_p99": 11792.835311566014,
+  "tpot_ms_mean": 133.82667217041617,
+  "tpot_ms_p99": 143.85390300482436,
+  "itl_ms_p50": 133.15027148928493,
+  "itl_ms_p99": 136.3098930916749,
+  "tpot_derived_decode_tps_per_user": 7.472351989195325,
+  "output_throughput_tok_per_s": 129.35832615713633,
+  "completed_requests": 32
+ },
+ "concurrency_after": {
+  "concurrency_8": {
+   "ttft_ms_p50": 3236.0692900256254,
+   "ttft_ms_p99": 3408.653500850778,
+   "tpot_ms_mean": 93.82846053396618,
+   "tpot_ms_p99": 97.33174586078283,
+   "itl_ms_p50": 92.8230895078741,
+   "itl_ms_p99": 98.11703283106908,
+   "tpot_derived_decode_tps_per_user": 10.657747066392472,
+   "output_throughput_tok_per_s": 67.3509326852711,
+   "completed_requests": 16
+  },
+  "concurrency_32": {
+   "ttft_ms_p50": 12009.61599854054,
+   "ttft_ms_p99": 12088.212359402096,
+   "tpot_ms_mean": 131.0787858126028,
+   "tpot_ms_p99": 132.91111780369036,
+   "itl_ms_p50": 132.8839350026101,
+   "itl_ms_p99": 136.43783817999065,
+   "tpot_derived_decode_tps_per_user": 7.628999565419023,
+   "output_throughput_tok_per_s": 142.77848193019662,
+   "completed_requests": 64
+  }
+ },
+ "per_width_served_latency_after": {
+  "1": {
+   "wall_s": 5.201936851022765,
+   "ttft_s_max": 0.41031127399764955,
+   "ttft_s_min": 0.41031127399764955,
+   "tpot_ms_mean": 37.727405031131006,
+   "agg_tok_s": 24.60621950357464,
+   "tokens": 128
+  },
+  "2": {
+   "wall_s": 5.94404970400501,
+   "ttft_s_max": 1.0818665070692077,
+   "ttft_s_min": 0.8052448680391535,
+   "tpot_ms_mean": 39.36916152721154,
+   "agg_tok_s": 43.068280507060884,
+   "tokens": 256
+  },
+  "4": {
+   "wall_s": 8.415417011012323,
+   "ttft_s_max": 1.9080927489558235,
+   "ttft_s_min": 1.6338939969427884,
+   "tpot_ms_mean": 51.77184574624091,
+   "agg_tok_s": 60.84071642914455,
+   "tokens": 512
+  },
+  "8": {
+   "wall_s": 15.318544066976756,
+   "ttft_s_max": 3.526194525999017,
+   "ttft_s_min": 3.250580894993618,
+   "tpot_ms_mean": 93.11535935649579,
+   "agg_tok_s": 66.84708386925018,
+   "tokens": 1024
+  },
+  "16": {
+   "wall_s": 20.36119514692109,
+   "ttft_s_max": 6.7109888000413775,
+   "ttft_s_min": 6.433329413062893,
+   "tpot_ms_mean": 107.61032856044756,
+   "agg_tok_s": 100.58348663829233,
+   "tokens": 2048
+  },
+  "32": {
+   "wall_s": 29.123992403037846,
+   "ttft_s_max": 13.246617615106516,
+   "ttft_s_min": 12.966725398087874,
+   "tpot_ms_mean": 125.07214907838186,
+   "agg_tok_s": 140.6400586608022,
+   "tokens": 4096
+  }
+ },
+ "full_model_reference": {
+  "b1_tokenout_deferred_ms_per_step": 23.94,
+  "b1_tokenout_tps_per_user": 41.8,
+  "source": "doc/datatype_sweep/README.md (stage 8)"
+ },
+ "in_process_traced_step_ms_after": {
+  "width_1_not_served": 25.13,
+  "width_2": 37.74,
+  "width_4": 50.81,
+  "width_8": 79.78,
+  "source": "~/qwen35-122b-bringup/artifacts/w1probe-fix2.json"
+ },
+ "device_time": {
+  "prefill_ms": null,
+  "decode_ms": null,
+  "reason": "vllm_serving_profiler_disabled_to_protect_hardware"
+ },
+ "tt_config": {
+  "trace_region_size": 805306368,
+  "l1_small_size": 24576,
+  "fabric_config": "FABRIC_1D"
+ },
+ "decode_widths_served": [
+  2,
+  4,
+  8,
+  16,
+  32
+ ],
+ "min_width_reason": "width-1 device non-determinism (README section 3)"
+}

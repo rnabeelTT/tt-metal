@@ -1,0 +1,119 @@
+
+dump_configuration.py:
+Scope,Name,Value
+
+check_cb_inactive.py:
+  pass
+
+check_dram_health.py:
+Dev,GDDR Inst,DDR Bank,Corrected Reads,Corrected Writes,Uncorrected Reads,Uncorrected Writes,Train,BIST,Endpoints,Temp Top,Temp Bot,Speed MT/s
+0,0,0,0,0,0,0,SUCCESS,SUCCESS,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",46,46,16000
+0,1,1,0,0,0,0,SUCCESS,SUCCESS,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",48,48,16000
+0,2,2,0,0,0,0,SUCCESS,SUCCESS,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",46,48,16000
+0,3,3,0,0,0,0,SUCCESS,SUCCESS,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",46,48,16000
+0,4,4,0,0,0,0,SUCCESS,SUCCESS,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",46,48,16000
+0,5,5,0,0,0,0,SUCCESS,SUCCESS,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",46,48,16000
+0,6,6,0,0,0,0,SUCCESS,SUCCESS,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",48,48,16000
+0,7,7,0,0,0,0,SUCCESS,SUCCESS,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",46,48,16000
+1,0,0,0,0,0,0,SUCCESS,SUCCESS,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",48,50,16000
+1,1,1,0,0,0,0,SUCCESS,SUCCESS,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",48,52,16000
+1,2,2,0,0,0,0,SUCCESS,SUCCESS,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",50,50,16000
+1,3,3,0,0,0,0,SUCCESS,SUCCESS,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",52,52,16000
+1,4,4,0,0,0,0,SUCCESS,SUCCESS,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",52,54,16000
+1,5,5,0,0,0,0,SUCCESS,SUCCESS,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",52,52,16000
+1,6,6,0,0,0,0,SUCCESS,SUCCESS,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",52,54,16000
+1,7,7,0,0,0,0,SUCCESS,SUCCESS,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",54,54,16000
+2,0,0,0,0,0,0,SUCCESS,SUCCESS,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",50,52,16000
+2,1,1,0,0,0,0,SUCCESS,SUCCESS,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",50,52,16000
+2,2,2,0,0,0,0,SUCCESS,SUCCESS,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",48,50,16000
+2,3,3,0,0,0,0,SUCCESS,SUCCESS,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",50,52,16000
+2,4,4,0,0,0,0,SUCCESS,SUCCESS,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",46,52,16000
+2,5,5,0,0,0,0,SUCCESS,SUCCESS,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",48,50,16000
+2,6,6,0,0,0,0,SUCCESS,SUCCESS,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",46,50,16000
+2,7,7,0,0,0,0,SUCCESS,SUCCESS,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",48,50,16000
+3,0,0,0,0,0,0,SUCCESS,SUCCESS,"0-0 (d0,0), 0-1 (d0,1), 0-11 (d0,2)",50,54,16000
+3,1,1,0,0,0,0,SUCCESS,SUCCESS,"0-2 (d1,0), 0-10 (d1,1), 0-3 (d1,2)",50,52,16000
+3,2,2,0,0,0,0,SUCCESS,SUCCESS,"0-9 (d2,0), 0-4 (d2,1), 0-8 (d2,2)",48,54,16000
+3,3,3,0,0,0,0,SUCCESS,SUCCESS,"0-5 (d3,0), 0-7 (d3,1), 0-6 (d3,2)",50,54,16000
+3,4,4,0,0,0,0,SUCCESS,SUCCESS,"9-0 (d4,0), 9-1 (d4,1), 9-11 (d4,2)",52,54,16000
+3,5,5,0,0,0,0,SUCCESS,SUCCESS,"9-2 (d5,0), 9-10 (d5,1), 9-3 (d5,2)",52,56,16000
+3,6,6,0,0,0,0,SUCCESS,SUCCESS,"9-9 (d6,0), 9-4 (d6,1), 9-8 (d6,2)",52,56,16000
+3,7,7,0,0,0,0,SUCCESS,SUCCESS,"9-5 (d7,0), 9-7 (d7,1), 9-6 (d7,2)",54,56,16000
+
+check_eth_status.py:
+Dev,Loc,Port Status,Retrain Count,RX Link Up,Heartbeat,Mailbox
+0,"11-1 (e0,9)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+0,"6-1 (e0,8)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+0,"3-1 (e0,4)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+0,"2-1 (e0,2)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+1,"4-1 (e0,5)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+1,"3-1 (e0,4)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+1,"15-1 (e0,3)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+1,"2-1 (e0,2)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+2,"11-1 (e0,9)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+2,"6-1 (e0,8)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+2,"3-1 (e0,4)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+2,"2-1 (e0,2)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+3,"4-1 (e0,5)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+3,"3-1 (e0,4)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+3,"15-1 (e0,3)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+3,"2-1 (e0,2)",Up,0,Up,True,"0xD0E50002, 0x00000000, 0x00000000, 0x00000000"
+
+check_l1_status.py:
+  pass
+
+check_noc_locations.py:
+  pass
+
+device_info.py:
+Dev,Tray/Board,Chip,ASIC,Arch,Board,Bus ID,PCI BDF,Unique ID,ARC FW,Postcode
+0,Board 0x461319340c9,0,1,blackhole,p300,0x01,0000:01:00.0,0x8c2632681921,19.13.1,N/A
+1,Board 0x461319340c9,1,0,blackhole,p300,0x02,0000:02:00.0,0x8c2632681920,19.13.1,N/A
+2,Board 0x461319340ee,2,1,blackhole,p300,0x03,0000:03:00.0,0x8c2632681dc1,19.13.1,N/A
+3,Board 0x461319340ee,3,0,blackhole,p300,0x04,0000:04:00.0,0x8c2632681dc0,19.13.1,N/A
+
+device_telemetry.py:
+Dev,AI Clk,ARC Clk,ASIC Temp,Board Temp,ETH Live,DDR Status,DDR Speed,ARC Uptime
+0,1350 MHz,800 MHz,49.9 C,0.0 C,0xC140C14 (8 live),0x55555555,16000 MT/s,0:12:08
+1,1350 MHz,800 MHz,54.8 C,0.0 C,0x5C005C (8 live),0x55555555,16000 MT/s,0:12:08
+2,1350 MHz,800 MHz,51.0 C,0.0 C,0xC140C14 (8 live),0x55555555,16000 MT/s,0:12:08
+3,1350 MHz,800 MHz,54.5 C,0.0 C,0x5C005C (8 live),0x55555555,16000 MT/s,0:12:08
+
+dump_op_mesh.py:
+R\C,C0,C1
+0,"(Device 1)\n16911: ReshapeViewDeviceOperation","(Device 0)\n16911: ReshapeViewDeviceOperation"
+1,"(Device 2)\n16911: ReshapeViewDeviceOperation","(Device 3)\n16911: ReshapeViewDeviceOperation"
+
+dump_op_window.py:
+Op Id,Status,Op Name,Devices
+16901,,EmbeddingsDeviceOperation,
+16902,,TilizeWithValPaddingDeviceOperation,
+16903,,EmbeddingsDeviceOperation,
+16904,,TilizeWithValPaddingDeviceOperation,
+16905,,ReshapeViewDeviceOperation,
+16906,,ReshapeViewDeviceOperation,
+16907,,ReshapeViewDeviceOperation,
+16908,,SliceDeviceOperation,
+16909,,EmbeddingsDeviceOperation,
+16910,,TilizeWithValPaddingDeviceOperation,
+16911,RUNNING,ReshapeViewDeviceOperation,"0, 1, 2, 3"
+16912,,AllGatherAsyncDeviceOperation,
+16913,,LayerNormDeviceOperation,
+16914,,ShardedToInterleavedDeviceOperation,
+16915,,MatmulDeviceOperation,
+16916,,SliceDeviceOperation,
+16917,,SliceDeviceOperation,
+16918,,SliceDeviceOperation,
+16919,,SliceDeviceOperation,
+16920,,FillPadDeviceOperation,
+16921,,CopyDeviceOperation,
+
+dump_running_operations.py:
+Op Id,Op Name,Op Params,Prev Op Id,Prev Op Name,Prev Op Params,Device Cnt,Core Cnt,Devices,Cores
+16911,ReshapeViewDeviceOperation,"Tensor[0]\n  logical_shape: [2, 1, 768]\n  dtype: BFLOAT16\n  tile_shape: {32, 32}\n  face_shape: {16, 16}\n  num_faces: 4\n  memory_layout: INTERLEAVED\n  buffer_type: DRAM\n  shard_spec: none\n  nd_shard_spec: none\n  created_with_nd_shard_spec: 0\n  per_core_allocation: 0\n  alignment: [32, 32]",16910,TilizeWithValPaddingDeviceOperation,"Tensor[0]\n  logical_shape: [2, 1, 768]\n  dtype: BFLOAT16\n  config: RowMajorPageConfig()\n  memory_layout: INTERLEAVED\n  buffer_type: DRAM\n  shard_spec: none\n  nd_shard_spec: none\n  created_with_nd_shard_spec: 0\n  per_core_allocation: 0\n  alignment: [1]",4,32,"0, 1, 2, 3","0:1-2 (0,0)\n0:1-3 (0,1)\n0:1-4 (0,2)\n0:1-5 (0,3)\n0:1-6 (0,4)\n..."
+
+check_binary_integrity.py:
+  pass
+
+check_core_magic.py:
+  pass
