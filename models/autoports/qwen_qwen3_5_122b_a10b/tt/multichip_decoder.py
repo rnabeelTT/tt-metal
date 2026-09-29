@@ -185,7 +185,10 @@ class MultichipConfig:
         attention-norm output (``DistributedNorm`` already emits the width-sharded decode activation).
         """
         base = self.base
-        if self.sorted_min_tokens is not None:
+        env_min = os.environ.get("QWEN35_SORTED_MIN_TOKENS")  # perf-pass sweep knob: overrides the selected value
+        if env_min is not None:
+            base = base.with_(sorted_min_tokens=int(env_min))
+        elif self.sorted_min_tokens is not None:
             base = base.with_(sorted_min_tokens=int(self.sorted_min_tokens))  # prefill MoE path threshold (stage 7)
         return base.with_(
             kv_dtype=self.kv_dtype,

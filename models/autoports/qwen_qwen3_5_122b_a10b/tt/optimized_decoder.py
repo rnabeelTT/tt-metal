@@ -21,12 +21,13 @@ import math
 import os
 from dataclasses import dataclass, replace
 
+import torch
 from loguru import logger
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.fused_decoder import FusedDecoder, FusionFlags, Qwen35MoEFused
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.layer import Qwen35MoeDecoderLayer
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.moe import MoEPrecision, sparse_matmul_program_config
+from models.autoports.qwen_qwen3_5_122b_a10b.tt.moe import TILE, MoEPrecision, sparse_matmul_program_config
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.utils.substate import substate
@@ -62,10 +63,18 @@ class OptimizationConfig:
     masked_down_cores: int = 32
     masked_down_in0: int = 32
     gather_max_tokens: int = 4
+    # decode "pairs" path (perf pass): one group-parallel sparse matmul per projection over all (token, expert) pairs
+    # of the step instead of the per-token gather loop / the serial masked path; 0 = off (QWEN35_MOE_PAIRS_MAX_TOKENS).
+    # Layer-level traced decode per step (GDN / attention layer): w4 1.078 -> 0.985 / 0.968 -> 0.877 ms, w8 1.987 -> 1.430 /
+    # 1.906 -> 1.282 ms; 48-layer traced step w4 50.8 -> 46.6 ms, w8 79.8 -> 67.8 ms; bit-reproducible at widths 2-8.
+    pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "8"))  # adopted (perf pass turn 2)
     # routed-expert prefill: "masked" (per-group expert union, stage 1/2) or "sorted" (expert-sorted dispatch: every 32-row
     # group is one expert; see tt/moe_dispatch.py); geometry of the two compact sparse matmuls
     prefill_mode: str = "sorted"
-    sorted_min_tokens: int = 512  # below this many tokens the masked path wins (static per-expert padding dominates)
+    sorted_min_tokens: int = int(
+        os.environ.get("QWEN35_SORTED_MIN_TOKENS", "512")
+    )  # below this many tokens the masked path took over (per-expert padding dominated with the multicast factory;
+    # re-evaluated in the post-stage-12 perf pass with the group-parallel factory: QWEN35_SORTED_MIN_TOKENS sweeps it)
     sorted_group_rows: int = 32  # rows per expert block (multiple of 32): fewer weight re-reads vs more padding
     sorted_max_tokens: int = (
         4096  # largest prefill chunk routed to the sorted path (index math exact to 7196; checked to 4096)
@@ -376,8 +385,117 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 tpc.create_matmul_1d_decode_progcfg(32, Sl, H, opt.shared_decode_cores, fp32_acc=fp32, grid_w=grid_w),
             )
 
+    # ---- routed experts, pairs dispatch (decode, few tokens) ---------------------------------------------------
+    def _routed_gather(self, x4, scores, ids, T):
+        if 0 < T <= int(self.opt.pairs_max_tokens):
+            return self._routed_pairs(x4, scores, ids, T)
+        return super()._routed_gather(x4, scores, ids, T)
+
+    def _routed_pairs(self, x4, scores, ids, T):
+        """All (token, expert) pairs of a decode step as G = T*k groups of one tile-padded row each: the group-parallel
+        sparse matmul (whole groups per core over the grid) does gate/up and down in ONE call each; the routing weights
+        and the sum over the k experts of every token follow as a batch-dim multiply + reduction. Replaces the per-token
+        gather loop (widths 2-4) and the serial masked path (width 8) with ~12 ops per layer."""
+        k, Nl, H, E = self.top_k, self.inter_local, self.hidden, self.num_experts
+        G = T * k
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        RM = ttnn.ROW_MAJOR_LAYOUT
+        cfg_gu, cfg_dn = self._grouped_configs(TILE, H, Nl)
+        # activation rows -> one padded tile per pair (row of token t repeated k times), ids -> one uint16 stick
+        x_rm = ttnn.to_layout(x4, RM, memory_config=dram)  # [1,1,T,H]
+        x_rows = ttnn.reshape(x_rm, (1, T, 1, H))
+        x_rep = ttnn.repeat(x_rows, ttnn.Shape([1, 1, k, 1]), memory_config=dram)  # [1,T,k,H]: row t repeated k times
+        ttnn.deallocate(x_rm)
+        x_pairs = ttnn.to_layout(ttnn.reshape(x_rep, (1, G, 1, H)), ttnn.TILE_LAYOUT, memory_config=dram)  # [1,G,1,H]
+        ttnn.deallocate(x_rep)
+        # ids [1,1,T,k] -> one uint16 stick [1,G]: the data-moving reshape takes uint32 (not uint16), the final
+        # [1,1,1,G] -> [1,G] reshape is a view
+        ids_u32 = ttnn.typecast(ids, ttnn.uint32) if ids.dtype != ttnn.uint32 else ids
+        ids_rm = ttnn.to_layout(ids_u32, RM, memory_config=dram) if ids_u32.layout != RM else ids_u32
+        ids_row = ttnn.reshape(ids_rm, (1, 1, 1, G))
+        ids_g = ttnn.reshape(ttnn.typecast(ids_row, ttnn.uint16), (1, G))
+        tmp_ids = [t for t in (ids_u32, ids_rm, ids_row) if t is not ids]
+        mask = self._pairs_mask(G, E)
+        fused = ttnn.sparse_matmul(
+            x_pairs,
+            self.up_gate,
+            sparsity=mask,
+            indices=ids_g,
+            is_input_b_sparse=True,
+            memory_config=dram,
+            program_config=cfg_gu,
+            compute_kernel_config=self.routed_ckc,
+            dtype=self.prec.act_dtype,
+        )  # compact [1,G,1,2Nl]
+        ttnn.deallocate(x_pairs)
+        din = ttnn.swiglu(fused, memory_config=dram)  # [1,G,1,Nl]
+        ttnn.deallocate(fused)
+        down = ttnn.sparse_matmul(
+            din,
+            self.down,
+            sparsity=mask,
+            indices=ids_g,
+            is_input_a_sparse=False,
+            is_input_b_sparse=True,
+            memory_config=dram,
+            program_config=cfg_dn,
+            compute_kernel_config=self.routed_ckc,
+            dtype=self.prec.act_dtype,
+        )  # compact [1,G,1,H]
+        ttnn.deallocate(din)
+        ttnn.deallocate(ids_g)
+        seen = set()
+        for t in tmp_ids:
+            if id(t) not in seen:
+                seen.add(id(t))
+                ttnn.deallocate(t)
+        # routing weights: [1,1,T,k] -> one value per pair batch [1,G,1,1]
+        sc_rm = ttnn.to_layout(scores, RM, memory_config=dram)
+        sc_g = ttnn.to_layout(ttnn.reshape(sc_rm, (1, G, 1, 1)), ttnn.TILE_LAYOUT, memory_config=dram)
+        ttnn.deallocate(sc_rm)
+        weighted = ttnn.multiply(down, sc_g, memory_config=dram)  # [1,G,1,H]
+        ttnn.deallocate(down)
+        ttnn.deallocate(sc_g)
+        # swiglu reports the tile-padded row count (32) as its logical rows; the padded rows are zeros through the
+        # chain, so keep them in the batch-dim split and trim one logical row after the k-sum
+        rows = weighted.shape[-2]
+        per_tok = ttnn.reshape(weighted, (T, k, rows, H))  # batch-dim split, no data movement
+        acc = ttnn.sum(per_tok, dim=1, keepdim=True, compute_kernel_config=self.routed_ckc)  # [T,1,1,H]
+        ttnn.deallocate(weighted)
+        if acc.shape[-2] != 1:  # the NC reduction keeps the tile-padded row count: keep the one logical row
+            acc_t = ttnn.slice(acc, [0, 0, 0, 0], [T, 1, 1, H], memory_config=dram)
+            ttnn.deallocate(acc)
+            acc = acc_t
+        if T == 1:
+            return acc  # [1,1,1,H] already
+        # T tokens in T separate padded tiles -> one [1,1,T,H] tile block (row-major round trip)
+        acc_rm = ttnn.to_layout(acc, RM, memory_config=dram)
+        ttnn.deallocate(acc)
+        out = ttnn.to_layout(ttnn.reshape(acc_rm, (1, 1, T, H)), ttnn.TILE_LAYOUT, memory_config=dram)
+        ttnn.deallocate(acc_rm)
+        return out
+
+    def _pairs_mask(self, G, E):
+        """The op still validates a sparsity operand of batch length G x E (unused in indexed mode): one cached
+        device tensor per pair count."""
+        cache = getattr(self, "_pairs_masks", None)
+        if cache is None:
+            cache = self._pairs_masks = {}
+        if G not in cache:
+            cache[G] = ttnn.from_torch(
+                torch.ones(1, G, 1, E, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.device,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                **({"mesh_mapper": ttnn.ReplicateTensorToMesh(self.device)} if self.num_devices > 1 else {}),
+            )
+        return cache[G]
+
     # ---- routed experts, sorted dispatch (prefill) ----------------------------------------------------------
     def _routed_masked(self, x4, scores, ids, T, chunk):
+        if chunk == TILE and 0 < T <= int(self.opt.pairs_max_tokens):
+            return self._routed_pairs(x4, scores, ids, T)  # decode step wider than the gather limit
         if self.opt.prefill_mode != "sorted" or not (self.opt.sorted_min_tokens <= T <= self.opt.sorted_max_tokens):
             return super()._routed_masked(x4, scores, ids, T, chunk)
         return self._routed_sorted(x4, scores, ids, T)

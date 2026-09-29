@@ -1111,6 +1111,49 @@ def _timed_traced_decode(h, device, tag, iters=3):
     return dt
 
 
+def _timed_traced_decode_batched(h, device, B, tag, iters=5):
+    """B live users (prefilled one at a time, 37 tokens each), one traced batched decode step, replay timing."""
+    seq_len = 37
+    hidden = _hidden(B, seq_len, h.H, seed=3100 + B)
+    for u in range(B):
+        h.tt_prefill(hidden[u : u + 1], user_id=u)
+    x, kw = h.decode_inputs(_hidden(B, 1, h.H, seed=3101 + B), torch.full((B,), seq_len))
+    out = h.tt.decode_forward(x, **kw)
+    ttnn.deallocate(out)
+    tid = ttnn.begin_trace_capture(device, cq_id=0)
+    out = h.tt.decode_forward(x, **kw)
+    ttnn.end_trace_capture(device, tid, cq_id=0)
+    ttnn.execute_trace(device, tid, cq_id=0, blocking=True)  # warm
+    ttnn.synchronize_device(device)
+    signpost(f"PERF_DECODE_B{B}_{tag}")
+    t0 = time.time()
+    for _ in range(iters):
+        ttnn.execute_trace(device, tid, cq_id=0, blocking=False)
+    ttnn.synchronize_device(device)
+    dt = 1e3 * (time.time() - t0) / iters
+    signpost(f"PERF_DECODE_B{B}_{tag}_END")
+    ttnn.release_trace(device, tid)
+    return dt
+
+
+@pytest.mark.perf
+@mesh_tp(MESH_PARAMS)
+@pytest.mark.parametrize("batch", [1, 2, 4, 8, 16, 32], ids=["b1", "b2", "b4", "b8", "b16", "b32"])
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_perf_traced_decode_batched(mesh_device, layer_idx, batch):
+    """Traced batched decode step per layer at the served widths 8 / 16 / 32 (MoE path = masked or sorted by
+    sorted_min_tokens; post-stage-12 perf pass)."""
+    hm = _mc(mesh_device, layer_idx, batch=batch, max_seq_len=1024, real=True, hf=False)
+    ms = _timed_traced_decode_batched(hm, mesh_device, batch, "MESH")
+    ff = hm.tt.layer.feed_forward
+    print(
+        f"PERF_CONFIG {hm.kind} traced_decode_b{batch}: sorted_min_tokens={getattr(ff.opt, 'sorted_min_tokens', None)} pairs_max_tokens={getattr(ff.opt, 'pairs_max_tokens', None)} gather_max={getattr(ff, 'GATHER_MAX_TOKENS', None)}"
+    )
+    print(
+        f"PERF {hm.kind} traced_decode_b{batch}: mesh(1x4) {ms:.3f} ms per step ({batch / ms * 1e3:.0f} tok/s aggregate at this layer rate)"
+    )
+
+
 def _perf_traced_decode(mesh_device, layer_idx):
     base_ms = float("nan")
     if PERF_BASELINE:

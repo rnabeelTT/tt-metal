@@ -1,0 +1,48 @@
+{
+ "seeded_width_1": {
+  "rounds": 6,
+  "rows": 1,
+  "unique": 1,
+  "samples": [
+   "15-year-old female. Father has a large number of siblings from previous families to create an expanded"
+  ]
+ },
+ "seeded_width_2": {
+  "rounds": 6,
+  "rows": 2,
+  "unique": 1,
+  "samples": [
+   "15-year-old female. Father has a large number of siblings from previous families to create an expanded"
+  ]
+ },
+ "seeded_width_4": {
+  "rounds": 6,
+  "rows": 4,
+  "unique": 1,
+  "samples": [
+   "15-year-old female. Father has a large number of siblings from previous families to create an expanded"
+  ]
+ },
+ "seeded_width_8": {
+  "rounds": 3,
+  "rows": 8,
+  "unique": 1,
+  "samples": [
+   "15-year-old female. Father has a large number of siblings from previous families to create an expanded"
+  ]
+ },
+ "seeded_width_16": {
+  "rounds": 3,
+  "rows": 16,
+  "unique": 1,
+  "samples": [
+   "15-year-old female. Father has a large number of siblings from previous families to create an expanded"
+  ]
+ },
+ "greedy_width_1": {
+  "unique": 1,
+  "samples": [
+   "1000 words.\n\nThe rain in Seattle didn't wash things clean; it just made the grime slicker, turning the city into a kaleidoscope of blurred neon and gray pavement. Elias Thorne preferred it that way. He ran a small repair shop tucked between a laundromat and a"
+  ]
+ }
+}

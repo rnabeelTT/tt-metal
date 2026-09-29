@@ -1,0 +1,16 @@
+2026-09-29 19:31:31.253 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+SMDET mcast_gather_M1_bfp4_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET grouped_M1_bfp4_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M32_bfp4_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET grouped_M32_bfp4_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M32_rows1to31_NaN_row0: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M32_rows1to31_huge_row0: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M32_rows1to31_zero_row0: 1 distinct outputs in 40 reps
+SMDET grouped_M32_rows1to31_NaN_row0: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M1_bfp4_LoFi_NOl1acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M1_bfp4_LoFi_fp32acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M1_bfp4_HiFi2_l1acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M1_bfp8_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET mcast_gather_M1_bf16_LoFi_l1acc: 1 distinct outputs in 40 reps
+SMDET done
