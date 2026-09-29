@@ -24,7 +24,7 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 | 1 user, 128 / 128 tokens | TTFT 426 ms (`vllm bench serve`, stage 10) / 394-398 ms (TTI release rows), TPOT 37.7 ms (26.5 t/s/u) |
 | 32 users, 128 / 128 tokens | TPOT 125-133 ms, 288 total tok/s (release report), CI burst 129 tok/s |
 | per-width TPOT 1 / 2 / 4 / 8 / 16 / 32 users | 37.7 / 39.4 / 51.8 / 93.1 / 107.6 / 125.1 ms |
-| long prompt, 1 user | TTFT 133 s at 131072 tokens, 283 s at 262080 tokens; decode unchanged |
+| long prompt, 1 user (stage 12, group-parallel MoE prefill) | TTFT 4.0 s at 8192, 16.4 s at 32768, 72.3 s at 131072 tokens (stage 11: 7.8 / 31.4 / 132.6 s); decode unchanged; `doc/optimized_prefill/` |
 | Hub bundle (final image `36b6aa8bb6e4`, thinking off by default), served from the Hub on a reset device (`doc/tti_release/RUN_NOTES.md` round 3) | healthy in 12.8 min; `tt-model curl` answers with defaults; thinking opt-in works; 32 concurrent 126.1 tok/s; 131072-token prompt OK |
 | accuracy (TTI ci-nightly subsets, non-thinking greedy, graded vs the bf16 HF checkpoint in the same setting) | ifeval 92.66 vs HF 89.91 (published 93.4 is thinking mode); gpqa_diamond 77.5 vs HF 80.0 (a pass by one item under TTI's sample-count rule, both budget-cut at 4096 tokens; published 86.6 is thinking mode): stage-11 status `release-readiness-ci-subset-pass`; full sets non-thinking 87.99 / 68.69 (`doc/tti_release/RUN_NOTES.md`) |
 
@@ -77,8 +77,11 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   bit-reproducible. The width-1 trace measures 25.1 ms: about 12 ms per token is left on the table for one user.
 - **Seeded requests run at full width (32).** Cross-width numerics differ (gather vs masked MoE, SDPA grid), so a batch
   with any `seed` runs the width-32 trace to keep seeded outputs reproducible regardless of co-tenants.
-- **Prefill is serialised** at ~1000 tok/s per admission (traced chunk buckets 128..2048: 7.8 s at 8192 tokens, 133 s at 131072); 32 simultaneous long prompts wait minutes
-  for TTFT (release report rows). Concurrent prefill is the next serving lever.
+- **Prefill is serialised** per admission at ~2000 tok/s (stage 12: group-parallel `ttnn.sparse_matmul` factory over all
+  110 cores + matmul counting sort; traced chunk buckets 128..2048: 4.0 s at 8192 tokens, 72 s at 131072; before stage 12
+  ~1000 tok/s). 32 simultaneous long prompts still wait for each other's prefill. Chunked / batched prefill (interleaving
+  prefill segments with decode steps, as the gpt-oss-120b p150x4 bundle does) is the next serving lever; the remaining
+  per-layer MoE cost at 2048 tokens is dispatch bookkeeping (elementwise ops on the one-hot, three 1-core scatters).
 - **Thinking mode loops on constraint-heavy prompts** under greedy decoding and under the model card's coding preset
   (temperature 0.6, no presence penalty): 20-35 % of IFEval-style prompts never close the think block within 16K tokens and
   end in verbatim two-line repetition; the bf16 HF reference on CPU shows the same dithering (`doc/tti_release/RUN_NOTES.md`
@@ -131,6 +134,7 @@ images / videos:
 | code | `models/autoports/qwen_qwen3_5_122b_a10b/tt/` (`model.py`, `generator.py`, `generator_vllm.py`, `decode_buckets.py`, `moe.py`, `moe_dispatch.py`, `weights.py`, `precision.py`, stage decoders) |
 | shared code touched | `models/demos/blackhole/qwen36/`, `models/experimental/gated_attention_gated_deltanet/`, `models/tt_transformers/`, `models/common/` (per-stage commits list the hunks) |
 | tests | `models/autoports/qwen_qwen3_5_122b_a10b/tests/` |
+| stage-12 prefill evidence | `doc/optimized_prefill/` (README, work_log, Tracy before/after CSVs, readiness prefill checks, served before/after) |
 | per-stage evidence | `doc/{functional_decoder,fused_decoder,optimized_decoder,multichip_decoder,optimized_multichip_decoder,full_model,optimized_full_model,datatype_sweep,vllm_integration,optimized_vllm,tti_release}/` |
 | bundle manifest | `models/autoports/qwen_qwen3_5_122b_a10b/tt-model.yaml`; HF repo `raahemnabeel/qwen3-5-122b-a10b-blackholex4` (private) |
 | bring-up workspace | `~/qwen35-122b-bringup/` (scripts per stage, logs, STATUS.md, staged bundle under `pkgbuild/`) |

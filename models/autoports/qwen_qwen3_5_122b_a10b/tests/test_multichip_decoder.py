@@ -465,11 +465,16 @@ def test_mc_source_fallback_audit():
 
 
 # ---------------------------------------------------------------------------------------------------
+# 513 / 1000 (stage 12): expert-sorted prefill lengths whose padded dispatch rows are not a multiple of the counting-sort
+# block (the grouped sparse matmul + matmul counting sort path at T >= sorted_min_tokens, awkward tails)
+SORTED_SEQ_LENS = (513, 1000)
+
+
 @mesh_tp()
 @pytest.mark.parametrize(
     ("layer_idx", "seq_len"),
-    [(li, T) for T in SEQ_LENS for li in (L0, L3)],
-    ids=[f"{'gdn' if li == L0 else 'attn'}_seq{T}" for T in SEQ_LENS for li in (L0, L3)],
+    [(li, T) for T in SEQ_LENS + SORTED_SEQ_LENS for li in (L0, L3)],
+    ids=[f"{'gdn' if li == L0 else 'attn'}_seq{T}" for T in SEQ_LENS + SORTED_SEQ_LENS for li in (L0, L3)],
 )
 def test_mc_prefill_decode_against_hf(mesh_device, layer_idx, seq_len):
     """Synthetic weights: prefill T + decode at T vs HF (PCC >= 0.995) for both layer kinds on the mesh."""
@@ -1142,6 +1147,14 @@ def test_perf_prefill_2048(mesh_device, layer_idx):
 
 
 @pytest.mark.perf
+@mesh_tp(PERF_PREFILL_PARAMS)
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_perf_prefill_2048_whole(mesh_device, layer_idx):
+    """2048 tokens in ONE call = the production 2048 bucket (one expert-sorted MoE dispatch); stage-12 prefill baseline."""
+    _perf_prefill(mesh_device, layer_idx, 2048)
+
+
+@pytest.mark.perf
 @mesh_tp(MESH_PARAMS)
 @pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
 def test_perf_traced_decode(mesh_device, layer_idx):
@@ -1226,3 +1239,74 @@ def test_perf_single_prefill(device, layer_idx):
 def test_perf_single_traced_decode(device, layer_idx):
     hb = _mk_baseline(device, layer_idx)
     _single_report(hb.kind, "traced_decode", _timed_traced_decode(hb, device, "BASELINE"))
+
+
+@pytest.mark.perf
+@mesh_tp(PERF_PREFILL_PARAMS)
+@pytest.mark.parametrize("layer_idx", [L0], ids=["gdn"])
+@pytest.mark.parametrize("seq_len", [2048], ids=["2048"])
+def test_perf_moe_prefill(mesh_device, layer_idx, seq_len):
+    """Stage-12 prefill profile: the MoE block alone on a replicated [1,1,T,H] input (the production 2048 bucket calls it
+    once per layer), with a device-profiler flush between the expert-sorted phases (dispatch build / row gather / gate-up
+    sparse matmul / swiglu+weights / down sparse matmul / undispatch) so the per-op table survives the profiler buffer
+    limit that hides a whole 2048-token layer call. Signposts PERF_MOE_MESH.._END wrap the timed call."""
+    import models.autoports.qwen_qwen3_5_122b_a10b.tt.optimized_decoder as od
+
+    hm = _mc(mesh_device, layer_idx, batch=1, max_seq_len=4096, real=True, hf=False)
+    ff = hm.tt.layer.feed_forward
+    x = ttnn.from_torch(
+        _hidden(1, seq_len, hm.H, seed=2300).reshape(1, 1, seq_len, hm.H),
+        dtype=ttnn.bfloat16,
+        layout=ttnn.TILE_LAYOUT,
+        device=mesh_device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+    )
+    phases = []
+
+    def wrap(name, fn):
+        def w(*a, **k):
+            _flush_profiler(mesh_device)
+            t0 = time.time()
+            out = fn(*a, **k)
+            ttnn.synchronize_device(mesh_device)
+            phases.append((name, 1e3 * (time.time() - t0)))
+            _flush_profiler(mesh_device)
+            return out
+
+        return w
+
+    orig = {
+        "build": od.SortedDispatch.build,
+        "gather": od.gather_rows,
+        "undispatch": od.undispatch_rows,
+        "sparse": ttnn.sparse_matmul,
+        "swiglu": ttnn.swiglu,
+    }
+    od.SortedDispatch.build = wrap("dispatch_build", orig["build"])
+    od.gather_rows = wrap("gather_rows", orig["gather"])
+    od.undispatch_rows = wrap("undispatch_rows", orig["undispatch"])
+    ttnn.sparse_matmul = wrap("sparse_matmul", orig["sparse"])
+    ttnn.swiglu = wrap("swiglu", orig["swiglu"])
+    try:
+        out = ff.forward(x, mode="prefill")  # compile
+        ttnn.deallocate(out)
+        ttnn.synchronize_device(mesh_device)
+        phases.clear()
+        _flush_profiler(mesh_device)
+        t0 = time.time()
+        signpost("PERF_MOE_MESH")
+        out = ff.forward(x, mode="prefill")
+        ttnn.synchronize_device(mesh_device)
+        signpost("PERF_MOE_MESH_END")
+        total = 1e3 * (time.time() - t0)
+        ttnn.deallocate(out)
+    finally:
+        od.SortedDispatch.build = orig["build"]
+        od.gather_rows = orig["gather"]
+        od.undispatch_rows = orig["undispatch"]
+        ttnn.sparse_matmul = orig["sparse"]
+        ttnn.swiglu = orig["swiglu"]
+    for name, ms in phases:
+        print(f"PERF_MOE_PHASE {name}: {ms:.3f} ms (host wall incl. sync)")
+    print(f"PERF_MOE linear_attention moe_prefill_{seq_len}: mesh(1x{TP}) {total:.3f} ms host wall with flushes")

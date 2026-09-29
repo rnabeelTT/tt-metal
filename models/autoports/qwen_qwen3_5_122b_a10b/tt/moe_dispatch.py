@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import os
 
+import torch
+
 import ttnn
 
 TILE = 32
@@ -47,7 +49,12 @@ def dispatch_rows(T: int, k: int, E: int, group: int = TILE) -> int:
 #   "sort_u16": ttnn.sort on uint16 ids (DRAM multi-core factory; hang-free but ~4 ms per 512-token chunk);
 #   "sort_fp32": the original fp32 ttnn.sort (cross-core-exchange factory; its sort_barrier deadlocks intermittently on
 #   one device of the (1,4) mesh - the 48-layer warm-up hang, doc/full_model/triage/warm_hang_*.txt).
-DISPATCH_MODE = os.environ.get("QWEN35_DISPATCH_MODE", "counting_h")  # "counting" | "sort_u16" | "sort_fp32"
+#   "counting_mm" (default, stage 12): counting sort whose running count is a BLOCK-TRIANGULAR MATMUL (fp32 accumulate, exact
+#   integers) instead of ttnn.cumsum on the [Rp, E] one-hot: the dim-2 cumsum ran on ~4 cores and needed two full-tensor
+#   permutes (25 of the 53 ms MoE device time per 2048-token layer, stage-12 profile); the matmuls use the whole grid.
+DISPATCH_MODE = os.environ.get(
+    "QWEN35_DISPATCH_MODE", "counting_mm"
+)  # "counting_mm" | "counting_h" | "counting" | "sort_u16" | "sort_fp32"
 SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
 
 
@@ -85,12 +92,70 @@ class SortedDispatch:
                 "zeros_g": ttnn.zeros((1, 1, 1, G), dtype=u32, layout=RM, device=dev),
                 "zeros_rp": ttnn.zeros((1, 1, 1, Rp), dtype=u32, layout=RM, device=dev),
             }
+            if DISPATCH_MODE == "counting_mm":
+                # block-triangular running count: rows in blocks of Bk (the smallest tile multiple giving at most 32
+                # blocks, so the block prefix is one 32 x 32 tile); Rp is zero-padded up to nb * Bk when Bk does not
+                # divide it (e.g. T=500: Rp=4000 -> Bk=128, 32 blocks, Rp_pad=4096). L = lower-triangular ones incl. the
+                # diagonal (within-block inclusive count), P = strictly-lower-triangular ones over the (up to 32) blocks
+                Bk = TILE * (-(-Rp // (32 * TILE)))
+                nb = -(-Rp // Bk)
+                assert nb <= 32 and nb * Bk >= Rp, (Rp, Bk, nb)
+                c["Rp_pad"] = nb * Bk
+                L = torch.tril(torch.ones(Bk, Bk, dtype=torch.float32))
+                P = torch.tril(torch.ones(32, 32, dtype=torch.float32), diagonal=-1)
+                c["Bk"] = Bk
+                c["nb"] = nb
+                c["L_tri"] = ttnn.from_torch(L.reshape(1, 1, Bk, Bk), dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
+                c["P_excl"] = ttnn.from_torch(P.reshape(1, 1, 32, 32), dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
+                c["ones_row_bk"] = ttnn.full((1, 1, TILE, Bk), 1.0, dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
             if len(self._const) >= CONST_CACHE_ENTRIES:  # bounded: drop the oldest length's constants
                 oldest = next(iter(self._const))
                 for t in self._const.pop(oldest).values():
-                    ttnn.deallocate(t)
+                    if not isinstance(t, int):
+                        ttnn.deallocate(t)
             self._const[T] = c
         return c
+
+    def _running_count_mm(self, oh, consts, Rp, E, f32_ckc):
+        """Inclusive running count of the one-hot rows along the token axis (== ttnn.cumsum(oh, dim=2)) as matmuls:
+        within each block of Bk rows ``L_tri @ oh_block`` (batched over the blocks), plus the exclusive prefix of the
+        block totals (``P_excl @ totals``) broadcast over the block's rows. All operands are 0/1 or small integers, the
+        accumulation is fp32, so every count is exact."""
+        Bk, nb, Rp_pad = consts["Bk"], consts["nb"], consts["Rp_pad"]
+        f32 = ttnn.float32
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        oh_src = oh
+        if Rp_pad > Rp:  # zero rows appended: they add nothing to any count and are sliced off below
+            oh_src = ttnn.pad(oh, [(0, 0), (0, 0), (0, Rp_pad - Rp), (0, 0)], value=0.0)
+        oh_b = ttnn.reshape(oh_src, (1, nb, Bk, E))  # tile-aligned view: Bk % 32 == 0
+        cs_local = ttnn.matmul(consts["L_tri"], oh_b, compute_kernel_config=f32_ckc, dtype=f32, memory_config=dram)
+        if nb > 1:
+            tot = ttnn.matmul(consts["ones_row_bk"], oh_b, compute_kernel_config=f32_ckc, dtype=f32, memory_config=dram)
+            tot = ttnn.slice(tot, (0, 0, 0, 0), (1, nb, 1, E))  # [1,nb,1,E]: block totals (row 0 of every 32-row block)
+            tot_rows = ttnn.reshape(ttnn.to_layout(tot, ttnn.ROW_MAJOR_LAYOUT), (1, 1, nb, E))
+            ttnn.deallocate(tot)
+            if nb < 32:
+                tot_rows = ttnn.pad(tot_rows, [(0, 0), (0, 0), (0, 32 - nb), (0, 0)], value=0.0)
+            tot_rows = ttnn.to_layout(tot_rows, ttnn.TILE_LAYOUT)
+            pre = ttnn.matmul(consts["P_excl"], tot_rows, compute_kernel_config=f32_ckc, dtype=f32, memory_config=dram)
+            ttnn.deallocate(tot_rows)  # [1,1,32,E]: exclusive block prefix in rows 0..nb-1
+            pre_rows = ttnn.reshape(
+                ttnn.to_layout(ttnn.slice(pre, (0, 0, 0, 0), (1, 1, nb, E)), ttnn.ROW_MAJOR_LAYOUT), (1, nb, 1, E)
+            )
+            ttnn.deallocate(pre)
+            pre_rows = ttnn.to_layout(pre_rows, ttnn.TILE_LAYOUT)
+            cs = ttnn.add(cs_local, pre_rows, memory_config=dram)  # broadcast over the Bk rows of every block
+            ttnn.deallocate(cs_local)
+            ttnn.deallocate(pre_rows)
+        else:
+            cs = cs_local
+        cs = ttnn.reshape(cs, (1, 1, Rp_pad, E))
+        if Rp_pad > Rp:
+            ttnn.deallocate(oh_src)
+            full = cs
+            cs = ttnn.slice(full, (0, 0, 0, 0), (1, 1, Rp, E), memory_config=dram)
+            ttnn.deallocate(full)
+        return cs
 
     @staticmethod
     def _f32(t):
@@ -134,7 +199,7 @@ class SortedDispatch:
         f32_ckc = ttnn.WormholeComputeKernelConfig(
             math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=False
         )
-        if DISPATCH_MODE in ("counting", "counting_h"):
+        if DISPATCH_MODE in ("counting", "counting_h", "counting_mm"):
             # ---- counting sort (no ttnn.sort): every token-major row i keeps its position; its destination is
             # offsets[e_i] + (rank of i among the rows of expert e_i). The rank is the running count of the one-hot
             # along the token axis, picked through the one-hot. All integers stay exact: counts/cumsum in fp32,
@@ -209,7 +274,10 @@ class SortedDispatch:
                 off_i = ttnn.add(ttnn.multiply(sel_hi, 256.0), sel_lo)  # [1,1,Rp,1]
                 ttnn.deallocate(sel_hi)
                 ttnn.deallocate(sel_lo)
-                cs = ttnn.cumsum(oh, dim=2, dtype=f32)  # [1,1,Rp,E]
+                if DISPATCH_MODE == "counting_mm":
+                    cs = self._running_count_mm(oh, consts, Rp, E, f32_ckc)  # [1,1,Rp,E] fp32, == cumsum(oh, dim=2)
+                else:
+                    cs = ttnn.cumsum(oh, dim=2, dtype=f32)  # [1,1,Rp,E]
                 cs_hi = ttnn.floor(ttnn.multiply(cs, 1.0 / 256.0))
                 cs_lo = ttnn.subtract(cs, ttnn.multiply(cs_hi, 256.0))
                 ttnn.deallocate(cs)
@@ -337,6 +405,9 @@ class SortedDispatch:
         ttnn.deallocate(grp_of_row)
         if src_ids is not sorted_ids:
             ttnn.deallocate(src_ids)
+        # expert id of every group as the uint16 ROW_MAJOR stick the group-parallel sparse matmul (`indices=`) reads;
+        # padding groups carry expert 0 (their rows are zero-weighted and never read back)
+        group_ids = ttnn.reshape(ttnn.typecast(grp_expert, ttnn.uint16), (1, G))  # uint32 RM -> uint16 RM [1, G]
         grp_f = self._f32(ttnn.to_layout(grp_expert, ttnn.TILE_LAYOUT))
         ttnn.deallocate(grp_expert)
         group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)  # [1,G,1,E] fp32 one-hot
@@ -362,6 +433,7 @@ class SortedDispatch:
             "src_tok": src_tok_rm,
             "weights": weights,
             "group_mask": group_mask,
+            "group_ids": group_ids,
             "undispatch": undispatch,
             "Rd": Rd,
             "G": G,

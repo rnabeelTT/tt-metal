@@ -8,6 +8,7 @@
 
 #include "ttnn/operations/matmul/device/sparse/sparse_matmul_device_operation_types.hpp"
 #include "ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_mcast_1d_optimized.hpp"
+#include "ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.hpp"
 #include "ttnn/operations/matmul/device/config/matmul_program_config_types.hpp"
 
 namespace ttnn::prim {
@@ -18,7 +19,12 @@ struct SparseMatmulDeviceOperation {
     using spec_return_value_t = std::vector<tt::tt_metal::TensorSpec>;
     using tensor_return_value_t = std::vector<Tensor>;
 
-    using program_factory_t = std::variant<SparseMatmulMultiCoreReuseMcast1DProgramFactory>;
+    using program_factory_t =
+        std::variant<SparseMatmulMultiCoreReuseMcast1DProgramFactory, SparseMatmulMultiCoreReuseGroupedProgramFactory>;
+    // A MatmulMultiCoreReuseProgramConfig selects the group-parallel factory (indexed/gather mode only);
+    // every other config keeps the multicast-1D factory.
+    static program_factory_t select_program_factory(
+        const operation_attributes_t& operation_attributes, const tensor_args_t& tensor_args);
     static void validate_on_program_cache_miss(
         const operation_attributes_t& operation_attributes, const tensor_args_t& tensor_args);
     static void validate_on_program_cache_hit(

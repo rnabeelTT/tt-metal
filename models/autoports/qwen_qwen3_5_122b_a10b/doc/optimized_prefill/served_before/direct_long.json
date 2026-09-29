@@ -1,0 +1,54 @@
+{
+ "book_tokens": 194119,
+ "long_8192": {
+  "prompt_tokens": 8192,
+  "reps": [
+   {
+    "ttft_s": 5.328802256146446,
+    "wall_s": 7.721341199008748,
+    "chunks": 64,
+    "text": "?\"\n\n\"Been abroad not often of late years; during the last two or three years,\nvery rarely.\"\n\n\"Sir, are you a single gentleman?\"\n\nMr. Lorry, being a man of a wandering and unsettled habit as to the\npoint of home--which, with such a vagrant"
+   },
+   {
+    "ttft_s": 5.3317749940324575,
+    "wall_s": 7.7203655240591615,
+    "chunks": 64,
+    "text": "?\"\n\n\"Been abroad not often of late years; during the last two or three years,\nvery rarely.\"\n\n\"Sir, are you a single gentleman?\"\n\nMr. Lorry, being a man of a wandering and unsettled habit as to the\npoint of home--which, with such a vagrant"
+   }
+  ],
+  "ttft_s": 5.328802256146446,
+  "prompt_tok_s": 1537.3060598281784
+ },
+ "long_32768": {
+  "prompt_tokens": 32768,
+  "reps": [
+   {
+    "ttft_s": 21.63532058801502,
+    "wall_s": 24.052655291976407,
+    "chunks": 64,
+    "text": ", in reality a\nvery slight one, known only in the hours when they were together, and in\ncommon company? Yes. Ever see the prisoner in Paris? Yes. Rather a\nloose way of answering that. Answer the question. Had he ever seen the\nprisoner in Paris? Yes. How"
+   },
+   {
+    "ttft_s": 21.645606792066246,
+    "wall_s": 24.06215365207754,
+    "chunks": 64,
+    "text": ", in reality a\nvery slight one, known only in the hours when they were together, and in\ncommon company? Yes. Ever see the prisoner in Paris? Yes. Rather a\nloose way of answering that. Answer the question. Had he ever seen the\nprisoner in Paris? Yes. How"
+   }
+  ],
+  "ttft_s": 21.63532058801502,
+  "prompt_tok_s": 1514.5604090633155
+ },
+ "long_131072": {
+  "prompt_tokens": 131072,
+  "reps": [
+   {
+    "ttft_s": 93.48862094501965,
+    "wall_s": 96.01664242311381,
+    "chunks": 64,
+    "text": ", and their\nheated faces were distorted and convulsed. The teeth were bared, glaring\nlike the teeth of a wild animal; the wild red eyes, the wild hair, and\nthe wild garments; the wild swaying and dancing to the grindstone's\npace; the wild blood on their"
+   }
+  ],
+  "ttft_s": 93.48862094501965,
+  "prompt_tok_s": 1402.0101984078149
+ }
+}

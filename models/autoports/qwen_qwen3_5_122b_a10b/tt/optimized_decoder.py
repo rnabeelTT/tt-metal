@@ -74,6 +74,13 @@ class OptimizationConfig:
     sorted_gate_up_in0: int = 32
     sorted_down_cores: int = 64
     sorted_down_in0: int = 32
+    # stage 12: group-parallel sparse matmul (MatmulMultiCoreReuseProgramConfig + `indices`): the expert groups are split
+    # across the whole core grid (each core reads its groups' rows and the whole [K, N] expert block) instead of every
+    # core walking every group with only the small per-device N split. in0_block_w per projection (K tiles per step).
+    sorted_grouped: bool = os.environ.get("QWEN35_SORTED_GROUPED", "1") == "1"
+    grouped_gate_up_in0: int = 4
+    grouped_down_in0: int = 4
+    grouped_subblock_w: int = 8
     # --- decode matmul program configs (round 2, from the stage-2 profile) ---
     # router gate matmul [32,H]x[H,256]: "ttnn" (auto), "derived" (TTMoEGate 2D-mcast derivation), "1d8" (1D, 8 cores)
     router_decode_pc: str = "derived"
@@ -397,14 +404,22 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         x_disp = gather_rows(x4, m["src_tok"], Rd, gs)  # [1,G,gs,H]
         ttnn.deallocate(m["src_tok"])
         narrow = self.tile_gu.tile_shape[1] != 32
+        grouped = bool(getattr(opt, "sorted_grouped", False))
+        if grouped:
+            # indexed/gather mode: the id list drives the weight reads, `sparsity` is unused (kept for the op signature)
+            sparse_kw = {"indices": m["group_ids"]}
+            cfg_gu, cfg_dn = self._grouped_configs(gs, H, Nl)
+        else:
+            sparse_kw = {"nnz": G}
+            cfg_gu, cfg_dn = self._cfg_sorted_gu, self._cfg_sorted_dn
         out_gu = None if narrow else self._alloc_dev((1, G, gs, 2 * Nl), act)
         fused = ttnn.sparse_matmul(
             x_disp,
             self.up_gate,
             sparsity=m["group_mask"],
-            nnz=G,
+            **sparse_kw,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            program_config=self._cfg_sorted_gu,
+            program_config=cfg_gu,
             **({"output_tile": self.tile_gu} if narrow else {"optional_output_tensor": out_gu}),
             compute_kernel_config=self.routed_ckc,
             dtype=act,
@@ -421,21 +436,67 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             din,
             self.down,
             sparsity=m["group_mask"],
-            nnz=G,
+            **sparse_kw,
             optional_output_tensor=out_dn,
             is_input_a_sparse=False,
             is_input_b_sparse=True,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            program_config=self._cfg_sorted_dn,
+            program_config=cfg_dn,
             compute_kernel_config=self.routed_ckc,
             dtype=act,
         )  # compact [1,G,32,H]
         ttnn.deallocate(din)
         ttnn.deallocate(m["group_mask"])
+        ttnn.deallocate(m["group_ids"])
         y = undispatch_rows(down, None, m["undispatch"], T, k, H)
         ttnn.deallocate(down)
         ttnn.deallocate(m["undispatch"])
         return y
+
+    def _grouped_configs(self, gs, H, Nl):
+        """MatmulMultiCoreReuseProgramConfig pair (gate/up, down) for the group-parallel sparse matmul: whole groups per
+        core (per_core_M = gs/32, per_core_N = all N tiles), K stepped in in0_block_w tiles, subblock 1 x w."""
+        if getattr(self, "_cfg_grouped", None) is None:
+            opt = self.opt
+            grid = self.device.compute_with_storage_grid_size()
+
+            def cfg(k, n_tiles, in0_cap, w_tile_bytes):
+                k_tiles = k // 32
+                ib = max(1, min(int(in0_cap), k_tiles))
+                while k_tiles % ib:
+                    ib -= 1
+                # L1 budget of the grouped factory per core: double-buffered in0 [M, ib] + in1 [ib, N] blocks and one
+                # bf16 output block. Shrink the K block until it fits (a too-large block is a program-build TT_THROW).
+                m_tiles = gs // 32
+                while (
+                    ib > 1
+                    and 2 * m_tiles * ib * 2048 + 2 * n_tiles * ib * w_tile_bytes + m_tiles * n_tiles * 2048 > 1_300_000
+                ):
+                    ib -= 1
+                    while k_tiles % ib:
+                        ib -= 1
+                sw = max(1, min(int(opt.grouped_subblock_w), n_tiles))
+                while n_tiles % sw:
+                    sw -= 1
+                if getattr(self.routed_ckc, "fp32_dest_acc_en", False):
+                    while sw > 4:
+                        sw -= 1
+                return ttnn.MatmulMultiCoreReuseProgramConfig(
+                    compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y),
+                    in0_block_w=ib,
+                    out_subblock_h=1,
+                    out_subblock_w=sw,
+                    per_core_M=gs // 32,
+                    per_core_N=n_tiles,
+                )
+
+            gu_tiles = -(-(2 * Nl) // self.tile_gu.tile_shape[1])
+            tile_bytes = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088}
+            self._cfg_grouped = (
+                cfg(H, gu_tiles, opt.grouped_gate_up_in0, tile_bytes.get(self.up_gate.dtype, 2048)),
+                cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048)),
+            )
+        return self._cfg_grouped
 
     def _route(self, x4):
         if self._gate_pc_decode is not None:

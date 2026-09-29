@@ -76,6 +76,16 @@ ttnn::Shape compute_sparse_matmul_compact_output_shape(
     const ttnn::Tensor& input_tensor_a, const ttnn::Tensor& input_tensor_b, uint32_t nnz) {
     return ttnn::Shape{1U, nnz, input_tensor_a.logical_shape()[-2], input_tensor_b.logical_shape()[-1]};
 }
+
+// Group-parallel (grouped) mode: selected by a MatmulMultiCoreReuseProgramConfig. Group g of the dense
+// activation batch is multiplied with expert indices[g] only (one product per group, not the
+// batchA x num_active cross product of the plain indexed mode), so the output is the compact
+// [1, G, M, N] tensor.
+bool is_grouped_mode(const ttnn::prim::SparseMatmulParams& operation_attributes) {
+    return operation_attributes.program_config.has_value() &&
+           std::holds_alternative<ttnn::operations::matmul::MatmulMultiCoreReuseProgramConfig>(
+               operation_attributes.program_config.value());
+}
 }  // namespace
 
 namespace ttnn::prim {
@@ -281,8 +291,10 @@ void SparseMatmulDeviceOperation::validate_on_program_cache_miss(
             batch_length_B,
             b_shape_padded[-3],
             b_shape_padded);
+        // Plain indexed mode selects num_active DISTINCT experts. The grouped mode maps every activation
+        // group to an expert, and several groups may share one expert, so G may exceed E there.
         TT_FATAL(
-            indices.logical_volume() <= batch_length_B,
+            is_grouped_mode(operation_attributes) || indices.logical_volume() <= batch_length_B,
             "indices length / num_active ({}) must be <= the number of sparse groups in input B ({})",
             indices.logical_volume(),
             batch_length_B);
@@ -317,12 +329,15 @@ void SparseMatmulDeviceOperation::validate_on_program_cache_miss(
             // only valid output is the indexed shape. A full-E output would leave holes (the writer no
             // longer zero-fills skipped slots because it never visits them), and an undersized one
             // would be written out of bounds.
-            const auto indexed_output_shape = compute_sparse_matmul_output_shape(
-                input_tensor_a,
-                input_tensor_b,
-                operation_attributes.is_input_a_sparse,
-                operation_attributes.is_input_b_sparse,
-                indexed_num_active);
+            const auto indexed_output_shape = is_grouped_mode(operation_attributes)
+                                                  ? compute_sparse_matmul_compact_output_shape(
+                                                        input_tensor_a, input_tensor_b, indexed_num_active.value())
+                                                  : compute_sparse_matmul_output_shape(
+                                                        input_tensor_a,
+                                                        input_tensor_b,
+                                                        operation_attributes.is_input_a_sparse,
+                                                        operation_attributes.is_input_b_sparse,
+                                                        indexed_num_active);
             TT_FATAL(
                 optional_output_shape == indexed_output_shape,
                 "Optional output tensor shape {} must match the indexed output shape {} when indices are "
@@ -361,6 +376,36 @@ void SparseMatmulDeviceOperation::validate_on_program_cache_miss(
     // Check order matters: every value used as a divisor below is rejected as zero first, so a
     // malformed program config fails as a TT_FATAL rather than a host divide-by-zero.
     if (operation_attributes.program_config.has_value()) {
+        if (const auto* rc = std::get_if<operations::matmul::MatmulMultiCoreReuseProgramConfig>(
+                &operation_attributes.program_config.value())) {
+            // Group-parallel factory: whole groups per core in indexed/gather mode.
+            TT_FATAL(
+                operation_attributes.use_indices,
+                "sparse_matmul: a MatmulMultiCoreReuseProgramConfig (group-parallel factory) requires the `indices` "
+                "operand (indexed/gather mode)");
+            TT_FATAL(
+                operation_attributes.is_input_b_sparse && !operation_attributes.is_input_a_sparse,
+                "sparse_matmul (grouped): input B must be the sparse (expert) operand and input A dense");
+            TT_FATAL(
+                rc->in0_block_w != 0 && rc->out_subblock_h != 0 && rc->out_subblock_w != 0 && rc->per_core_M != 0 &&
+                    rc->per_core_N != 0,
+                "sparse_matmul (grouped): program config fields must be non-zero");
+            TT_FATAL(
+                indexed_num_active.has_value() &&
+                    get_batch_size(input_tensor_a.padded_shape()) == indexed_num_active.value(),
+                "sparse_matmul (grouped): input A's batch ({}) must equal the number of indices ({}): one activation "
+                "group per id",
+                get_batch_size(input_tensor_a.padded_shape()),
+                indexed_num_active.value_or(0));
+            TT_FATAL(
+                rc->per_core_M % rc->out_subblock_h == 0 && rc->per_core_N % rc->out_subblock_w == 0,
+                "sparse_matmul (grouped): per_core_M ({}) / per_core_N ({}) must be divisible by the subblock dims ({} "
+                "x {})",
+                rc->per_core_M,
+                rc->per_core_N,
+                rc->out_subblock_h,
+                rc->out_subblock_w);
+        }
         if (const auto* pc = std::get_if<operations::matmul::MatmulMultiCoreReuseMultiCast1DProgramConfig>(
                 &operation_attributes.program_config.value())) {
             TT_FATAL(
@@ -420,12 +465,15 @@ SparseMatmulDeviceOperation::spec_return_value_t SparseMatmulDeviceOperation::co
         num_active = tensor_args.optional_input_tensors.at(0)->logical_volume();
     }
 
-    const auto output_shape = compute_sparse_matmul_output_shape(
-        input_tensor_a,
-        input_tensor_b,
-        operation_attributes.is_input_a_sparse,
-        operation_attributes.is_input_b_sparse,
-        num_active);
+    const auto output_shape =
+        (num_active.has_value() && is_grouped_mode(operation_attributes))
+            ? compute_sparse_matmul_compact_output_shape(input_tensor_a, input_tensor_b, num_active.value())
+            : compute_sparse_matmul_output_shape(
+                  input_tensor_a,
+                  input_tensor_b,
+                  operation_attributes.is_input_a_sparse,
+                  operation_attributes.is_input_b_sparse,
+                  num_active);
 
     const auto output_dtype = operation_attributes.output_dtype.has_value() ? operation_attributes.output_dtype.value()
                                                                             : input_tensor_a.dtype();
@@ -503,6 +551,16 @@ SparseMatmulDeviceOperation::tensor_return_value_t SparseMatmulDeviceOperation::
 
 // static ttsl::hash::hash_t SparseMatmulDeviceOperation::compute_program_hash(
 //     const operation_attributes_t& operation_attributes, const tensor_args_t& tensor_args);
+
+SparseMatmulDeviceOperation::program_factory_t SparseMatmulDeviceOperation::select_program_factory(
+    const operation_attributes_t& operation_attributes, const tensor_args_t& /*tensor_args*/) {
+    if (operation_attributes.program_config.has_value() &&
+        std::holds_alternative<operations::matmul::MatmulMultiCoreReuseProgramConfig>(
+            operation_attributes.program_config.value())) {
+        return SparseMatmulMultiCoreReuseGroupedProgramFactory{};
+    }
+    return SparseMatmulMultiCoreReuseMcast1DProgramFactory{};
+}
 
 std::tuple<SparseMatmulParams, SparseMatmulInputs> sparse_matmul_build_operation_args(
     const Tensor& input_tensor_a,
