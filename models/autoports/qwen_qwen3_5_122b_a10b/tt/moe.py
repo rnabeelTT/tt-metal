@@ -38,6 +38,9 @@ import ttnn
 TILE = 32
 # functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
 ROUTER_TOPK_FIRST = os.environ.get("QWEN35_ROUTER_TOPK_FIRST", "1") == "1"  # default since the perf pass (2026-09-29)
+ROUTER_L1 = (
+    os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
+)  # L1-resident router intermediates for decode rows (experiment)
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -318,19 +321,21 @@ class Qwen35MoE:
     # ------------------------------------------------------------------------------------------------
     def _route(self, x4):
         """Router: returns renormalized top-k scores [1,1,T,k] (bf16) and expert ids [1,1,T,k] (uint16)."""
+        # decode rows (<= 32 tokens): keep the router chain L1-resident (perf pass, QWEN35_ROUTER_L1); prefill rows in DRAM
+        r_mc = ttnn.L1_MEMORY_CONFIG if (ROUTER_L1 and x4.shape[-2] <= TILE) else ttnn.DRAM_MEMORY_CONFIG
         logits = ttnn.linear(
             x4,
             self.router_w,
             dtype=ttnn.bfloat16,
             compute_kernel_config=self.router_ckc,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=r_mc,
         )
         if ROUTER_TOPK_FIRST:
             # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
             # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).
-            values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True)
+            values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True, memory_config=r_mc)
             ttnn.deallocate(logits)
-            scores = ttnn.softmax(values, dim=-1, numeric_stable=True)
+            scores = ttnn.softmax(values, dim=-1, numeric_stable=True, memory_config=r_mc)
             ttnn.deallocate(values)
         else:
             probs = ttnn.softmax(logits, dim=-1, numeric_stable=True)

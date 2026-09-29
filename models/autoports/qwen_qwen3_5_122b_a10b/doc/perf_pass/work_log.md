@@ -123,3 +123,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   c1 TTFT p50 408 ms, TPOT 32.7 ms (30.6 t/s/u; stage 10: 37.7 / 26.5); c2 38.1; c4 46.7; c8 67.7; c16 110.3 (client
   107.0); c32 130.5 (client 125.2). Seeded 1 unique of 6/12/24/24/48 at widths 1..16, greedy width 1: 1 unique of 6.
   Per-width client aggregate: 28.0 / 44.0 / 65.5 / 84.5 / 100.4 / 140.7 tok/s at 1 / 2 / 4 / 8 / 16 / 32 users.
+- 21:59-22:07 turn 3a, L1-resident router chain (`QWEN35_ROUTER_L1=1`, chain15): GDN layer b1 0.709 -> 0.690 ms, b4 0.992
+  -> 0.972, b8 1.431 -> 1.409; attention b1 0.601 -> 0.629, b8 1.267 -> 1.263 -> net < 0.5 ms per 48-layer step: rejected
+  (knob kept off). The functional router's ~120 us per layer at width 1 is op-launch cost of three small ops.
+- 21:58-22:05 bundle rebuilt from 4e7f349857d (`12-package.sh`, warm cache) -> image f6b91cc768b9, pushed private (Hub
+  revision 5fef4bd0). 22:11 Hub verification: `tt-model serve --refresh` moved 1e17833e -> 5fef4bd0, new image started.
+- 22:11-22:25 Hub verification of the turn-1 bundle (rev 5fef4bd0, image f6b91cc768b9): all checks pass; 8K 4.5 s, 128K
+  72.6 s; near-tie greedy texts differ from the stage-12 image (default greeting "Hello!"). Host-profiling run (chain16:
+  py-spy on the EngineCore at c8 / c32) next.

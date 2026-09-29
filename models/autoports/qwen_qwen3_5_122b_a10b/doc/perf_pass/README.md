@@ -95,3 +95,14 @@ Reproducibility on the served path with the width-1 trace (`served_w1/seedprobe.
   op groups are the GDN decode mixer (~50 ops: conv shift register, head layouts, recurrence) and the attention block.
   `ttnn.experimental.kda` ships fused kernels (`qkv_causal_conv1d_silu`, `sigmoid_gated_rms_norm`, recurrent scans)
   that could replace several of them.
+
+## Shipped
+
+Commits 62010702d98 (pairs path) and 4e7f349857d (width-1 fix, two-op router, min width 1) on the local branch
+`qwen3_5_122b_a10b`. Bundle rebuilt from 4e7f349857d (image `tt-model/qwen3-5-122b-a10b-blackholex4:f6b91cc768b9`),
+pushed private (`raahemnabeel/qwen3-5-122b-a10b-blackholex4`, Hub revision 5fef4bd0), verified from the Hub on reset
+devices (`logs/13/verify-hub.log`): healthy in 10.8 min, /v1/models 262144, chat, tool call, `tt-model curl` default /
+thinking on (1005 reasoning chars) / thinking off, non-aligned 2381-token prompt, 32-request burst 127 tok/s, 8192-token
+prompt 4.5 s and 131072-token prompt 72.6 s wall for 16 new tokens. Greedy continuations at near ties differ from the
+stage-12 image (the default greeting is now "Hello!", the 128K completion's wording changes mid-sentence): the two-op
+router renormalizes in a different order at bf16, a numerics change of the same class as a batch-width change.
