@@ -1,0 +1,51 @@
+reset ok (attempt 1)
+=== autoport server (thinking ON) 2026-09-27T08:53:55+00:00
+server healthy 2026-09-27T09:03:40+00:00
+=== probe: thinking sampling (run-6 decoding) 2026-09-27T09:03:40+00:00
+PROBE hello      finish=stop    tokens=   667 reasoning=   2387 content=   47 win_rep=   1 line_run=  1 wall=101.7s
+PROBE ifeval-empty-0 finish=length  tokens= 16384 reasoning=  57594 content=    0 win_rep=   2 line_run=  1 wall=2221.5s
+PROBE ifeval-empty-6 finish=length  tokens= 16384 reasoning=  57669 content=    0 win_rep=  10 line_run=  1 wall=2221.5s
+PROBE ifeval-empty-15 finish=length  tokens= 16384 reasoning=  51819 content=    0 win_rep=  10 line_run=  1 wall=2221.5s
+PROBE ifeval-0   finish=length  tokens= 16384 reasoning=  57594 content=    0 win_rep=   2 line_run=  1 wall=2221.5s
+PROBE ifeval-1   finish=stop    tokens=  5899 reasoning=  23723 content=  864 win_rep=   2 line_run=  1 wall=821.0s
+PROBE ifeval-2   finish=stop    tokens=  3180 reasoning=   8494 content= 1135 win_rep=   1 line_run=  1 wall=454.0s
+PROBE ifeval-3   finish=stop    tokens=  2265 reasoning=   8763 content= 1056 win_rep=   2 line_run=  1 wall=326.7s
+PROBE ifeval-4   finish=stop    tokens=  4080 reasoning=  15098 content=   38 win_rep=   1 line_run=  1 wall=575.9s
+PROBE ifeval-5   finish=stop    tokens=  2738 reasoning=  10412 content=  445 win_rep=   1 line_run=  1 wall=392.8s
+PROBE ifeval-6   finish=length  tokens= 16384 reasoning=  57669 content=    0 win_rep=  10 line_run=  1 wall=2221.5s
+PROBE ifeval-7   finish=stop    tokens= 11691 reasoning=  41010 content=  540 win_rep=   2 line_run=  1 wall=1599.5s
+PROBE ifeval-8   finish=stop    tokens=  1119 reasoning=   3699 content=  642 win_rep=   1 line_run=  1 wall=165.6s
+PROBE ifeval-9   finish=stop    tokens= 13286 reasoning=  45007 content= 3746 win_rep=   2 line_run=  1 wall=1811.9s
+PROBE ifeval-10  finish=stop    tokens=  2547 reasoning=   7928 content= 3063 win_rep=   1 line_run=  1 wall=366.5s
+PROBE ifeval-11  finish=stop    tokens=  2143 reasoning=   7799 content=  990 win_rep=   1 line_run=  1 wall=309.4s
+PROBE ifeval-12  finish=stop    tokens=  2498 reasoning=   9481 content= 1538 win_rep=   1 line_run=  1 wall=359.4s
+PROBE ifeval-13  finish=stop    tokens=  4890 reasoning=  17696 content= 3682 win_rep=   1 line_run=  1 wall=685.5s
+PROBE ifeval-14  finish=stop    tokens=  1780 reasoning=   5967 content= 1399 win_rep=   1 line_run=  1 wall=258.4s
+PROBE ifeval-15  finish=length  tokens= 16384 reasoning=  51819 content=    0 win_rep=  10 line_run=  1 wall=2221.5s
+PROBE gpqa-0     finish=stop    tokens= 11930 reasoning=  29912 content= 2831 win_rep=   1 line_run=  1 wall=1631.9s
+PROBE gpqa-1     finish=length  tokens= 16384 reasoning=  52463 content=    0 win_rep=   2 line_run=  2 wall=2221.5s
+PROBE gpqa-2     finish=stop    tokens= 10835 reasoning=  23630 content= 2696 win_rep=   1 line_run=  1 wall=1484.2s
+PROBE gpqa-3     finish=length  tokens= 16384 reasoning=  56696 content= 1073 win_rep=   2 line_run=  1 wall=2221.5s
+=== probe: thinking greedy 2026-09-27T09:40:45+00:00
+PROBE hello      finish=stop    tokens=  1978 reasoning=   7369 content=   47 win_rep=   1 line_run=  1 wall=280.8s
+PROBE ifeval-empty-0 finish=length  tokens= 16384 reasoning=  58398 content=    0 win_rep=   7 line_run=  1 wall=1684.6s
+PROBE ifeval-empty-6 finish=stop    tokens=  2245 reasoning=   6586 content= 1484 win_rep=   1 line_run=  1 wall=311.8s
+PROBE ifeval-empty-15 finish=stop    tokens=  2623 reasoning=   8603 content=  496 win_rep=   1 line_run=  1 wall=356.3s
+PROBE ifeval-0   finish=length  tokens= 16384 reasoning=  58398 content=    0 win_rep=   7 line_run=  1 wall=1684.6s
+PROBE ifeval-1   finish=length  tokens= 16384 reasoning=  55956 content=    0 win_rep=  34 line_run=  1 wall=1684.6s
+PROBE ifeval-2   finish=length  tokens= 16384 reasoning=  52747 content=    0 win_rep=  10 line_run=  1 wall=1684.6s
+PROBE ifeval-3   finish=stop    tokens=  1551 reasoning=   5496 content=  914 win_rep=   1 line_run=  1 wall=222.4s
+PROBE ifeval-4   finish=stop    tokens=  1387 reasoning=   5267 content=   38 win_rep=   1 line_run=  1 wall=198.4s
+PROBE ifeval-5   finish=stop    tokens=  2904 reasoning=  11467 content=  463 win_rep=   1 line_run=  3 wall=389.1s
+PROBE ifeval-6   finish=stop    tokens=  2245 reasoning=   6586 content= 1484 win_rep=   1 line_run=  1 wall=311.8s
+PROBE ifeval-7   finish=length  tokens= 16384 reasoning=  53635 content=    0 win_rep=   1 line_run=  3 wall=1684.5s
+PROBE ifeval-8   finish=stop    tokens=  1502 reasoning=   5091 content=  469 win_rep=   2 line_run=  1 wall=215.0s
+PROBE ifeval-9   finish=stop    tokens= 15535 reasoning=  51364 content= 3429 win_rep=   2 line_run=  1 wall=1602.6s
+PROBE ifeval-10  finish=stop    tokens=  2331 reasoning=   7111 content= 3052 win_rep=   1 line_run=  1 wall=322.5s
+PROBE ifeval-11  finish=stop    tokens=  2379 reasoning=   8387 content=  942 win_rep=   1 line_run=  1 wall=328.1s
+PROBE ifeval-12  finish=stop    tokens=  3059 reasoning=  11865 content= 1536 win_rep=   1 line_run=  1 wall=407.4s
+PROBE ifeval-13  finish=stop    tokens=  3404 reasoning=  11863 content= 2642 win_rep=   1 line_run=  1 wall=440.9s
+PROBE ifeval-14  finish=stop    tokens=  4763 reasoning=  13153 content= 1522 win_rep=   1 line_run=  1 wall=570.5s
+PROBE ifeval-15  finish=stop    tokens=  2623 reasoning=   8603 content=  496 win_rep=   1 line_run=  1 wall=356.3s
+reset ok (attempt 1)
+=== done 2026-09-27T10:09:54+00:00

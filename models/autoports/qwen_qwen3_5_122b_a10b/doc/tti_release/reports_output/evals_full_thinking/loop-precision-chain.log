@@ -1,0 +1,25 @@
+reset ok (attempt 1)
+=== server policy=served (served) 2026-09-27T10:14:43+00:00
+server healthy 2026-09-27T10:29:59+00:00
+PRECISION_EFFECTIVE {"ccl_dtype": "bfp8", "co
+LOOPPROBE served         hello     finish=stop    tokens=   918 reasoning=  3366 content=   47 loop_onset_char=None wall=92.4s
+LOOPPROBE served         ifeval-0  finish=length  tokens=  8192 reasoning= 25198 content=    0 loop_onset_char=None wall=570.5s
+LOOPPROBE served         ifeval-1  finish=length  tokens=  8192 reasoning= 28824 content=    0 loop_onset_char=None wall=570.5s
+LOOPPROBE served         ifeval-2  finish=stop    tokens=  3078 reasoning=  8833 content=  875 loop_onset_char=None wall=304.6s
+LOOPPROBE served         ifeval-7  finish=length  tokens=  8192 reasoning= 27378 content=    0 loop_onset_char=None wall=570.5s
+LOOPPROBE served         ifeval-6  finish=stop    tokens=  3033 reasoning=  9684 content= 1475 loop_onset_char=None wall=299.2s
+LOOPPROBE served         ifeval-15 finish=length  tokens=  8192 reasoning= 28472 content=    0 loop_onset_char=15440 wall=570.5s
+reset ok (attempt 1)
+=== server policy=baseline_s7 (models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/baseline_s7.json) 2026-09-27T10:40:36+00:00
+server did not come up (baseline_s7)
+scripts/11-loop-precision-chain.sh: line 21: kill: (221962) - No such process
+reset ok (attempt 1)
+=== server policy=gdn_fp32 (models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/gdn_state_fp32.json) 2026-09-27T11:41:34+00:00
+server did not come up (gdn_fp32)
+scripts/11-loop-precision-chain.sh: line 21: kill: (411726) - No such process
+reset ok (attempt 1)
+=== server policy=kv_bf16 (models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/kv_bf16.json) 2026-09-27T12:42:32+00:00
+server did not come up (kv_bf16)
+scripts/11-loop-precision-chain.sh: line 21: kill: (605234) - No such process
+reset ok (attempt 1)
+=== done 2026-09-27T13:43:25+00:00

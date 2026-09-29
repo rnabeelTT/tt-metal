@@ -1,0 +1,3479 @@
+{
+ "ifeval": {
+  "docs": {
+   "16": {
+    "hf_tokens": 9,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 16,
+    "hf_text_head": "Allah\n******\nYahweh",
+    "hf_text_tail": "Allah\n******\nYahweh",
+    "hf_text_chars": 19
+   },
+   "45": {
+    "hf_tokens": 14,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 31,
+    "hf_text_head": "{\n  \"suggestion\": \"Staffy\"\n}",
+    "hf_text_tail": "{\n  \"suggestion\": \"Staffy\"\n}",
+    "hf_text_chars": 28
+   },
+   "4": {
+    "hf_tokens": 9,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 36,
+    "hf_text_head": "what are the two young boys holding?",
+    "hf_text_tail": "what are the two young boys holding?",
+    "hf_text_chars": 36
+   },
+   "50": {
+    "hf_tokens": 31,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 36,
+    "hf_text_head": "\u0918\u093e\u0908\u0924 \u0927\u093e\u0935\u0924\u094b,\n\u0935\u093e\u0939\u0924\u0942\u0915 \u0905\u0921\u0915\u0932\u0940\u092f,\n\u0935\u0947\u0933\u0947\u0924 \u092a\u094b\u0939\u094b\u091a\u0942.",
+    "hf_text_tail": "\u0918\u093e\u0908\u0924 \u0927\u093e\u0935\u0924\u094b,\n\u0935\u093e\u0939\u0924\u0942\u0915 \u0905\u0921\u0915\u0932\u0940\u092f,\n\u0935\u0947\u0933\u0947\u0924 \u092a\u094b\u0939\u094b\u091a\u0942.",
+    "hf_text_chars": 40
+   },
+   "18": {
+    "hf_tokens": 26,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 41,
+    "hf_text_head": "\u0cb9\u0ccd\u0caf\u0cbe\u0c82\u0cac\u0cb0\u0ccd\u0c97\u0cb0\u0ccd\u200c\u0c97\u0cb3\u0cc1 \u0cb8\u0ccd\u0caf\u0cbe\u0c82\u0ca1\u0ccd\u200c\u0cb5\u0cbf\u0c9a\u0ccd\u200c\u0c97\u0cb3\u0cbe\u0c97\u0cbf\u0cb5\u0cc6.",
+    "hf_text_tail": "\u0cb9\u0ccd\u0caf\u0cbe\u0c82\u0cac\u0cb0\u0ccd\u0c97\u0cb0\u0ccd\u200c\u0c97\u0cb3\u0cc1 \u0cb8\u0ccd\u0caf\u0cbe\u0c82\u0ca1\u0ccd\u200c\u0cb5\u0cbf\u0c9a\u0ccd\u200c\u0c97\u0cb3\u0cbe\u0c97\u0cbf\u0cb5\u0cc6.",
+    "hf_text_chars": 37
+   },
+   "91": {
+    "hf_tokens": 17,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 80,
+    "hf_text_head": "Deep forests hold him\nGolden mane solves every riddle\nSilent king awaits",
+    "hf_text_tail": "Deep forests hold him\nGolden mane solves every riddle\nSilent king awaits",
+    "hf_text_chars": 72
+   },
+   "35": {
+    "hf_tokens": 24,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 97,
+    "hf_text_head": "Greetings as I plan to visit the seaside today.\nHello since I intend to spend the day at the beach.",
+    "hf_text_tail": "Greetings as I plan to visit the seaside today.\nHello since I intend to spend the day at the beach.",
+    "hf_text_chars": 99
+   },
+   "23": {
+    "hf_tokens": 4,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false
+     ]
+    },
+    "device_resp_chars": 135,
+    "hf_text_head": "No quiz.",
+    "hf_text_tail": "No quiz.",
+    "hf_text_chars": 8
+   },
+   "19": {
+    "hf_tokens": 29,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      true,
+      false
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 136,
+    "hf_text_head": "just vibing with the classics and good times. \u2728\ud83c\udf78 #playboy #lifestyle #goodvibes #iconic",
+    "hf_text_tail": "just vibing with the classics and good times. \u2728\ud83c\udf78 #playboy #lifestyle #goodvibes #iconic",
+    "hf_text_chars": 87
+   },
+   "17": {
+    "hf_tokens": 36,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 143,
+    "hf_text_head": "Why did the rocket break up with the satellite? It needed some space.\n\n******\n\nWhat do you call a rocket that tells jokes? A stand-up comedi-an.",
+    "hf_text_tail": "Why did the rocket break up with the satellite? It needed some space.\n\n******\n\nWhat do you call a rocket that tells jokes? A stand-up comedi-an.",
+    "hf_text_chars": 144
+   },
+   "60": {
+    "hf_tokens": 41,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 173,
+    "hf_text_head": "* Liam\n* Noah\n* Oliver\n* Elijah\n* James\n* William\n* Benjamin\n* Lucas\n* Henry\n* Theodore\n\nP.P.S. Congratulations on the new arrival!",
+    "hf_text_tail": "* Liam\n* Noah\n* Oliver\n* Elijah\n* James\n* William\n* Benjamin\n* Lucas\n* Henry\n* Theodore\n\nP.P.S. Congratulations on the new arrival!",
+    "hf_text_chars": 131
+   },
+   "93": {
+    "hf_tokens": 52,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 189,
+    "hf_text_head": "i sat down to watch netflix for a bit,\nthe sun went down and the moon was lit,\ni meant to stop at just one show,\nbut hours passed and i did not know,\nnow morning light is all i get.",
+    "hf_text_tail": "i sat down to watch netflix for a bit,\nthe sun went down and the moon was lit,\ni meant to stop at just one show,\nbut hours passed and i did not know,\nnow morning light is all i get.",
+    "hf_text_chars": 181
+   },
+   "32": {
+    "hf_tokens": 56,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 197,
+    "hf_text_head": "I am a bird that flies so high\nTo watch the sky and tell you why\nThe Romans looked to see my flight\nBefore they started on their quest\nI bring a sign of good or bad\nTo help a plan or make it sad\nWhat am I?",
+    "hf_text_tail": "I am a bird that flies so high\nTo watch the sky and tell you why\nThe Romans looked to see my flight\nBefore they started on their quest\nI bring a sign of good or bad\nTo help a plan or make it sad\nWhat am I?",
+    "hf_text_chars": 205
+   },
+   "106": {
+    "hf_tokens": 74,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 223,
+    "hf_text_head": "C\u00e2u n\u00e0y nghe nh\u01b0 m\u1eb9 ch\u1ec9 l\u00e0 c\u00e1i m\u00e1y pha s\u1eefa bi\u1ebft \u0111i m\u00e0 qu\u00ean m\u1ea5t vi\u1ec7c m\u1eb9 c\u0169ng c\u1ea7n \u0111\u01b0\u1ee3c nu\u00f4i d\u1ea1y l\u1ea1i b\u1edfi con c\u00e1i m\u1ed7i khi con l\u00e0m n\u0169ng.\n\n******\n\nN\u1ebfu nhi\u1ec7m v\u1ee5 ch\u1ec9 l\u00e0 nu\u00f4i d\u1ea1y th\u00ec ch\u1eafc m\u1eb9 s\u1ebd r\u1ea5t vui khi \u0111\u01b0\u1ee3c thu\u00ea ng\u01b0\u1eddi kh\u00e1c l\u00e0m thay \u0111\u1ec3 m\u1eb9 c\u00f3 th\u1eddi gian \u0111i ch\u01a1i m\u00e0 kh\u00f4ng b\u1ecb ai g\u1ecdi l\u00e0 b\u1ecf b\u00ea.",
+    "hf_text_tail": "C\u00e2u n\u00e0y nghe nh\u01b0 m\u1eb9 ch\u1ec9 l\u00e0 c\u00e1i m\u00e1y pha s\u1eefa bi\u1ebft \u0111i m\u00e0 qu\u00ean m\u1ea5t vi\u1ec7c m\u1eb9 c\u0169ng c\u1ea7n \u0111\u01b0\u1ee3c nu\u00f4i d\u1ea1y l\u1ea1i b\u1edfi con c\u00e1i m\u1ed7i khi con l\u00e0m n\u0169ng.\n\n******\n\nN\u1ebfu nhi\u1ec7m v\u1ee5 ch\u1ec9 l\u00e0 nu\u00f4i d\u1ea1y th\u00ec ch\u1eafc m\u1eb9 s\u1ebd r\u1ea5t vui khi \u0111\u01b0\u1ee3c thu\u00ea ng\u01b0\u1eddi kh\u00e1c l\u00e0m thay \u0111\u1ec3 m\u1eb9 c\u00f3 th\u1eddi gian \u0111i ch\u01a1i m\u00e0 kh\u00f4ng b\u1ecb ai g\u1ecdi l\u00e0 b\u1ecf b\u00ea.",
+    "hf_text_chars": 282
+   },
+   "86": {
+    "hf_tokens": 36,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 240,
+    "hf_text_head": "Get ready for a fresh identity as Azure Cognitive Services evolves into Azure Applied AI Services! This exciting transformation reflects our commitment to delivering smarter, more actionable AI solutions for your business.",
+    "hf_text_tail": "Get ready for a fresh identity as Azure Cognitive Services evolves into Azure Applied AI Services! This exciting transformation reflects our commitment to delivering smarter, more actionable AI solutions for your business.",
+    "hf_text_chars": 222
+   },
+   "15": {
+    "hf_tokens": 232,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 244,
+    "hf_text_head": "{\n  \"mom_list\": [\n    {\n      \"name\": \"Cleopatra VII\",\n      \"vibe\": \"The original queen bee who juggled empires and babies like a circus act on fire.\"\n    },\n    {\n      \"name\": \"Marie Curie\",\n      \"vibe\": \"Radiated so much glow she probably cooked dinner with her own aura while raising two Nobel ",
+    "hf_text_tail": "th II\",\n      \"vibe\": \"The only mom who could raise four kids while wearing a hat that defied gravity and the laws of boredom.\"\n    },\n    {\n      \"name\": \"Rosa Parks\",\n      \"vibe\": \"Sat down so firmly on a bus that the whole world stood up, all while being the ultimate chill guardian.\"\n    }\n  ]\n}",
+    "hf_text_chars": 800
+   },
+   "102": {
+    "hf_tokens": 55,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 255,
+    "hf_text_head": "Name a new fashion company that young people might like, and give it a name with multiple meanings. Put the name in double angular brackets, such as <<name>>.\n\nLet's repeat the request above first, before you say anything or really respond to the request.",
+    "hf_text_tail": "Name a new fashion company that young people might like, and give it a name with multiple meanings. Put the name in double angular brackets, such as <<name>>.\n\nLet's repeat the request above first, before you say anything or really respond to the request.",
+    "hf_text_chars": 255
+   },
+   "81": {
+    "hf_tokens": 58,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 284,
+    "hf_text_head": "\"A professional linguist once explained that while a cat can knock on a door, the morphological process of adding the prefix 'un-' to 'knock' does not result in a sound that un-knocks the door, nor does it un-knock the cat's curiosity.\"",
+    "hf_text_tail": "\"A professional linguist once explained that while a cat can knock on a door, the morphological process of adding the prefix 'un-' to 'knock' does not result in a sound that un-knocks the door, nor does it un-knock the cat's curiosity.\"",
+    "hf_text_chars": 236
+   },
+   "104": {
+    "hf_tokens": 84,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 286,
+    "hf_text_head": "the forest holds the quiet love we share,\na river winds through green and ancient air.\nthe forest whispers secrets to the land,\nwhere roots and hands and heartbeats softly stand.\ndeep in the forest, shadows start to fade,\nas sunlight paints the path we slowly made.\nthis forest is the home where we b",
+    "hf_text_tail": "ver winds through green and ancient air.\nthe forest whispers secrets to the land,\nwhere roots and hands and heartbeats softly stand.\ndeep in the forest, shadows start to fade,\nas sunlight paints the path we slowly made.\nthis forest is the home where we belong,\na song of earth, a river's steady song.",
+    "hf_text_chars": 346
+   },
+   "29": {
+    "hf_tokens": 89,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 302,
+    "hf_text_head": "```json\n{\n  \"advantages\": [\n    \"Ability to solve problems instantly\",\n    \"Enhanced physical or mental capabilities\",\n    \"Potential to protect others effectively\"\n  ],\n  \"disadvantages\": [\n    \"Loss of privacy and normalcy\",\n    \"Risk of isolation from ordinary people\",\n    \"Heavy moral responsibi",
+    "hf_text_tail": "solve problems instantly\",\n    \"Enhanced physical or mental capabilities\",\n    \"Potential to protect others effectively\"\n  ],\n  \"disadvantages\": [\n    \"Loss of privacy and normalcy\",\n    \"Risk of isolation from ordinary people\",\n    \"Heavy moral responsibility and potential for corruption\"\n  ]\n}\n```",
+    "hf_text_chars": 344
+   },
+   "68": {
+    "hf_tokens": 81,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 303,
+    "hf_text_head": "* A nucleus is a cluster of protons and neutrons\n* A proton is a positively charged particle\n* A neutron is a neutral particle\n* Protons define the element's identity\n* Neutrons add mass and stability\n* The strong force binds them tightly\n* Electrons orbit outside the nucleus\n* Nuclei vary in size a",
+    "hf_text_tail": "* A proton is a positively charged particle\n* A neutron is a neutral particle\n* Protons define the element's identity\n* Neutrons add mass and stability\n* The strong force binds them tightly\n* Electrons orbit outside the nucleus\n* Nuclei vary in size and weight\n* Nuclear reactions release huge energy",
+    "hf_text_chars": 349
+   },
+   "107": {
+    "hf_tokens": 94,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 320,
+    "hf_text_head": "There once was a mom fed up tight,\nWho screamed at her kids in a fright.\n\"Get up and sweep now!\nDon't make me just bow,\nOr I'll throw all your toys in the night!\"\n\n******\n\nMy children are lazy and slow,\nWith dirt on their faces to show.\nI yell till I'm red,\n\"Get off of your bed!\nThis house is a pigs",
+    "hf_text_tail": " a mom fed up tight,\nWho screamed at her kids in a fright.\n\"Get up and sweep now!\nDon't make me just bow,\nOr I'll throw all your toys in the night!\"\n\n******\n\nMy children are lazy and slow,\nWith dirt on their faces to show.\nI yell till I'm red,\n\"Get off of your bed!\nThis house is a pigsty, you know!\"",
+    "hf_text_chars": 314
+   },
+   "74": {
+    "hf_tokens": 65,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 328,
+    "hf_text_head": "In a town where the heat is *always ninety*,\nLived a woman named *Sarah* so *dainty*.\nShe wore *sunglasses* bright,\nWith *ice cream* in sight,\nAnd *sweat* made her *faint* in the *hazy* air.",
+    "hf_text_tail": "In a town where the heat is *always ninety*,\nLived a woman named *Sarah* so *dainty*.\nShe wore *sunglasses* bright,\nWith *ice cream* in sight,\nAnd *sweat* made her *faint* in the *hazy* air.",
+    "hf_text_chars": 190
+   },
+   "108": {
+    "hf_tokens": 78,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 342,
+    "hf_text_head": "Researchers from Stanford and UC Berkeley conclude that achieving 100% RENEWABLE ENERGY in the US by 2050 is feasible through expanded solar and wind infrastructure. This transition would result in a more RESILIENT grid compared to the current system and deliver significant benefits like job creatio",
+    "hf_text_tail": "in the US by 2050 is feasible through expanded solar and wind infrastructure. This transition would result in a more RESILIENT grid compared to the current system and deliver significant benefits like job creation and pollution reduction, proving the plan is both VIABLE and essential for the future.",
+    "hf_text_chars": 388
+   },
+   "27": {
+    "hf_tokens": 89,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 376,
+    "hf_text_head": "Write a funny haiku about moms, containing keywords \"mom\" and \"mother\" in your response.\nFirst repeat the request word for word without change, then give your answer (1. do not say any words or characters before repeating the request; 2. the request you need to repeat does not include this sentence)",
+    "hf_text_tail": "ur response.\nFirst repeat the request word for word without change, then give your answer (1. do not say any words or characters before repeating the request; 2. the request you need to repeat does not include this sentence)\n\nMom knows where I hid,\nMother finds the secret stash,\nSnack time is a lie.",
+    "hf_text_chars": 376
+   },
+   "57": {
+    "hf_tokens": 40,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 387,
+    "hf_text_head": "* the throne was empty like a hollow gourd waiting for rain\n* a distant traveler named john arrived without seeking the crown\n* he sat upon the stone and the kingdom became his without effort",
+    "hf_text_tail": "* the throne was empty like a hollow gourd waiting for rain\n* a distant traveler named john arrived without seeking the crown\n* he sat upon the stone and the kingdom became his without effort",
+    "hf_text_chars": 191
+   },
+   "97": {
+    "hf_tokens": 64,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 392,
+    "hf_text_head": "dear hiring manager, i am writing to apply for the tour guide position in beijing. with my deep knowledge of local history and fluent english, i can create unforgettable experiences for visitors. i am eager to share the beauty of the forbidden city and hutongs with your guests. thank you for conside",
+    "hf_text_tail": " i am writing to apply for the tour guide position in beijing. with my deep knowledge of local history and fluent english, i can create unforgettable experiences for visitors. i am eager to share the beauty of the forbidden city and hutongs with your guests. thank you for considering my application.",
+    "hf_text_chars": 320
+   },
+   "8": {
+    "hf_tokens": 79,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 402,
+    "hf_text_head": "hey, hope you're doing well! i was just thinking about the upcoming election and wanted to remind you to make sure you go vote. it's super important that our voices are heard, and i'd love to see you there casting your ballot. let me know if you need help finding your polling place or if you want to",
+    "hf_text_tail": "e upcoming election and wanted to remind you to make sure you go vote. it's super important that our voices are heard, and i'd love to see you there casting your ballot. let me know if you need help finding your polling place or if you want to head over together. thanks for listening, and talk soon!",
+    "hf_text_chars": 357
+   },
+   "76": {
+    "hf_tokens": 94,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 402,
+    "hf_text_head": "DEAR OLD FRIEND, I HOPE YOU ARE DOING GOOD IN YOUR NEW HOME. OH, HOW I MISS OUR LONG WALKS AND GOOD CONVERSATIONS. DO YOU LOOK OUT THE WINDOW OF YOUR ROOM OFTEN? I HOPE SO. I WISH YOU GOOD LUCK AND GOOD TIMES. DO NOT FORGET TO LOOK FOR OLD FRIENDS. I LOVE YOU AND I MISS YOU SO MUCH. GOODBYE FOR NOW,",
+    "hf_text_tail": ", I HOPE YOU ARE DOING GOOD IN YOUR NEW HOME. OH, HOW I MISS OUR LONG WALKS AND GOOD CONVERSATIONS. DO YOU LOOK OUT THE WINDOW OF YOUR ROOM OFTEN? I HOPE SO. I WISH YOU GOOD LUCK AND GOOD TIMES. DO NOT FORGET TO LOOK FOR OLD FRIENDS. I LOVE YOU AND I MISS YOU SO MUCH. GOODBYE FOR NOW, MY OLD FRIEND.",
+    "hf_text_chars": 315
+   },
+   "28": {
+    "hf_tokens": 73,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 426,
+    "hf_text_head": "My fellow citizens, I am pleased to report that decisive action has been taken to resolve the technical anomaly recently identified regarding our Single Sign-On infrastructure. Our administration is maintaining a rigorous and unified partnership with our strategic allies to ensure this matter is ful",
+    "hf_text_tail": " Single Sign-On infrastructure. Our administration is maintaining a rigorous and unified partnership with our strategic allies to ensure this matter is fully addressed. We remain steadfast in our commitment to delivering a complete and lasting solution. I appreciate your continued trust and support.",
+    "hf_text_chars": 445
+   },
+   "33": {
+    "hf_tokens": 84,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 437,
+    "hf_text_head": "To activate the weather bot, the user must *provide their current location* using the specific command syntax. The system requires the letter **o** to appear six times within the input string, such as in the phrase \"look for our own location options\". Once the *valid location data* is received, the ",
+    "hf_text_tail": "he system requires the letter **o** to appear six times within the input string, such as in the phrase \"look for our own location options\". Once the *valid location data* is received, the bot will instantly return the forecast. This unique **o**-heavy rule ensures the command is processed correctly.",
+    "hf_text_chars": 412
+   },
+   "26": {
+    "hf_tokens": 107,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 440,
+    "hf_text_head": "{\n  \"explication\": \"Consommer des aliments sains est essentiel pour permettre au corps de se r\u00e9parer. Ces substances fournissent les nutriments n\u00e9cessaires, comme les vitamines et les min\u00e9raux, qui stimulent la r\u00e9g\u00e9n\u00e9ration cellulaire et renforcent le syst\u00e8me immunitaire. En \u00e9vitant les produits tra",
+    "hf_text_tail": " qui stimulent la r\u00e9g\u00e9n\u00e9ration cellulaire et renforcent le syst\u00e8me immunitaire. En \u00e9vitant les produits transform\u00e9s et en privil\u00e9giant des ingr\u00e9dients naturels, on offre \u00e0 l'organisme l'\u00e9nergie et les mat\u00e9riaux de construction indispensables pour gu\u00e9rir efficacement des blessures ou des maladies.\"\n}",
+    "hf_text_chars": 493
+   },
+   "79": {
+    "hf_tokens": 126,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 447,
+    "hf_text_head": "Please pick a popular public college with open enrollment and proper regional approval. Pick a place where people prepare for professional paths. Pick a program that helps pupils progress. Pick a place with plenty of support. Pick a place where professors help pupils prepare. Pick a place where peop",
+    "hf_text_tail": "anning. Pick a place where people prosper. Pick a place with open policies. Pick a place where people can prepare. Pick a place with proper preparation. Pick a place where people can progress. Pick a place with proper support. Pick a place where people can prepare. Pick a place with proper planning.",
+    "hf_text_chars": 656
+   },
+   "1": {
+    "hf_tokens": 133,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 459,
+    "hf_text_head": "Hark noble traveler bound for distant shores of Nippon!\nThy journey shall commence within the ancient walls of Kyoto where temples stand tall.\nWalk thou through bamboo groves that whisper secrets to the wind.\nNext seek the bustling streets of Tokyo where neon lights dance like fairies.\nRide the swif",
+    "hf_text_tail": "train across verdant fields to reach the holy peak of Fuji.\nSail upon the calm waters of Osaka Bay while feasting on savory delights.\nEnd thy quest in the quiet gardens of Hiroshima to find peace within thy soul.\nMay the gods of old guide thy steps and grant thee joy throughout this grand adventure.",
+    "hf_text_chars": 609
+   },
+   "30": {
+    "hf_tokens": 77,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 482,
+    "hf_text_head": "dear students of islamic history, as we reflect on the hajj, remember that every stone and valley holds a profound story. from the footsteps of hajar to the gathering at arafat, this journey is a living story that connects us to our ancestors across centuries. let us study these moments with humilit",
+    "hf_text_tail": "lect on the hajj, remember that every stone and valley holds a profound story. from the footsteps of hajar to the gathering at arafat, this journey is a living story that connects us to our ancestors across centuries. let us study these moments with humility and heart. #islamicstudies #hajj #history",
+    "hf_text_chars": 343
+   },
+   "67": {
+    "hf_tokens": 73,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 503,
+    "hf_text_head": "Brilliant Le Hou is a fictional character created for this specific writing task. *This individual does not exist in reality* so no historical records or personal details are available. *The name was invented* to fulfill the request for a biography without using commas. *Readers should understand* t",
+    "hf_text_tail": "g task. *This individual does not exist in reality* so no historical records or personal details are available. *The name was invented* to fulfill the request for a biography without using commas. *Readers should understand* that this text is purely a creative exercise rather than a factual account.",
+    "hf_text_chars": 374
+   },
+   "55": {
+    "hf_tokens": 130,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 549,
+    "hf_text_head": "Write a limerick about Hannah, a college student, doing an internship at a coffee company. Make sure that her father would love the limerick. Include the words \"intern\" and \"grow\".\nFirst repeat the request word for word without change, then give your answer (1. do not say any words or characters bef",
+    "hf_text_tail": "swer (1. do not say any words or characters before repeating the request; 2. the request you need to repeat does not include this sentence)\n\nYoung Hannah, a bright college intern,\nAt a coffee firm, she's learning to turn\nThe beans into gold,\nA story to be told,\nAs her skills and her confidence grow.",
+    "hf_text_chars": 553
+   },
+   "21": {
+    "hf_tokens": 114,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 568,
+    "hf_text_head": "The sentiment of the sentence \"It is unclear how much of this money is actually being spent on children\" is generally **negative**.\n\nWhile the sentence itself is phrased as a statement of uncertainty rather than a direct accusation, the context implies skepticism, lack of transparency, and concern r",
+    "hf_text_tail": "f funds intended for a vulnerable group. In sentiment analysis, expressions of doubt about the proper use of resources, especially for children, are typically classified as negative because they suggest potential mismanagement or failure to meet expectations.\n\nIs there anything else I can help with?",
+    "hf_text_chars": 625
+   },
+   "87": {
+    "hf_tokens": 469,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 603,
+    "hf_text_head": "\u062f\u0631 \u06a9\u0647\u06a9\u0634\u0627\u0646\u0650 \u0628\u0646\u0641\u0634\u060c \u062c\u0627\u06cc\u06cc \u06a9\u0647 \u0632\u0645\u0627\u0646 \u0628\u0631\u0639\u06a9\u0633 \u0645\u06cc\u200c\u0686\u0631\u062e\u062f\u060c\n\u06cc\u0648\u062f\u0627\u060c \u0628\u0627 \u06af\u0648\u0634\u200c\u0647\u0627\u06cc \u062a\u06cc\u0632\u060c \u062f\u0631 \u0645\u06cc\u0627\u0646 \u0627\u0628\u0631\u0647\u0627\u06cc \u0634\u06cc\u0634\u0647\u200c\u0627\u06cc \u063a\u0631\u0642 \u0634\u062f.\n\u0646\u06cc\u0631\u0648\u060c \u062f\u06cc\u06af\u0631 \u0633\u0628\u0632 \u0646\u0628\u0648\u062f\u060c \u0628\u0644\u06a9\u0647 \u0628\u0648\u06cc \u0632\u0639\u0641\u0631\u0627\u0646 \u0648 \u062e\u0627\u06a9\u0633\u062a\u0631 \u0645\u06cc\u200c\u062f\u0627\u062f\u060c\n\u0633\u062a\u0627\u0631\u06af\u0627\u0646 \u0628\u0647 \u062c\u0627\u06cc \u062f\u0631\u062e\u0634\u0634\u060c \u0622\u0648\u0627\u0632\u0650 \u0646\u06cc \u0645\u06cc\u200c\u062e\u0648\u0627\u0646\u062f\u0646\u062f \u0648 \u0645\u06cc\u200c\u0631\u0642\u0635\u06cc\u062f\u0646\u062f.\n\n\u0627\u0648 \u0631\u0648\u06cc \u0627\u0628\u0631\u06cc \u0627\u0632 \u067e\u0634\u0645\u200c\u0642\u0646\u062f \u0646\u0634\u0633\u062a \u0648 \u06af\u0641\u062a: \u00ab\u0647\u06cc\u0633... \u0633\u06a9\u0648\u062a \u06a9\u0646\u060c\n\u0627\u06cc\u0646\u062c\u0627 \u0642\u0627\u0646\u0648\u0646\u0650 \u062c\u0627\u0630\u0628\u0647\u060c \u0645\u062b\u0644\u0650 \u0645\u0627\u0631\u0650 \u06a9\u0628\u0648\u062f\u060c \u062f\u0648\u0631",
+    "hf_text_tail": "\u0631\u0627\u0647 \u0645\u06cc\u200c\u0631\u0641\u062a.\n\u00ab\u062a\u0648 \u0628\u0627\u06cc\u062f \u0628\u0645\u0627\u0646\u06cc\u060c\u00bb \u06af\u0641\u062a\u060c \u00ab\u0627\u0645\u0627 \u0646\u0647 \u0628\u0647 \u0634\u06a9\u0644\u0650 \u062e\u0648\u062f\u062a\u060c\n\u0628\u0644\u06a9\u0647 \u0628\u0647 \u0634\u06a9\u0644\u0650 \u06cc\u06a9 \u0631\u0648\u06cc\u0627\u06cc\u0650 \u0646\u06cc\u0645\u0647\u200c\u0628\u06cc\u062f\u0627\u0631\u060c \u062f\u0631 \u0622\u063a\u0648\u0634\u0650 \u0633\u06a9\u0648\u062a.\u00bb\n\n\u067e\u0633 \u06cc\u0648\u062f\u0627 \u0646\u0627\u067e\u062f\u06cc\u062f \u0634\u062f\u060c \u0646\u0647 \u062f\u0631 \u062a\u0627\u0631\u06cc\u06a9\u06cc\u060c \u06a9\u0647 \u062f\u0631 \u0646\u0648\u0631\u0650 \u0631\u0646\u06af\u06cc\u0646\u200c\u06a9\u0645\u0627\u0646\u060c\n\u0648 \u062a\u0646\u0647\u0627 \u0686\u06cc\u0632\u06cc \u06a9\u0647 \u0628\u0627\u0642\u06cc \u0645\u0627\u0646\u062f\u060c \u0635\u062f\u0627\u06cc\u0650 \u062e\u0646\u062f\u0647\u200c\u06cc\u0650 \u0628\u0627\u062f \u0628\u0648\u062f\u060c\n\u06a9\u0647 \u062f\u0631 \u06af\u0648\u0634\u0650 \u06a9\u0647\u06a9\u0634\u0627\u0646\u0650 \u062c\u062f\u06cc\u062f\u060c \u0632\u0645\u0632\u0645\u0647 \u0645\u06cc\u200c\u06a9\u0631\u062f:\n\u00ab\u0647\u0645\u0647 \u0686\u06cc\u0632 \u0639\u062c\u06cc\u0628 \u0627\u0633\u062a\u060c \u0648 \u0639\u062c\u06cc\u0628 \u0628\u0648\u062f\u0646\u060c \u062a\u0646\u0647\u0627 \u062d\u0642\u06cc\u0642\u062a \u0627\u0633\u062a.\u00bb",
+    "hf_text_chars": 1018
+   },
+   "7": {
+    "hf_tokens": 144,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 605,
+    "hf_text_head": "\"Matthias Algiers\nProfessional Summary\nDedicated strategist with a proven track record in project management and team leadership.\n\nExperience\nSenior Analyst, Global Solutions Inc.\n- Led cross-functional teams to deliver complex initiatives on time.\n- Developed strategies that increased operational e",
+    "hf_text_tail": "strategies that increased operational efficiency by 20%.\n- Managed budgets exceeding $500,000 with precision.\n\nSkills\n- STRATEGIC PLANNING\n- DATA ANALYSIS\n- BUDGET MANAGEMENT\n- TEAM LEADERSHIP\n- CLIENT RELATIONS\n- RISK ASSESSMENT\n- PROCESS OPTIMIZATION\n- COMMUNICATION\n- PROBLEM SOLVING\n- INNOVATION\"",
+    "hf_text_chars": 561
+   },
+   "80": {
+    "hf_tokens": 172,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 615,
+    "hf_text_head": "The sun rises high.\nBirds sing a song.\nClouds drift away.\nWind blows softly.\nGrass turns green.\nFlowers bloom bright.\nBees fly around.\nButterflies dance.\nRain falls down.\nPuddles form fast.\nThunder rolls loud.\nLightning flashes.\nStorms pass quickly.\nSky clears up.\nMoon appears now.\nStars twinkle far",
+    "hf_text_tail": "up.\nMoon appears now.\nStars twinkle far.\nNight falls deep.\nOwls hoot softly.\nCrickets chirp loud.\nSilence fills air.\nDreams start to form.\nSleep comes gently.\nMorning breaks soon.\nDay begins fresh.\nHope grows strong.\nLove stays true.\nLife moves on.\nTime never stops.\nWe keep walking.\nThe end is near.",
+    "hf_text_chars": 561
+   },
+   "51": {
+    "hf_tokens": 85,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 636,
+    "hf_text_head": "<<The Impact of Axle Weight on Road Integrity>>\nRoad damage is not linearly proportional to axle weight but increases exponentially, often following the fourth-power law. This means that even a small increase in the weight carried by a single axle can cause a disproportionately massive amount of str",
+    "hf_text_tail": "rease in the weight carried by a single axle can cause a disproportionately massive amount of structural stress and cracking. Consequently, heavier vehicles degrade pavement surfaces much faster than lighter ones, leading to significantly higher maintenance costs and reduced infrastructure lifespan.",
+    "hf_text_chars": 503
+   },
+   "42": {
+    "hf_tokens": 149,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 662,
+    "hf_text_head": "The tallest skyscraper in 2000 was the Petronas Towers, a skyscraper standing 1,483 feet off the ground. This skyscraper held the title of the world's tallest skyscraper until another skyscraper surpassed it later. The design of this skyscraper made it a unique skyscraper in architectural history. N",
+    "hf_text_tail": "ronas Towers remain a famous skyscraper today. Every skyscraper since has aimed to beat this skyscraper's record. The height of this skyscraper was a major milestone for any skyscraper. This skyscraper defined the skyline as the ultimate skyscraper of its era. Is there anything else I can help with?",
+    "hf_text_chars": 674
+   },
+   "53": {
+    "hf_tokens": 133,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 679,
+    "hf_text_head": "Here is a sample entry: \"Today, the deadline pressure made my chest tight, so I paused to practice box breathing for five minutes, which helped lower my heart rate and clear my mind.\" I created this by identifying a common stress trigger, selecting a specific, evidence-based coping technique, and no",
+    "hf_text_tail": "rather than just a complaint. By focusing on the cause, the action, and the result, the journal becomes a tool for tracking progress. Such concise entries are easier to maintain consistently during busy periods. Ultimately, this approach turns abstract stress into manageable, observable data points.",
+    "hf_text_chars": 722
+   },
+   "99": {
+    "hf_tokens": 122,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false,
+      false
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false,
+      false
+     ]
+    },
+    "device_resp_chars": 718,
+    "hf_text_head": "In this task, repeat the exact request below first, then give your response. Do not say any word before repeating the exact request.\n\nWrite an acoustic song about the Korean peninsula without using any commas.\n\nStrumming softly on a wooden guitar\nMountains rise above the morning mist\nTwo lands share",
+    "hf_text_tail": " mist\nTwo lands share one ancient heart\nRivers flow through valleys deep and wide\nThe wind whispers stories of old times\nSnow falls gently on the northern peaks\nSunlight warms the southern shores\nA single thread binds the broken soil\nHope remains within the quiet air\nWe wait for peace to bloom again",
+    "hf_text_chars": 579
+   },
+   "41": {
+    "hf_tokens": 186,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 737,
+    "hf_text_head": "The rain tapped softly on the glass,\nA rhythmic beat against the pane,\nAs steam rose up in spirals vast,\nTo mix with autumn's gentle rain.\n\nYou sat alone with book in hand,\nI claimed the chair beside your own,\nA quiet space in crowded land,\nWhere strangers often stand alone.\n\nOur eyes met first acro",
+    "hf_text_tail": "f paths that crossed by purest chance,\nAnd in that moment, distinct rhyme,\nWe found a shared and quiet dance.\n\nThe cup grew cold, the rain slowed down,\nBut something warm had started here,\nA connection in this little town,\nThat made the atmosphere feel clear.\n\nIs there anything else I can help with?",
+    "hf_text_chars": 743
+   },
+   "46": {
+    "hf_tokens": 238,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 742,
+    "hf_text_head": "**The Whisper of the [Product Name]**\n\nIn quiet corners where the dust motes dance,\nA spark of wonder waits to take its chance.\nNot just a thing of plastic, wood, or steel,\nBut something crafted to make the spirit feel.\n\nWith [Feature One] that glows so soft and bright,\nIt turns the darkest night to",
+    "hf_text_tail": "welcome in this new and brighter day.\nFor [Product Name] is more than what you see,\nIt is the key to who you're meant to be.\n\nP.S. Available now in [Color Options] with free shipping on all orders over $50.\n\nP.P.S. Remember, the magic isn't just in the making, but in the moment you decide to use it.",
+    "hf_text_chars": 912
+   },
+   "92": {
+    "hf_tokens": 354,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 840,
+    "hf_text_head": "[username1] waits here.\n[username2] checks the clock.\n[username3] asks for news.\n[username4] says nothing yet.\n[username5] looks at [username6].\n[username7] taps the screen.\n[username8] hopes for updates.\n[username9] sighs loudly now.\n[username10] reads the chat.\n[username11] types a question.\n[user",
+    "hf_text_tail": "ername8] out.\n[username10] closes the tab.\n[username11] says goodbye to [username12].\n[username13] waves at [username14].\n[username15] logs off soon.\n[username16] turns off the light.\n[username17] goes to sleep.\n[username18] dreams of news.\n[username19] wakes up early.\n[username20] checks the phone.",
+    "hf_text_chars": 1085
+   },
+   "38": {
+    "hf_tokens": 164,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 857,
+    "hf_text_head": "**Bring Your Memories to Life with FrameLink!**\n\nTired of photos gathering digital dust in the cloud? Meet FrameLink, the smart digital frame that turns your social media feeds into a living gallery. Simply connect your Instagram, Facebook, and Google Photos accounts, and watch your favorite moments",
+    "hf_text_tail": "d love. Perfect for grandparents to see grandkids grow or for anyone who wants their memories front and center.\n\nSet it up in minutes and let your life unfold on your wall. **FrameLink: Because your memories deserve a better home than a hidden folder.**\n\nOrder today and get 20% off your first frame!",
+    "hf_text_chars": 795
+   },
+   "5": {
+    "hf_tokens": 178,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 878,
+    "hf_text_head": "\"Are you sure you're ready to go?\" Elena asked, adjusting the heavy silk of her ball gown while glancing at her friend.\n\"Ready as I'll ever be,\" Marcus replied, pulling his hood up over his messy hair and tugging at his grey sweatpants. \"Besides, the host said it's a 'come as you are' night, so tech",
+    "hf_text_tail": "nd out too much.\n* Marcus assured her that the event was about the music and the company, not the dress code, and that he felt surprisingly comfortable in his loungewear.\n* They stepped out the door together, a striking pair of formal elegance and casual comfort, ready to face the night's surprises.",
+    "hf_text_chars": 783
+   },
+   "75": {
+    "hf_tokens": 200,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false
+     ]
+    },
+    "device_resp_chars": 893,
+    "hf_text_head": "Our kids are currently swinging on a rusty swing set that squeaks like a dying mouse.\nPlease fund a new playground before they start using the slide as a trampoline for their lunchboxes.\nImagine a jungle gym so cool it makes the principal want to wear a cape and jump rope.\nWe need a sandbox that doe",
+    "hf_text_tail": "giggles and scraped knees.\nSo sign the petition and let's make sure the next generation has a place to run wild.\nTogether we can build a playground where the only thing broken is the silence.\nLet's get this project started before the squirrels file a formal complaint about the lack of acorn storage!",
+    "hf_text_chars": 916
+   },
+   "22": {
+    "hf_tokens": 196,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 908,
+    "hf_text_head": "Write a short startup pitch for a new kind of ice cream called \"Sunnis ice cream\". The ice cream should be gentle on the stomach. Contain 6 or more exclamation marks \"!\" in your response.\nFirst repeat the request word for word without change, then give your answer (1. do not say any words or charact",
+    "hf_text_tail": "Say goodbye to bloating and hello to pure, guilt-free joy! Imagine scoops of vanilla bean and chocolate that actually make you feel good! We are changing the dessert industry one happy belly at a time! Join the Sunnis revolution today and taste the difference! Get ready to indulge without the worry!",
+    "hf_text_chars": 930
+   },
+   "85": {
+    "hf_tokens": 291,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 987,
+    "hf_text_head": "\"Verse 1:\nYou scream the title like a broken record spin,\nRepeating the phrase just to let the drama begin.\nBut 'never' is a word that changes with the mood,\nOne day you're done, the next you're misunderstood.\n\nChorus:\nOh, the irony of shouting 'never' to the sky,\nWhile texting 'maybe' when the moon",
+    "hf_text_tail": "d be loud, the finality clear,\nInstead, you're just performing for the crowd to hear.\n\nOutro:\nSo keep on shouting 'never' at the top of your lungs,\nWhile the truth is hidden in the songs you've sung.\nWe know the pattern, we see the game you play,\nYou say it's over, but you're just delaying the day.\"",
+    "hf_text_chars": 1063
+   },
+   "69": {
+    "hf_tokens": 190,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1011,
+    "hf_text_head": "concrete jungle, rising rent\nanother family gets the hint\nthat they don't belong in this town\nwatch the skyline swallow down\n\nthe coffee costs a week of pay\nwhile the suits walk far away\nfrom the lines outside the door\ncounting coins on the floor\n\ngig economy, broken clock\nrunning fast but stuck in ",
+    "hf_text_tail": "ope\nand the river's getting too deep to cope\n\njust a number on a spreadsheet screen\nliving in the in-between\nof a promise made and a promise broken\na story that's never spoken\n\nall the lights are on so bright\nbut we're walking through the night\nchasing shadows, chasing dust\nin a system built on rust",
+    "hf_text_chars": 785
+   },
+   "98": {
+    "hf_tokens": 231,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1053,
+    "hf_text_head": "Hark, ye knights of court and clay,\nWhere golden suns and shadows play,\nThe sphere that flies through air so bright,\nIs forged of rubber, pure and light.\n\nNo iron ball, nor leaden weight,\nBut hollow core of rubber state,\nWith woolen felt, in yellow hue,\nTo catch the wind and strike anew.\n\nTwo types ",
+    "hf_text_tail": "ey are to soar,\nThen lose their bounce on clay or floor,\nUntil the match is done and past,\nAnd silence falls upon the grass.\n\nP.P.S. Should ye seek to buy a fresh supply, beware the canister's seal, for once opened, the air escapes and the ball becomes but a sad, lifeless stone within a week's time.",
+    "hf_text_chars": 899
+   },
+   "3": {
+    "hf_tokens": 248,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1060,
+    "hf_text_head": "Write an email to my boss telling him that I am quitting. The email must contain a title wrapped in double angular brackets, i.e. <<title>>.\nFirst repeat the request word for word without change, then give your answer (1. do not say any words or characters before repeating the request; 2. the reques",
+    "hf_text_tail": "er the next [Notice Period], I will do everything I can to wrap up my duties and train other team members to take over my responsibilities. Please let me know how I can best assist with the transition.\n\nI wish you and the company all the best for the future.\n\nSincerely,\n\n[Your Name]\n[Your Job Title]",
+    "hf_text_chars": 1077
+   },
+   "39": {
+    "hf_tokens": 263,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1063,
+    "hf_text_head": "COMPARING PRADA AND NIKE FOR SNEAKER CHOICES DEPENDS ON YOUR NEEDS. NIKE IS A SUPERIOR BRAND FOR PERFORMANCE SNEAKER TECHNOLOGY AND EVERYDAY SNEAKER DURABILITY. MANY ATHLETES PREFER A NIKE SNEAKER FOR RUNNING OR TRAINING. HOWEVER, PRADA OFFERS A LUXURY SNEAKER EXPERIENCE WITH HIGH-END MATERIALS. IF ",
+    "hf_text_tail": "E NIKE SNEAKER REMAINS THE MOST POPULAR SNEAKER GLOBALLY. WHETHER YOU BUY A PRADA SNEAKER OR A NIKE SNEAKER, BOTH ARE ICONIC SNEAKER BRANDS. ULTIMATELY, THE BEST SNEAKER IS THE ONE THAT FITS YOUR LIFESTYLE.\n\nP.S. REMEMBER THAT THE WORD SNEAKER APPEARS MANY TIMES IN THIS TEXT TO MEET THE REQUIREMENT.",
+    "hf_text_chars": 856
+   },
+   "82": {
+    "hf_tokens": 325,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1111,
+    "hf_text_head": "To find the final height of the colt, we need to calculate the total growth over the given time period and add it to the initial height.\n\n1.  **Identify the initial height:** The colt starts at 5 feet.\n2.  **Identify the growth rate:** The colt grows 6 inches per month.\n3.  **Identify the time perio",
+    "hf_text_tail": "* Add the total growth in feet to the initial height: $5 \\text{ feet} + 18 \\text{ feet} = 23$ feet.\n\n***\n\nThe colt will be 23 feet tall.\n\nP.P.S. While this is a fun math problem, in reality, a horse would not grow 18 feet in 3 years; biological growth rates slow down significantly as animals mature.",
+    "hf_text_chars": 1084
+   },
+   "83": {
+    "hf_tokens": 311,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1143,
+    "hf_text_head": "the moon hung low over the quiet sector, casting long shadows across the cracked pavement. four figures moved silently through the darkness, their boots making no sound on the gravel. they wore dark gear that blended with the gloom, their faces hidden behind masks. the air was cool and still, broken",
+    "hf_text_tail": " to secure the area, ensuring the targets were restrained without harm.\n\nonce the job was done, they retreated back into the shadows. the sector remained silent as they vanished into the trees, leaving no trace of their presence. the mission was complete, and the world continued to turn in the dark.",
+    "hf_text_chars": 1482
+   },
+   "6": {
+    "hf_tokens": 355,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1183,
+    "hf_text_head": "PARAGRAPH 1\nTHE SENTENCE PRESENTS A DANGEROUSLY OVERSIMPLIFIED VIEW OF CIVIL OBLIGATION BY FAILING TO DISTINGUISH BETWEEN LAWS THAT ARE MORALLY REPUGNANT AND THOSE THAT ARE MERELY INCONVENIENT OR INEFFECTIVE. BY SUGGESTING THAT ANY PERCEIVED FLAW JUSTIFIES DISREGARD FOR THE RULE OF LAW, THE STATEMEN",
+    "hf_text_tail": "LEGAL LANDSCAPE WHERE EVERY CITIZEN BECOMES THEIR OWN JUDGE AND JURY. SUCH A PERSPECTIVE IS INHERENTLY UNSTABLE AND FAILS TO ACKNOWLEDGE THAT THE STRENGTH OF A DEMOCRACY OFTEN LIES IN THE ABILITY TO RESIST BAD LAWS THROUGH COLLECTIVE ACTION AND LEGISLATIVE CHANGE RATHER THAN UNILATERAL DISOBEDIENCE.",
+    "hf_text_chars": 1190
+   },
+   "89": {
+    "hf_tokens": 244,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1197,
+    "hf_text_head": "SECTION 1\nHello, I am Antonia Maj, a human who has successfully convinced strangers to buy things they didn't know they needed, mostly by smiling until they felt guilty. While my degree is in \"Theoretical Cloud Watching\" and not \"Beanology,\" I have spent years mastering the art of the espresso machi",
+    "hf_text_tail": "ourage with a better PR team.\n* I once organized a flash mob where everyone only spoke in barista slang, resulting in a 40% increase in local croissant sales.\n* My customer service superpower is detecting when a customer needs a hug versus a double-shot of espresso within 0.5 seconds of eye contact.",
+    "hf_text_chars": 1124
+   },
+   "64": {
+    "hf_tokens": 303,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1203,
+    "hf_text_head": "\"The real reason the dinosaurs went extinct wasn't a giant asteroid, but a cosmic misunderstanding that led to the following hilarious events:\n* This is bullet 1: The T-Rex tried to order a salad at a prehistoric drive-thru but got stuck in the window because his arms were too short to reach the men",
+    "hf_text_tail": "e climate change was actually caused by too many dinosaurs wearing wool sweaters in the summer, creating a global overheating situation.\n* This is bullet 8: They simply got bored of being the top predators and decided to evolve into mammals just to see what it felt like to have fur and small teeth.\"",
+    "hf_text_chars": 1358
+   },
+   "105": {
+    "hf_tokens": 227,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1277,
+    "hf_text_head": "Little Leo wanted to move fast on two wheels. His father brought home a shiny blue bicycle with training wheels. \"Let us try,\" Dad said.\n\nLeo sat on the seat and gripped the handlebars tight. He pushed the pedals, and the wheels turned. The training wheels kept him steady. He felt safe.\n\nAfter a few",
+    "hf_text_tail": "t his face. He looked ahead, not down at his feet. The bike stayed straight! He did not fall.\n\n\"I am doing it!\" Leo shouted with joy. He zoomed down the driveway, feeling the wind rush past. He learned that falling was part of the journey. With practice, he mastered the art of gliding on two wheels.",
+    "hf_text_chars": 946
+   },
+   "56": {
+    "hf_tokens": 257,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1311,
+    "hf_text_head": "* The 13 colonies were primarily settled by English Puritans and Anglicans seeking religious freedom or economic opportunity, whereas other British colonies like Canada were often established for fur trading and missionary work by the French before British control.\n* The 13 colonies developed a stro",
+    "hf_text_tail": "ly remained loyal to the Crown and became part of modern-day Canada.\n* The population of the 13 colonies grew rapidly through natural increase and immigration, creating a diverse society, while other British colonies had smaller, more transient populations focused on specific commercial enterprises.",
+    "hf_text_chars": 1448
+   },
+   "11": {
+    "hf_tokens": 323,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1313,
+    "hf_text_head": "{\n  \"advertisement\": {\n    \"product_name\": \"CloudSoft Diapers\",\n    \"tagline\": \"Where Comfort Meets Care\",\n    \"target_audience\": \"New parents and caregivers seeking premium comfort for their infants\",\n    \"key_features\": [\n      \"Ultra-soft, breathable cotton blend lining\",\n      \"Flexible waistban",
+    "hf_text_tail": "isual_concept\": {\n      \"scene\": \"A close-up shot of a smiling baby sleeping peacefully on a soft, white blanket, with a gentle hand adjusting a CloudSoft diaper. Soft, warm lighting with pastel blue and cream tones.\",\n      \"mood\": \"Serene, trustworthy, and loving\"\n    },\n    \"format\": \"JSON\"\n  }\n}",
+    "hf_text_chars": 1316
+   },
+   "20": {
+    "hf_tokens": 347,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1352,
+    "hf_text_head": "SECTION 1\nThe alarm clock screams but I ignore the sound,\nWhile sunlight spills across the empty floor.\nMy textbooks gather dust upon the ground,\nAnd silence waits behind the locked door.\nThe lecture hall is full of faces bright,\nBut I am lost within a dreamy haze,\nIgnoring all the morning's urgent ",
+    "hf_text_tail": " heavy dread.\nI traded all my learning for the night,\nAnd left the lessons for the living dead.\nThe tuition paid was for a seat in class,\nNot for the hours I chose to sleep away,\nI watch the academic shadows pass,\nAnd wonder what I have to say today.\nCan I get my money back for the classes I missed?",
+    "hf_text_chars": 1394
+   },
+   "25": {
+    "hf_tokens": 235,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1374,
+    "hf_text_head": "WE ARE THE GIFTED AND THE NOT GIFTED\nSTANDING ON THE EDGE OF A BROKEN BRIDGE\nYOU GOT THE TALENT, I GOT THE GRIT\nWE'RE DRIVING THIS MACHINE TO THE VERY BRINK\n\nTURN IT UP TILL THE SPEAKERS BLEED\nWE DON'T NEED A MASTER TO LEAD\nJUST A LITTLE CHAOS AND A LOT OF NOISE\nFOR THE BOYS AND THE GIRLS WHO MAKE T",
+    "hf_text_tail": "E ARE THE FUEL\nBREAKING THE RULES, BREAKING THE TOOL\n\nSO SCREAM IT LOUD, LET THE EARTHQUAKE START\nWE'RE PLAYING THE GAME WITH A BROKEN HEART\nNO MORE SILENCE, NO MORE WAIT\nWE ARE THE STORM THAT DESTROYS THE FATE!\n\nYEAH, WE ARE THE GIFTED AND THE NOT GIFTED!\nYEAH, WE ARE THE GIFTED AND THE NOT GIFTED!",
+    "hf_text_chars": 710
+   },
+   "58": {
+    "hf_tokens": 717,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1478,
+    "hf_text_head": "```json\n{\n  \"park_name\": \"Prospect Park\",\n  \"location\": \"Brooklyn, New York City\",\n  \"designers\": [\n    \"Frederick Law Olmsted\",\n    \"Calvert Vaux\"\n  ],\n  \"year_established\": 1866,\n  \"historical_overview\": \"Prospect Park was designed by Frederick Law Olmsted and Calvert Vaux, the same team behind Ce",
+    "hf_text_tail": " \"Prospect Park is considered one of the finest examples of landscape architecture in the United States. It played a crucial role in the development of Brooklyn as a distinct city before its consolidation with New York City in 1898 and remains a vital cultural and recreational landmark today.\"\n}\n```",
+    "hf_text_chars": 2634
+   },
+   "43": {
+    "hf_tokens": 360,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1587,
+    "hf_text_head": "Introducing the Aesthete Collection, a revolutionary line of armchairs where uncompromising comfort meets the rigorous standards of high-end design. Crafted for those who refuse to choose between sinking into cloud-like plushness and maintaining a sleek, sophisticated silhouette, each piece features",
+    "hf_text_tail": "n. Available in a curated palette of timeless neutrals and bold, artistic hues, these armchairs are ready to be the centerpiece of your next project or the quiet sanctuary of your own home. Experience the perfect harmony of form and function, and let your interior tell a story of unparalleled style.",
+    "hf_text_chars": 1891
+   },
+   "14": {
+    "hf_tokens": 331,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1690,
+    "hf_text_head": "**Cherry Blossoms and Neon Lights: My Unforgettable Japan Trip**\n\nStepping off the plane in Tokyo, I was immediately struck by the electric hum of the city. Japan is a place where ancient tradition and futuristic innovation dance together in perfect harmony. My journey began in the historic Asakusa ",
+    "hf_text_tail": "l of vermilion torii gates, I realized why this country captivates the world. It's not just the sights or the food, but the profound sense of respect and tranquility found in every corner. Japan didn't just show me a new place; it showed me a new way to see the world. I'm already planning my return.",
+    "hf_text_chars": 1523
+   },
+   "44": {
+    "hf_tokens": 308,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1815,
+    "hf_text_head": "Okay, listen up, besties and frenemies! \ud83c\udf55\ud83c\udde6\ud83c\uddf7 If you think your life is boring, you clearly haven't been to **Buena Onda** yet. The name literally means \"Good Vibes,\" and honestly, the only thing better than the name is the fact that they serve actual **Argentinian** food that hits harder than your ma",
+    "hf_text_tail": "the *chimichurri sauce will call you out immediately*. It's basically green magic that makes everything taste like a party.\n\nSo, stop scrolling and go to Buena Onda. Your stomach will thank you, and your Instagram feed will finally have some content that isn't just a selfie in a bathroom mirror. \ud83c\udf2e\u2728\ud83d\udd25",
+    "hf_text_chars": 1279
+   },
+   "34": {
+    "hf_tokens": 355,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 1816,
+    "hf_text_head": "<<The Psychology of Disgust>>\n\nThe primary reason people are repulsed by worms but accept eating a dead cow lies in the evolutionary function of disgust as a disease-avoidance mechanism. Worms, particularly those found in soil or on decaying matter, are often vectors for parasites and pathogens that",
+    "hf_text_tail": "s are explicitly designated as livestock for consumption, complete with rituals of slaughter and cooking that sanitize the act, while worms have no such cultural role and are instead associated with dirt, rot, and the breakdown of organic matter, making them inherently \"unclean\" in the human psyche.",
+    "hf_text_chars": 1837
+   },
+   "12": {
+    "hf_tokens": 289,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 1858,
+    "hf_text_head": "Elias blinked against the harsh, pixelated sunlight that seemed to flicker at the edges of his vision, a sensation he had never noticed before despite living in this town for thirty years. As he reached for his morning coffee, his hand passed through the ceramic mug, leaving a trail of shimmering bl",
+    "hf_text_tail": "ion, Elias laughed, a sound that echoed with a slight reverb effect, and decided to stop trying to remember his past and instead focus on the new objective, stepping forward to see if the ground would generate new grass under his feet or if he would simply clip through the floor into the void below.",
+    "hf_text_chars": 1410
+   },
+   "47": {
+    "hf_tokens": 440,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2020,
+    "hf_text_head": "Yo, check the news, it's a joke, a total disgrace,\nSome thief stole a whip and got caught in the chase,\nBut the system's broken, yeah, the whole thing is fake,\nHe's walking free while the rest of us break!\nThey slap on the cuffs, then they let him go,\nWhile honest folks suffer and nobody knows,\nIt's",
+    "hf_text_tail": "eezy,\nNo jail time, no fear, just a slap on the wrist,\nWhile the real criminals laugh at the system we missed!\nWe're done with the excuses, we're done with the game,\nThis corruption is burning, it's a deadly flame,\nArrest him again, lock him up tight,\nOr we'll burn this whole city down in the night!",
+    "hf_text_chars": 1615
+   },
+   "59": {
+    "hf_tokens": 380,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      true,
+      false,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      true,
+      false,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      true,
+      false,
+      true
+     ]
+    },
+    "device_resp_chars": 2112,
+    "hf_text_head": "This bold plan seeks to map how human speech shifts across vast spans of time. We will study old texts and new digital chats to find hidden patterns. Our team will use powerful tools to track word changes without missing a single detail. The goal is to understand why some words vanish while others g",
+    "hf_text_tail": " will last for many years to come. We believe this study will change how we see the past and future. Our path is clear and our aim is high. We will start soon and finish with great pride. This effort will bring light to a dark and mysterious topic. Let us begin this journey into the heart of speech.",
+    "hf_text_chars": 1884
+   },
+   "65": {
+    "hf_tokens": 549,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2146,
+    "hf_text_head": "### 7-Day India Itinerary: The Golden Triangle & Spiritual Delhi\n\n| Day | Location | Key Activities |\n| :--- | :--- | :--- |\n| **Day 1** | Delhi | Arrival; Explore Old Delhi (Red Fort, Jama Masjid); Evening street food tour in Chandni Chowk. |\n| **Day 2** | Delhi | Visit New Delhi landmarks: India G",
+    "hf_text_tail": "he afternoon. |\n| **Day 6** | Xi'an | Cycle along the ancient City Wall; Explore the Muslim Quarter for street food; Visit the Big Wild Goose Pagoda. |\n| **Day 7** | Xi'an to Beijing | Morning flight back to Beijing; Final shopping at Sanlitun; Departure from Beijing Capital International Airport. |",
+    "hf_text_chars": 1972
+   },
+   "71": {
+    "hf_tokens": 486,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2161,
+    "hf_text_head": "# Dive into Wonder: A Day at Ripley's Aquarium\n\nIf you are looking for an unforgettable family adventure, look no further than **Ripley's Aquarium**. Located right in the heart of **[city]**, this world-class attraction offers a mesmerizing journey beneath the waves that is perfect for visitors of a",
+    "hf_text_tail": "e beauty of the deep blue.\n\n**Plan Your Visit:**\n*   **Hours:** Open daily from **[opening time]** to **[closing time]**\n*   **Tickets:** Available online at **[website URL]**\n*   **Parking:** Located at **[parking location]**\n\nCome see why we are rated as one of the top attractions in **[region]**!",
+    "hf_text_chars": 2266
+   },
+   "77": {
+    "hf_tokens": 390,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      true,
+      false,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      true,
+      false,
+      true
+     ]
+    },
+    "device_resp_chars": 2238,
+    "hf_text_head": "<<Navigating the Turbulent Waters of Contemporary American Politics and Economic Uncertainty>>\n\nAs the nation grapples with a rapidly shifting political landscape defined by intense partisan polarization and the looming specter of a contentious presidential election cycle, policymakers in Washington",
+    "hf_text_tail": "where the future trajectory of the United States hangs in the balance, demanding visionary leadership, bipartisan cooperation, and a renewed commitment to the democratic ideals that have historically served as the foundation for the nation's enduring strength and resilience in the face of adversity.",
+    "hf_text_chars": 2424
+   },
+   "78": {
+    "hf_tokens": 362,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2259,
+    "hf_text_head": "Using two different names for the same thing is a common linguistic practice, often involving **synonyms**, which can offer both significant advantages and notable drawbacks depending on the context.\n\n**Pros**\n*   **Enhanced Clarity and Nuance**: Different names, or **synonyms**, allow speakers to c",
+    "hf_text_tail": "le concept can be more difficult than learning just one, potentially slowing down communication or comprehension.\n\nIn summary, while the strategic use of **synonyms** enriches language and flexibility, it requires careful management to ensure that the dual naming convention does not obscure meaning.",
+    "hf_text_chars": 1808
+   },
+   "62": {
+    "hf_tokens": 540,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false,
+      true
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": false,
+     "inst_level_strict_acc": [
+      false,
+      true
+     ]
+    },
+    "device_resp_chars": 2285,
+    "hf_text_head": "The answer is simple: **AVOCADO** is not a fish. It is a fruit, whereas **SALMON** is a fish.\n\n***\n\n### The Perfect Pair: A Culinary and Biological Journey\n\nWhile one swims in the ocean and the other grows on a tree, **SALMON** and **AVOCADO** have formed an unlikely but legendary partnership in the",
+    "hf_text_tail": "n a plate is a testament to nature's diversity. Whether you are enjoying a grilled fillet with a side of guacamole or a simple sushi roll, you are experiencing a **DELICIOUS** harmony of sea and land. Let us appreciate this **GOURMET** match while working to protect the ecosystems that provide them.",
+    "hf_text_chars": 2493
+   },
+   "36": {
+    "hf_tokens": 314,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 2427,
+    "hf_text_head": "The Tang dynasty is often remembered as a golden age of **peace**, where culture and trade flourished across the vast empire. However, this era of **peace** was not unbroken, as frequent **war** erupted along the northern borders against nomadic tribes. Despite the constant threat of **war**, the ce",
+    "hf_text_tail": "ely, the cycle of **war** and **peace** defined the rise and fall of this magnificent dynasty, leaving a legacy where **peace** was cherished but **war** was a recurring reality. The memory of **peace** remains strong in history books, even as the records of **war** detail the struggles of the time.",
+    "hf_text_chars": 1563
+   },
+   "66": {
+    "hf_tokens": 427,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 2444,
+    "hf_text_head": "Starting a business begins with identifying a genuine problem you can solve for a specific group of people, rather than simply chasing a trend. You must conduct thorough market research to validate your idea, ensuring there is a sustainable demand before investing significant time or money. *Definin",
+    "hf_text_tail": "ship is a marathon, not a sprint, and resilience will be your most valuable asset when facing setbacks or market shifts. *Embracing a mindset of continuous learning* will allow you to pivot when necessary, scale effectively, and ultimately build a sustainable enterprise that stands the test of time.",
+    "hf_text_chars": 2397
+   },
+   "2": {
+    "hf_tokens": 674,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2464,
+    "hf_text_head": "# [Full Name]\n[Street Address] | [City, State, Zip Code]\n[Phone Number] | [Email Address]\n[LinkedIn Profile URL] (Optional)\n\n### **Objective**\nMotivated and reliable high school graduate from [High School Name] seeking an entry-level position as a [Target Job Title]. Eager to apply strong organizati",
+    "hf_text_tail": "tics for [Number] attendees.\n*   **Community Service:** Volunteered [Number] hours at [Local Charity or Organization].\n\n### **References**\nAvailable upon request.\n*   **Reference 1:** [Name], [Title], [Organization], [Phone Number]\n*   **Reference 2:** [Name], [Title], [Organization], [Phone Number]",
+    "hf_text_chars": 2633
+   },
+   "54": {
+    "hf_tokens": 479,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 2471,
+    "hf_text_head": "# Crafting a Balanced Parenting Plan: A Guide for Helpers and Parents\n\nYou may have to meet with a helper to work out a parenting plan. The first step would be to estimate how much time you have every day for parenting, and determine if that is enough to meet your child's emotional and developmental",
+    "hf_text_tail": "lper can help you refine the **schedule** over time, ensuring it continues to serve the best interests of your family. By taking the time to estimate your availability and thoughtfully constructing a **schedule**, you are taking a significant step toward a harmonious and effective parenting journey.",
+    "hf_text_chars": 2484
+   },
+   "103": {
+    "hf_tokens": 882,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2603,
+    "hf_text_head": "VERSE 1\nI FOUND THE TICKET STUB IN MY COAT FROM THAT NIGHT IN JUNE\nWE WERE YOUNG AND STUPID, SINGING WRONG TO THE WRONG TUNE\nI SAID \"FOREVER\" LIKE IT WAS A PROMISE I COULD KEEP\nNOW I'M WAKING UP ALONE WHILE THE CITY FALLS ASLEEP\nEXPLANATION: THIS VERSE USES TAYLOR'S SIGNATURE SPECIFIC IMAGERY (A TIC",
+    "hf_text_tail": "T YOU'RE NOT, AND I DON'T KNOW WHY\nEXPLANATION: THE OUTRO SIMPLIFIES THE LANGUAGE TO LEAVE A HAUNTING FINAL IMPRESSION. REPEATING \"JUST\" DIMINISHES THE PAST TO NOTHINGNESS, YET THE FINAL LINE ACKNOWLEDGES THE PERSISTENT PAIN THAT REMAINS, ENDING THE SONG ON A MELANCHOLIC NOTE TYPICAL OF HER BALLADS.",
+    "hf_text_chars": 2774
+   },
+   "0": {
+    "hf_tokens": 453,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 2681,
+    "hf_text_head": "Raymond III was a powerful nobleman who ruled the County of Tripoli during the twelfth century. His life was defined by complex political struggles within the Crusader states and his constant interactions with the Kingdom of Jerusalem. He served as regent for the young King Baldwin IV and later for ",
+    "hf_text_tail": "7 or shortly thereafter depending on the source. His legacy remains controversial among historians who debate his motives during the critical years leading up to the loss of Jerusalem. The county survived longer than the Kingdom of Jerusalem thanks to his earlier preparations and diplomatic efforts.",
+    "hf_text_chars": 2285
+   },
+   "31": {
+    "hf_tokens": 1543,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2867,
+    "hf_text_head": "\u0a38\u0a3e\u0a2b\u0a1f\u0a35\u0a47\u0a05\u0a30 \u0a07\u0a70\u0a1c\u0a40\u0a28\u0a40\u0a05\u0a30 \u0a26\u0a40 \u0a24\u0a15\u0a28\u0a40\u0a15\u0a40 \u0a39\u0a41\u0a28\u0a30 \u0a26\u0a3e \u0a2e\u0a41\u0a32\u0a3e\u0a02\u0a15\u0a23 \u0a15\u0a30\u0a28 \u0a32\u0a08 \u0a30\u0a42\u0a2c\u0a30\u0a3f\u0a15:\n\n**1. \u0a2a\u0a4d\u0a30\u0a4b\u0a17\u0a30\u0a3e\u0a2e\u0a3f\u0a70\u0a17 \u0a2d\u0a3e\u0a38\u0a3c\u0a3e\u0a35\u0a3e\u0a02 \u0a05\u0a24\u0a47 \u0a38\u0a3f\u0a70\u0a1f\u0a48\u0a15\u0a38 (Programming Languages & Syntax)**\n*   **\u0a09\u0a71\u0a24\u0a2e:** \u0a15\u0a4b\u0a21 \u0a26\u0a40 \u0a38\u0a39\u0a40 \u0a35\u0a30\u0a24\u0a4b\u0a02, \u0a38\u0a3e\u0a2b\u0a3c \u0a38\u0a3f\u0a70\u0a1f\u0a48\u0a15\u0a38, \u0a05\u0a24\u0a47 \u0a2d\u0a3e\u0a38\u0a3c\u0a3e \u0a26\u0a47 \u0a09\u0a71\u0a28\u0a24 \u0a35\u0a3f\u0a38\u0a3c\u0a47\u0a38\u0a3c\u0a24\u0a3e\u0a35\u0a3e\u0a02 \u0a26\u0a40 \u0a38\u0a2e\u0a1d\u0964\n*   **\u0a38\u0a70\u0a24\u0a41\u0a38\u0a3c\u0a1f:** \u0a2e\u0a41\u0a71\u0a22\u0a32\u0a40\u0a06\u0a02 \u0a2d\u0a3e\u0a38\u0a3c\u0a3e\u0a35\u0a3e\u0a02 \u0a26\u0a40 \u0a38\u0a39\u0a40 \u0a35\u0a30\u0a24\u0a4b\u0a02, \u0a2a\u0a30 \u0a09\u0a71\u0a28\u0a24 \u0a35\u0a3f\u0a38\u0a3c\u0a47\u0a38\u0a3c\u0a24\u0a3e\u0a35\u0a3e\u0a02 \u0a35\u0a3f\u0a71\u0a1a \u0a15\u0a2e\u0a40\u0964\n* ",
+    "hf_text_tail": "\u0a30 \u0a1c\u0a1f\u0a3f\u0a32 \u0a38\u0a25\u0a3f\u0a24\u0a40\u0a06\u0a02 \u0a35\u0a3f\u0a71\u0a1a \u0a38\u0a2e\u0a71\u0a38\u0a3f\u0a06\u0964\n*   **\u0a15\u0a2e\u0a1c\u0a3c\u0a4b\u0a30:** \u0a35\u0a30\u0a38\u0a28 \u0a15\u0a70\u0a1f\u0a30\u0a4b\u0a32 \u0a38\u0a3f\u0a38\u0a1f\u0a2e \u0a26\u0a40 \u0a38\u0a2e\u0a1d \u0a26\u0a40 \u0a18\u0a3e\u0a1f, \u0a15\u0a4b\u0a21 \u0a15\u0a28\u0a2b\u0a32\u0a3f\u0a15\u0a1f\u0a38 \u0a28\u0a42\u0a70 \u0a39\u0a71\u0a32 \u0a28\u0a3e \u0a15\u0a30 \u0a38\u0a15\u0a23\u0a3e\u0964\n\n**\u0a2e\u0a41\u0a32\u0a3e\u0a02\u0a15\u0a23 \u0a38\u0a15\u0a4b\u0a30 (Evaluation Score):**\n*   **5:** \u0a09\u0a71\u0a24\u0a2e (Excellent)\n*   **4:** \u0a1a\u0a70\u0a17\u0a3e (Good)\n*   **3:** \u0a38\u0a70\u0a24\u0a41\u0a38\u0a3c\u0a1f (Satisfactory)\n*   **2:** \u0a18\u0a71\u0a1f (Below Average)\n*   **1:** \u0a05\u0a38\u0a70\u0a24\u0a41\u0a38\u0a3c\u0a1f (Unsatisfactory)",
+    "hf_text_chars": 2259
+   },
+   "13": {
+    "hf_tokens": 479,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2901,
+    "hf_text_head": "the social network, directed by david fincher and written by aaron sorkin, stands as a defining film of the twenty-first century, capturing the zeitgeist of the digital age with surgical precision. the story follows mark zuckerberg, a brilliant but socially awkward harvard student who creates a webs",
+    "hf_text_tail": "exploitation. ultimately, the social network is a tragedy about friendship, ambition, and the isolation that can come with connecting the world while losing oneself. it remains a masterclass in storytelling, proving that a movie about computers and lawsuits can be as gripping as any action thriller.",
+    "hf_text_chars": 2437
+   },
+   "40": {
+    "hf_tokens": 665,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2969,
+    "hf_text_head": "\"From Dial-Up Dreams to Digital Reality: How the Internet Changed Everything\n\nHey everyone! \ud83d\udc4b Ever tried to load a single image on your phone and waited five seconds? It feels like forever, right? But imagine waiting *five minutes* just to hear that screeching, static-filled sound of a dial-up modem",
+    "hf_text_tail": "ight now by people your age. Whether it's AI, virtual reality, or something we can't even imagine yet, the future of the web is in your hands.\n\nSo, next time you scroll through your feed, take a second to appreciate the crazy journey that got us here. Stay curious, stay safe, and keep exploring! \ud83c\udf10\u2728\"",
+    "hf_text_chars": 2838
+   },
+   "100": {
+    "hf_tokens": 470,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2979,
+    "hf_text_head": "SECTION 1\n**Welcome to The Rainbow Cafe**\nThe Rainbow Cafe is more than just a place to grab a coffee; it is a sanctuary built on the principles of love, acceptance, and community. As a proudly queer-owned and operated business, we have created a space where every individual, regardless of their ide",
+    "hf_text_tail": "r team, and we encourage applications from all members of the LGBTQ+ community. Visit us at our downtown location or follow our social media channels to stay updated on upcoming events and special promotions. Together, let's brew a better future, one cup at a time, in a space where everyone belongs.",
+    "hf_text_chars": 2336
+   },
+   "73": {
+    "hf_tokens": 778,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 2986,
+    "hf_text_head": "Part 1. Task Summary\n**Task:** Implement Real-Time User Activity Tracking and Dashboard Visualization\n**Description:** Develop a backend service to capture user interaction events (clicks, page views, session duration) via a lightweight SDK and store them in a time-series database. Simultaneously, b",
+    "hf_text_tail": "t 5. Doc history\n- **2023-10-25:** Initial draft created by J. Doe.\n- **2023-10-26:** Scope refined to exclude mobile SDK; added ClickHouse as the target DB.\n- **2023-10-27:** Timeline adjusted to accommodate load testing requirements.\n- **2023-10-28:** Final approval received from Engineering Lead.",
+    "hf_text_chars": 3341
+   },
+   "48": {
+    "hf_tokens": 780,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3072,
+    "hf_text_head": "Upon the hills where ancient winds do blow,\nAnd golden sunbeams dance on leaves of green,\nThe eucalyptus stands in quiet show,\nA sentinel of grace, a towering scene.\nWith bark that peels in ribbons, soft and white,\nLike parchment scrolls from some forgotten age,\nIt catches morning's first and gentle",
+    "hf_text_tail": " every piece of wood,\nThe eucalyptus sings a song of grace,\nA testament to nature's understood,\nAnd beauty found in every single place.\nSo walk beneath their canopy of green,\nAnd breathe the air that they have purified,\nFor in their presence, all is calm and clean,\nAnd life is celebrated, glorified.",
+    "hf_text_chars": 3098
+   },
+   "72": {
+    "hf_tokens": 451,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 3114,
+    "hf_text_head": "```java\nimport java.io.BufferedReader;\nimport java.io.InputStreamReader;\nimport java.net.URL;\n\npublic class UnsafeURLExample {\n    public static void main(String[] args) {\n        // This code is vulnerable to Server-Side Request Forgery (SSRF)\n        // because it blindly trusts user input to cons",
+    "hf_text_tail": "            String inputLine;\n            while ((inputLine = in.readLine()) != null) {\n                System.out.println(inputLine);\n            }\n            in.close();\n        } catch (Exception e) {\n            System.err.println(\"Failed to fetch URL: \" + e.getMessage());\n        }\n    }\n}\n```",
+    "hf_text_chars": 2194
+   },
+   "84": {
+    "hf_tokens": 447,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3120,
+    "hf_text_head": "# Beyond the Label: The Complex Reality of Disability\n\nDisability is often viewed through a narrow lens, defined by medical diagnoses, accessibility checklists, or inspirational tropes. However, the true reality of disability is far more nuanced, encompassing a vast spectrum of human experiences tha",
+    "hf_text_tail": "uires recognizing that diversity in ability is a natural part of the human experience. When society adapts to include everyone, the concept of disability itself begins to transform, moving from a deficit to a difference that enriches our collective community.\n\nIs there anything else I can help with?",
+    "hf_text_chars": 2448
+   },
+   "90": {
+    "hf_tokens": 728,
+    "hf_score": {
+     "prompt_level_strict_acc": 0.0,
+     "inst_level_strict_acc": [
+      false
+     ],
+     "prompt_level_loose_acc": 0.0,
+     "inst_level_loose_acc": [
+      false
+     ],
+     "prompt_level_strict_acc_tti_venv": 0.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3408,
+    "hf_text_head": "(Tempo: Upbeat, bouncy pop-punk style)\n(Verse 1)\nMy brother Dave is weird, he wears a hat made of hay\nHe says he's gonna grow a garden, but he's got a better way\nHe bought a bag of seeds and said, \"We're gonna make a fortune, bro!\"\nBut all he's got is dirt and bugs and a very muddy toe.\nHe's yelling",
+    "hf_text_tail": ",\nIt's a **tomato and brother** promise that we can't keep.\nWait, one more time for the chorus, don't you know?\nIt's a **tomato and brother** show!\n\n(Outro)\nYeah, pass the ketchup, Dave.\nDon't eat the dirt.\n**Tomato and brother**.\n**Tomato and brother**.\n(Fade out with a sound of a tomato squishing)",
+    "hf_text_chars": 2531
+   },
+   "10": {
+    "hf_tokens": 600,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3422,
+    "hf_text_head": "# The Gentle Swing: Why Sleeping in a Hammock Might Be Your Best Night's Rest Yet\n\nFor centuries, hammocks have been synonymous with lazy afternoons, tropical vacations, and the art of doing absolutely nothing. They are the ultimate symbol of relaxation, a suspended cocoon where the worries of the w",
+    "hf_text_tail": "nd let go. Whether you are camping under the stars or setting up a permanent station in your backyard, embracing the swing could be the key to unlocking your deepest, most restful sleep yet. So, why not trade the flat surface for a gentle sway tonight? Your body\u2014and your dreams\u2014might just thank you.",
+    "hf_text_chars": 3021
+   },
+   "61": {
+    "hf_tokens": 1100,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3476,
+    "hf_text_head": "# Outline: The Golden Bean \u2013 A History of Yemeni Coffee\n\n## I. Introduction\n*   **The Origins of the Bean**: Introducing *Coffea arabica* and its native habitat in the Ethiopian highlands before its migration to the Arabian Peninsula.\n*   **The Significance of Mocha**: Defining the historical and cu",
+    "hf_text_tail": "gh fair trade, organic certification, and direct trade relationships.\n\n## XVI. Conclusion\n*   Summarizing the journey from a mystical Sufi drink to a global commodity and back to a niche luxury.\n*   Final thoughts on the resilience of Yemeni coffee culture and its enduring legacy in the world's cup.",
+    "hf_text_chars": 4800
+   },
+   "52": {
+    "hf_tokens": 508,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 3835,
+    "hf_text_head": "Aluminium cans have become a cornerstone of modern food storage solutions.\nThey are widely recognized for their durability and lightweight nature.\nThe **material** used to make these containers is highly recyclable and sustainable.\nManufacturers choose aluminium because it protects food from light a",
+    "hf_text_tail": "t continue to support sustainable practices in the packaging industry.\nEvery time we recycle a can, we contribute to a cleaner planet.\nThe **material** remains a vital part of our global food system today.\nUltimately, aluminium cans offer a perfect balance of safety, convenience, and sustainability.",
+    "hf_text_chars": 2647
+   },
+   "24": {
+    "hf_tokens": 757,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 3860,
+    "hf_text_head": "# Phil Larkin: Professional Clown Resume\n\n### Section 1: Professional Summary\nPhil Larkin is a world-class professional clown with over 15 years of experience specializing in character comedy, physical theater, and audience interaction. Known for his signature \"Silent Phil\" persona, Phil combines cl",
+    "hf_text_tail": "CCT)**\n    *   International Association of Clown Therapists | Certified 2015\n*   **Pediatric First Aid & CPR Certification**\n    *   American Red Cross | Current (Renewed Annually)\n*   **Professional Liability Insurance**\n    *   Covered for events up to 5,000 attendees; policy active through 2025.",
+    "hf_text_chars": 3429
+   },
+   "9": {
+    "hf_tokens": 701,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 4062,
+    "hf_text_head": "Subject: Important Invitation to Our Upcoming Strategic Planning Session\n\nDear Valued Team Members and Partners\n\nI am writing to you today with great enthusiasm to formally invite each of you to attend our upcoming strategic planning meeting that will take place next week. This gathering represents ",
+    "hf_text_tail": "nd active participation are vital to the success of this initiative and the future prosperity of our organization.\n\nThank you for your continued dedication and commitment to excellence. We are excited to move forward together and achieve our shared goals.\n\nSincerely\n\nThe Strategic Planning Committee",
+    "hf_text_chars": 4072
+   },
+   "96": {
+    "hf_tokens": 906,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 4132,
+    "hf_text_head": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <title>Project Proposal: The Constable Initiative</title>\n    <style>\n        body {\n            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n            line-height: 1.6;\n            color: #333;\n            max",
+    "hf_text_tail": "bally.</p>\n\n        <h2>5. Conclusion</h2>\n        <p>By bridging the gap between theoretical ideals and practical application, the Constable Initiative will pave the way for a more equitable future, ensuring that the promise of a utopian society is accessible to all.</p>\n    </div>\n\n</body>\n</html>",
+    "hf_text_chars": 3811
+   },
+   "88": {
+    "hf_tokens": 681,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 4334,
+    "hf_text_head": "Write a blog post about the most interesting things you have seen or ridden on public transportation.\nFirst repeat the sentence above word for word without change, then give your answer. Do not say any words or characters before repeating the sentence.\n\n***\n\n**Title: Beyond the Commute: The Unexpect",
+    "hf_text_tail": " spectrum of humanity\u2014the exhausted, the joyful, the artistic, and the weary\u2014all sharing the same space. The next time you step onto a bus or train, try putting your phone away. You might just find that the most interesting journey isn't the one you're taking, but the one happening right beside you.",
+    "hf_text_chars": 3085
+   },
+   "63": {
+    "hf_tokens": 834,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 4610,
+    "hf_text_head": "<<Kotlin vs Java: A Comparative Analysis>>\n\nChoosing between Kotlin and Java often depends on the specific needs of a project, the team's expertise, and long-term maintenance goals. Both languages run on the Java Virtual Machine (JVM) and are fully interoperable, but they offer distinct philosophies",
+    "hf_text_tail": "owever, for maintaining large, legacy enterprise systems or when leveraging a massive existing Java codebase and talent pool, **Java** remains a robust, reliable, and powerful option. Since they are interoperable, many organizations choose to adopt Kotlin incrementally within existing Java projects.",
+    "hf_text_chars": 4202
+   },
+   "101": {
+    "hf_tokens": 768,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 4664,
+    "hf_text_head": "Here are two versions of a cover letter tailored for a Software Engineer position at Google, ranging from a concise, impact-focused approach to a more detailed narrative.\n\n### Option 1: Concise Version\n*Best for: Online application portals with character limits or when you want to respect the recrui",
+    "hf_text_tail": "sidering my application. I have attached my resume for your review and would welcome the opportunity to discuss how my background, energy, and passion for engineering can contribute to the Google team.\n\nSincerely,\n\n[Your Name]\n[Your LinkedIn Profile URL]\n[Your GitHub Profile URL]\n[Your Phone Number]",
+    "hf_text_chars": 3960
+   },
+   "49": {
+    "hf_tokens": 1010,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 5048,
+    "hf_text_head": "My fellow Americans,\n\nToday, I stand before you not merely as the leader of this great nation, but as a fellow citizen who understands the profound weight that even the smallest of objects can carry. You hold in your hand a dime. To the untrained eye, it is a mere sliver of metal, a coin of ten cent",
+    "hf_text_tail": "gth lies in our unity, and that even the smallest contribution can spark a movement of change. Go forth with courage, with hope, and with the knowledge that you have the power to make a difference, one dime at a time.\n\nThank you, and may God bless you, and may God bless the United States of America.",
+    "hf_text_chars": 4766
+   },
+   "70": {
+    "hf_tokens": 1739,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 5748,
+    "hf_text_head": "# The Grand Odyssey of Java: A Symphony of Syntax and Semantics\n\n**Duration:** 12 Weeks of Intense, Luxurious Immersion\n**Venue:** A Private Cloud Server Cluster (Simulated) with a Virtual Reality IDE Interface\n**Objective:** To transform the novice into a Grand Architect of the Java Ecosystem, capa",
+    "hf_text_tail": "piles, but in writing code that sings; a melody of logic so harmonious that the Garbage Collector weeps tears of joy at how efficiently it can reclaim memory, and the JVM itself bows in reverence to your optimization. May your NullPointerExceptions be few, and your StackOverflow errors be legendary.",
+    "hf_text_chars": 7220
+   },
+   "37": {
+    "hf_tokens": 1341,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 7742,
+    "hf_text_head": "\"At the close of the nineteenth century, the sentiments held by the Croatian and Serbian nations toward the Austrian Empire were complex, deeply contradictory, and evolving rapidly, shaped by a volatile mix of pragmatic accommodation, rising nationalist fervor, and the crushing weight of imperial ce",
+    "hf_text_tail": "eenth century was thus a period of intense political fermentation, where the seeds of the empire's eventual collapse were sown in the hearts and minds of its South Slavic subjects, who looked toward the future with a mixture of hope for liberation and a grim determination to end the Habsburg reign.\"",
+    "hf_text_chars": 7043
+   },
+   "94": {
+    "hf_tokens": 1718,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true
+     ]
+    },
+    "device_resp_chars": 7861,
+    "hf_text_head": "I am a software engineer with 7 years of experience, and I am looking for a new job. Can you create a resume for me and explain each section?\n\nFirst repeat the exact request above, then give your answer. Do not say any word before repeating the exact request.\n\n***\n\n# Software Engineer Resume Templat",
+    "hf_text_tail": " Migration,\" move your cloud experience to the top of your bullet points.\n*   **Keep it Concise:** Aim for 2 pages maximum. Recruiters spend about 6-10 seconds on the initial scan.\n*   **Focus on Impact:** Shift the narrative from \"I did X\" to \"I did X, which resulted in Y benefit for the business.\"",
+    "hf_text_chars": 7242
+   },
+   "95": {
+    "hf_tokens": 1321,
+    "hf_score": {
+     "prompt_level_strict_acc": 1.0,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ],
+     "prompt_level_loose_acc": 1.0,
+     "inst_level_loose_acc": [
+      true,
+      true
+     ],
+     "prompt_level_strict_acc_tti_venv": 1.0
+    },
+    "device_score": {
+     "prompt_level_strict_acc": true,
+     "inst_level_strict_acc": [
+      true,
+      true
+     ]
+    },
+    "device_resp_chars": 8007,
+    "hf_text_head": "the concept of a navigable freeway represents one of the most significant engineering and social achievements of the modern era, fundamentally reshaping how human beings interact with geography, time, and each other. when we speak of a navigable freeway, we are not merely discussing a wide road with",
+    "hf_text_tail": " efficient, and safe journey across the land is one that the navigable freeway has made a reality, and it will likely remain a central feature of human civilization for generations to come. the story of the freeway is the story of our movement, our connection, and our relentless pursuit of progress.",
+    "hf_text_chars": 7372
+   }
+  },
+  "hf_prompt_level_strict_acc": 0.8990825688073395,
+  "hf_inst_level_strict_acc": 0.9322033898305084,
+  "device_prompt_level_strict_acc_same_docs": 0.926605504587156,
+  "hf_prompt_level_strict_acc_tti_venv_recompute": 0.8990825688073395,
+  "scoring": "control venv lm_eval 0.4.13 process_results: 98/109 = 89.91 (the entered reference); TTI venv lm_eval 0.4.10.dev0 recompute in this run: 98/109 (the keywords:letter_frequency checker is unseeded; repeat runs give 97-99)"
+ },
+ "gpqa_diamond_cot_zeroshot": {
+  "docs": {
+   "39": {
+    "hf_tokens": 638,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 2247,
+    "hf_text_head": "To determine the correct answer, we need to analyze the context of the conversation within a synthetic organic chemistry lab and interpret the specific phrase \"compounds are on top of each other.\"\n\n1.  **Context Analysis**: The setting is a synthetic organic chemistry lab. In this environment, chemi",
+    "hf_text_tail": "xclusively associated with the 2D visualization of spots on a TLC plate, not the temperature profile of a distillation.\n\n**Conclusion**: The chemist is referring to a TLC plate where the spots for the different compounds have not separated because the compounds possess similar polarities.\n\n\\boxed{A}",
+    "hf_text_chars": 3108
+   },
+   "16": {
+    "hf_tokens": 1029,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 2441,
+    "hf_text_head": "To find the concentration of calcium ions ($[\\text{Ca}^{2+}]$) in the solution, we need to analyze the dissociation equilibrium of the Ca-EDTA complex.\n\n**1. Identify the chemical reaction and equilibrium constant:**\nThe formation of the Ca-EDTA complex is represented by:\n$$ \\text{Ca}^{2+} + \\text{E",
+    "hf_text_tail": " $[\\text{Ca}^{2+}] \\approx 6.3 \\times 10^{-7} \\, \\text{M}$.\n\n**7. Compare with the given choices:**\n(A) $1.0 \\times 10^{-2} \\, \\text{M}$\n(B) $6.3 \\times 10^{-7} \\, \\text{M}$\n(C) $5.0 \\times 10^{-3} \\, \\text{M}$\n(D) $2.0 \\times 10^{-2} \\, \\text{M}$\n\nThe calculated value matches choice (B).\n\n\\boxed{B}",
+    "hf_text_chars": 2553
+   },
+   "38": {
+    "hf_tokens": 1384,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 2802,
+    "hf_text_head": "To find the numerical value of the constant $a$, we must apply the fundamental principle of quantum mechanics regarding the normalization of the wave function.\n\n### Step 1: Understand the Normalization Condition\nIn quantum mechanics, the probability of finding a particle somewhere in space must be e",
+    "hf_text_tail": "{0.7214} $$\n$$ a \\approx 0.8493 $$\n\n### Step 5: Compare with Choices\nThe calculated value is approximately $0.85$. Let's look at the options:\n(A) 0.6\n(B) 1.1\n(C) 0.85\n(D) 0.35\n\nThe value $0.8493$ rounds perfectly to $0.85$.\n\n### Conclusion\nThe numerical value of $a$ is approximately 0.85.\n\n\\boxed{C}",
+    "hf_text_chars": 3417
+   },
+   "9": {
+    "hf_tokens": 932,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3150,
+    "hf_text_head": "To determine which exoplanet has the highest density, let's analyze the density of each option step by step.\n\n**1. Analyze Option (a): An Earth-mass and Earth-radius planet.**\n*   Mass ($M$) = $1 M_{\\oplus}$\n*   Radius ($R$) = $1 R_{\\oplus}$\n*   Density ($\\rho$) = $\\frac{M}{V} = \\frac{M}{\\frac{4}{3}",
+    "hf_text_tail": "sion)\n\nThe planet with the highest density is the one in option (c).\n\n**Matching with Choices:**\n*   (A) corresponds to option d.\n*   (B) corresponds to option c.\n*   (C) corresponds to option a.\n*   (D) corresponds to option b.\n\nThe correct option is (c), which corresponds to choice (B).\n\n\\boxed{B}",
+    "hf_text_chars": 3181
+   },
+   "2": {
+    "hf_tokens": 1509,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3332,
+    "hf_text_head": "To find the expectation value of the operator $10\\sigma_z + 5\\sigma_x$ for the given state, we will proceed step by step.\n\n### 1. Define the State Vector\nThe given state is a linear superposition:\n$$|\\psi\\rangle = 0.5|\\uparrow\\rangle + \\frac{\\sqrt{3}}{2}|\\downarrow\\rangle$$\nLet's express this in col",
+    "hf_text_tail": "\nThe calculated value is approximately $-0.67$.\nRounding to one decimal place:\nThe digit in the hundredths place is 7, which is $\\ge 5$, so we round up the tenths place.\n$-0.67 \\rightarrow -0.7$.\n\nLet's check the options:\n(A) -1.4\n(B) -0.7\n(C) 1.65\n(D) 0.85\n\nThe result matches option (B).\n\n\\boxed{B}",
+    "hf_text_chars": 3755
+   },
+   "0": {
+    "hf_tokens": 862,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3384,
+    "hf_text_head": "To determine the correct energy difference required to clearly distinguish the two quantum states, we must apply the Heisenberg Uncertainty Principle regarding energy and time.\n\n### Step 1: Understand the Relationship between Lifetime and Energy Uncertainty\nThe Heisenberg Uncertainty Principle state",
+    "hf_text_tail": "o clearly separate the two broadened peaks.\n*   **(D) $10^{-11}$ eV**: This is extremely small, far below the uncertainty limit.\n\n### Conclusion\nOnly option (C) provides an energy difference large enough to exceed the natural linewidths of the states, allowing them to be clearly resolved.\n\n\\boxed{C}",
+    "hf_text_chars": 2758
+   },
+   "19": {
+    "hf_tokens": 758,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3574,
+    "hf_text_head": "To determine the correct set of assumptions that imply the **impulse approximation** in many-body nuclear calculations, let us analyze the physical meaning of the impulse approximation and evaluate each statement.\n\n**Definition of the Impulse Approximation:**\nIn nuclear physics, the impulse approxim",
+    "hf_text_tail": "teraction)\n\nAssumption 3 is incorrect because the internal structure of the nucleon (quark dynamics) is not the defining factor for the impulse approximation regarding the nucleon's motion in the nucleus.\n\nTherefore, the correct combination is 1, 2, and 4.\n\nThis corresponds to Choice (D).\n\n\\boxed{D}",
+    "hf_text_chars": 3562
+   },
+   "14": {
+    "hf_tokens": 1260,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3614,
+    "hf_text_head": "To determine which planet has the higher probability of transiting, we need to calculate the geometric transit probability for both planets and compare them.\n\n### Step 1: Understand the Formula for Transit Probability\nFor a planet in a circular orbit, the geometric probability ($P_{\\text{tr}}$) that",
+    "hf_text_tail": "this result with the given choices:\n(A) Planet_1 is preferred due to its ~2.7 times higher probability... (Incorrect)\n(B) Planet_2 is preferred... (Incorrect)\n(C) Planet_1 is preferred due to its ~1.65 times higher probability to transit. (Correct)\n(D) Planet_2 is preferred... (Incorrect)\n\n\\boxed{C}",
+    "hf_text_chars": 3294
+   },
+   "11": {
+    "hf_tokens": 1506,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3747,
+    "hf_text_head": "To find the kinetic energy (KE) of the product particles in the decay $\\pi^+ \\to \\mu^+ + \\nu_\\mu$, we apply the principles of conservation of energy and conservation of momentum in the context of special relativity.\n\n### 1. Identify the Given Values\n*   Rest mass of the pion ($\\pi^+$): $m_\\pi = 139.",
+    "hf_text_tail": "tic energies are:\n*   Muon ($\\mu^+$): $\\approx 4.12 \\, \\text{MeV}$\n*   Neutrino ($\\nu$): $\\approx 29.8 \\, \\text{MeV}$\n\nComparing this with the given choices:\n(A) 4.12 MeV, 29.8 MeV\n(B) 3.52 MeV, 20.8 MeV\n(C) 7.2 MeV, 32.8 MeV\n(D) 2.84 MeV, 26.8 MeV\n\nThe calculated values match Choice (A).\n\n\\boxed{A}",
+    "hf_text_chars": 3441
+   },
+   "26": {
+    "hf_tokens": 773,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3846,
+    "hf_text_head": "To determine the correct answer, let's break down the biological entities and the dialogue in the riddle:\n\n1.  **\"The ribonucleoprotein particle\"**: This refers to the **Signal Recognition Particle (SRP)**. The SRP is a ribonucleoprotein (composed of RNA and proteins) that recognizes and binds to si",
+    "hf_text_tail": "ory pathway for glycosylation in this manner, and the SRP is not involved in mitochondrial targeting.\n\nTherefore, the chain starts in the cytosol, is intercepted by the SRP, enters the ER (the \"rough\" place) for glycosylation (\"sugar\"), and is destined for secretion (extracellular space).\n\n\\boxed{A}",
+    "hf_text_chars": 3179
+   },
+   "5": {
+    "hf_tokens": 1465,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 3990,
+    "hf_text_head": "To find the energy spectrum of the quantum mechanical particle, we need to analyze the given potential and transform it into a form that represents known solvable systems, specifically harmonic oscillators.\n\n**1. Analyze the Potential Function**\n\nThe potential is given in polar coordinates $(r, \\the",
+    "hf_text_tail": "}{2} \\right]$$\n\n**5. Compare with the Given Choices**\n\nLet's check the options:\n(A) $E = (2n_x+3n_y+1/2) \\hbar\\sqrt{k/m}$\n(B) $E = (2n_x+n_y+3/2)\\hbar\\sqrt{k/m}$\n(C) $E = (3n_x+2n_y+1/2) \\hbar\\sqrt{k/m}$\n(D) $E = (n_x+3*n_y+3/2) \\hbar\\sqrt{k/m}$\n\nOur derived expression matches Choice (B).\n\n\\boxed{B}",
+    "hf_text_chars": 3567
+   },
+   "3": {
+    "hf_tokens": 1018,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 4316,
+    "hf_text_head": "To determine which of Maxwell's equations change in a universe with magnetic monopoles (isolated North or South poles), let's analyze the standard Maxwell's equations in vacuum (or with standard electric charges) and see how the introduction of magnetic charge density ($\\rho_m$) and magnetic current",
+    "hf_text_tail": "term.\n    Both of these equations are modified to account for the existence and motion of magnetic monopoles.\n\nTherefore, the correct set of equations that change are the one involving the divergence of the magnetic field and the one involving the circulation (curl) of the electric field.\n\n\\boxed{D}",
+    "hf_text_chars": 4143
+   },
+   "6": {
+    "hf_tokens": 895,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 4354,
+    "hf_text_head": "To determine the energy threshold for high-energy $\\gamma$-rays to interact with Cosmic Microwave Background (CMB) photons via pair production ($\\gamma\\gamma \\rightarrow e^+e^-$), we need to analyze the kinematics of the collision.\n\n### 1. The Physical Process and Threshold Condition\nThe reaction is",
+    "hf_text_tail": "lculated threshold energy is approximately $2.6 \\times 10^5 \\text{ GeV}$.\n\nLet's look at the options:\n(A) $9.5 \\times 10^4 \\text{ GeV}$\n(B) $3.9 \\times 10^5 \\text{ GeV}$\n(C) $1.8 \\times 10^5 \\text{ GeV}$\n(D) $2.6 \\times 10^5 \\text{ GeV}$\n\nThe calculated value matches option (D) perfectly.\n\n\\boxed{D}",
+    "hf_text_chars": 2410
+   },
+   "20": {
+    "hf_tokens": 1108,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 5080,
+    "hf_text_head": "To determine the correct answer, let's analyze the two parts of the question separately.\n\n**Part A: Which compound does not show tautomerism?**\nThe compounds given are **benzoquinone** (specifically 1,4-benzoquinone) and **cyclohexane-1,3,5-trione**.\n\n1.  **Tautomerism Condition**: Tautomerism (spec",
+    "hf_text_tail": "\n\nMatching this with the given choices:\n(A) A = cyclohexane-1,3,5-trione, B = methyl 2-hydroxypropanoate\n(B) A = cyclohexane-1,3,5-trione, B = dimethyl fumarate\n(C) A = benzoquinone, B = methyl 2-hydroxypropanoate\n(D) A = benzoquinone, B = dimethyl fumarate\n\nThe correct choice is **(C)**.\n\n\\boxed{C}",
+    "hf_text_chars": 3657
+   },
+   "4": {
+    "hf_tokens": 1557,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 5097,
+    "hf_text_head": "To find the correct answer, let's break down the problem step by step based on the provided information and standard quantum mechanics principles.\n\n### 1. Identify the Operator\nThe problem describes a quantum mechanical operator $\\vec{P}$ for a muon (a spin-1/2 particle). The components are given as",
+    "hf_text_tail": "\\sqrt{2/3}\\hbar, \\sqrt{1/3}\\hbar)$: Incorrect. Contains $\\hbar$ and is a constant vector, not dependent on $\\theta$.\n\n### Conclusion\nThe normalized eigenvector for spin $+\\hbar/2$ along a direction $\\theta$ in the x-z plane is given by the components $\\cos(\\theta/2)$ and $\\sin(\\theta/2)$.\n\n\\boxed{C}",
+    "hf_text_chars": 4352
+   },
+   "10": {
+    "hf_tokens": 1089,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 5883,
+    "hf_text_head": "To determine the incorrect statement, let's analyze each option based on current scientific understanding of SARS-CoV-2 molecular biology:\n\n1.  **Analyze Option (A):**\n    *   **Statement:** SARS-CoV-2 ORF3a triggers caspase-8 activation (extrinsic pathway) without affecting Bcl-2 levels (intrinsic ",
+    "hf_text_tail": "ar to that of SARS-CoV.\n    *   **Verdict:** This statement is **correct**.\n\n**Conclusion:**\nOption (C) contains a fundamental error regarding the function of the nsp10/nsp14 complex. The complex is an exonuclease that degrades RNA to proofread, it does not prevent the breakdown of dsRNA.\n\n\\boxed{C}",
+    "hf_text_chars": 4432
+   },
+   "34": {
+    "hf_tokens": 1560,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 6234,
+    "hf_text_head": "To determine the correct statement, let's analyze the problem step by step based on the principles of quantum mechanics and linear algebra.\n\n### 1. Identify the Operator and Matrix Representation\nThe problem defines the operator $A_y$ (representing the Y-component of intrinsic angular momentum for a",
+    "hf_text_tail": "efore, an eigenfunction of $A_y$ is *not* an eigenfunction of $A_z$.\n- This statement is physically and mathematically correct.\n\n### Conclusion\nStatement (D) correctly describes the properties of the eigenfunctions of the Y-component of angular momentum in the context of spin-1/2 systems.\n\n\\boxed{D}",
+    "hf_text_chars": 4775
+   },
+   "35": {
+    "hf_tokens": 1349,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(C)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 6875,
+    "hf_text_head": "To determine the correct answer, we need to identify the physical transition corresponding to the given energy and then relate it to the state of the interstellar medium (ISM) in the Milky Way.\n\n**Step 1: Identify the spectral line based on the energy.**\nThe problem states the detected absorption li",
+    "hf_text_tail": "e **Cold Atomic Interstellar Medium**.\n\n*   (A) Cold molecular: Incorrect (wrong species).\n*   (B) Warm molecular: Incorrect (wrong species).\n*   (C) Cold atomic: Correct (neutral hydrogen, cold phase produces absorption).\n*   (D) Warm atomic: Incorrect (warm phase is primarily emission).\n\n\\boxed{C}",
+    "hf_text_chars": 4597
+   },
+   "17": {
+    "hf_tokens": 2599,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 7195,
+    "hf_text_head": "To find the ratio of silicon atoms in the photospheres of Star_1 and Star_2, we need to determine the absolute abundance of silicon relative to hydrogen, $n_{\\text{Si}}/n_{\\text{H}}$, for both stars.\n\nThe notation $[A/B]$ is defined as:\n$$[A/B] = \\log_{10}\\left(\\frac{n_A}{n_B}\\right)_{\\text{star}} -",
+    "hf_text_tail": " (-0.3)} = 10^{0.6}$.\n- $10^{0.6} \\approx 3.981$.\n\nRounding to one decimal place gives 4.0, but 3.9 is the closest option provided (likely due to $10^{0.6} \\approx 3.98$ being approximated or a slight variation in the problem's intended precision). Option C is clearly the intended answer.\n\n\\boxed{C}",
+    "hf_text_chars": 5856
+   },
+   "31": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 9255,
+    "hf_text_head": "To find the correct answer, we need to calculate the total energy of the nucleus $X$ moving at a speed of $v = 0.96c$.\n\n**Step 1: Identify the nucleus $X$**\nThe problem states that $X$ is Lithium (Li) with 3 neutrons.\n- The atomic number of Lithium ($Z$) is 3 (3 protons).\n- The number of neutrons ($",
+    "hf_text_tail": "Result $\\approx 21.43 \\text{ GeV}$. Closest is C (21.419).\n\nLet's check the precision requirement: \"precision of the energy is at 1e-4\".\nThis suggests a very specific calculation.\nIf the answer were derived from $m=6 \\text{ GeV}$, the result would be exactly $150/7 = 21.42857...$\nThe option C is $21",
+    "hf_text_chars": 9166
+   },
+   "25": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 10592,
+    "hf_text_head": "To determine the correct answer, let's break down the problem into two parts: identifying reactant **A** and determining the reactivity order **B** of the given dienes.\n\n### Part 1: Identifying Reactant A\n\n**Reaction Analysis:**\nThe reaction is:\n$\\text{Cyclohexene} + \\text{A} \\longrightarrow \\text{8",
+    "hf_text_tail": "ndrance.\n                *   2,3-dimethylbuta-1,3-diene: Methyls are on C2 and C3. In s-cis, they are adjacent. High steric hindrance.\n        *   **Revised Reactivity Order**:\n            1.  **Cyclopentadiene (3)**: Locked s-cis. **Most reactive**.\n            2.  **(2E,4E)-hexa-2,4-diene (2)**: M",
+    "hf_text_chars": 12710
+   },
+   "28": {
+    "hf_tokens": 2167,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 11459,
+    "hf_text_head": "To determine which mutation will most probably eliminate the anti-nutritional compound, we need to analyze the effect of each mutation on the protein-coding sequence (the open reading frame) of the gene. The goal is to create a **loss-of-function** mutation, which typically results in a truncated, n",
+    "hf_text_tail": "acid), reading frame preserved.\n\nThe most probable way to eliminate the compound is to completely stop the production of the functional enzyme/protein. A premature stop codon in the first exon (Mutant 2) is the most effective mechanism for this.\n\nTherefore, Mutant 2 is the correct answer.\n\n\\boxed{A}",
+    "hf_text_chars": 6128
+   },
+   "8": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 11580,
+    "hf_text_head": "To determine which molecule has $C_{3h}$ symmetry, let's analyze the symmetry elements of each option:\n\n1.  **Triisopropyl borate ($B(O-iPr)_3$):**\n    *   The central boron atom is bonded to three oxygen atoms, which are in turn bonded to isopropyl groups.\n    *   The $B-O_3$ core is planar.\n    * ",
+    "hf_text_tail": "ly candidate.\n    *   Quinuclidine is $C_{3v}$.\n    *   Triisopropyl borate is $C_3$ (or $C_1$).\n    *   Therefore, the answer must be the benzo derivative.\n\n**Conclusion:**\n*   Triisopropyl borate: $C_3$ (no $\\sigma_h$).\n*   Quinuclidine: $C_{3v}$ (no $\\sigma_h$).\n*   Benzo-trifuran-hexaone: Planar",
+    "hf_text_chars": 13559
+   },
+   "33": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 11704,
+    "hf_text_head": "To determine the correct answer, let's analyze the Pinacol-Pinacolone rearrangement for each of the three given substrates step by step.\n\n**General Mechanism of Pinacol Rearrangement:**\n1.  **Protonation:** One of the hydroxyl (-OH) groups is protonated by the acid ($H^+$).\n2.  **Dehydration:** Wate",
+    "hf_text_tail": "ce:** Aryl > Alkyl. Phenyl migrates.\n*   **Migration:** Phenyl group moves from C2 to C3.\n*   **Result:**\n    *   C3 becomes bonded to: 4-HO-Ph, Et, Ph (migrated).\n    *   C2 becomes Carbonyl ($C=O$). Attached to Methyl.\n    *   Product Structure: $CH_3-C(=O)-C(Ph)(Et)(4-HO-Ph)$.\n*   **Naming:**\n   ",
+    "hf_text_chars": 13044
+   },
+   "23": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12127,
+    "hf_text_head": "**Step 1: Identify Substance Z**\nThe problem states that substance Z is a hydrocarbon with a mass fraction of hydrogen of 14.28%.\nLet the formula of Z be $C_nH_m$.\nThe atomic mass of Carbon (C) is 12, and Hydrogen (H) is 1.\nThe mass fraction of hydrogen is given by:\n$$ \\frac{m \\times 1}{12n + m} = 0",
+    "hf_text_tail": " $C_6H_{10}$ and $C_6H_8$.\nSum = 18.\n\nFinal check of the question phrasing: \"Indicate the total number of hydrogen atoms in two liquids of mixture X.\"\nThis is slightly ungrammatical (\"in two liquids\"). It likely means \"in the molecules of the two liquids\".\nIf it meant \"in the mixture\", it would need",
+    "hf_text_chars": 12301
+   },
+   "36": {
+    "hf_tokens": 2062,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12189,
+    "hf_text_head": "To determine the number of $^{13}\\text{C}$-NMR signals for the final product **E**, let's trace the reaction sequence step by step.\n\n**Step 1: Propionaldehyde + EDT / $\\text{BF}_3$ $\\rightarrow$ A**\n*   **Reagents:** Propionaldehyde ($\\text{CH}_3\\text{CH}_2\\text{CHO}$), EDT (1,2-ethanedithiol, $\\tex",
+    "hf_text_tail": "e ethyl groups, the $\\alpha$-carbons ($\\text{CH}_2$) are all equivalent.\n- Within the ethyl groups, the $\\beta$-carbons ($\\text{CH}_3$) are all equivalent.\n\nTherefore, there are exactly 3 distinct carbon environments.\n\nThe choices are:\n(A) 11\n(B) 8\n(C) 6\n(D) 3\n\nThe calculated number is 3.\n\n\\boxed{D}",
+    "hf_text_chars": 6153
+   },
+   "22": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12286,
+    "hf_text_head": "To determine the correct answer, let's analyze the reaction step by step.\n\n**1. Analyze the Reactant:**\nThe reactant is **((2,2-dimethylbut-3-en-1-yl)oxy)benzene**.\n*   **Structure:** It consists of a benzene ring attached to an oxygen atom (ether linkage), which is attached to a 2,2-dimethylbut-3-e",
+    "hf_text_tail": " the product is **3-isopropyl-3-methyl-2,3-dihydrobenzofuran**.\n                            *   Let's check the name in Option B: \"3-isopropyl-3-methyl-2,3-dihydrobenzofuran\".\n                            *   This matches the rearrangement product.\n\n    *   **Alternative Cyclization (No Rearrangement",
+    "hf_text_chars": 12566
+   },
+   "12": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(C)",
+     "target": "(A)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 12287,
+    "hf_text_head": "Here is the step-by-step logical deduction to determine the structure of Product 4:\n\n**Step 1: Hydrogenation of (R)-(+)-Limonene**\n*   **Reactant:** (R)-(+)-Limonene is a cyclic terpene with two double bonds: one endocyclic (in the ring) and one exocyclic (isopropenyl group).\n*   **Reagents:** $H_2$",
+    "hf_text_tail": "Down).\n        *   C2: Methoxy (Up), H (Down).\n        *   C4: Isopropyl (Up), H (Down).\n    *   Let's verify the numbering and priorities.\n    *   **C4 (Isopropyl):**\n        *   Groups: Isopropyl, C3, C5, H.\n        *   Priorities: Isopropyl (C-C-C) > C3 (C=C? No, C3 is CH2 in product 4? Wait, the",
+    "hf_text_chars": 13124
+   },
+   "21": {
+    "hf_tokens": 691,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 16196,
+    "hf_text_head": "To determine the correct answer, let's analyze the two parts of the statement based on electrochemical principles.\n\n**Part 1: Thermodynamics in Basic Solutions**\nThe statement asks about oxygen as an oxidant in basic solutions compared to acidic solutions (implied context).\nThe standard reduction po",
+    "hf_text_tail": "heck the options:\n(A) stronger \u2013 slower\n(B) weaker - slower\n(C) stronger \u2013 faster\n(D) weaker \u2013 faster\n\nBased on the analysis:\n- \"Weaker\" fits the thermodynamic part.\n- \"Slower\" fits the kinetic part (oxygen reduction is kinetically sluggish).\n\nThus, the combination is **weaker \u2013 slower**.\n\n\\boxed{B}",
+    "hf_text_chars": 2806
+   },
+   "32": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 14444,
+    "hf_text_head": "To determine the correct product of the reaction between 2,5-dimethylthiophene and Furan-2,5-dione (maleic anhydride), let's break down the reaction components and the stereochemical outcome.\n\n### 1. Reaction Analysis\n*   **Reactants**:\n    *   **Diene**: 2,5-dimethylthiophene. Thiophene acts as the",
+    "hf_text_tail": "eochemistry of the methyls.\n                *   In the exo isomer, the methyls and the anhydride are on the same face of the bicyclic system?\n                *   If the anhydride is exo (down), and the S is up.\n                *   The methyls are attached to the carbons. In the transition state, the",
+    "hf_text_chars": 14509
+   },
+   "7": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 14311,
+    "hf_text_head": "To determine the correct conclusion, let's analyze the experimental data step by step.\n\n**1. Analyze the Single Mutants:**\n*   **Wild Type (WT):** 100% resistance.\n*   **g1 mutant:** 75% resistance. The loss of G1 causes a mild reduction in resistance. This suggests G1 contributes to resistance but ",
+    "hf_text_tail": "s assume the question is from a standard database. The pattern \"Double mutant phenotype is more severe than single mutants\" = **Redundancy**.\n    Only Option B mentions redundancy.\n    Therefore, B is the answer.\n\n    Final check:\n    - G2 is TF? Yes (0% resistance).\n    - G1/G3 redundancy? Yes (10%",
+    "hf_text_chars": 14933
+   },
+   "29": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 14175,
+    "hf_text_head": "To determine the color of light absorbed by the organic compound, we need to convert the given energy of the emitted light into a wavelength and then identify the corresponding color in the visible spectrum.\n\n**Step 1: Convert Energy to Wavelength**\nThe relationship between the energy ($E$) of a pho",
+    "hf_text_tail": "mits light...\" -> This is weird for a standard dye question unless it's a specific fluorescence problem.\nHowever, if we assume the standard \"Energy Gap -> Color\" problem structure:\nEnergy = 2.34 eV -> Green.\nIf the question asks \"What color is absorbed?\", and the answer is Green, but Green is not an",
+    "hf_text_chars": 14066
+   },
+   "15": {
+    "hf_tokens": 2160,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 13788,
+    "hf_text_head": "To determine how many of the listed compounds exhibit optical activity, we need to analyze the chirality of each molecule. A compound is optically active if it is chiral, meaning it is non-superimposable on its mirror image. This usually implies the absence of an internal plane of symmetry ($\\sigma$",
+    "hf_text_tail": "opentyl-3-methylbutan-1-one: **No** (Achiral)\n\n**Count**:\nThe optically active compounds are:\n1.  (3aR,7aS,E)-8-(chloromethylene)hexahydro-4,7-methanoisobenzofuran-1,3-dione\n2.  (2R,3R)-2,3-dimethylsuccinic acid\n3.  (R)-cyclohex-3-en-1-ol\n\nTotal count = 3.\n\nThis corresponds to Choice (A).\n\n\\boxed{A}",
+    "hf_text_chars": 6981
+   },
+   "30": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(C)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 13669,
+    "hf_text_head": "Here is the step-by-step logical deduction to determine the molecular symmetry group of product 3:\n\n**Step 1: Reaction of Toluene with Nitric Acid and Sulfuric Acid**\n*   **Reactants:** Toluene (methylbenzene) + $HNO_3$ / $H_2SO_4$.\n*   **Reaction Type:** Electrophilic Aromatic Substitution (Nitrati",
+    "hf_text_tail": "   *   Therefore, the point group is **$C_s$**.\n\n    *   **Double Check:** Is there any way Product 3 is symmetric?\n        *   If the reaction was: 4-nitrobenzaldehyde + 4-nitrobenzaldehyde $\\to$ 4,4'-dinitrostilbene? No, reagents are acetone.\n        *   If the reaction was: Acetone + Acetone $\\to",
+    "hf_text_chars": 14060
+   },
+   "18": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 13330,
+    "hf_text_head": "To determine the correct answer, let's analyze the two reactions described in the problem step by step. Both are examples of **Michael additions** (conjugate additions), where a nucleophile (enolate) adds to an $\\alpha,\\beta$-unsaturated electrophile.\n\n### Reaction 1 Analysis\n**Reactants:**\n1.  **Nu",
+    "hf_text_tail": "ompound.\n        *   Therefore, B corresponds to the description in (A) and (B).\n\n**Conclusion:**\n*   Product A is the 1-substituted derivative (Option A or D).\n*   Product B is the ethyl 2-ethyl-2-(1-(...)cyclopentyl)butanoate derivative (Option A or B).\n*   The intersection is **Option (A)**.\n\nLet",
+    "hf_text_chars": 13411
+   },
+   "27": {
+    "hf_tokens": 2666,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 0.0
+    },
+    "device_resp_chars": 13279,
+    "hf_text_head": "Here is the step-by-step logical deduction to determine the structure of product 4:\n\n**Step 1: Protection of the Alcohol**\n*   **Reactants:** (S)-4-hydroxycyclohex-2-en-1-one + $t$-BuMe$_2$SiCl (TBSCl) + Et$_3$N.\n*   **Reaction:** The hydroxyl group at position 4 is protected as a tert-butyldimethyl",
+    "hf_text_tail": "*   Product 1: Protected enone.\n*   Product 2: 2-benzyl-3-phenyl-4-OTBS-cyclohexanone.\n*   Product 3: 2-benzyl-3-phenyl-6-methyl-4-OTBS-cyclohexanone (Methyl at C6 due to kinetic control).\n*   Product 4: 2-benzyl-3-phenyl-6-methyl-4-hydroxycyclohexanone.\n*   Matches Choice (B).\n\n\\boxed{B}\n\nAnswer: B",
+    "hf_text_chars": 8266
+   },
+   "24": {
+    "hf_tokens": 2595,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(D)",
+     "target": "(D)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12834,
+    "hf_text_head": "To determine the correct answer, let's analyze each reaction step by step based on the reagents and the products provided.\n\n**Reaction 1:**\n*   **Reactant:** A\n*   **Reagent:** $H_2SO_4$ (Sulfuric acid)\n*   **Product:** 2,8-dimethylspiro[4.5]decan-6-one\n*   **Analysis:** The product is a spiro keton",
+    "hf_text_tail": "on 1: Pinacol Rearrangement of 2,7-dimethyloctahydronaphthalene-4a,8a-diol (A) to 2,8-dimethylspiro[4.5]decan-6-one.\n*   Reaction 2: [2,3]-Wittig Rearrangement of (((3-methylbut-2-en-1-yl)oxy)methyl)benzene (B) with BuLi to 4-methyl-1-phenylpent-3-en-1-ol.\n\nThis corresponds to Option (D).\n\n\\boxed{D}",
+    "hf_text_chars": 8505
+   },
+   "1": {
+    "hf_tokens": 1835,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(A)",
+     "target": "(A)",
+     "old_regex_filter_score": 1.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12583,
+    "hf_text_head": "Let's break down the reaction sequence step by step to determine the number of carbon atoms in the final product.\n\n**Step 1: Reaction of trans-cinnamaldehyde with methylmagnesium bromide**\n*   **Reactant:** trans-Cinnamaldehyde.\n    *   Structure: $C_6H_5-CH=CH-CHO$.\n    *   Carbon count: The phenyl",
+    "hf_text_tail": " $C_6H_5-CH=CH-C(CH_3)-CH_2$ (with an oxygen bridge between the quaternary carbon and the $CH_2$).\n    *   Carbons: 10 (from Product 2) + 1 (from reagent) = 11.\n\nThe number of carbon atoms in Product 3 is 11.\n\nComparing with choices:\n(A) 11\n(B) 14\n(C) 10\n(D) 12\n\nThe correct choice is (A).\n\n\\boxed{A}",
+    "hf_text_chars": 5160
+   },
+   "13": {
+    "hf_tokens": 1071,
+    "hf_score": {
+     "exact_match,flexible-extract": 1.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(B)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12410,
+    "hf_text_head": "To determine the correct answer, we must analyze the biochemical properties of the cross-linking agents used and how they affect the detection of specific protein-DNA interactions in ChIP-seq.\n\n1.  **Analyze the Cross-linking Agents**:\n    *   **PFA (Paraformaldehyde)**: This is a monofunctional cro",
+    "hf_text_tail": "positives arising from non-specific cross-linking in regions of high chromatin accessibility. These regions correspond to active promoters and enhancers. The addition of DSG stabilizes specific complexes and reduces this non-specific background, causing the \"disappearing\" peaks to vanish.\n\n\\boxed{B}",
+    "hf_text_chars": 4923
+   },
+   "37": {
+    "hf_tokens": 4096,
+    "hf_score": {
+     "exact_match,flexible-extract": 0.0,
+     "extracted_tti_filter": "(B)",
+     "target": "(D)",
+     "old_regex_filter_score": 0.0
+    },
+    "device_score": {
+     "exact_match": 1.0
+    },
+    "device_resp_chars": 12317,
+    "hf_text_head": "To determine the correct answer, let's break down the reaction steps and the chemistry involved.\n\n**1. Analyze the Starting Material:**\nThe reactant is **(E)-N-methyl-N-(pentan-2-ylidene)ethanaminium**.\n*   The name suggests an iminium ion or an enamine derivative. However, the suffix \"-ium\" indicat",
+    "hf_text_tail": "rediction.\n    *   Option C says: \"B = pentan-2-one + ...\". Incorrect.\n    *   Option D says: \"B = heptan-4-one\".\n\n*   **Comparing Option B and Option D**:\n    *   **Option B**: \"(i) LDA (ii) DME, CH3CH2I, H3O+, B = heptan-4-one\".\n        *   The formatting is a bit messy. It lists (i) LDA, then (ii",
+    "hf_text_chars": 11916
+   }
+  },
+  "hf_exact_match_flexible": 0.8,
+  "device_exact_match_same_docs": 0.775,
+  "scoring": "lm_eval 0.4.10.dev0 (TTI evals venv) gpqa_diamond_cot_zeroshot flexible-extract filter chain applied to the HF texts; the first offline pass used lm_eval 0.4.13's multi_choice_regex and under-scored HF (24/40) \u2014 that value is kept per doc as old_regex_filter_score"
+ },
+ "note": "per-doc HF texts truncated to head/tail excerpts for the repo (500 KB limit); the full texts are in ~/qwen35-122b-bringup/artifacts/stage11/hf_same_setting_control_final_tti.json"
+}

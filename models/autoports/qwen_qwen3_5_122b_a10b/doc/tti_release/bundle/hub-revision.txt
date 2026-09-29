@@ -1,0 +1,7 @@
+# HfApi.model_info snapshot 2026-09-29T12:28:08.911550Z (token read from the cache file, not printed)
+repo: raahemnabeel/qwen3-5-122b-a10b-blackholex4
+private: True
+revision: ed5f26b934123c62c53a45e2b1141d046b43ca96
+files: 710
+last_modified: 2026-09-29 09:10:51+00:00
+top-level: ['.gitattributes', 'README.md', 'code', 'image', 'requirements.lock', 'tt_kernel_manifest.json']

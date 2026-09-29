@@ -1,0 +1,408 @@
+2026-09-26 13:31:14,211 - run.py:1218 - INFO: TT-Inference version: 0.22.0
+2026-09-26 13:31:14,211 - run.py:1219 - INFO: TT-Inference SHA: 9ef9d6602669
+2026-09-26 13:31:14,211 - run.py:1220 - INFO:
+============================================================
+tt-inference-server run.py CLI args summary
+============================================================
+
+Model Options:
+  model:                      Qwen/Qwen3.5-122B-A10B
+  device:                     p300x2
+  impl:                       qwen35-122b-autoport
+  engine:                     vLLM
+  workflow:                   evals
+  tools:                      vllm
+
+Optional args:
+  dev_mode:                   True
+  docker_server:              False
+  local_server:               False
+  no_auth:                    True
+  tt_metal_python_venv_dir:   None
+  tt_metal_home:              /home/raahem/tt-metal
+  service_port:               8131
+  bind_host:                  0.0.0.0
+  docker_override_image:      None
+  docker_interactive:         False
+  device_id:                  None
+  disable_trace_capture:      False
+  override_tt_config:         None
+  vllm_override_args:         None
+  workflow_args:              None
+  limit_samples_mode:         ci-nightly
+  eval_samples:               None
+  skip_system_sw_validation:  True
+
+Host Storage Options:
+  host_volume:                None
+  host_hf_cache:              None
+  host_weights_dir:           None
+  quetzal_package_root:       None
+  image_user:                 1000
+
+============================================================
+2026-09-26 13:31:14,211 - run.py:1226 - INFO: Runtime model spec saved to: /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-26_13-31-14_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_xZ_AFrFi.json
+2026-09-26 13:31:14,212 - target_pack.py:137 - DEBUG: No TargetPack registered; using Tenstorrent reference_config.
+2026-09-26 13:31:14,224 - validate_setup.py:341 - INFO: Starting local setup validation
+2026-09-26 13:31:14,225 - validate_setup.py:377 - INFO: ✅ validating local setup completed
+2026-09-26 13:31:14,225 - run.py:1343 - INFO: Model Qwen3.5-122B-A10B (model_type=LLM) routes through the workflow engine.
+2026-09-26 13:31:14,225 - runner.py:31 - INFO: → command=evals
+2026-09-26 13:31:14,226 - venv_provisioner.py:73 - DEBUG: No VenvProvisioner registered; using Tenstorrent VENV_CONFIGS.
+2026-09-26 13:31:14,226 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python --index-strategy unsafe-best-match -r /home/raahem/tt-inference-server/requirements/workflow-run-script.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_workflow_run_script
+Checked 19 packages in 50ms
+2026-09-26 13:31:14,300 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/python --index-strategy unsafe-best-match -r /home/raahem/tt-inference-server/requirements/evals-common.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_evals_common
+Resolved 104 packages in 726ms
+Checked 104 packages in 0.97ms
+2026-09-26 13:31:15,053 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/tt-inference-server/run_workflows.py --model Qwen/Qwen3.5-122B-A10B --workflow evals --device p300x2 --service-port 8131 --runtime-model-spec-json /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-26_13-31-14_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_xZ_AFrFi.json --output-dir /home/raahem/tt-inference-server/workflow_logs/reports_output/evals
+2026-09-26 13:31:15,373 [INFO] workflow_module.command_factory: Minted debug-test JWT and exported as OPENAI_API_KEY.
+2026-09-26 13:31:15,384 [INFO] workflow_module.runner: → command=workflow
+2026-09-26 13:31:15,384 [INFO] workflow.evals: === Workflow start: evals | model=Qwen3.5-122B-A10B device=P300X2 port=8131 output=/home/raahem/tt-inference-server/workflow_logs/reports_output/evals/Qwen__Qwen3.5-122B-A10B_p300x2_evals ===
+2026-09-26 13:31:15,402 [INFO] workflow.evals: → task=llm_eval
+2026-09-26 13:31:15,402 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8131/health (timeout 3600s)
+2026-09-26 13:31:15,404 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8131/health
+2026-09-26 13:31:15,404 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=ifeval
+2026-09-26 13:31:15,404 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks ifeval --model local-chat-completions --model_args model=Qwen/Qwen3.5-122B-A10B,base_url=http://127.0.0.1:8131/v1/chat/completions,tokenizer_backend=huggingface,num_concurrent=32 --gen_kwargs max_gen_toks=16384,do_sample=false,stream=false,seed=42 --output_path /home/raahem/tt-inference-server/workflow_logs/reports_output/evals/Qwen__Qwen3.5-122B-A10B_p300x2_evals/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-09-26 13:31:15,578 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:15 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-09-26 13:31:15,578 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:15 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-09-26 13:31:18,854 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:18 INFO     [_cli.run:376] Selected Tasks: ['ifeval']
+2026-09-26 13:31:19,540 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:19 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-09-26 13:31:19,540 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:19 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 16384, 'do_sample': False, 'stream': False, 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-09-26 13:31:19,540 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:19 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'Qwen/Qwen3.5-122B-A10B', 'base_url': 'http://127.0.0.1:8131/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'num_concurrent': 32, 'trust_remote_code': True}
+2026-09-26 13:31:19,546 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:19 INFO     [models.api_models:310] Using max length 2048 - 1
+2026-09-26 13:31:19,546 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:19 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-09-26 13:31:22,312 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [tasks:700] Selected tasks:
+2026-09-26 13:31:22,312 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [tasks:691] Task: ifeval (ifeval/ifeval.yaml)
+2026-09-26 13:31:22,312 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [evaluator:313] ifeval: Using gen_kwargs: {'until': [], 'do_sample': False, 'temperature': 0.0, 'max_gen_toks': 16384, 'stream': False, 'seed': 42}
+2026-09-26 13:31:22,312 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [evaluator:328] num_fewshot has been set to 0 for ifeval in its config. Manual configuration will be ignored.
+2026-09-26 13:31:22,312 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-09-26 13:31:22,313 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [api.task:310] Building contexts for ifeval on rank 0...
+2026-09-26 13:31:22,315 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 13:31:22,316 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/109 [00:00<?, ?it/s]
+2026-09-26 13:31:22,316 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 109/109 [00:00<00:00, 90944.73it/s]
+2026-09-26 13:31:22,316 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [evaluator:583] Running generate_until requests
+2026-09-26 13:31:22,317 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:13:31:22 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-09-26 13:31:22,318 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 13:32:59,032 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/109 [00:00<?, ?it/s]
+2026-09-26 13:33:38,630 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   1%|          | 1/109 [01:36<2:54:05, 96.71s/it]
+2026-09-26 13:34:48,972 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   2%|▏         | 2/109 [02:16<1:52:33, 63.12s/it]
+2026-09-26 13:35:06,424 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   3%|▎         | 3/109 [03:26<1:57:20, 66.42s/it]
+2026-09-26 13:35:13,600 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   4%|▎         | 4/109 [03:44<1:22:23, 47.09s/it]
+2026-09-26 13:35:15,232 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   5%|▍         | 5/109 [03:51<56:40, 32.69s/it]
+2026-09-26 13:35:26,108 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▌         | 6/109 [03:52<37:59, 22.13s/it]
+2026-09-26 13:36:20,372 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▋         | 7/109 [04:03<31:22, 18.45s/it]
+2026-09-26 13:36:59,286 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   7%|▋         | 8/109 [04:58<50:15, 29.85s/it]
+2026-09-26 13:37:00,869 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   8%|▊         | 9/109 [05:36<54:28, 32.69s/it]
+2026-09-26 13:37:11,593 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   9%|▉         | 10/109 [05:38<38:05, 23.08s/it]
+2026-09-26 13:37:21,479 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  10%|█         | 11/109 [05:49<31:31, 19.30s/it]
+2026-09-26 13:37:23,512 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  11%|█         | 12/109 [05:59<26:34, 16.44s/it]
+2026-09-26 13:37:39,843 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  12%|█▏        | 13/109 [06:01<19:19, 12.07s/it]
+2026-09-26 13:38:00,667 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  13%|█▎        | 14/109 [06:17<21:09, 13.36s/it]
+2026-09-26 13:38:26,932 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  14%|█▍        | 15/109 [06:38<24:27, 15.61s/it]
+2026-09-26 13:38:35,923 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  15%|█▍        | 16/109 [07:04<29:09, 18.82s/it]
+2026-09-26 13:39:05,007 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  16%|█▌        | 17/109 [07:13<24:19, 15.86s/it]
+2026-09-26 13:40:22,990 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 18/109 [07:42<30:04, 19.84s/it]
+2026-09-26 13:40:46,093 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 19/109 [09:00<55:56, 37.30s/it]
+2026-09-26 13:40:56,190 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  18%|█▊        | 20/109 [09:23<49:00, 33.04s/it]
+2026-09-26 13:41:14,501 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  19%|█▉        | 21/109 [09:33<38:21, 26.15s/it]
+2026-09-26 13:42:10,279 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  20%|██        | 22/109 [09:52<34:30, 23.80s/it]
+2026-09-26 13:42:28,940 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  21%|██        | 23/109 [10:47<47:51, 33.39s/it]
+2026-09-26 13:43:32,107 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  22%|██▏       | 24/109 [11:06<41:02, 28.97s/it]
+2026-09-26 13:43:39,046 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  23%|██▎       | 25/109 [12:09<54:55, 39.23s/it]
+2026-09-26 13:44:22,832 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  24%|██▍       | 26/109 [12:16<40:52, 29.54s/it]
+2026-09-26 13:44:41,214 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  25%|██▍       | 27/109 [13:00<46:12, 33.82s/it]
+2026-09-26 13:46:05,680 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  26%|██▌       | 28/109 [13:18<39:24, 29.19s/it]
+2026-09-26 13:47:49,647 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  27%|██▋       | 29/109 [14:43<1:01:01, 45.77s/it]
+2026-09-26 13:49:44,645 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 30/109 [16:27<1:23:15, 63.23s/it]
+2026-09-26 13:49:55,903 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 31/109 [18:22<1:42:23, 78.76s/it]
+2026-09-26 13:50:26,806 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  29%|██▉       | 32/109 [18:33<1:15:05, 58.51s/it]
+2026-09-26 13:50:29,245 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  30%|███       | 33/109 [19:04<1:03:37, 50.23s/it]
+2026-09-26 13:51:41,345 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  31%|███       | 34/109 [19:06<44:51, 35.89s/it]
+2026-09-26 13:53:51,744 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  32%|███▏      | 35/109 [20:19<57:39, 46.75s/it]
+2026-09-26 13:58:18,833 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  33%|███▎      | 36/109 [22:29<1:27:24, 71.85s/it]
+2026-09-26 14:01:22,675 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  34%|███▍      | 37/109 [26:56<2:36:30, 130.42s/it]2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:22,677 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:01:22,678 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:01:22 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:01:35,171 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:01:58,435 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  35%|███▍      | 38/109 [30:12<2:57:43, 150.19s/it]
+2026-09-26 14:02:19,696 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  36%|███▌      | 39/109 [30:36<2:10:48, 112.12s/it]
+2026-09-26 14:02:21,507 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  37%|███▋      | 40/109 [30:57<1:37:35, 84.86s/it]
+2026-09-26 14:02:23,994 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  38%|███▊      | 41/109 [30:59<1:07:56, 59.95s/it]
+2026-09-26 14:05:06,666 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▊      | 42/109 [31:01<47:41, 42.71s/it]  2026-09-26:14:05:06 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:05:06,666 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:05:06 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:05:14,576 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:05:14 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:05:14,576 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:05:14 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:06:20,618 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:06:20 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:06:20,618 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:06:20 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:06:48,897 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:06:51,702 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▉      | 43/109 [35:26<2:00:18, 109.37s/it]
+2026-09-26 14:07:07,510 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  40%|████      | 44/109 [35:29<1:23:50, 77.40s/it]
+2026-09-26 14:07:12,580 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  41%|████▏     | 45/109 [35:45<1:02:50, 58.92s/it]2026-09-26:14:07:12 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:07:12,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:07:12 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:07:44,282 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:08:01,577 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  42%|████▏     | 46/109 [36:21<54:53, 52.28s/it]  2026-09-26:14:08:01 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:08:01,577 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:08:01 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:08:27,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:08:27 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:08:27,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:08:27 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:08:36,583 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:08:36 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:08:36,583 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:08:36 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:09:15,191 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:09:45,243 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  43%|████▎     | 47/109 [37:52<1:05:59, 63.87s/it]
+2026-09-26 14:10:23,597 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  44%|████▍     | 48/109 [38:22<54:37, 53.72s/it]  2026-09-26:14:10:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:10:23,597 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:10:23 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:11:32,261 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:11:46,888 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  45%|████▍     | 49/109 [40:09<1:09:42, 69.71s/it]
+2026-09-26 14:12:10,598 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  46%|████▌     | 50/109 [40:24<52:17, 53.19s/it]  2026-09-26:14:12:10 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:12:10,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:12:10 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:12:29,593 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:12:29 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:12:29,593 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:12:29 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:12:50,386 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:13:02,964 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  47%|████▋     | 51/109 [41:28<54:24, 56.28s/it]
+2026-09-26 14:13:32,603 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  48%|████▊     | 52/109 [41:40<41:00, 43.17s/it]2026-09-26:14:13:32 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:13:32,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:13:32 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:13:39,581 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:13:39 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:13:39,581 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:13:39 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:14:25,581 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:14:41,591 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  49%|████▊     | 53/109 [43:03<51:20, 55.00s/it]2026-09-26:14:14:41 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:14:41,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:14:41 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:15:55,203 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:16:06,582 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|████▉     | 54/109 [44:32<59:56, 65.39s/it]2026-09-26:14:16:06 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:16:06,582 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:16:06 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:16:27,848 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:16:30,746 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|█████     | 55/109 [45:05<50:00, 55.57s/it]
+2026-09-26 14:16:36,479 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  51%|█████▏    | 56/109 [45:08<35:07, 39.77s/it]
+2026-09-26 14:17:11,969 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  52%|█████▏    | 57/109 [45:14<25:36, 29.56s/it]
+2026-09-26 14:17:20,224 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  53%|█████▎    | 58/109 [45:49<26:38, 31.34s/it]
+2026-09-26 14:19:19,172 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  54%|█████▍    | 59/109 [45:57<20:20, 24.41s/it]
+2026-09-26 14:19:45,586 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  55%|█████▌    | 60/109 [47:56<43:05, 52.77s/it]2026-09-26:14:19:45 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:19:45,586 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:19:45 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:20:27,616 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:20:27 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:20:27,616 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:20:27 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:20:45,065 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:21:13,892 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  56%|█████▌    | 61/109 [49:22<50:10, 62.71s/it]
+2026-09-26 14:21:41,575 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  57%|█████▋    | 62/109 [49:51<41:09, 52.54s/it]2026-09-26:14:21:41 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:21:41,575 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:21:41 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:22:14,963 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 14:24:20,128 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  58%|█████▊    | 63/109 [50:52<42:14, 55.10s/it]
+2026-09-26 14:28:19,674 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  59%|█████▊    | 64/109 [52:57<57:05, 76.12s/it]2026-09-26:14:28:19 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:28:19,674 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:28:19 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:31:23,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:23 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:31:58,609 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:58 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:31:58,609 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:31:58 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:32:21,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:32:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:32:21,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:32:21 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:35:07,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:35:07 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:35:07,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:35:07 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:36:21,648 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:36:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:36:21,648 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:36:21 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:37:13,627 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:37:13 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:37:13,627 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:37:13 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:37:44,600 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:37:44 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:37:44,600 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:37:44 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:38:02,592 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:38:02 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:38:02,592 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:38:02 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:38:28,599 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:38:28 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:38:28,599 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:38:28 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:39:45,597 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:39:45 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:39:45,597 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:39:45 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:43:33,674 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:43:33 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:43:33,674 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:43:33 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:44:26,625 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:44:26 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:44:26,625 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:44:26 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:44:42,579 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:44:42 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:44:42,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:44:42 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:45:55,647 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:45:55 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:45:55,647 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:45:55 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:46:07,584 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:07 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:46:07,584 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:07 INFO     [models.api_models:814] Retry attempt 1
+2026-09-26 14:46:28,595 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:28 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:46:28,595 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:28 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:46:31,578 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:31 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:46:31,578 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:31 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:46:36,579 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:36 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:46:36,579 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:46:36 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:47:12,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:47:12 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:47:12,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:47:12 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:47:20,582 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:47:20 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:47:20,582 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:47:20 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:49:19,673 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:49:19 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:49:19,673 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:49:19 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:49:46,596 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:49:46 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:49:46,596 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:49:46 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:50:28,617 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:50:28 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:50:28,617 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:50:28 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:50:45,581 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:50:45 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:50:45,581 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:50:45 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:51:14,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:51:14 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:51:14,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:51:14 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:51:42,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:51:42 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:51:42,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:51:42 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:52:15,584 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:52:15 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:52:15,584 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:52:15 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:54:20,637 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:54:20 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:54:20,637 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:54:20 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 14:58:20,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:58:20 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 14:58:20,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:14:58:20 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:01:24,633 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:01:24,633 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:01:24,634 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:24 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:01:59,609 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:59 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:01:59,609 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:01:59 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:02:22,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:02:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:02:22,598 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:02:22 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:05:08,673 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:05:08 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:05:08,673 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:05:08 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:06:22,643 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:06:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:06:22,643 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:06:22 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:07:14,614 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:07:14 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:07:14,614 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:07:14 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:07:45,604 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:07:45 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:07:45,604 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:07:45 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:08:03,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:08:03 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:08:03,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:08:03 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:08:29,600 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:08:29 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:08:29,600 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:08:29 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:09:46,651 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:09:46 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:09:46,651 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:09:46 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:13:34,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:13:34 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:13:34,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:13:34 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:14:27,627 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:14:27 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:14:27,627 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:14:27 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:14:43,590 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:14:43 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:14:43,590 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:14:43 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:15:56,647 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:15:56 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:15:56,647 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:15:56 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:16:08,586 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:08 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:16:08,586 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:08 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:16:29,595 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:29 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:16:29,595 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:29 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:16:32,577 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:32 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:16:32,577 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:32 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:16:37,579 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:37 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:16:37,579 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:16:37 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:17:13,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:17:13 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:17:13,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:17:13 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:17:21,582 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:17:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:17:21,582 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:17:21 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:19:20,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:19:20 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:19:20,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:19:20 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:19:47,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:19:47 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:19:47,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:19:47 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:20:29,608 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:20:29 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:20:29,608 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:20:29 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:20:46,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:20:46 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:20:46,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:20:46 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:21:15,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:21:15 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:21:15,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:21:15 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:21:43,602 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:21:43 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:21:43,602 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:21:43 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:22:16,607 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:22:16 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:22:16,607 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:22:16 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:24:21,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:24:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:24:21,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:24:21 INFO     [models.api_models:814] Retry attempt 2
+2026-09-26 15:28:21,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:28:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:31:25,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:31:25 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:31:25,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:31:25 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:31:25,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:31:25 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:31:25,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:31:25 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:32:00,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:32:00 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:32:23,599 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:32:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:35:09,646 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:35:09 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:36:23,596 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:36:23 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:37:15,627 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:37:15 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:37:46,590 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:37:46 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:38:04,593 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:38:04 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:38:30,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:38:30 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:39:47,652 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:39:47 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:43:35,666 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:43:35 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:44:28,628 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:44:28 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:44:44,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:44:44 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:45:57,648 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:45:57 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:46:09,586 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:46:09 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:46:30,596 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:46:30 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:46:33,578 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:46:33 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:46:38,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:46:38 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:47:14,607 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:47:14 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:47:22,583 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:47:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:49:21,674 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:49:21 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:49:48,588 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:49:48 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:50:30,617 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:50:30 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:50:47,593 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:50:47 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:51:16,604 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:51:16 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:51:44,603 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:51:44 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:52:17,608 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:52:17 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:54:22,674 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:54:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 15:58:22,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:15:58:22 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:01:26,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:01:26 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:01:26,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:01:26 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:01:26,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:01:26 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:01:26,676 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:01:26 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:02:01,610 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:02:01 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:02:24,591 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:02:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:05:10,675 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:05:10 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:06:24,640 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:06:24 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:07:16,581 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:07:16 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:07:47,606 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:07:47 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:08:05,593 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:05 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:08:31,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:31 ERROR    [models.api_models:698] Exception:TimeoutError(), undefined, retrying.
+2026-09-26 16:08:31,601 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-26 16:08:31,601 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  59%|█████▊    | 64/109 [2:37:09<1:50:29, 147.33s/it]
+2026-09-26 16:08:31,601 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:31 ERROR    [models.api_models:854] 45/109 request batch(es) failed. Replacing with error sentinels to preserve partial results.
+2026-09-26 16:08:32,175 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:32 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-09-26 16:08:32,176 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:32 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/tt-inference-server/workflow_logs/reports_output/evals/Qwen__Qwen3.5-122B-A10B_p300x2_evals/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2/Qwen__Qwen3.5-122B-A10B/*.jsonl
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:32 ERROR    [_cli.run:482] 45 prompt(s) failed during inference. Sample logs have been saved for debugging.
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: Traceback (most recent call last):
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: File "/home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval", line 10, in <module>
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: sys.exit(cli_evaluate())
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: File "/home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/lib/python3.10/site-packages/lm_eval/__main__.py", line 10, in cli_evaluate
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: parser.execute(args)
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: File "/home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/lib/python3.10/site-packages/lm_eval/_cli/harness.py", line 60, in execute
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: args.func(args)
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: File "/home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/lib/python3.10/site-packages/lm_eval/_cli/run.py", line 486, in _execute
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: raise RuntimeError(
+2026-09-26 16:08:32,228 [INFO] test_module.llm_tests.llm_eval_tests: RuntimeError: Evaluation completed with 45 failed prompt(s). Check samples_*.jsonl for __INFERENCE_ERROR__ and __PARTIAL_OUTPUT__ entries.
+2026-09-26 16:08:33,030 [ERROR] test_module.llm_tests.llm_eval_tests: ⛔ subprocess.Popen command failed with return code: 1
+command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks ifeval --model local-chat-completions --model_args model=Qwen/Qwen3.5-122B-A10B,base_url=http://127.0.0.1:8131/v1/chat/completions,tokenizer_backend=huggingface,num_concurrent=32 --gen_kwargs max_gen_toks=16384,do_sample=false,stream=false,seed=42 --output_path /home/raahem/tt-inference-server/workflow_logs/reports_output/evals/Qwen__Qwen3.5-122B-A10B_p300x2_evals/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+
+See error messages in logs above this RuntimeError for details on actual cause of failure.
+
+This command is optional or can be recovered from failure (check=False set). Continuing ...
+
+2026-09-26 16:08:33,032 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=gpqa_diamond_cot_zeroshot
+2026-09-26 16:08:33,032 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks gpqa_diamond_cot_zeroshot --model local-chat-completions --model_args model=Qwen/Qwen3.5-122B-A10B,base_url=http://127.0.0.1:8131/v1/chat/completions,tokenizer_backend=huggingface,num_concurrent=32 --gen_kwargs max_gen_toks=32768,do_sample=false,stream=false,seed=42 --output_path /home/raahem/tt-inference-server/workflow_logs/reports_output/evals/Qwen__Qwen3.5-122B-A10B_p300x2_evals/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-09-26 16:08:33,156 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:33 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-09-26 16:08:33,156 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:33 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-09-26 16:08:34,797 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:34 INFO     [_cli.run:376] Selected Tasks: ['gpqa_diamond_cot_zeroshot']
+2026-09-26 16:08:35,332 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:35 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-09-26 16:08:35,332 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:35 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 32768, 'do_sample': False, 'stream': False, 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-09-26 16:08:35,332 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:35 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'Qwen/Qwen3.5-122B-A10B', 'base_url': 'http://127.0.0.1:8131/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'num_concurrent': 32, 'trust_remote_code': True}
+2026-09-26 16:08:35,336 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:35 INFO     [models.api_models:310] Using max length 2048 - 1
+2026-09-26 16:08:35,336 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-26:16:08:35 INFO     [models.api_models:331] Using tokenizer huggingface

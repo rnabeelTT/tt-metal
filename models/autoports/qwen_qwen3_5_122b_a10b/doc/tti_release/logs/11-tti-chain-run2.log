@@ -1,0 +1,46 @@
+8
+=== autoport server 2026-09-26T10:56:10+00:00
+server healthy 2026-09-26T11:05:56+00:00
+MODELS [('Qwen/Qwen3.5-122B-A10B', 262144)]
+CHAT stop 'The capital of France is Paris.' reasoning ''
+TOOL tool_calls [{"id": "chatcmpl-tool-a0c7fbdcdcf48efb", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\": \"Paris\"}"}}] ''
+=== TTI smoke 2026-09-26T11:05:58+00:00
+tti smoke exit=0
+2026-09-26 11:06:09,602 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T11
+2026-09-26 11:06:09,603 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09
+2026-09-26 11:06:09,603 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09
+2026-09-26 11:06:09,603 [INFO] report_module.generator: Generated report: md=/home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T110609+0
+2026-09-26 11:06:09,603 [INFO] workflow.benchmarks: Wrote markdown: /home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T110609+0000.md
+2026-09-26 11:06:09,603 [INFO] workflow.benchmarks: Wrote json:     /home/raahem/tt-inference-server/workflow_logs/reports_output/benchmarks/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09-26T110609+
+2026-09-26 11:06:09,603 [INFO] workflow.benchmarks: === Workflow done: benchmarks (rc=0) ===
+2026-09-26 11:06:09,603 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-09-26 11:06:09,629 - runner.py:42 - INFO: ✅ command=benchmarks rc=0
+2026-09-26 11:06:09,629 - run.py:1380 - INFO: The output of the workflows is not checked and any errors will be in the logs above and in the saved log file.
+SMOKE_SPEC models/autoports/qwen_qwen3_5_122b_a10b False False benchmarks 8131
+=== TTI release (ci-nightly) 2026-09-26T11:06:09+00:00
+tti release exit=0
+2026-09-26 13:03:31,815 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=32768 osl=128 max_concurrency=7; benchmark block is reported as NA (ungraded).
+2026-09-26 13:03:33,818 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat
+WARNING 09-26 13:03:36 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x719369dd6480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_p
+2026-09-26 13:05:56,768 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-26 13:05:58,772 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat
+WARNING 09-26 13:06:01 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7fda255d6480>, seed=0, num_prompts=3, dataset_name='random', no_stream=False, dataset_p
+2026-09-26 13:10:32,340 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=3; benchmark block is reported as NA (ungraded).
+2026-09-26 13:10:34,345 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat
+WARNING 09-26 13:10:37 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7d69e15e6480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_p
+2026-09-26 13:15:15,474 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=131072 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-26 13:15:15,482 [INFO] workflow.spec_tests: ⏭  task=spec_tests no-op rc=0 (0.0s)
+2026-09-26 13:15:15,483 [INFO] workflow.release: Acceptance: PASS (0 blocker(s))
+2026-09-26 13:15:15,485 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T11261
+2026-09-26 13:15:15,486 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09-26
+2026-09-26 13:15:15,487 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09-26
+2026-09-26 13:15:15,487 [INFO] report_module.generator: Generated report: md=/home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T112618+0000
+2026-09-26 13:15:15,487 [INFO] workflow.release: Wrote markdown: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_Qwen__Qwen3.5-122B-A10B_2026-09-26T112618+0000.md
+2026-09-26 13:15:15,487 [INFO] workflow.release: Wrote json:     /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_Qwen__Qwen3.5-122B-A10B_2026-09-26T112618+0000.j
+2026-09-26 13:15:15,487 [INFO] workflow.release: === Workflow done: release (rc=0) ===
+2026-09-26 13:15:15,487 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-09-26 13:15:15,514 - runner.py:42 - INFO: ✅ command=release rc=0
+=== done 2026-09-26T13:16:15+00:00

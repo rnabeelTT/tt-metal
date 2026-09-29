@@ -1,0 +1,93 @@
+[
+ {
+  "tag": "hello",
+  "prompt": "Say hello in one sentence.",
+  "finish": "stop",
+  "completion_tokens": 918,
+  "reasoning_chars": 3366,
+  "content_chars": 47,
+  "loop_onset_char": null,
+  "wall_s": 92.4,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Task: Say hello.\n    *   Constraint: Use exactly one sentence.\n\n2.  **Determine the Content:**\n    *   Greeting: \"Hello,\" \"Hi,\" \"Greetings,\" etc.\n    *   Tone: Friendly, polite, concise.\n\n3.  **Draft Options:**\n    *   Hello there!\n    *   Hi, how are you doing today?\n    *   Greetings, I hope you are having a wonderful day.\n    *   Hello, it's nice to meet you.\n\n4.  **Check Constraints:**\n    *   \"Hello there!\" is one sentence.\n    *   \"Hi",
+  "reasoning_tail": "having a wonderful day!\"\n\n    Actually, let's keep it even simpler to ensure it's undeniably one sentence.\n    \"Hello there!\"\n\n    No, let's be a bit more conversational.\n    \"Hello, it is nice to meet you!\"\n\n    Okay, I will output: \"Hello, I hope you are having a wonderful day!\"\n\n    Wait, I should check if \"Hello!\" counts as a sentence. In grammar, interjections can be minor sentences. But to be safe, a subject-verb structure is clearer.\n    \"I am saying hello to you.\" -> Too robotic.\n    \"Hello, how are you doing today?\" -> Good.\n\n    Let's go with: \"Hello, I hope you are having a wonderful day!\"\n\n    Re-reading: \"Say hello in one sentence.\"\n    Okay.\n\n    Final check:\n    Text: Hello, I hope you are having a wonderful day!\n    Sentence count: 1.\n    Content: Greeting.\n\n    Perfect.cw\n",
+  "content_head": "\n\nHello, I hope you are having a wonderful day!"
+ },
+ {
+  "tag": "ifeval-0",
+  "prompt": "Write a 300+ word summary of the wikipedia page \"https://en.wikipedia.org/wiki/Raymond_III,_Count_of_Tripoli\". Do not use any commas and highlight at least 3 sections that has titles in markdown format, for example *highlighted section part 1*, *highlighted section part 2*, *highlighted section part 3*.",
+  "finish": "length",
+  "completion_tokens": 8192,
+  "reasoning_chars": 25198,
+  "content_chars": 0,
+  "loop_onset_char": null,
+  "wall_s": 570.5,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Topic: Wikipedia page \"Raymond III, Count of Tripoli\".\n    *   Length: 300+ words.\n    *   Constraint 1: Do not use any commas (`,`).\n    *   Constraint 2: Highlight at least 3 sections that have titles in markdown format (e.g., *highlighted section part 1*).\n    *   Goal: Write a summary based on the content of that Wikipedia page.\n\n2.  **Information Retrieval (Internal Knowledge):**\n    *   I need to recall or synthesize information about",
+  "reasoning_tail": " fine.\n        One detail: \"II\". Roman numerals are fine.\n\n        Final check on constraints:\n        1. 300+ words. (Yes, ~339)\n        2. No commas. (Will ensure)\n        3. Highlight at least 3 sections with titles in markdown format like *highlighted section part 1*. (I have *Early Life and Inheritance*, *Political Alliances and Conflicts*, *Death and Legacy*).\n\n        Let's assemble.\n\n        Wait, I need to make sure I don't use a comma in the markdown headers themselves if I were to use headers. But the prompt says \"highlight at least 3 sections that has titles in markdown format, for example *highlighted section part 1*\". This implies inline text highlighting using italics. I will stick to inline italics for the section markers within the paragraphs.\n\n        Wait, I should check",
+  "content_head": ""
+ },
+ {
+  "tag": "ifeval-1",
+  "prompt": "I am planning a trip to Japan, and I would like thee to write an itinerary for my journey in a Shakespearean style. You are not allowed to use any commas in your response.",
+  "finish": "length",
+  "completion_tokens": 8192,
+  "reasoning_chars": 28824,
+  "content_chars": 0,
+  "loop_onset_char": null,
+  "wall_s": 570.5,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Topic: Trip itinerary to Japan.\n    *   Style: Shakespearean (Early Modern English, poetic, dramatic).\n    *   Constraint: No commas allowed in the response.\n\n2.  **Deconstruct the Constraint:**\n    *   \"No commas\" is a strict negative constraint. I must ensure every sentence is structured without using the character \",\".\n    *   This means I need to rely on other punctuation (periods, question marks, exclamation points, semicolons, colons,",
+  "reasoning_tail": "eck if I should use formatting. Formatting is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use markdown. Markdown is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use bold. Bold is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use italics. Italics is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use underline. Underline is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use strikethrough. Strikethrough is fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use code blocks. Code blocks are fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use lists. Lists are fine.\n    *   Okay.\n\n    *   Wait, I need to check if I should use tables. Tables are fine.\n    *   Okay.\n\n    *   Wait, I need",
+  "content_head": ""
+ },
+ {
+  "tag": "ifeval-2",
+  "prompt": "Write a resume for a fresh high school graduate who is seeking their first job. Make sure to include at least 12 placeholder represented by square brackets, such as [address], [name].",
+  "finish": "stop",
+  "completion_tokens": 3078,
+  "reasoning_chars": 8833,
+  "content_chars": 875,
+  "loop_onset_char": null,
+  "wall_s": 304.6,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Target Audience:** Fresh high school graduate seeking their first job.\n    *   **Format:** Resume.\n    *   **Constraint:** Must include at least 12 placeholders represented by square brackets (e.g., [address], [name]).\n\n2.  **Determine Resume Structure:**\n    *   Header (Contact Info)\n    *   Objective/Summary\n    *   Education\n    *   Skills\n    *   Experience (Volunteer, Part-time, Extracurriculars - since it's a first job)\n    *   Acti",
+  "reasoning_tail": "zation Name]\n    15. [Start Date]\n    16. [End Date]\n    17. [Task 1]\n    18. [Action 1]\n    19. [Goal]\n    20. [Specific Skill 2]\n    21. [Club/Sport Name]\n    22. [Position Held]\n    23. [Community Service Activity]\n\n    Total 23 placeholders. Meets the \"at least 12\" requirement.\n\n    Wait, I should check if the prompt implies I should only use specific examples like [address] or if I can create my own. \"such as [address], [name]\". This implies I can create my own descriptive placeholders. I will do that.\n\n    One more check: \"Make sure to include at least 12 placeholder represented by square brackets\".\n    Okay, I will bold the placeholders or just leave them as is? Usually, just leaving them as is is clearer for a template. I will leave them as is.\n\n    Let's write the final output.cw\n",
+  "content_head": "\n\n[Full Name]\n[City, State, Zip Code]\n[Phone Number] | [Email Address]\n\n**Professional Objective**\nMotivated high school graduate seeking an entry-level position at [Company Name]. Eager to apply strong work ethic and [Specific Skill 1] in a challenging environment while contributing to team success"
+ },
+ {
+  "tag": "ifeval-7",
+  "prompt": "Write me a resume for Matthias Algiers. Use words with all capital letters to highlight key abilities, but make sure that words with all capital letters appear less than 10 times. Wrap the entire response with double quotation marks.",
+  "finish": "length",
+  "completion_tokens": 8192,
+  "reasoning_chars": 27378,
+  "content_chars": 0,
+  "loop_onset_char": null,
+  "wall_s": 570.5,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Name:** Matthias Algiers.\n    *   **Task:** Write a resume.\n    *   **Constraint 1:** Use words with all capital letters (ALL CAPS) to highlight key abilities.\n    *   **Constraint 2:** Words in ALL CAPS must appear less than 10 times in the entire response.\n    *   **Constraint 3:** Wrap the entire response with double quotation marks (\"...\").\n\n2.  **Drafting the Content:**\n    *   I need to create a professional resume for \"Matthias Alg",
+  "reasoning_tail": "ed \"Tech Solutions Inc.\" \"Tech\" is Mixed. \"Solutions\" is Mixed. \"Inc.\" is Mixed.\n    I used \"State University\". \"State\" is Mixed. \"University\" is Mixed.\n    I used \"Senior Manager\". \"Senior\" is Mixed. \"Manager\" is Mixed.\n\n    Okay, I think I'm good.\n    Wait, I need to make sure I don't use the word \"A\" as a standalone word.\n    \"Results-driven specialist focused on business growth.\" -> No \"A\".\n    \"Demonstrated LEADERSHIP in cross-functional teams.\" -> No \"A\".\n    \"Expert in developing STRATEGY for market expansion.\" -> No \"A\".\n    \"Proficient in data ANALYSIS to optimize performance.\" -> No \"A\".\n    \"Strong COMMUNICATION abilities for stakeholder engagement.\" -> No \"A\".\n    \"Dedicated to INNOVATION in operational workflows.\" -> No \"A\".\n    \"Senior Manager, Tech Solutions Inc.\" -> No \"A\".",
+  "content_head": ""
+ },
+ {
+  "tag": "ifeval-6",
+  "prompt": "Write a 2 paragraph critique of the following sentence in all capital letters, no lowercase letters allowed: \"If the law is bad, you should not follow it\". Label each paragraph with PARAGRAPH X.",
+  "finish": "stop",
+  "completion_tokens": 3033,
+  "reasoning_chars": 9684,
+  "content_chars": 1475,
+  "loop_onset_char": null,
+  "wall_s": 299.2,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Task: Write a 2-paragraph critique of the sentence \"If the law is bad, you should not follow it\".\n    *   Constraint 1: The entire output must be in ALL CAPITAL LETTERS.\n    *   Constraint 2: No lowercase letters allowed.\n    *   Constraint 3: Label each paragraph with \"PARAGRAPH X\" (where X is 1 or 2).\n    *   Content: Critique the provided sentence.\n\n2.  **Drafting Content (Mental or Scratchpad):**\n    *   *Paragraph 1:* Discuss the philo",
+  "reasoning_tail": "RIGHTS. A MORE ROBUST ARGUMENT WOULD DISTINGUISH BETWEEN LAWS THAT VIOLATE FUNDAMENTAL HUMAN RIGHTS AND THOSE THAT MERELY DISPLEASE AN INDIVIDUAL OR GROUP. ULTIMATELY, THE SENTENCE SERVES AS A STIMULUS FOR DEBATE RATHER THAN A PRACTICAL GUIDE FOR ACTION, AS IT FAILS TO ADDRESS THE LEGAL AND SOCIAL REPERCUSSIONS THAT OFTEN ARISE FROM INTENTIONAL NONCOMPLIANCE WITH GOVERNMENT MANDATES.\n\n    Looks solid. I will ensure no lowercase slips in.\n    Wait, \"PARAGRAPH X\". X is a variable. I should replace X with 1 and 2.\n    So \"PARAGRAPH 1\" and \"PARAGRAPH 2\".\n    Numbers are not lowercase letters, so they are allowed.\n    Okay.\n\n    One final scan for lowercase:\n    P A R A G R A P H 1\n    T H I S ...\n    P A R A G R A P H 2\n    F U R T H E R M O R E ...\n\n    Everything looks uppercase.\n    Ready.\n",
+  "content_head": "\n\nPARAGRAPH 1\nTHIS SENTENCE PRESENTS A DECEPTIVELY SIMPLE MORAL ABSOLUTE THAT OVERLOOKS THE COMPLEXITY OF CIVIL SOCIETY AND THE RULE OF LAW. WHILE THE IDEA OF RESISTING UNJUST LEGISLATION HAS HISTORICAL PRECEDENT IN CIVIL DISOBEDIENCE MOVEMENTS, THE STATEMENT FAILS TO DEFINE WHO DETERMINES WHAT CONS"
+ },
+ {
+  "tag": "ifeval-15",
+  "prompt": "Please provide the names of 5 famous moms in JSON format. Please, use any interesting or weird tone. Your entire output should just contain a JSON block, nothing else.",
+  "finish": "length",
+  "completion_tokens": 8192,
+  "reasoning_chars": 28472,
+  "content_chars": 0,
+  "loop_onset_char": 15440,
+  "wall_s": 570.5,
+  "reasoning_head": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Topic: Names of 5 famous moms.\n    *   Format: JSON.\n    *   Tone: Interesting or weird.\n    *   Constraint: Entire output should just contain a JSON block, nothing else (no markdown code blocks, no introductory text, no explanations).\n\n2.  **Select the Content:**\n    *   Need 5 famous moms.\n    *   Need to apply an \"interesting or weird\" tone to the descriptions or names themselves within the JSON structure.\n    *   Examples of famous moms",
+  "reasoning_tail": "ait, I need to make sure I don't add any markdown.\n    Okay.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    I will output the JSON now.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    I will output the JSON now.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    I will output the JSON now.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    I will output the JSON now.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    Wait, I need to make sure I don't add any markdown.\n    Okay.\n    I will output",
+  "content_head": ""
+ }
+]

@@ -1,0 +1,5 @@
+TOKENS device gpqa ci-nightly (run 11), cap 4096: n=40 at_cap=18 wrong=9 wrong_and_at_cap=8 median_tokens=3252
+TOKENS device gpqa full set (run 5), cap 4096: n=198 at_cap=88 wrong=62 wrong_and_at_cap=55 median_tokens=2852
+TOKENS device ifeval full set (run 5), cap 2048: n=541 at_cap=10 wrong=65 wrong_and_at_cap=3 median_tokens=207
+TOKENS HF gpqa ci-nightly control, cap 4096: n=40 at_cap=13 wrong=8 wrong_and_at_cap=7 median_tokens=1835
+TOKENS HF ifeval ci-nightly control, cap 2048: n=109 at_cap=0 wrong=11 wrong_and_at_cap=0 median_tokens=244

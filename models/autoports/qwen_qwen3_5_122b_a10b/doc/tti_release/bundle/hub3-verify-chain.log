@@ -1,0 +1,22 @@
+device holders: 0
+=== tt-model serve FROM THE HUB (profile p300x2, port 20000) 2026-09-27T13:44:18+00:00
+serve exit=0
+bundle healthy 2026-09-27T13:57:06+00:00
+HUB3_MODELS [('Qwen/Qwen3.5-122B-A10B', 262144)]
+HUB3_CHAT stop 'The capital of France is Paris.' reasoning_len 0
+HUB3_TOOL tool_calls [{"id": "chatcmpl-tool-af44b831ece0cbad", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\": \"Paris\"}"}}]
+tt-model curl (defaults) exit=0
+HUB3_TTMODEL_CURL_DEFAULT stop 'Hello! How can I help you today?' reasoning_len 0 10
+tt-model curl (thinking opt-in) exit=0
+HUB3_TTMODEL_CURL_THINK stop '\n\nThe capital of France is Paris.' reasoning_len 592 182
+tt-model curl (thinking off) exit=0
+HUB3_TTMODEL_CURL_NOTHINK stop 'Hello!' reasoning_len 0 3
+HUB3_NONALIGNED prompt_tokens 2381 completion 32 ' had roamed in its\nforlornness up the hill, like an evil spirit, seeki'
+HUB3_BURST32 32 ok, 3200 tokens in 25.4s = 126.1 tok/s, finish={'length'}
+HUB3_LONG128K prompt_tokens 131072 ', and their\nheated faces were distorted and convulsed. The t'
+(EngineCore pid=149) PRECISION_EFFECTIVE {"ccl_dtype": "bfp8", "config_id": "combo_mixer_lmhead_bfp4_ccl_bfp8", "kv_cache_dtype": "bfp8", "layers": {"0": {"linear_attention": "bfp4", "linear_attention
+=== stop 2026-09-27T14:00:05+00:00
+✓ stopping tt-model-qwen3-5-122b-a10b-blackholex4-p300x2  clean shutdown  2.7s
+  ✓ stopped 1 container(s)
+no bundle container running
+=== done 2026-09-27T14:01:02+00:00

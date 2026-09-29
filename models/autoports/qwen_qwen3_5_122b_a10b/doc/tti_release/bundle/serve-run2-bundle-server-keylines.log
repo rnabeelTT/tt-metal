@@ -1,0 +1,1 @@
+(EngineCore pid=148) PRECISION_EFFECTIVE {"ccl_dtype": "bfp8", "config_id": "combo_mixer_lmhead_bfp4_ccl_bfp8", "kv_cache_dtype": "bfp8", "layers": {"0": {"linear_attention": "bfp4", "linear_attention

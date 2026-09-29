@@ -1,0 +1,22 @@
+reset ok (attempt 1), tt-smi -ls exit 0
+=== autoport server (release config, thinking off) 2026-09-29T06:02:44+00:00
+server healthy 2026-09-29T06:12:44+00:00
+CHAT stop 'The capital of France is Paris.' reasoning_len 0
+=== TTI release (ci-nightly, subset references) 2026-09-29T06:12:45+00:00
+tti release exit=0
+2026-09-29 08:17:16,971 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=3; benchmark block is reported as NA (ungraded).
+2026-09-29 08:17:18,975 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7848263b6480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversam
+2026-09-29 08:21:59,845 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=131072 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 08:46:31,568 [INFO] workflow.release: Acceptance: PASS (0 blocker(s))
+2026-09-29 08:46:31,572 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_
+2026-09-29 08:46:31,573 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-
+2026-09-29 08:46:31,574 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-
+2026-09-29 08:46:31,574 [INFO] report_module.generator: Generated report: md=/home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_08-46-
+2026-09-29 08:46:31,574 [INFO] workflow.release: Wrote markdown: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_08-46-31.md
+2026-09-29 08:46:31,574 [INFO] workflow.release: Wrote json:     /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_08-46-31
+2026-09-29 08:46:31,574 [INFO] workflow.release: === Workflow done: release (rc=0) ===
+2026-09-29 08:46:31,574 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-09-29 08:46:31,602 - runner.py:42 - INFO: ✅ command=release rc=0
+reset ok (attempt 1), tt-smi -ls exit 0
+=== done 2026-09-29T08:47:31+00:00

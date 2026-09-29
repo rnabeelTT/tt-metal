@@ -1,0 +1,170 @@
+2026-09-26 17:25:19,613 - run.py:1218 - INFO: TT-Inference version: 0.22.0
+2026-09-26 17:25:19,613 - run.py:1219 - INFO: TT-Inference SHA: 9ef9d6602669
+2026-09-26 17:25:19,613 - run.py:1220 - INFO:
+============================================================
+tt-inference-server run.py CLI args summary
+============================================================
+
+Model Options:
+  model:                      Qwen/Qwen3.5-122B-A10B
+  device:                     p300x2
+  impl:                       qwen35-122b-autoport
+  engine:                     vLLM
+  workflow:                   spec_tests
+  tools:                      vllm
+
+Optional args:
+  dev_mode:                   True
+  docker_server:              False
+  local_server:               False
+  no_auth:                    True
+  tt_metal_python_venv_dir:   None
+  tt_metal_home:              /home/raahem/tt-metal
+  service_port:               8131
+  bind_host:                  0.0.0.0
+  docker_override_image:      None
+  docker_interactive:         False
+  device_id:                  None
+  disable_trace_capture:      False
+  override_tt_config:         None
+  vllm_override_args:         None
+  workflow_args:              None
+  limit_samples_mode:         None
+  eval_samples:               None
+  skip_system_sw_validation:  True
+
+Host Storage Options:
+  host_volume:                None
+  host_hf_cache:              None
+  host_weights_dir:           None
+  quetzal_package_root:       None
+  image_user:                 1000
+
+============================================================
+2026-09-26 17:25:19,613 - run.py:1226 - INFO: Runtime model spec saved to: /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-26_17-25-19_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_Mgc_mY9y.json
+2026-09-26 17:25:19,613 - validate_setup.py:341 - INFO: Starting local setup validation
+2026-09-26 17:25:19,613 - validate_setup.py:377 - INFO: ✅ validating local setup completed
+2026-09-26 17:25:19,613 - run.py:1343 - INFO: Model Qwen3.5-122B-A10B (model_type=LLM) routes through the workflow engine.
+2026-09-26 17:25:19,614 - runner.py:31 - INFO: → command=spec_tests
+2026-09-26 17:25:19,615 - venv_provisioner.py:73 - DEBUG: No VenvProvisioner registered; using Tenstorrent VENV_CONFIGS.
+2026-09-26 17:25:19,615 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python --index-strategy unsafe-best-match -r /home/raahem/tt-inference-server/requirements/workflow-run-script.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_workflow_run_script
+Checked 19 packages in 51ms
+2026-09-26 17:25:19,690 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/tt-inference-server/run_workflows.py --model Qwen/Qwen3.5-122B-A10B --workflow spec_tests --device p300x2 --service-port 8131 --runtime-model-spec-json /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-26_17-25-19_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_Mgc_mY9y.json --output-dir /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests
+2026-09-26 17:25:20,004 [INFO] workflow_module.runner: → command=workflow
+2026-09-26 17:25:20,004 [INFO] workflow.spec_tests: === Workflow start: spec_tests | model=Qwen3.5-122B-A10B device=P300X2 port=8131 output=/home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/Qwen__Qwen3.5-122B-A10B_p300x2_spec_tests ===
+2026-09-26 17:25:20,004 [INFO] workflow.spec_tests: → task=spec_tests
+2026-09-26 17:25:20,004 [INFO] test_module.dispatch: Running spec_tests for model=Qwen3.5-122B-A10B, device=P300X2
+2026-09-26 17:25:20,005 [INFO] test_module.test_categorization_system.test_filter: Loading server tests configuration
+2026-09-26 17:25:20,005 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-09-26 17:25:20,005 [INFO] test_module.test_categorization_system.test_filter: Loading test suites from discovery
+2026-09-26 17:25:20,005 [INFO] test_module.test_categorization_system.suite_loader: Loading suite files from /home/raahem/tt-inference-server/test_module/test_suites
+2026-09-26 17:25:20,005 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 5 suites
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Loaded 8 suites from audio.json (AUDIO)
+2026-09-26 17:25:20,006 [WARNING] test_module.test_categorization_system.suite_loader: Skipping efficientnet on n300: not in compatible_devices ['n150']
+2026-09-26 17:25:20,006 [WARNING] test_module.test_categorization_system.suite_loader: Skipping segformer on n300: not in compatible_devices ['n150']
+2026-09-26 17:25:20,006 [WARNING] test_module.test_categorization_system.suite_loader: Skipping unet on n300: not in compatible_devices ['n150']
+2026-09-26 17:25:20,006 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vit on n300: not in compatible_devices ['n150']
+2026-09-26 17:25:20,006 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vovnet on n300: not in compatible_devices ['n150']
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 9 suites
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Loaded 9 suites from cnn.json (CNN)
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 6 suites
+2026-09-26 17:25:20,006 [INFO] test_module.test_categorization_system.suite_loader: Loaded 6 suites from embedding.json (EMBEDDING)
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping motif on p300: not in compatible_devices ['t3k', 'galaxy', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [INFO] test_module.test_categorization_system.suite_loader: Expanded 6 test matrices into 29 suites
+2026-09-26 17:25:20,007 [INFO] test_module.test_categorization_system.suite_loader: Loaded 32 suites from image.json (IMAGE)
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on gpu: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p100: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150x4: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_1_8b on blackhole_galaxy: not in compatible_devices ['n150', 'n300', 't3k', 'gpu', 'p100', 'p150', 'p150x4', 'p150x8', 'p300', 'p300x2', 'galaxy', 'galaxy_t3k']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n150: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n300: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on t3k: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on blackhole_galaxy: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy_t3k: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on gpu: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p100: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,007 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x4: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x8: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p300: not in compatible_devices ['p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on blackhole_galaxy: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on gpu: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p100: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on blackhole_galaxy: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on gpu: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p100: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x4: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x8: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300x2: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on n150: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on n300: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on blackhole_galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on galaxy_t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on gpu: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p100: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p150: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p150x8: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p300: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Expanded 4 test matrices into 40 suites
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Loaded 40 suites from llm.json (LLM)
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 2 suites
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Loaded 2 suites from tts.json (TTS)
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 15 suites
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.suite_loader: Loaded 15 suites from video.json (VIDEO)
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.test_filter: Building reverse mapping: model -> category
+2026-09-26 17:25:20,008 [INFO] test_module.test_categorization_system.test_filter: Expanding 112 test suites
+2026-09-26 17:25:20,009 [INFO] test_module.test_categorization_system.test_filter: Including prerequisites by default
+2026-09-26 17:25:20,009 [INFO] test_module.test_categorization_system.test_filter: Getting filtered tests
+2026-09-26 17:25:20,009 [INFO] test_module.test_categorization_system.test_filter: Getting prerequisite tests for suite: qwen3-5-122b-a10b-p300x2
+2026-09-26 17:25:20,009 [INFO] test_module.test_categorization_system.test_filter: Skipping prerequisite DeviceLivenessTest for engine vLLM (allowed: ['media', 'forge'])
+2026-09-26 17:25:20,009 [INFO] test_module.test_categorization_system.test_filter: Expanding prerequisite test: LoggerForkSafetyTest
+2026-09-26 17:25:20,009 [INFO] test_module.dispatch: [qwen3-5-122b-a10b-p300x2] 2 test case(s)
+2026-09-26 17:25:20,009 [INFO] test_module.dispatch:   -> LoggerForkSafetyTest (test_module.unit_tests.logger_fork_safety_test)
+2026-09-26 17:25:20,011 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-09-26 17:25:20,012 [INFO] test_module._test_common.base_test: Running tests (attempt 1/121)
+2026-09-26 17:25:20,012 [INFO] test_module.unit_tests.logger_fork_safety_test: Testing logger fork safety with held lock...
+2026-09-26 17:25:20,012 [INFO] test_module.unit_tests.logger_fork_safety_test: Handler lock held by background thread, forking...
+2026-09-26 17:25:20,013 [INFO] test_module.unit_tests.logger_fork_safety_test: Child logged without deadlock
+2026-09-26 17:25:20,013 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-09-26 17:25:20,014 [INFO] test_module.dispatch:   -> VLLMParamConformanceTest (test_module.llm_tests.vllm_param_conformance_test)
+2026-09-26 17:25:20,015 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-09-26 17:25:20,016 [INFO] test_module._test_common.base_test: Running tests (attempt 1/1)
+2026-09-26 17:25:20,016 [INFO] test_module.llm_tests.vllm_param_conformance_test: Running vLLM parameter suite: /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python -m pytest /home/raahem/tt-inference-server/llm_module/test_vllm_chat_completions.py --output-path /tmp/vllm_param_3bf1hqgz --task-name vllm_chat_completions --endpoint-url http://127.0.0.1:8131/v1/chat/completions --model-name Qwen/Qwen3.5-122B-A10B -q
+2026-09-26 17:49:50,694 [INFO] test_module.llm_tests.vllm_param_conformance_test: vLLM parameter suite exited with code 0
+2026-09-26 17:49:50,694 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-09-26 17:49:50,694 [INFO] workflow_module.blocks_sink: BlockAccumulator: +2 block(s), total=2
+2026-09-26 17:49:50,694 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'num_of_devices': 4}
+2026-09-26 17:49:50,694 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'num_of_devices': 4, 'num_concurrent_requests': 4}
+2026-09-26 17:49:50,694 [INFO] test_module.dispatch: spec_tests done: 2 block(s), 0 failure(s) -> exit=0
+2026-09-26 17:49:50,694 [INFO] workflow.spec_tests: ✅ task=spec_tests block=spec_tests (1470.7s)
+2026-09-26 17:49:50,694 [INFO] workflow.spec_tests: Acceptance: PASS (0 blocker(s))
+2026-09-26 17:49:50,695 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.md
+2026-09-26 17:49:50,696 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.json
+2026-09-26 17:49:50,696 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.json
+2026-09-26 17:49:50,696 [INFO] report_module.generator: Generated report: md=/home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.md, json=/home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.json
+2026-09-26 17:49:50,696 [INFO] workflow.spec_tests: Wrote markdown: /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.md
+2026-09-26 17:49:50,696 [INFO] workflow.spec_tests: Wrote json:     /home/raahem/tt-inference-server/workflow_logs/reports_output/spec_tests/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50.json
+2026-09-26 17:49:50,696 [INFO] workflow.spec_tests: === Workflow done: spec_tests (rc=0) ===
+2026-09-26 17:49:50,696 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-09-26 17:49:50,723 - runner.py:42 - INFO: ✅ command=spec_tests rc=0
+2026-09-26 17:49:50,723 - run.py:1374 - INFO: Completed run.py.
+2026-09-26 17:49:50,723 - run.py:1380 - INFO: The output of the workflows is not checked and any errors will be in the logs above and in the saved log file.
+2026-09-26 17:49:50,723 - run.py:1384 - INFO: If you encounter any issues please share the log file in a GitHub issue and server log if available.
+2026-09-26 17:49:50,723 - run.py:1388 - INFO: This log file is saved on local machine at: /home/raahem/tt-inference-server/workflow_logs/run_logs/run_2026-09-26_17-25-19_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_spec_tests_zE4XvIqY.log

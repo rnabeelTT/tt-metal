@@ -1,0 +1,19 @@
+docker load tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90…
+Loaded image: tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90
+✓ docker load tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90  53.4s
+weights → host HF cache…
+
+
+Fetching 52 files:   0%|          | 0/52 [00:00<?, ?it/s][A[AFetching 52 files: 100%|██████████| 52/52 [00:00<00:00, 9560.51it/s]
+✓ weights → host HF cache
+/home/raahem/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/dc
+4d348443bc740c68e2d77492492c11606384d5
+  ✓ pulled raahemnabeel/qwen3-5-122b-a10b-blackholex4
+  → next:  tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4
+  ✓ host ready  docker 29.5.1 · tt devices · hugepages
+  ✓ image tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90
+  starting tt-model-qwen3-5-122b-a10b-blackholex4-p300x2…
+  ✓ container started  1.5s
+  → endpoint (once ready):  http://127.0.0.1:20000
+  → follow the boot:        tt-model logs
+  raahemnabeel/qwen3-5-122b-a10b-blackholex4 -f

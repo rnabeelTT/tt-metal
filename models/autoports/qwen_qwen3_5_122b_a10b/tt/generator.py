@@ -27,7 +27,14 @@ import time
 
 import torch
 from loguru import logger
-from readiness_check.contract import Generator as ReadinessGenerator
+
+try:
+    from readiness_check.contract import Generator as ReadinessGenerator
+except ImportError:  # the serving container ships without the bring-up runtime: the ABC only names the methods below
+
+    class ReadinessGenerator:  # pragma: no cover - stand-in for the readiness_check contract base class
+        pass
+
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.model import create_model

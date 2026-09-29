@@ -1,0 +1,79 @@
+  ↻ image tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90 is missing from
+  docker (deleted or pruned); re-pulling it from
+  raahemnabeel/qwen3-5-122b-a10b-blackholex4
+docker load tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90…
+✗ docker load tt-model/qwen3-5-122b-a10b-blackholex4:b8669899ce90
+Traceback (most recent call last):
+  File "/home/raahem/tt-model-manager/.venv/bin/tt-model", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/raahem/tt-model-manager/src/tt_kernel/cli.py", line 1757, in main
+    app()
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/main.py", line 1154, in __call__
+    raise e
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/main.py", line 1137, in __call__
+    return get_command(self)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/_click/core.py", line 807, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/core.py", line 1203, in main
+    return _main(
+           ^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/core.py", line 189, in _main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/src/tt_kernel/cli.py", line 113, in invoke
+    return super().invoke(ctx)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/core.py", line 1125, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/_click/core.py", line 746, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/_click/core.py", line 489, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/typer/main.py", line 1524, in wrapper
+    return callback(**use_params)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/src/tt_kernel/cli.py", line 1213, in serve
+    container_cli.serve_container(
+  File "/home/raahem/tt-model-manager/src/tt_kernel/container_cli.py", line 593, in serve_container
+    pull_container(str(target), (entry or {}).get("revision"), manifest,
+  File "/home/raahem/tt-model-manager/src/tt_kernel/container_cli.py", line 238, in pull_container
+    snapshot = hub.download_bundle(repo_id, revision, dest=td)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/src/tt_kernel/hub.py", line 236, in download_bundle
+    path = snapshot_download(
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 394, in snapshot_download
+    for f in api.list_repo_tree(repo_id=repo_id, recursive=True, revision=commit_hash, repo_type=repo_type)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 4093, in list_repo_tree
+    for path_info in paginate(path=tree_url, headers=headers, params={"recursive": recursive, "expand": expand}):
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/huggingface_hub/utils/_pagination.py", line 36, in paginate
+    r = session.get(path, params=params, headers=headers, timeout=timeout)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/httpx/_client.py", line 1053, in get
+    return self.request(
+           ^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/httpx/_client.py", line 914, in send
+    response = self._send_handling_auth(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/httpx/_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/httpx/_client.py", line 977, in _send_handling_redirects
+    hook(request)
+  File "/home/raahem/tt-model-manager/.venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 260, in hf_request_event_hook
+    raise OfflineModeIsEnabled(
+huggingface_hub.errors.OfflineModeIsEnabled: Cannot reach https://huggingface.co/api/models/raahemnabeel/qwen3-5-122b-a10b-blackholex4/tree/628601556142c1fa25d6fcb270bd6a83e4252841?recursive=true&expand=false: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable.

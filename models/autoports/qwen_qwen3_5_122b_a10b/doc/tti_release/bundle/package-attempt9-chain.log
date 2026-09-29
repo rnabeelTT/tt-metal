@@ -1,0 +1,26 @@
+=== tt-model package (attempt 9: thinking off by default (serve args), card text) 2026-09-27T10:14:50+00:00
+
+real	1m40.485s
+user	0m5.059s
+sys	0m7.412s
+package exit=0
+#47 naming to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672 done
+#47 unpacking to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672 0.1s done
+#47 DONE 0.4s
+exporting the image as an OCI layout…
+✓ exporting the image as an OCI layout  21.5s
+  • image/ 2.0 GB as content-addressed blobs
+  ✓ packaged qwen3-5-122b-a10b-blackholex4 →
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4
+  → serve it locally:  tt-model serve
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4/tt_kernel_manifest.json
+  → publish it:        tt-model push
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4
+total 12
+drwxrwxr-x 3 raahem raahem 4096 Sep 26 13:17 .
+drwxrwxr-x 7 raahem raahem 4096 Sep 26 17:52 ..
+drwxrwxr-x 3 raahem raahem 4096 Sep 27 10:14 build
+=== done 2026-09-27T10:16:31+00:00

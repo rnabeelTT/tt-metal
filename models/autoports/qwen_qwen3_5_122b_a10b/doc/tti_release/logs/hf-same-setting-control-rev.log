@@ -1,0 +1,8 @@
+=== hf same-setting control 2026-09-28T06:40:26+00:00 tasks=gpqa_diamond_cot_zeroshot batch=8 limit=0
+[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation a
+/home/raahem/qwen35-122b-bringup/scripts/11-hf-same-setting-control.py:16: DeprecationWarning: get_task_dict is deprecated. Use TaskManager.load() instead.
+  tm = TaskManager(); td = get_task_dict(TASKS, tm)
+gpqa_diamond_cot_zeroshot: 4 docs done (+8 in 30526s, max new tokens 4096)
+gpqa_diamond_cot_zeroshot: 8 docs done (+8 in 27615s, max new tokens 4096)
+gpqa_diamond_cot_zeroshot: 12 docs done (+8 in 23875s, max new tokens 4096)
+=== done 2026-09-29T06:01:51+00:00

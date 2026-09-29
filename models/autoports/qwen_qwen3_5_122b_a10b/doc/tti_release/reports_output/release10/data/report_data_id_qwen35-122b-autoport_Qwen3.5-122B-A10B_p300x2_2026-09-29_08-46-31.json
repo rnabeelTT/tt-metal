@@ -1,0 +1,1044 @@
+{
+    "metadata": {
+        "model_name": "Qwen3.5-122B-A10B",
+        "model_repo": "Qwen/Qwen3.5-122B-A10B",
+        "device": "P300X2",
+        "generated_at": "2026-09-29T06:32:58+00:00",
+        "report_id": "id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_08-46-31",
+        "workflow": "release",
+        "server_mode": "API",
+        "run_command": "python run.py --dev-mode --model Qwen/Qwen3.5-122B-A10B --device p300x2 --workflow release --limit-samples-mode ci-nightly --service-port 8131 --no-auth --skip-system-sw-validation",
+        "runtime_model_spec_json": "/home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-29_06-12-45_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_3ckS78LH.json",
+        "model_id": "id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2",
+        "inference_engine": "vLLM",
+        "tt_metal_commit": null,
+        "vllm_commit": null,
+        "model_impl": "qwen35-122b-autoport"
+    },
+    "sections": [
+        {
+            "kind": "evals",
+            "data": {
+                "task_name": "ifeval",
+                "tolerance": 0.05,
+                "published_score": 93.4,
+                "published_score_ref": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B (IFEval, thinking mode)",
+                "gpu_reference_score": 89.91,
+                "gpu_reference_score_ref": "ci-nightly ifeval (doc_ids 0-108), bf16 HF Qwen3_5MoeForCausalLM on CPU, same chat requests, enable_thinking=False, greedy, max_new_tokens 2048; prompt_level_strict_acc; 2026-09-29 (autoport doc/tti_release/RUN_NOTES.md run 8b) [CI_NIGHTLY subset]",
+                "score": 92.66055045871559,
+                "ratio_to_published": 0.9920829813566979,
+                "ratio_to_reference": 1.0305922640275342,
+                "accuracy_check": 2,
+                "priority": "must",
+                "mean_seconds_per_task": 3.945559846486153
+            },
+            "title": "LLM Eval \u2014 ifeval",
+            "task_type": "llm",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "task_name": "ifeval",
+                "tolerance": 0.05,
+                "published_score": 93.4,
+                "published_score_ref": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B (IFEval, thinking mode)"
+            }
+        },
+        {
+            "kind": "evals",
+            "data": {
+                "task_name": "gpqa_diamond_cot_zeroshot",
+                "tolerance": 0.05,
+                "published_score": 86.6,
+                "published_score_ref": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B (GPQA Diamond, thinking mode)",
+                "gpu_reference_score": 60.0,
+                "gpu_reference_score_ref": "ci-nightly gpqa_diamond_cot_zeroshot (doc_ids 0-39), bf16 HF on CPU, same requests, enable_thinking=False, greedy, max_new_tokens 4096; exact_match flexible-extract; 2026-09-29 (RUN_NOTES run 8b) [CI_NIGHTLY subset]",
+                "score": 77.5,
+                "ratio_to_published": 0.8949191685912241,
+                "ratio_to_reference": 1.2916666666666667,
+                "accuracy_check": 2,
+                "priority": "must",
+                "mean_seconds_per_task": 19.536895493700285
+            },
+            "title": "LLM Eval \u2014 gpqa_diamond_cot_zeroshot",
+            "task_type": "llm",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "task_name": "gpqa_diamond_cot_zeroshot",
+                "tolerance": 0.05,
+                "published_score": 86.6,
+                "published_score_ref": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B (GPQA Diamond, thinking mode)"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 8,
+                "input_sequence_length": 128,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 397.7836,
+                "p50_ttft": 399.5516,
+                "p99_ttft": 418.2466,
+                "mean_tpot_ms": 37.73,
+                "mean_e2el_ms": 5189.4922,
+                "tps_input_throughput": 24.6641,
+                "tps_output_throughput": 24.6641,
+                "tps_total_throughput": 49.3283,
+                "request_throughput": 0.1927,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:33:51"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 32,
+                "num_requests": 256,
+                "input_sequence_length": 128,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 12358.2837,
+                "p50_ttft": 12372.2367,
+                "p99_ttft": 12417.2366,
+                "mean_tpot_ms": 127.0284,
+                "mean_e2el_ms": 28490.8874,
+                "tps_input_throughput": 143.7606,
+                "tps_output_throughput": 143.7606,
+                "tps_total_throughput": 287.5212,
+                "request_throughput": 1.1231,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:37:51"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 128,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 379.0332,
+                "p50_ttft": 377.1692,
+                "p99_ttft": 392.2254,
+                "mean_tpot_ms": 37.7579,
+                "mean_e2el_ms": 39005.4127,
+                "tps_input_throughput": 3.2816,
+                "tps_output_throughput": 26.2526,
+                "tps_total_throughput": 29.5342,
+                "request_throughput": 0.0256,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:41:13"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 32,
+                "num_requests": 128,
+                "input_sequence_length": 128,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 12317.832,
+                "p50_ttft": 12328.6225,
+                "p99_ttft": 12351.8492,
+                "mean_tpot_ms": 140.3928,
+                "mean_e2el_ms": 155939.6773,
+                "tps_input_throughput": 26.2664,
+                "tps_output_throughput": 210.1309,
+                "tps_total_throughput": 236.3973,
+                "request_throughput": 0.2052,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:52:23"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 1024,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 1185.2076,
+                "p50_ttft": 1185.3209,
+                "p99_ttft": 1189.962,
+                "mean_tpot_ms": 37.7371,
+                "mean_e2el_ms": 5977.8172,
+                "tps_input_throughput": 171.2926,
+                "tps_output_throughput": 21.4116,
+                "tps_total_throughput": 192.7042,
+                "request_throughput": 0.1673,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:53:00"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 32,
+                "num_requests": 128,
+                "input_sequence_length": 1024,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 37956.5535,
+                "p50_ttft": 37927.6817,
+                "p99_ttft": 38058.3018,
+                "mean_tpot_ms": 126.6078,
+                "mean_e2el_ms": 54035.7496,
+                "tps_input_throughput": 606.3998,
+                "tps_output_throughput": 75.8,
+                "tps_total_throughput": 682.1997,
+                "request_throughput": 0.5922,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:56:49"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 2048,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 1971.1718,
+                "p50_ttft": 1970.3341,
+                "p99_ttft": 1977.9121,
+                "mean_tpot_ms": 37.7686,
+                "mean_e2el_ms": 6767.782,
+                "tps_input_throughput": 302.5986,
+                "tps_output_throughput": 18.9124,
+                "tps_total_throughput": 321.511,
+                "request_throughput": 0.1478,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 06:57:30"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 32,
+                "num_requests": 128,
+                "input_sequence_length": 2048,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 63063.2352,
+                "p50_ttft": 63062.7978,
+                "p99_ttft": 63151.8174,
+                "mean_tpot_ms": 126.5673,
+                "mean_e2el_ms": 79137.2877,
+                "tps_input_throughput": 828.1152,
+                "tps_output_throughput": 51.7572,
+                "tps_total_throughput": 879.8724,
+                "request_throughput": 0.4044,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:03:01"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 4096,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 3894.6037,
+                "p50_ttft": 3893.4872,
+                "p99_ttft": 3898.2514,
+                "mean_tpot_ms": 37.9149,
+                "mean_e2el_ms": 8709.7903,
+                "tps_input_throughput": 470.2611,
+                "tps_output_throughput": 14.6957,
+                "tps_total_throughput": 484.9567,
+                "request_throughput": 0.1148,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:03:51"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 32,
+                "num_requests": 128,
+                "input_sequence_length": 4096,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 124753.7328,
+                "p50_ttft": 124775.0393,
+                "p99_ttft": 124854.6715,
+                "mean_tpot_ms": 127.2352,
+                "mean_e2el_ms": 140912.6063,
+                "tps_input_throughput": 930.1527,
+                "tps_output_throughput": 29.0673,
+                "tps_total_throughput": 959.22,
+                "request_throughput": 0.2271,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:13:33"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 7768.738,
+                "p50_ttft": 7768.738,
+                "p99_ttft": 7773.0966,
+                "mean_tpot_ms": 37.9811,
+                "mean_e2el_ms": 12592.34,
+                "tps_input_throughput": 650.5386,
+                "tps_output_throughput": 10.1647,
+                "tps_total_throughput": 660.7033,
+                "request_throughput": 0.0794,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:14:17"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 31,
+                "num_requests": 62,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 240798.4369,
+                "p50_ttft": 240699.8342,
+                "p99_ttft": 240925.9824,
+                "mean_tpot_ms": 129.4128,
+                "mean_e2el_ms": 257233.8606,
+                "tps_input_throughput": 987.2314,
+                "tps_output_throughput": 15.4255,
+                "tps_total_throughput": 1002.6569,
+                "request_throughput": 0.1205,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:23:13"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 7789.914,
+                "p50_ttft": 7789.914,
+                "p99_ttft": 7792.496,
+                "mean_tpot_ms": 38.0294,
+                "mean_e2el_ms": 46694.0052,
+                "tps_input_throughput": 175.4391,
+                "tps_output_throughput": 21.9299,
+                "tps_total_throughput": 197.3689,
+                "request_throughput": 0.0214,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:25:40"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 28,
+                "num_requests": 56,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 217436.9034,
+                "p50_ttft": 217382.438,
+                "p99_ttft": 217522.0755,
+                "mean_tpot_ms": 141.1884,
+                "mean_e2el_ms": 361872.6769,
+                "tps_input_throughput": 633.8539,
+                "tps_output_throughput": 79.2317,
+                "tps_total_throughput": 713.0856,
+                "request_throughput": 0.0774,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:38:39"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 10000,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 9722.0038,
+                "p50_ttft": 9722.0038,
+                "p99_ttft": 9730.3986,
+                "mean_tpot_ms": 38.0303,
+                "mean_e2el_ms": 48627.0182,
+                "tps_input_throughput": 205.6458,
+                "tps_output_throughput": 21.0581,
+                "tps_total_throughput": 226.7039,
+                "request_throughput": 0.0206,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:41:12"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 23,
+                "num_requests": 46,
+                "input_sequence_length": 10000,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 223321.6012,
+                "p50_ttft": 223329.2553,
+                "p99_ttft": 223351.0667,
+                "mean_tpot_ms": 141.7286,
+                "mean_e2el_ms": 368309.9917,
+                "tps_input_throughput": 624.4704,
+                "tps_output_throughput": 63.9458,
+                "tps_total_throughput": 688.4162,
+                "request_throughput": 0.0624,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:54:25"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 16384,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 15572.0386,
+                "p50_ttft": 15572.0386,
+                "p99_ttft": 15576.321,
+                "mean_tpot_ms": 38.1371,
+                "mean_e2el_ms": 20415.453,
+                "tps_input_throughput": 802.5174,
+                "tps_output_throughput": 6.2697,
+                "tps_total_throughput": 808.7871,
+                "request_throughput": 0.049,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 07:55:34"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 15,
+                "num_requests": 30,
+                "input_sequence_length": 16384,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 233417.2187,
+                "p50_ttft": 233382.9255,
+                "p99_ttft": 233505.8319,
+                "mean_tpot_ms": 112.4698,
+                "mean_e2el_ms": 247700.8811,
+                "tps_input_throughput": 992.1558,
+                "tps_output_throughput": 7.7512,
+                "tps_total_throughput": 999.907,
+                "request_throughput": 0.0606,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:04:19"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 32768,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 31423.0796,
+                "p50_ttft": 31423.0796,
+                "p99_ttft": 31423.0796,
+                "mean_tpot_ms": 38.3966,
+                "mean_e2el_ms": 36299.4517,
+                "tps_input_throughput": 902.7049,
+                "tps_output_throughput": 3.5262,
+                "tps_total_throughput": 906.2311,
+                "request_throughput": 0.0275,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:05:39"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 7,
+                "num_requests": 7,
+                "input_sequence_length": 32768,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 219921.7069,
+                "p50_ttft": 219973.5798,
+                "p99_ttft": 219975.7877,
+                "mean_tpot_ms": 98.6092,
+                "mean_e2el_ms": 232445.0694,
+                "tps_input_throughput": 986.7875,
+                "tps_output_throughput": 3.8546,
+                "tps_total_throughput": 990.6421,
+                "request_throughput": 0.0301,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:10:16"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 65536,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 63910.2219,
+                "p50_ttft": 63910.2219,
+                "p99_ttft": 63910.2219,
+                "mean_tpot_ms": 39.0465,
+                "mean_e2el_ms": 68869.1257,
+                "tps_input_throughput": 951.5974,
+                "tps_output_throughput": 1.8586,
+                "tps_total_throughput": 953.456,
+                "request_throughput": 0.0145,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:12:41"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 3,
+                "num_requests": 3,
+                "input_sequence_length": 65536,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 191734.9546,
+                "p50_ttft": 191846.4426,
+                "p99_ttft": 191847.9158,
+                "mean_tpot_ms": 55.3386,
+                "mean_e2el_ms": 198762.9623,
+                "tps_input_throughput": 989.1507,
+                "tps_output_throughput": 1.9319,
+                "tps_total_throughput": 991.0827,
+                "request_throughput": 0.0151,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:17:16"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 131072,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 132586.8966,
+                "p50_ttft": 132586.8966,
+                "p99_ttft": 132586.8966,
+                "mean_tpot_ms": 39.9983,
+                "mean_e2el_ms": 137666.6766,
+                "tps_input_throughput": 952.0945,
+                "tps_output_throughput": 0.9298,
+                "tps_total_throughput": 953.0243,
+                "request_throughput": 0.0073,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "Qwen/Qwen3.5-122B-A10B",
+                "device": "P300X2",
+                "timestamp": "2026-09-29 08:21:59"
+            }
+        },
+        {
+            "kind": "spec_tests",
+            "data": {
+                "success": true,
+                "child_result": "OK",
+                "status": "pass",
+                "attempts": 1,
+                "logs": [],
+                "elapsed_seconds": 0.004137842915952206,
+                "test_name": "LoggerForkSafetyTest",
+                "description": "Test for logging fork safety to prevent deadlocks"
+            },
+            "title": "Logger Fork Safety",
+            "task_type": "unit",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "num_of_devices": 4
+            }
+        },
+        {
+            "kind": "spec_tests",
+            "data": {
+                "endpoint_url": "http://127.0.0.1:8131/v1/chat/completions",
+                "model_name": "Qwen/Qwen3.5-122B-A10B",
+                "task_name": "vllm_chat_completions",
+                "parameter_conformance_summary": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "status": "\u2705 PASS",
+                        "summary": "3/3 passed"
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_n",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "status": "\u2705 PASS",
+                        "summary": "9/9 passed"
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    }
+                ],
+                "detailed_test_results": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "parametrization": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[temperature-0.0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_k-1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_p-0.01]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "parametrization": "test_logprobs",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[10]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[5]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[3]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "parametrization": "test_non_uniform_seeding",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "parametrization": "test_seed_reproducibility",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    }
+                ],
+                "success": true,
+                "status": "pass",
+                "attempts": 1,
+                "logs": [
+                    "/home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/lib/python3.10/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \"asyncio_default_fixture_loop_scope\" is unset.",
+                    "The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \"function\", \"class\", \"module\", \"package\", \"session\"",
+                    "",
+                    "  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))",
+                    "......................                                                   [100%]",
+                    "22 passed in 1471.53s (0:24:31)"
+                ],
+                "elapsed_seconds": 1471.7099268890452,
+                "test_name": "VLLMParamConformanceTest",
+                "description": "vLLM chat/completions parameter conformance"
+            },
+            "title": "Vllm Chat Completions",
+            "task_type": "functional",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "num_of_devices": 4,
+                "num_concurrent_requests": 4
+            }
+        }
+    ],
+    "acceptance_criteria": true,
+    "acceptance_blockers": {},
+    "acceptance_criteria_metadata": {
+        "enforcement_result": "PASS",
+        "model_status": "FUNCTIONAL",
+        "categories": [
+            {
+                "name": "Benchmarks",
+                "status": "NA",
+                "total": 23,
+                "passed": 0,
+                "failed": 0,
+                "na": 23,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Evals",
+                "status": "PASS",
+                "total": 2,
+                "passed": 2,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Spec Tests",
+                "status": "PASS",
+                "total": 1,
+                "passed": 1,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Agentic Targets",
+                "status": "NA",
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            }
+        ]
+    },
+    "acceptance_summary_markdown": "### Acceptance Criteria\n\n- Acceptance status: \u2705 `PASS`\n- Model status: `FUNCTIONAL`\n- Benchmarks: \ud83d\udfe8 `NA` (0/23 passed, 23 NA)\n- Evals: \u2705 `PASS` (2/2 passed)\n- Spec Tests: \u2705 `PASS` (1/1 passed)\n- Agentic Targets: \ud83d\udfe8 `NA` (no blocks present)\n- All acceptance criteria passed."
+}

@@ -1,0 +1,5 @@
+docker load tt-model/qwen3-5-122b-a10b-blackholex4:2b77b9f6ee68…
+Loaded image: tt-model/qwen3-5-122b-a10b-blackholex4:2b77b9f6ee68
+✓ docker load tt-model/qwen3-5-122b-a10b-blackholex4:2b77b9f6ee68  46.6s
+  ✓ pulled raahemnabeel/qwen3-5-122b-a10b-blackholex4
+  → next:  tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4

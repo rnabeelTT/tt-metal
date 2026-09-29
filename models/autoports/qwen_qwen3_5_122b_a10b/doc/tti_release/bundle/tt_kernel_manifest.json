@@ -1,0 +1,146 @@
+{
+  "schema_version": "5.1",
+  "name": "qwen3-5-122b-a10b-blackholex4",
+  "tt_metal_version": "0.65.2.dev9873+g191f7f672f3",
+  "arch": "blackhole",
+  "device_count": 4,
+  "producer": {
+    "tt_kernel_version": "0.1.0",
+    "created_at": "2026-09-27T10:16:30.250376+00:00",
+    "hostname": "qb2-120-p11t05"
+  },
+  "weights": {
+    "repo_id": "Qwen/Qwen3.5-122B-A10B",
+    "revision": "dc4d348443bc740c68e2d77492492c11606384d5",
+    "allow_patterns": null,
+    "ignore_patterns": null,
+    "repo_type": "model"
+  },
+  "mesh": null,
+  "entrypoint": null,
+  "resources": null,
+  "capabilities": null,
+  "env": {},
+  "bundled": null,
+  "deps": null,
+  "container": {
+    "image": {
+      "registry": "hf",
+      "repository": "qwen3-5-122b-a10b-blackholex4",
+      "tag": "tt-model/qwen3-5-122b-a10b-blackholex4:36b6aa8bb6e4",
+      "digest": "sha256:36b6aa8bb6e401b97ed0ef5db2b8ab13ea4829fca22611767a3484281fb8efd3"
+    },
+    "kind": "vllm-plugin",
+    "runtime": {
+      "vllm": {
+        "version": "0.26.0"
+      },
+      "plugin": {
+        "path": "/home/raahem/vllm-tt-plugin",
+        "sha": "92403f3b0db48ac86aabf28159ea675c47a420e8",
+        "dirty": false
+      },
+      "extra_models_dir": "models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle",
+      "overrides": [
+        "torch==2.11.0+cpu",
+        "torchvision==0.26.0+cpu",
+        "transformers==5.12.1",
+        "tokenizers==0.22.2"
+      ],
+      "lock": "requirements.lock"
+    },
+    "serve": {
+      "hardware": null,
+      "mesh_device": null,
+      "port": 8000,
+      "max_model_len": 262144,
+      "max_num_seqs": 32,
+      "block_size": 64,
+      "server_timeout": null,
+      "capabilities": {
+        "tool_parser": "qwen3_xml",
+        "reasoning_parser": "qwen3"
+      },
+      "additional_config": {
+        "tt": {
+          "sample_on_device_mode": "all",
+          "trace_region_size": 805306368,
+          "l1_small_size": 24576,
+          "fabric_config": "FABRIC_1D"
+        }
+      },
+      "args": [
+        "--enable-auto-tool-choice",
+        "--default-chat-template-kwargs",
+        "{\"enable_thinking\": false}"
+      ],
+      "env": {
+        "ARCH_NAME": "blackhole",
+        "HF_MODEL": "Qwen/Qwen3.5-122B-A10B",
+        "QWEN35_TRACE_REGION_MIB": "768",
+        "QWEN35_PROGRAM_GUARD": "1"
+      }
+    },
+    "serve_profiles": [
+      {
+        "hardware": "p300x2",
+        "mesh_device": "P300x2",
+        "port": null,
+        "max_model_len": null,
+        "max_num_seqs": null,
+        "block_size": null,
+        "server_timeout": null,
+        "capabilities": null,
+        "additional_config": {},
+        "args": [],
+        "env": {},
+        "name": "p300x2",
+        "description": "Two p300 boards (4 dies), 32 concurrent sequences, 262144 context."
+      },
+      {
+        "hardware": "p150x4",
+        "mesh_device": "P150x4",
+        "port": null,
+        "max_model_len": null,
+        "max_num_seqs": null,
+        "block_size": null,
+        "server_timeout": null,
+        "capabilities": null,
+        "additional_config": {},
+        "args": [],
+        "env": {},
+        "name": "p150x4",
+        "description": "Four p150 boards, 32 concurrent sequences, 262144 context (same (1,4) mesh; untested on this host)."
+      }
+    ],
+    "default_profile": "p300x2",
+    "code_dir": "code",
+    "verify": [
+      "import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration",
+      "import models.autoports.qwen_qwen3_5_122b_a10b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+    ],
+    "built": {
+      "image": "tt-model/qwen3-5-122b-a10b-blackholex4:36b6aa8bb6e4",
+      "repo": "raahemnabeel/qwen3-5-122b-a10b-blackholex4",
+      "tt_model_version": "0.1.0",
+      "created_at": "2026-09-27T10:15:01+00:00",
+      "tt_metal": {
+        "sha": "191f7f672f31d73915950f369af4dda6ab5345aa",
+        "describe": "v0.79.0-dev20260909-70-g191f7f672f-dirty",
+        "dirty": true,
+        "scm_version": "0.65.2.dev9873+g191f7f672f3",
+        "mode": "local",
+        "remote": "https://github.com/tenstorrent/tt-metal.git",
+        "branch": "qwen3_5_122b_a10b",
+        "pushed": false
+      },
+      "code_sha256": "39e6b36b56f864a9fa8fc3a209759a1984a472385f4c83ab7e5723d0a52f6935",
+      "plugin": {
+        "sha": "92403f3b0db48ac86aabf28159ea675c47a420e8",
+        "path": "/home/raahem/vllm-tt-plugin",
+        "dirty": false
+      },
+      "image_digest": "sha256:36b6aa8bb6e401b97ed0ef5db2b8ab13ea4829fca22611767a3484281fb8efd3"
+    }
+  }
+}

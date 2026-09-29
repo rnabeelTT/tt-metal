@@ -1,0 +1,28 @@
+Repo raahemnabeel/qwen3-5-122b-a10b-blackholex4 exists and is already private
+  • image/ 2.0 GB in 28 content-addressed blobs — layers shared with another
+  model on the same tt-metal commit upload once
+uploading to raahemnabeel/qwen3-5-122b-a10b-blackholex4…
+/home/raahem/tt-model-manager/src/tt_kernel/hub.py:110: FutureWarning:
+================================================================================
+`upload_large_folder` is DEPRECATED and will be removed in a future release.
+
+Use `upload_folder` instead:
+
+    api.upload_folder(repo_id="raahemnabeel/qwen3-5-122b-a10b-blackholex4", repo_type="model", folder_path="/home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex4")
+================================================================================
+
+  _api().upload_large_folder(
+No files have been modified since last commit. Skipping to prevent empty commit.
+No files have been modified since last commit. Skipping to prevent empty commit.
+No files have been modified since last commit. Skipping to prevent empty commit.
+No files have been modified since last commit. Skipping to prevent empty commit.
+
+
+
+---------- 2026-09-26 19:00:58 (0:00:00) ----------
+Files:   hashed 1/709 (4.4K/2.0G) | pre-uploaded: 0/0 (0.0/2.0G) (+709 unsure) | committed: 0/709 (0.0/2.0G) | ignored: 0
+Workers: hashing: 4 | get upload mode: 0 | pre-uploading: 0 | committing: 0 | waiting: 0
+---------------------------------------------------
+✓ uploading to raahemnabeel/qwen3-5-122b-a10b-blackholex4  32.8s
+  ✓ pushed raahemnabeel/qwen3-5-122b-a10b-blackholex4
+  → consumers:  tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4

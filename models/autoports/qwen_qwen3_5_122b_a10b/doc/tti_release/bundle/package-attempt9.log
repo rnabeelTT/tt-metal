@@ -1,0 +1,243 @@
+reading the manifest…
+✓ reading the manifest  qwen3-5-122b-a10b-blackholex4 · vllm-plugin  10.4s
+  • tt-metal 191f7f672 (qwen3_5_122b_a10b) (dirty tree — packaged as-is) ·
+  local source
+  ○ this commit is on no remote — that is fine, and expected on a local branch
+  or fork: the image ships the tree itself, so nothing needs to fetch it. The
+  sha is recorded for reference only.
+  • plugin pinned to 92403f3b0
+  • 12 code path(s) → code/
+  ○ skipped by the ignore list:
+  models/autoports/qwen_qwen3_5_122b_a10b/tt/__pycache__,
+  models/demos/blackhole/qwen36/__pycache__,
+  models/demos/blackhole/qwen36/tests/__pycache__,
+  models/demos/blackhole/qwen36/tests/unit/__pycache__,
+  models/demos/blackhole/qwen36/utils/__pycache__ (+43 more)
+  → watch from another terminal:  tail -f
+  /home/raahem/.cache/tt-model/build/qwen3-5-122b-a10b-blackholex4.log
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 16.07kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7-labs
+#2 DONE 0.7s
+
+#3 docker-image://docker.io/docker/dockerfile:1.7-labs@sha256:b99fecfe00268a8b556fad7d9c37ee25d716ae08a5d7320e6d51c4dd83246894
+#3 resolve docker.io/docker/dockerfile:1.7-labs@sha256:b99fecfe00268a8b556fad7d9c37ee25d716ae08a5d7320e6d51c4dd83246894 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/ubuntu:22.04
+#4 ...
+
+#5 [context metalsrc] load .dockerignore
+#5 transferring metalsrc: 2B done
+#5 DONE 0.0s
+
+#6 [internal] load metadata for ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-22.04-dev-amd64:latest
+#6 DONE 0.2s
+
+#4 [internal] load metadata for docker.io/library/ubuntu:22.04
+#4 DONE 0.3s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 2B done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 DONE 0.0s
+
+#9 [context metalsrc] load from client
+#9 DONE 0.0s
+
+#10 [runtime  1/22] FROM docker.io/library/ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+#10 resolve docker.io/library/ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 0.0s done
+#10 DONE 0.0s
+
+#11 [prep 1/2] FROM ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-22.04-dev-amd64:latest@sha256:3643bc059bf70bd14d3031f5f53f8853abc564cd2a5d9a3dcff1b54c7003e25b
+#11 resolve ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-22.04-dev-amd64:latest@sha256:3643bc059bf70bd14d3031f5f53f8853abc564cd2a5d9a3dcff1b54c7003e25b 0.1s done
+#11 DONE 0.1s
+
+#8 [internal] load build context
+#8 transferring context: 70.97kB 0.2s done
+#8 DONE 0.3s
+
+#9 [context metalsrc] load from client
+#9 transferring metalsrc: 2.00MB 1.3s done
+#9 DONE 1.6s
+
+#12 [runtime 13/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/ttnn /opt/tt-metal/ttnn
+#12 CACHED
+
+#13 [builder  4/12] RUN --mount=type=cache,target=/root/.cache/ccache     --mount=type=cache,target=/cpm     ./build_metal.sh --enable-ccache --cpm-source-cache /cpm
+#13 CACHED
+
+#14 [runtime 11/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/build /opt/tt-metal/build
+#14 CACHED
+
+#15 [builder  9/12] COPY wheels /ctx/wheels
+#15 CACHED
+
+#16 [runtime 15/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/setup.py /opt/tt-metal/pyproject.toml /opt/tt-metal/
+#16 CACHED
+
+#17 [runtime 14/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/tools /opt/tt-metal/tools
+#17 CACHED
+
+#18 [builder  1/12] WORKDIR /opt/tt-metal
+#18 CACHED
+
+#19 [runtime 12/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/tt_metal /opt/tt-metal/tt_metal
+#19 CACHED
+
+#20 [runtime  8/22] COPY --from=builder /opt/vllm /opt/vllm
+#20 CACHED
+
+#21 [runtime  3/22] RUN existing="$(getent passwd 1000 | cut -d: -f1)"     && if [ -n "$existing" ]; then          userdel -r "$existing" 2>/dev/null || userdel "$existing";        fi     && useradd --uid 1000 --create-home --home-dir /home/tt --shell /bin/bash tt     && mkdir -p /home/tt/work/logs /cache /opt/tt-metal     && chown -R tt:tt /home/tt /cache /opt/tt-metal     && chmod 1777 /home/tt /home/tt/work /home/tt/work/logs /cache
+#21 CACHED
+
+#22 [builder  3/12] COPY code/ /opt/tt-metal/
+#22 CACHED
+
+#23 [builder  8/12] COPY vllm-src /ctx/vllm-src
+#23 CACHED
+
+#24 [builder  5/12] RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_TTNN="0.65.2.dev9873+g191f7f672f3"     uv pip install --python "/opt/tt-venv/bin/python" --no-build-isolation -e /opt/tt-metal
+#24 CACHED
+
+#25 [builder 11/12] RUN mkdir -p /opt/vllm /opt/tenstorrent
+#25 CACHED
+
+#26 [builder 12/12] RUN rm -rf /opt/tt-metal/.cpmcache /opt/tt-metal/.git /opt/tt-metal/infra        /opt/tt-metal/jobs /opt/tt-metal/releases /opt/tt-metal/dockerfile        /opt/tt-metal/contributing     && find /opt/tt-metal/build_Release -mindepth 1 -maxdepth 1 ! -name lib -exec rm -rf {} +     && ln -sfn build_Release /opt/tt-metal/build     && "/opt/tt-venv/bin/python" -m compileall -j0 -q        /opt/tt-metal/ttnn /opt/tt-metal/models /opt/tt-metal/tools || true
+#26 CACHED
+
+#27 [builder 10/12] RUN bash /ctx/install_engine.sh     && uv pip install --python "/opt/tt-venv/bin/python" tt-smi
+#27 CACHED
+
+#28 [builder  2/12] RUN git init -q /opt/tt-metal     && git -C /opt/tt-metal -c user.email=tt-model@tenstorrent.com -c user.name=tt-model        commit -q --allow-empty -m "tt-model version stub"     && git -C /opt/tt-metal tag "v0.79.0-dev20260909-70-g191f7f672f-dirty"
+#28 CACHED
+
+#29 [builder  6/12] COPY install_engine.sh requirements.lock* /ctx/
+#29 CACHED
+
+#30 [runtime 16/22] COPY --chown=tt:tt code/ /opt/tt-metal/
+#30 CACHED
+
+#31 [runtime  4/22] COPY --from=builder /opt/openmpi-v5.0.7-ulfm /opt/openmpi-v5.0.7-ulfm
+#31 CACHED
+
+#32 [runtime  2/22] RUN apt-get update && apt-get install -y --no-install-recommends     libhwloc15 libnuma1 libatomic1 libudev1 libcap2 zlib1g     libmpc3 libmpfr6 libgmp10 libzstd1     libevent-core-2.1-7 libevent-pthreads-2.1-7     libgl1 libsndfile1 ca-certificates     && apt-get clean && rm -rf /var/lib/apt/lists/*
+#32 CACHED
+
+#33 [prep 2/2] RUN uv venv --python "3.12" --relocatable --link-mode copy "/opt/tt-venv"     && uv pip install --python "/opt/tt-venv/bin/python"        setuptools==80.10.2 setuptools-scm==8.1.0 wheel
+#33 CACHED
+
+#34 [runtime  5/22] COPY --from=builder /opt/tenstorrent /opt/tenstorrent
+#34 CACHED
+
+#35 [runtime  9/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/runtime /opt/tt-metal/runtime
+#35 CACHED
+
+#36 [metal-local 1/1] COPY --from=metalsrc     --exclude=.git --exclude=.cpmcache --exclude=build_Release* --exclude=build     --exclude=built --exclude=python_env --exclude=.venv* --exclude=generated     --exclude=models --exclude=docs --exclude=tech_reports     --exclude=tt-train --exclude=model_tracer --exclude=.github     . /opt/tt-metal
+#36 CACHED
+
+#37 [runtime  7/22] COPY --from=builder /opt/tt-venv /opt/tt-venv
+#37 CACHED
+
+#38 [runtime 10/22] COPY --from=builder --chown=tt:tt /opt/tt-metal/build_Release /opt/tt-metal/build_Release
+#38 CACHED
+
+#39 [builder  7/12] COPY plugin-src /ctx/plugin-src
+#39 CACHED
+
+#40 [runtime  6/22] COPY --from=builder /usr/local/share/uv /usr/local/share/uv
+#40 CACHED
+
+#41 [runtime 17/22] COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+#41 CACHED
+
+#42 [runtime 18/22] COPY --chmod=0755 serve-default.sh /usr/local/bin/serve-default.sh
+#42 DONE 0.0s
+
+#43 [runtime 19/22] WORKDIR /home/tt/work
+#43 DONE 0.0s
+
+#44 [runtime 20/22] COPY verify.sh /ctx/verify.sh
+#44 DONE 0.0s
+
+#45 [runtime 21/22] RUN bash /ctx/verify.sh
+#45 0.275 + /opt/tt-venv/bin/python -c 'import ttnn, vllm, vllm_tt_plugin; import torch; assert torch.__version__.endswith('\''+cpu'\''), torch.__version__; import vllm; assert '\''/tt-metal/'\'' not in vllm.__file__, vllm.__file__; import torch; v = torch.__version__.split('\''+'\'')[0]; assert v == '\''2.11.0'\'', f'\''torch {v} was resolved by vLLM but tt-metal pins 2.11.0; ttnn extension modules were built against 2.11.0 — pin it via runtime.lock'\'''
+#45 3.293 2026-09-27 10:15:09.344 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+#45 3.293 Config{cache_path=/home/tt/.cache/ttnn,model_cache_path=/home/tt/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+#45 6.820 INFO 09-27 10:15:12 [__init__.py:52] Available plugins for group vllm.platform_plugins:
+#45 6.820 INFO 09-27 10:15:12 [__init__.py:54] - tt -> vllm_tt_plugin.entrypoints:platform_plugin
+#45 6.820 INFO 09-27 10:15:12 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+#45 6.867 INFO 09-27 10:15:12 [__init__.py:237] Platform plugin tt is activated
+#45 14.06 + /opt/tt-venv/bin/python -c 'import os, sys, json, importlib; md = os.environ['\''EXTRA_MODELS_DIR'\'']; found = 0
+#45 14.06 for e in sorted(os.listdir(md)):
+#45 14.06     d = os.path.join(md, e)
+#45 14.06     mp = os.path.join(d, '\''vllm_metadata.json'\'')
+#45 14.06     if not os.path.exists(mp):
+#45 14.06         continue
+#45 14.06     found += 1
+#45 14.06     meta = json.load(open(mp))
+#45 14.06     spec = meta['\''main_class'\'']
+#45 14.06     if d not in sys.path:
+#45 14.06         sys.path.append(d)
+#45 14.06     mod, sep, cls = spec.rpartition('\'':'\'')
+#45 14.06     if not sep:
+#45 14.06         mod, _, cls = spec.rpartition('\''.'\'')
+#45 14.06     obj = getattr(importlib.import_module(mod), cls)
+#45 14.06     assert obj is not None, spec
+#45 14.06     print('\''resolved'\'', meta.get('\''arch'\''), '\''->'\'', spec)
+#45 14.06 assert found, f'\''EXTRA_MODELS_DIR {md} registers no models'\''
+#45 14.06 '
+#45 16.82 INFO 09-27 10:15:22 [__init__.py:52] Available plugins for group vllm.platform_plugins:
+#45 16.82 INFO 09-27 10:15:22 [__init__.py:54] - tt -> vllm_tt_plugin.entrypoints:platform_plugin
+#45 16.82 INFO 09-27 10:15:22 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+#45 19.45 2026-09-27 10:15:25.502 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+#45 19.45 Config{cache_path=/home/tt/.cache/ttnn,model_cache_path=/home/tt/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+#45 20.18 INFO 09-27 10:15:26 [__init__.py:237] Platform plugin tt is activated
+#45 29.95 INFO 09-27 10:15:35 [importing.py:53] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+#45 29.95 INFO 09-27 10:15:35 [importing.py:88] Triton not installed or not compatible; certain GPU-related functions will not be available.
+#45 32.78 resolved Qwen3_5MoeForConditionalGeneration -> models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm:Qwen35MoeForConditionalGeneration
+#45 35.60 + /opt/tt-venv/bin/python -c 'import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration'
+#45 38.32 INFO 09-27 10:15:44 [__init__.py:52] Available plugins for group vllm.platform_plugins:
+#45 38.32 INFO 09-27 10:15:44 [__init__.py:54] - tt -> vllm_tt_plugin.entrypoints:platform_plugin
+#45 38.32 INFO 09-27 10:15:44 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+#45 40.96 2026-09-27 10:15:47.011 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+#45 40.96 Config{cache_path=/home/tt/.cache/ttnn,model_cache_path=/home/tt/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+#45 41.65 INFO 09-27 10:15:47 [__init__.py:237] Platform plugin tt is activated
+#45 49.96 INFO 09-27 10:15:56 [importing.py:53] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+#45 49.96 INFO 09-27 10:15:56 [importing.py:88] Triton not installed or not compatible; certain GPU-related functions will not be available.
+#45 54.75 + /opt/tt-venv/bin/python -c 'import models.autoports.qwen_qwen3_5_122b_a10b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]'
+#45 59.93 2026-09-27 10:16:05.984 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+#45 59.93 Config{cache_path=/home/tt/.cache/ttnn,model_cache_path=/home/tt/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+#45 DONE 61.7s
+
+#46 [runtime 22/22] RUN chmod -R a+rwX /home/tt
+#46 DONE 0.3s
+
+#47 exporting to image
+#47 exporting layers
+#47 exporting layers 0.3s done
+#47 exporting manifest sha256:1e134d1065391b9bfd589479e89652f60554dc3e925d58b13088444e0c8fcf1b 0.0s done
+#47 exporting config sha256:40268308fd04bae76d29e0b898ecee44f4adf7258ce5ff5682dca2f69453844b 0.0s done
+#47 exporting attestation manifest sha256:c7cf2b00ea8978334907ea20db7909af9f305b4578bbb39bdedad3bee32918db 0.0s done
+#47 exporting manifest list sha256:36b6aa8bb6e401b97ed0ef5db2b8ab13ea4829fca22611767a3484281fb8efd3 done
+#47 naming to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672 done
+#47 unpacking to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672 0.1s done
+#47 DONE 0.4s
+exporting the image as an OCI layout…
+✓ exporting the image as an OCI layout  21.5s
+  • image/ 2.0 GB as content-addressed blobs
+  ✓ packaged qwen3-5-122b-a10b-blackholex4 →
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4
+  → serve it locally:  tt-model serve
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4/tt_kernel_manifest.json
+  → publish it:        tt-model push
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4

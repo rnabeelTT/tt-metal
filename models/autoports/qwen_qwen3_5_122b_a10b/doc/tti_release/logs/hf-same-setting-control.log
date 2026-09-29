@@ -1,0 +1,27 @@
+=== hf same-setting control 2026-09-27T14:22:29+00:00 tasks=ifeval,gpqa_diamond_cot_zeroshot batch=8 limit=0
+[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation a
+/home/raahem/qwen35-122b-bringup/scripts/11-hf-same-setting-control.py:16: DeprecationWarning: get_task_dict is deprecated. Use TaskManager.load() instead.
+  tm = TaskManager(); td = get_task_dict(TASKS, tm)
+ifeval: 8 docs done (+8 in 187s, max new tokens 31)
+ifeval: 16 docs done (+8 in 753s, max new tokens 232)
+ifeval: 24 docs done (+8 in 437s, max new tokens 94)
+ifeval: 32 docs done (+8 in 488s, max new tokens 107)
+ifeval: 40 docs done (+8 in 1467s, max new tokens 469)
+ifeval: 48 docs done (+8 in 1384s, max new tokens 354)
+ifeval: 56 docs done (+8 in 1016s, max new tokens 291)
+ifeval: 64 docs done (+8 in 1663s, max new tokens 355)
+ifeval: 72 docs done (+8 in 2352s, max new tokens 717)
+ifeval: 80 docs done (+8 in 2162s, max new tokens 549)
+ifeval: 88 docs done (+8 in 5014s, max new tokens 1543)
+ifeval: 96 docs done (+8 in 3345s, max new tokens 780)
+ifeval: 104 docs done (+8 in 5024s, max new tokens 1100)
+ifeval: 109 docs done (+5 in 5005s, max new tokens 1739)
+CONTROL ifeval n=109 HF prompt_strict=0.8991 inst_strict=0.9322 tti_style=91.56 | device prompt_strict same docs=0.9266
+gpqa_diamond_cot_zeroshot: 4 docs done (+8 in 4507s, max new tokens 1384)
+gpqa_diamond_cot_zeroshot: 8 docs done (+8 in 6581s, max new tokens 1509)
+gpqa_diamond_cot_zeroshot: 12 docs done (+8 in 5141s, max new tokens 1506)
+gpqa_diamond_cot_zeroshot: 16 docs done (+8 in 7299s, max new tokens 1557)
+gpqa_diamond_cot_zeroshot: 20 docs done (+8 in 20830s, max new tokens 4096)
+gpqa_diamond_cot_zeroshot: 24 docs done (+8 in 27127s, max new tokens 4096)
+gpqa_diamond_cot_zeroshot: 28 docs done (+8 in 40344s, max new tokens 4096)
+=== done 2026-09-29T06:01:52+00:00

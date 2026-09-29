@@ -1,0 +1,3 @@
+BUNDLE_NONALIGNED prompt_tokens 2381 completion 32 ' had roamed in its\nforlornness up the hill, like an evil spirit, seeki'
+BUNDLE_BURST32 32 ok, 3200 tokens in 25.4s = 126.1 tok/s, finish={'length'}
+BUNDLE_LONG128K prompt_tokens 131072 ', and their\nheated faces were distorted and convulsed. The t'

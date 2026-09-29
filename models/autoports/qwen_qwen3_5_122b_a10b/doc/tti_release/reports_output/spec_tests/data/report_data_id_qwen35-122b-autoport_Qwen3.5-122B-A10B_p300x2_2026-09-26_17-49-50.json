@@ -1,0 +1,302 @@
+{
+    "metadata": {
+        "model_name": "Qwen3.5-122B-A10B",
+        "model_repo": "Qwen/Qwen3.5-122B-A10B",
+        "device": "P300X2",
+        "generated_at": "2026-09-26 17:49:50",
+        "report_id": "id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-26_17-49-50",
+        "workflow": "spec_tests",
+        "server_mode": "API",
+        "run_command": "python run.py --dev-mode --model Qwen/Qwen3.5-122B-A10B --device p300x2 --workflow spec_tests --service-port 8131 --no-auth --skip-system-sw-validation",
+        "runtime_model_spec_json": "/home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-26_17-25-19_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_Mgc_mY9y.json",
+        "model_id": "id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2",
+        "inference_engine": "vLLM",
+        "tt_metal_commit": null,
+        "vllm_commit": null,
+        "model_impl": "qwen35-122b-autoport"
+    },
+    "sections": [
+        {
+            "kind": "spec_tests",
+            "data": {
+                "success": true,
+                "child_result": "OK",
+                "status": "pass",
+                "attempts": 1,
+                "logs": [],
+                "elapsed_seconds": 0.003635801956988871,
+                "test_name": "LoggerForkSafetyTest",
+                "description": "Test for logging fork safety to prevent deadlocks"
+            },
+            "title": "Logger Fork Safety",
+            "task_type": "unit",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "num_of_devices": 4
+            }
+        },
+        {
+            "kind": "spec_tests",
+            "data": {
+                "endpoint_url": "http://127.0.0.1:8131/v1/chat/completions",
+                "model_name": "Qwen/Qwen3.5-122B-A10B",
+                "task_name": "vllm_chat_completions",
+                "parameter_conformance_summary": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "status": "\u2705 PASS",
+                        "summary": "3/3 passed"
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_n",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "status": "\u2705 PASS",
+                        "summary": "9/9 passed"
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    }
+                ],
+                "detailed_test_results": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "parametrization": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[temperature-0.0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_k-1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_p-0.01]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "parametrization": "test_logprobs",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[10]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[5]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[3]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "parametrization": "test_non_uniform_seeding",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "parametrization": "test_seed_reproducibility",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    }
+                ],
+                "success": true,
+                "status": "pass",
+                "attempts": 1,
+                "logs": [
+                    "/home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/lib/python3.10/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \"asyncio_default_fixture_loop_scope\" is unset.",
+                    "The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \"function\", \"class\", \"module\", \"package\", \"session\"",
+                    "",
+                    "  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))",
+                    "......................                                                   [100%]",
+                    "22 passed in 1470.49s (0:24:30)"
+                ],
+                "elapsed_seconds": 1470.6796363489702,
+                "test_name": "VLLMParamConformanceTest",
+                "description": "vLLM chat/completions parameter conformance"
+            },
+            "title": "Vllm Chat Completions",
+            "task_type": "functional",
+            "id": "Qwen__Qwen3.5-122B-A10B_P300X2",
+            "targets": {
+                "num_of_devices": 4,
+                "num_concurrent_requests": 4
+            }
+        }
+    ],
+    "acceptance_criteria": true,
+    "acceptance_blockers": {},
+    "acceptance_criteria_metadata": {
+        "enforcement_result": "PASS",
+        "model_status": "EXPERIMENTAL",
+        "categories": [
+            {
+                "name": "Benchmarks",
+                "status": "NA",
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Evals",
+                "status": "NA",
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Spec Tests",
+                "status": "PASS",
+                "total": 1,
+                "passed": 1,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Agentic Targets",
+                "status": "NA",
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            }
+        ]
+    },
+    "acceptance_summary_markdown": "### Acceptance Criteria\n\n- Acceptance status: \u2705 `PASS`\n- Model status: `EXPERIMENTAL`\n- Benchmarks: \ud83d\udfe8 `NA` (no blocks present)\n- Evals: \ud83d\udfe8 `NA` (no blocks present)\n- Spec Tests: \u2705 `PASS` (1/1 passed)\n- Agentic Targets: \ud83d\udfe8 `NA` (no blocks present)\n- All acceptance criteria passed."
+}

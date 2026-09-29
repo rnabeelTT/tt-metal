@@ -1,0 +1,7 @@
+{
+  "arch": "Qwen3_5MoeForConditionalGeneration",
+  "main_class": "models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm:Qwen35MoeForConditionalGeneration",
+  "hf_model": "Qwen/Qwen3.5-122B-A10B",
+  "mesh_device": ["P300x2", "P150x4"],
+  "notes": "Text-only serving of the Qwen3.5-122B-A10B autoport on a (1,4) Blackhole mesh; registered by the vLLM TT plugin from EXTRA_MODELS_DIR (this folder) or by platform.py::register_tt_models()."
+}

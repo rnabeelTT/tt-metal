@@ -1,0 +1,3 @@
+Autoport implementation check passed: models/autoports/qwen_qwen3_5_122b_a10b found in 8 copied TTI artifact field(s).
+Context contract OK for models/autoports/qwen_qwen3_5_122b_a10b: target=262144, supported=262144 (full HF context).
+TTI release evidence present under models/autoports/qwen_qwen3_5_122b_a10b/doc/tti_release (2 release report(s)).

@@ -1,0 +1,1691 @@
+2026-09-29 09:22:07,601 - run.py:1218 - INFO: TT-Inference version: 0.22.0
+2026-09-29 09:22:07,601 - run.py:1219 - INFO: TT-Inference SHA: 9ef9d6602669
+2026-09-29 09:22:07,601 - run.py:1220 - INFO:
+============================================================
+tt-inference-server run.py CLI args summary
+============================================================
+
+Model Options:
+  model:                      Qwen/Qwen3.5-122B-A10B
+  device:                     p300x2
+  impl:                       qwen35-122b-autoport
+  engine:                     vLLM
+  workflow:                   release
+  tools:                      vllm
+
+Optional args:
+  dev_mode:                   True
+  docker_server:              False
+  local_server:               False
+  no_auth:                    True
+  tt_metal_python_venv_dir:   None
+  tt_metal_home:              /home/raahem/tt-metal
+  service_port:               8131
+  bind_host:                  0.0.0.0
+  docker_override_image:      None
+  docker_interactive:         False
+  device_id:                  None
+  disable_trace_capture:      False
+  override_tt_config:         None
+  vllm_override_args:         None
+  workflow_args:              None
+  limit_samples_mode:         ci-nightly
+  eval_samples:               None
+  skip_system_sw_validation:  True
+
+Host Storage Options:
+  host_volume:                None
+  host_hf_cache:              None
+  host_weights_dir:           None
+  quetzal_package_root:       None
+  image_user:                 1000
+
+============================================================
+2026-09-29 09:22:07,602 - run.py:1226 - INFO: Runtime model spec saved to: /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-29_09-22-07_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_Lw9dsPFy.json
+2026-09-29 09:22:07,602 - target_pack.py:137 - DEBUG: No TargetPack registered; using Tenstorrent reference_config.
+2026-09-29 09:22:07,614 - validate_setup.py:341 - INFO: Starting local setup validation
+2026-09-29 09:22:07,614 - validate_setup.py:377 - INFO: ✅ validating local setup completed
+2026-09-29 09:22:07,614 - run.py:1343 - INFO: Model Qwen3.5-122B-A10B (model_type=LLM) routes through the workflow engine.
+2026-09-29 09:22:07,615 - runner.py:31 - INFO: → command=release
+2026-09-29 09:22:07,615 - venv_provisioner.py:73 - DEBUG: No VenvProvisioner registered; using Tenstorrent VENV_CONFIGS.
+2026-09-29 09:22:07,615 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python --index-strategy unsafe-best-match -r /home/raahem/tt-inference-server/requirements/workflow-run-script.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_workflow_run_script
+Checked 19 packages in 25ms
+2026-09-29 09:22:07,662 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/python --index-strategy unsafe-best-match -r /home/raahem/tt-inference-server/requirements/evals-common.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_evals_common
+Resolved 104 packages in 849ms
+Checked 104 packages in 0.64ms
+2026-09-29 09:22:08,523 - workflow_venvs.py:177 - INFO: sub-dir already exists for llm_vllm: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/artifacts
+2026-09-29 09:22:08,524 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/python --index-strategy unsafe-best-match --override /home/raahem/tt-inference-server/requirements/llm-vllm-overrides.txt -r /home/raahem/tt-inference-server/requirements/llm-vllm.txt
+Using Python 3.11.16 environment at: .workflow_venvs/.venv_llm_vllm
+Checked 7 packages in 23ms
+2026-09-29 09:22:08,551 - proc.py:75 - INFO: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/tt-inference-server/run_workflows.py --model Qwen/Qwen3.5-122B-A10B --workflow release --device p300x2 --service-port 8131 --runtime-model-spec-json /home/raahem/tt-inference-server/workflow_logs/runtime_model_specs/runtime_model_spec_2026-09-29_09-22-07_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_Lw9dsPFy.json --output-dir /home/raahem/tt-inference-server/workflow_logs/reports_output/release
+2026-09-29 09:22:08,821 [INFO] workflow_module.command_factory: Minted debug-test JWT and exported as OPENAI_API_KEY.
+2026-09-29 09:22:08,821 [INFO] workflow_module.command_factory: Minted debug-test JWT and exported as OPENAI_API_KEY.
+2026-09-29 09:22:08,825 [INFO] workflow_module.runner: → command=workflow
+2026-09-29 09:22:08,825 [INFO] workflow.release: === Workflow start: release | model=Qwen3.5-122B-A10B device=P300X2 port=8131 output=/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release ===
+2026-09-29 09:22:08,825 [INFO] workflow.release: --- release: evals ---
+2026-09-29 09:22:08,842 [INFO] workflow.evals: → task=llm_eval
+2026-09-29 09:22:08,842 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8131/health (timeout 3600s)
+2026-09-29 09:22:08,844 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8131/health
+2026-09-29 09:22:08,845 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=ifeval
+2026-09-29 09:22:08,845 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks ifeval --model local-chat-completions --model_args model=Qwen/Qwen3.5-122B-A10B,base_url=http://127.0.0.1:8131/v1/chat/completions,tokenizer_backend=huggingface,timeout=7200,num_concurrent=32 --gen_kwargs max_gen_toks=2048,do_sample=false,stream=false,seed=42 --output_path /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-09-29 09:22:09,006 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:09 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-09-29 09:22:09,006 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:09 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-09-29 09:22:12,083 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 INFO     [_cli.run:376] Selected Tasks: ['ifeval']
+2026-09-29 09:22:12,730 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-09-29 09:22:12,730 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 2048, 'do_sample': False, 'stream': False, 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-09-29 09:22:12,730 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'Qwen/Qwen3.5-122B-A10B', 'base_url': 'http://127.0.0.1:8131/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'timeout': 7200, 'num_concurrent': 32, 'trust_remote_code': True}
+2026-09-29 09:22:12,736 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 INFO     [models.api_models:310] Using max length 2048 - 1
+2026-09-29 09:22:12,736 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:12 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-09-29 09:22:15,504 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [tasks:700] Selected tasks:
+2026-09-29 09:22:15,504 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [tasks:691] Task: ifeval (ifeval/ifeval.yaml)
+2026-09-29 09:22:15,504 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [evaluator:313] ifeval: Using gen_kwargs: {'until': [], 'do_sample': False, 'temperature': 0.0, 'max_gen_toks': 2048, 'stream': False, 'seed': 42}
+2026-09-29 09:22:15,504 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [evaluator:328] num_fewshot has been set to 0 for ifeval in its config. Manual configuration will be ignored.
+2026-09-29 09:22:15,504 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-09-29 09:22:15,505 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [api.task:310] Building contexts for ifeval on rank 0...
+2026-09-29 09:22:15,507 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-29 09:22:15,508 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/109 [00:00<?, ?it/s]
+2026-09-29 09:22:15,508 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 109/109 [00:00<00:00, 92847.10it/s]
+2026-09-29 09:22:15,508 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [evaluator:583] Running generate_until requests
+2026-09-29 09:22:15,509 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:22:15 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-09-29 09:22:15,510 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-29 09:22:27,759 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/109 [00:00<?, ?it/s]
+2026-09-29 09:22:29,095 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   1%|          | 1/109 [00:12<22:02, 12.25s/it]
+2026-09-29 09:22:33,106 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   2%|▏         | 2/109 [00:13<10:23,  5.83s/it]
+2026-09-29 09:22:34,497 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   3%|▎         | 3/109 [00:17<08:49,  5.00s/it]
+2026-09-29 09:22:34,951 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   4%|▎         | 4/109 [00:18<06:15,  3.57s/it]
+2026-09-29 09:22:38,158 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   5%|▍         | 5/109 [00:19<04:14,  2.45s/it]
+2026-09-29 09:22:39,805 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▌         | 6/109 [00:22<04:38,  2.71s/it]
+2026-09-29 09:22:41,174 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▋         | 7/109 [00:24<04:00,  2.36s/it]
+2026-09-29 09:22:43,698 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   7%|▋         | 8/109 [00:25<03:26,  2.04s/it]
+2026-09-29 09:22:46,059 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   8%|▊         | 9/109 [00:28<03:39,  2.19s/it]
+2026-09-29 09:22:48,106 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   9%|▉         | 10/109 [00:30<03:42,  2.25s/it]
+2026-09-29 09:22:50,271 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  10%|█         | 11/109 [00:32<03:34,  2.19s/it]
+2026-09-29 09:22:51,189 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  12%|█▏        | 13/109 [00:34<02:40,  1.67s/it]
+2026-09-29 09:22:52,412 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  13%|█▎        | 14/109 [00:35<02:20,  1.48s/it]
+2026-09-29 09:22:53,312 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  14%|█▍        | 15/109 [00:36<02:12,  1.41s/it]
+2026-09-29 09:22:54,680 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  15%|█▍        | 16/109 [00:37<01:58,  1.27s/it]
+2026-09-29 09:22:56,429 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  16%|█▌        | 17/109 [00:39<01:59,  1.30s/it]
+2026-09-29 09:22:57,341 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 18/109 [00:40<02:10,  1.43s/it]
+2026-09-29 09:23:01,559 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 19/109 [00:41<01:55,  1.28s/it]
+2026-09-29 09:23:03,489 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  18%|█▊        | 20/109 [00:46<03:10,  2.14s/it]
+2026-09-29 09:23:11,323 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  19%|█▉        | 21/109 [00:47<03:02,  2.08s/it]
+2026-09-29 09:23:11,769 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  20%|██        | 22/109 [00:55<05:29,  3.79s/it]
+2026-09-29 09:23:17,376 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  21%|██        | 23/109 [00:56<04:00,  2.79s/it]
+2026-09-29 09:23:20,219 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  22%|██▏       | 24/109 [01:01<05:08,  3.63s/it]
+2026-09-29 09:23:22,396 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  23%|██▎       | 25/109 [01:04<04:45,  3.40s/it]
+2026-09-29 09:23:24,613 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  25%|██▍       | 27/109 [01:06<03:11,  2.33s/it]
+2026-09-29 09:23:31,858 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  26%|██▌       | 28/109 [01:09<03:06,  2.30s/it]
+2026-09-29 09:23:35,190 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  27%|██▋       | 29/109 [01:16<04:47,  3.60s/it]
+2026-09-29 09:23:36,834 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 30/109 [01:19<04:38,  3.52s/it]
+2026-09-29 09:23:38,632 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 31/109 [01:21<03:53,  3.00s/it]
+2026-09-29 09:23:42,796 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  29%|██▉       | 32/109 [01:23<03:24,  2.66s/it]
+2026-09-29 09:23:44,071 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  30%|███       | 33/109 [01:27<03:55,  3.09s/it]
+2026-09-29 09:23:45,627 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  32%|███▏      | 35/109 [01:28<02:26,  1.98s/it]
+2026-09-29 09:23:47,836 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  33%|███▎      | 36/109 [01:30<02:17,  1.88s/it]
+2026-09-29 09:23:49,674 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  34%|███▍      | 37/109 [01:32<02:21,  1.96s/it]
+2026-09-29 09:23:52,438 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  35%|███▍      | 38/109 [01:34<02:16,  1.93s/it]
+2026-09-29 09:23:53,683 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  36%|███▌      | 39/109 [01:36<02:31,  2.16s/it]
+2026-09-29 09:24:02,182 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  38%|███▊      | 41/109 [01:38<01:40,  1.48s/it]
+2026-09-29 09:24:04,864 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▊      | 42/109 [01:46<03:32,  3.17s/it]
+2026-09-29 09:24:10,175 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▉      | 43/109 [01:49<03:20,  3.04s/it]
+2026-09-29 09:24:12,523 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  40%|████      | 44/109 [01:54<03:57,  3.65s/it]
+2026-09-29 09:24:19,537 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  41%|████▏     | 45/109 [01:57<03:30,  3.29s/it]
+2026-09-29 09:24:25,016 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  42%|████▏     | 46/109 [02:04<04:33,  4.34s/it]
+2026-09-29 09:24:27,087 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  43%|████▎     | 47/109 [02:09<04:49,  4.67s/it]
+2026-09-29 09:24:27,539 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  44%|████▍     | 48/109 [02:11<03:58,  3.91s/it]
+2026-09-29 09:24:33,806 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  46%|████▌     | 50/109 [02:12<02:12,  2.24s/it]
+2026-09-29 09:24:35,939 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  47%|████▋     | 51/109 [02:18<03:07,  3.22s/it]
+2026-09-29 09:24:37,753 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  48%|████▊     | 52/109 [02:20<02:47,  2.94s/it]
+2026-09-29 09:24:39,415 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  49%|████▊     | 53/109 [02:22<02:27,  2.64s/it]
+2026-09-29 09:24:40,345 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|████▉     | 54/109 [02:23<02:10,  2.37s/it]
+2026-09-29 09:24:42,565 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|█████     | 55/109 [02:24<01:45,  1.96s/it]
+2026-09-29 09:24:44,697 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  51%|█████▏    | 56/109 [02:27<01:47,  2.03s/it]
+2026-09-29 09:24:46,449 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  53%|█████▎    | 58/109 [02:29<01:21,  1.60s/it]
+2026-09-29 09:24:47,828 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  54%|█████▍    | 59/109 [02:30<01:21,  1.63s/it]
+2026-09-29 09:24:51,448 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  55%|█████▌    | 60/109 [02:32<01:16,  1.57s/it]
+2026-09-29 09:24:51,895 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  56%|█████▌    | 61/109 [02:35<01:41,  2.12s/it]
+2026-09-29 09:24:53,621 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  57%|█████▋    | 62/109 [02:36<01:17,  1.66s/it]
+2026-09-29 09:24:55,026 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  58%|█████▊    | 63/109 [02:38<01:17,  1.68s/it]
+2026-09-29 09:24:57,847 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  59%|█████▊    | 64/109 [02:39<01:11,  1.60s/it]
+2026-09-29 09:25:03,361 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  60%|█████▉    | 65/109 [02:42<01:26,  1.95s/it]
+2026-09-29 09:25:08,446 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  61%|██████    | 66/109 [02:47<02:09,  3.00s/it]
+2026-09-29 09:25:10,250 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  61%|██████▏   | 67/109 [02:52<02:32,  3.62s/it]
+2026-09-29 09:25:13,921 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  62%|██████▏   | 68/109 [02:54<02:06,  3.08s/it]
+2026-09-29 09:25:18,289 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  63%|██████▎   | 69/109 [02:58<02:10,  3.26s/it]
+2026-09-29 09:25:20,246 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  64%|██████▍   | 70/109 [03:02<02:19,  3.59s/it]
+2026-09-29 09:25:22,775 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  65%|██████▌   | 71/109 [03:04<01:57,  3.10s/it]
+2026-09-29 09:25:24,288 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  66%|██████▌   | 72/109 [03:07<01:48,  2.93s/it]
+2026-09-29 09:25:25,969 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  67%|██████▋   | 73/109 [03:08<01:30,  2.51s/it]
+2026-09-29 09:25:30,052 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  68%|██████▊   | 74/109 [03:10<01:19,  2.26s/it]
+2026-09-29 09:25:32,992 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  69%|██████▉   | 75/109 [03:14<01:35,  2.80s/it]
+2026-09-29 09:25:35,785 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  70%|██████▉   | 76/109 [03:17<01:33,  2.85s/it]
+2026-09-29 09:25:38,243 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  71%|███████   | 77/109 [03:20<01:30,  2.83s/it]
+2026-09-29 09:25:39,433 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  72%|███████▏  | 78/109 [03:22<01:24,  2.72s/it]
+2026-09-29 09:25:40,033 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  72%|███████▏  | 79/109 [03:23<01:07,  2.26s/it]
+2026-09-29 09:25:40,479 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  73%|███████▎  | 80/109 [03:24<00:51,  1.76s/it]
+2026-09-29 09:25:42,638 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  74%|███████▍  | 81/109 [03:24<00:38,  1.37s/it]
+2026-09-29 09:25:44,809 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  75%|███████▌  | 82/109 [03:27<00:43,  1.60s/it]
+2026-09-29 09:25:46,261 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  76%|███████▌  | 83/109 [03:29<00:46,  1.77s/it]
+2026-09-29 09:25:47,274 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  77%|███████▋  | 84/109 [03:30<00:41,  1.68s/it]
+2026-09-29 09:25:48,725 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  78%|███████▊  | 85/109 [03:31<00:35,  1.48s/it]
+2026-09-29 09:25:49,322 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  79%|███████▉  | 86/109 [03:33<00:33,  1.47s/it]
+2026-09-29 09:25:50,611 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  80%|███████▉  | 87/109 [03:33<00:26,  1.21s/it]
+2026-09-29 09:25:52,044 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  81%|████████  | 88/109 [03:35<00:25,  1.23s/it]
+2026-09-29 09:25:58,414 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  82%|████████▏ | 89/109 [03:36<00:25,  1.29s/it]
+2026-09-29 09:26:02,526 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  83%|████████▎ | 90/109 [03:42<00:53,  2.82s/it]
+2026-09-29 09:26:03,117 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  83%|████████▎ | 91/109 [03:47<00:57,  3.20s/it]
+2026-09-29 09:26:06,212 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  84%|████████▍ | 92/109 [03:47<00:41,  2.42s/it]
+2026-09-29 09:26:17,167 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  85%|████████▌ | 93/109 [03:50<00:41,  2.62s/it]
+2026-09-29 09:26:18,438 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  86%|████████▌ | 94/109 [04:01<01:16,  5.12s/it]
+2026-09-29 09:26:24,626 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  87%|████████▋ | 95/109 [04:02<00:55,  3.97s/it]
+2026-09-29 09:26:25,861 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  88%|████████▊ | 96/109 [04:09<01:00,  4.63s/it]
+2026-09-29 09:26:31,330 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  89%|████████▉ | 97/109 [04:10<00:43,  3.61s/it]
+2026-09-29 09:26:51,508 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  90%|████████▉ | 98/109 [04:15<00:45,  4.17s/it]
+2026-09-29 09:27:05,709 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  91%|█████████ | 99/109 [04:35<01:29,  8.97s/it]
+2026-09-29 09:27:20,420 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  92%|█████████▏| 100/109 [04:50<01:34, 10.54s/it]
+2026-09-29 09:27:24,171 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  93%|█████████▎| 101/109 [05:04<01:34, 11.79s/it]
+2026-09-29 09:27:31,455 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  94%|█████████▎| 102/109 [05:08<01:05,  9.38s/it]
+2026-09-29 09:27:35,021 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  94%|█████████▍| 103/109 [05:15<00:52,  8.75s/it]
+2026-09-29 09:27:38,676 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  95%|█████████▌| 104/109 [05:19<00:35,  7.20s/it]
+2026-09-29 09:27:56,480 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  96%|█████████▋| 105/109 [05:23<00:24,  6.13s/it]
+2026-09-29 09:28:21,066 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  97%|█████████▋| 106/109 [05:40<00:28,  9.63s/it]
+2026-09-29 09:28:29,474 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  98%|█████████▊| 107/109 [06:05<00:28, 14.12s/it]
+2026-09-29 09:29:16,830 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  99%|█████████▉| 108/109 [06:13<00:12, 12.41s/it]
+2026-09-29 09:29:16,830 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 109/109 [07:01<00:00, 22.89s/it]
+2026-09-29 09:29:16,830 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 109/109 [07:01<00:00,  3.87s/it]
+2026-09-29 09:29:17,460 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:17 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-09-29 09:29:17,461 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:17 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2/Qwen__Qwen3.5-122B-A10B/*.jsonl
+2026-09-29 09:29:18,305 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=gpqa_diamond_cot_zeroshot
+2026-09-29 09:29:18,305 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/tt-inference-server/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks gpqa_diamond_cot_zeroshot --model local-chat-completions --model_args model=Qwen/Qwen3.5-122B-A10B,base_url=http://127.0.0.1:8131/v1/chat/completions,tokenizer_backend=huggingface,timeout=7200,num_concurrent=32 --gen_kwargs max_gen_toks=4096,do_sample=false,stream=false,seed=42 --output_path /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-09-29 09:29:18,446 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:18 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-09-29 09:29:18,446 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:18 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-09-29 09:29:20,058 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 INFO     [_cli.run:376] Selected Tasks: ['gpqa_diamond_cot_zeroshot']
+2026-09-29 09:29:20,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-09-29 09:29:20,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 4096, 'do_sample': False, 'stream': False, 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-09-29 09:29:20,580 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'Qwen/Qwen3.5-122B-A10B', 'base_url': 'http://127.0.0.1:8131/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'timeout': 7200, 'num_concurrent': 32, 'trust_remote_code': True}
+2026-09-29 09:29:20,583 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 INFO     [models.api_models:310] Using max length 2048 - 1
+2026-09-29 09:29:20,583 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:20 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-09-29 09:29:22,958 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [tasks:700] Selected tasks:
+2026-09-29 09:29:22,958 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [tasks:691] Task: gpqa_diamond_cot_zeroshot (gpqa/cot_zeroshot/gpqa_diamond_cot_zeroshot.yaml)
+2026-09-29 09:29:22,958 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [evaluator:313] gpqa_diamond_cot_zeroshot: Using gen_kwargs: {'until': ['</s>'], 'do_sample': False, 'temperature': 0.0, 'max_gen_toks': 4096, 'stream': False, 'seed': 42}
+2026-09-29 09:29:22,958 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [evaluator:328] num_fewshot has been set to 0 for gpqa_diamond_cot_zeroshot in its config. Manual configuration will be ignored.
+2026-09-29 09:29:22,958 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-09-29 09:29:22,962 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [api.task:310] Building contexts for gpqa_diamond_cot_zeroshot on rank 0...
+2026-09-29 09:29:22,970 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-29 09:29:22,982 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/40 [00:00<?, ?it/s]
+2026-09-29 09:29:22,982 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 40/40 [00:00<00:00, 3237.47it/s]
+2026-09-29 09:29:22,982 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [evaluator:583] Running generate_until requests
+2026-09-29 09:29:22,983 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:29:22 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-09-29 09:29:22,983 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-09-29 09:31:28,411 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/40 [00:00<?, ?it/s]
+2026-09-29 09:31:56,991 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   2%|▎         | 1/40 [02:05<1:21:31, 125.43s/it]
+2026-09-29 09:31:59,835 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   5%|▌         | 2/40 [02:34<43:21, 68.46s/it]
+2026-09-29 09:32:04,952 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   8%|▊         | 3/40 [02:36<23:44, 38.50s/it]
+2026-09-29 09:32:22,694 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  10%|█         | 4/40 [02:41<15:11, 25.32s/it]
+2026-09-29 09:32:47,186 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  12%|█▎        | 5/40 [02:59<13:10, 22.59s/it]
+2026-09-29 09:32:53,317 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  15%|█▌        | 6/40 [03:24<13:09, 23.23s/it]
+2026-09-29 09:33:13,478 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  18%|█▊        | 7/40 [03:30<09:42, 17.64s/it]
+2026-09-29 09:33:15,389 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  20%|██        | 8/40 [03:50<09:50, 18.44s/it]
+2026-09-29 09:33:32,738 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  22%|██▎       | 9/40 [03:52<06:51, 13.28s/it]
+2026-09-29 09:33:34,071 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  25%|██▌       | 10/40 [04:09<07:16, 14.53s/it]
+2026-09-29 09:33:39,129 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 11/40 [04:11<05:04, 10.49s/it]
+2026-09-29 09:33:46,173 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  30%|███       | 12/40 [04:16<04:07,  8.84s/it]
+2026-09-29 09:34:25,712 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  32%|███▎      | 13/40 [04:23<03:43,  8.30s/it]
+2026-09-29 09:34:27,030 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  35%|███▌      | 14/40 [05:02<07:41, 17.73s/it]
+2026-09-29 09:35:29,817 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  38%|███▊      | 15/40 [05:04<05:19, 12.78s/it]
+2026-09-29 09:36:30,847 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  40%|████      | 16/40 [06:06<11:08, 27.84s/it]
+2026-09-29 09:36:44,615 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  42%|████▎     | 17/40 [07:07<14:29, 37.82s/it]
+2026-09-29 09:37:06,967 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  45%|████▌     | 18/40 [07:21<11:12, 30.59s/it]
+2026-09-29 09:37:11,350 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  48%|████▊     | 19/40 [07:43<09:50, 28.12s/it]
+2026-09-29 09:37:41,704 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|█████     | 20/40 [07:48<06:59, 20.99s/it]
+2026-09-29 09:38:32,498 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  52%|█████▎    | 21/40 [08:18<07:32, 23.80s/it]
+2026-09-29 09:39:40,020 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  55%|█████▌    | 22/40 [09:09<09:34, 31.90s/it]
+2026-09-29 09:41:13,916 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  57%|█████▊    | 23/40 [10:17<12:04, 42.59s/it]
+2026-09-29 09:41:38,104 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  92%|█████████▎| 37/40 [11:50<00:35, 11.83s/it]
+2026-09-29 09:41:57,409 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  95%|█████████▌| 38/40 [12:15<00:25, 12.83s/it]
+2026-09-29 09:42:17,792 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  98%|█████████▊| 39/40 [12:34<00:13, 13.49s/it]
+2026-09-29 09:42:17,792 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 40/40 [12:54<00:00, 14.38s/it]
+2026-09-29 09:42:17,792 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 40/40 [12:54<00:00, 19.37s/it]
+2026-09-29 09:42:19,159 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:42:19 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-09-29 09:42:19,160 [INFO] test_module.llm_tests.llm_eval_tests: 2026-09-29:09:42:19 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/eval_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2/Qwen__Qwen3.5-122B-A10B/*.jsonl
+2026-09-29 09:42:19,899 [INFO] workflow_module.blocks_sink: BlockAccumulator: +2 block(s), total=2
+2026-09-29 09:42:19,899 [INFO] workflow_module.blocks_sink:   - kind=evals id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'task_name': 'ifeval', 'tolerance': 0.05, 'published_score': 93.4, 'published_score_ref': 'https://huggingface.co/Qwen/Qwen3.5-122B-A10B (IFEval, thinking mode)'}
+2026-09-29 09:42:19,899 [INFO] workflow_module.blocks_sink:   - kind=evals id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'task_name': 'gpqa_diamond_cot_zeroshot', 'tolerance': 0.05, 'published_score': 86.6, 'published_score_ref': 'https://huggingface.co/Qwen/Qwen3.5-122B-A10B (GPQA Diamond, thinking mode)'}
+2026-09-29 09:42:19,899 [INFO] workflow.evals: ✅ llm_eval blocks=2 kind=evals (1211.1s)
+2026-09-29 09:42:19,899 [INFO] workflow.release: --- release: benchmarks ---
+2026-09-29 09:42:19,900 [INFO] workflow.benchmarks: → task=llm_benchmark tools=vllm
+2026-09-29 09:42:19,902 [INFO] test_module.llm_tests.llm_benchmark_tests: Running LLM benchmark: tool=vllm over 23 sweep point(s)
+2026-09-29 09:42:19,902 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8131/health (timeout 1200s)
+2026-09-29 09:42:19,904 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8131/health
+2026-09-29 09:42:19,904 [INFO] llm_module.runner: Running vllm sweep point 1/23  isl=128 osl=128 max_conc=1 n=8
+2026-09-29 09:42:19,904 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 8 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-42-19_isl-128_osl-128_maxcon-1_n-8.json --dataset-name random --random-input-len 128 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 09-29 09:42:22 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 09:42:22 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 09:42:22 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 09:42:23 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7a410dbe6480>, seed=0, num_prompts=8, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-42-19_isl-128_osl-128_maxcon-1_n-8.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-b5e83281-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 09-29 09:42:24 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+Starting main benchmark run...
+|          | 00:05 elapsed, 1668:27:02 remaining
+Traffic request rate: inf
+
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/8 [00:00<?, ?it/s]
+12%|█▎        | 1/8 [00:05<00:36,  5.19s/it]
+25%|██▌       | 2/8 [00:10<00:31,  5.18s/it]
+38%|███▊      | 3/8 [00:15<00:25,  5.18s/it]
+50%|█████     | 4/8 [00:20<00:20,  5.18s/it]
+62%|██████▎   | 5/8 [00:25<00:15,  5.19s/it]
+75%|███████▌  | 6/8 [00:31<00:10,  5.19s/it]
+88%|████████▊ | 7/8 [00:36<00:05,  5.20s/it]
+100%|██████████| 8/8 [00:41<00:00,  5.19s/it]
+100%|██████████| 8/8 [00:41<00:00,  5.19s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     8
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  41.53
+Total input tokens:                      1024
+Total generated tokens:                  1024
+Request throughput (req/s):              0.19
+Output token throughput (tok/s):         24.66
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          49.32
+---------------Time to First Token----------------
+Mean TTFT (ms):                          398.37
+Median TTFT (ms):                        401.22
+P99 TTFT (ms):                           413.59
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.73
+Median TPOT (ms):                        37.73
+P99 TPOT (ms):                           37.75
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.59
+Median ITL (ms):                         37.74
+P99 ITL (ms):                            41.32
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          5190.67
+Median E2EL (ms):                        5192.80
+P99 E2EL (ms):                           5206.73
+==================================================
+2026-09-29 09:43:11,640 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 09:43:11,642 [INFO] llm_module.runner: Running vllm sweep point 2/23  isl=128 osl=128 max_conc=32 n=256
+2026-09-29 09:43:13,644 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 32 --num-prompts 256 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-43-13_isl-128_osl-128_maxcon-32_n-256.json --dataset-name random --random-input-len 128 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 09-29 09:43:16 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 09:43:16 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 09:43:16 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 09:43:17 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7122233d6480>, seed=0, num_prompts=256, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=32, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-43-13_isl-128_osl-128_maxcon-32_n-256.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-077f33ee-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 09-29 09:43:18 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+|          | 00:05 elapsed, 1676:06:18 remaining
+
+Initial test run completed.
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+0%|          | 0/256 [00:00<?, ?it/s]
+0%|          | 1/256 [00:28<2:00:20, 28.31s/it]
+13%|█▎        | 33/256 [00:56<05:30,  1.48s/it]
+25%|██▌       | 65/256 [01:25<03:37,  1.14s/it]
+38%|███▊      | 97/256 [01:53<02:43,  1.03s/it]
+50%|█████     | 129/256 [02:22<02:03,  1.03it/s]
+63%|██████▎   | 161/256 [02:50<01:29,  1.06it/s]
+75%|███████▌  | 193/256 [03:19<00:58,  1.08it/s]
+88%|████████▊ | 225/256 [03:47<00:28,  1.09it/s]
+100%|██████████| 256/256 [03:47<00:00,  1.12it/s]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     256
+Failed requests:                         0
+Maximum request concurrency:             32
+Benchmark duration (s):                  227.86
+Total input tokens:                      32768
+Total generated tokens:                  32768
+Request throughput (req/s):              1.12
+Output token throughput (tok/s):         143.81
+Peak output token throughput (tok/s):    288.00
+Peak concurrent requests:                64.00
+Total token throughput (tok/s):          287.61
+---------------Time to First Token----------------
+Mean TTFT (ms):                          12349.88
+Median TTFT (ms):                        12336.27
+P99 TTFT (ms):                           12464.24
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          127.02
+Median TPOT (ms):                        126.86
+P99 TPOT (ms):                           129.38
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           126.80
+Median ITL (ms):                         129.44
+P99 ITL (ms):                            138.75
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          28481.94
+Median E2EL (ms):                        28459.20
+P99 E2EL (ms):                           28644.37
+==================================================
+2026-09-29 09:47:11,735 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=128 max_concurrency=32; benchmark block is reported as NA (ungraded).
+2026-09-29 09:47:11,737 [INFO] llm_module.runner: Running vllm sweep point 3/23  isl=128 osl=1024 max_conc=1 n=4
+2026-09-29 09:47:13,739 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-47-13_isl-128_osl-1024_maxcon-1_n-4.json --dataset-name random --random-input-len 128 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 09-29 09:47:16 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 09:47:16 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 09:47:16 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 09:47:17 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x72cdef5d6480>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-47-13_isl-128_osl-1024_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-bbf6e564-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 09-29 09:47:18 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+Starting main benchmark run...
+|          | 00:39 elapsed, 12759:20:56 remaining
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:39<01:57, 39.01s/it]
+50%|█████     | 2/4 [01:18<01:18, 39.00s/it]
+75%|███████▌  | 3/4 [01:57<00:39, 39.00s/it]
+100%|██████████| 4/4 [02:36<00:00, 39.01s/it]
+100%|██████████| 4/4 [02:36<00:00, 39.01s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  156.04
+Total input tokens:                      512
+Total generated tokens:                  4096
+Request throughput (req/s):              0.03
+Output token throughput (tok/s):         26.25
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          29.53
+---------------Time to First Token----------------
+Mean TTFT (ms):                          384.16
+Median TTFT (ms):                        380.13
+P99 TTFT (ms):                           404.98
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.76
+Median TPOT (ms):                        37.76
+P99 TPOT (ms):                           37.76
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.90
+Median ITL (ms):                         37.74
+P99 ITL (ms):                            40.98
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          39008.88
+Median E2EL (ms):                        39004.05
+P99 E2EL (ms):                           39028.93
+==================================================
+2026-09-29 09:50:33,733 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 09:50:33,735 [INFO] llm_module.runner: Running vllm sweep point 4/23  isl=128 osl=1024 max_conc=32 n=128
+2026-09-29 09:50:35,736 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 32 --num-prompts 128 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-50-35_isl-128_osl-1024_maxcon-32_n-128.json --dataset-name random --random-input-len 128 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 09-29 09:50:38 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 09:50:38 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 09:50:38 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 09:50:39 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7c89f1dde480>, seed=0, num_prompts=128, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=32, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_09-50-35_isl-128_osl-1024_maxcon-32_n-128.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-de5b5f63-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 09-29 09:50:40 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 00:39 elapsed, 11839:17:46 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+0%|          | 0/128 [00:00<?, ?it/s]
+1%|          | 1/128 [02:34<5:26:07, 154.07s/it]
+26%|██▌       | 33/128 [05:11<12:49,  8.10s/it]
+51%|█████     | 65/128 [07:46<06:30,  6.20s/it]
+76%|███████▌  | 97/128 [10:24<02:54,  5.63s/it]
+100%|██████████| 128/128 [10:24<00:00,  4.88s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     128
+Failed requests:                         0
+Maximum request concurrency:             32
+Benchmark duration (s):                  624.00
+Total input tokens:                      16384
+Total generated tokens:                  131072
+Request throughput (req/s):              0.21
+Output token throughput (tok/s):         210.05
+Peak output token throughput (tok/s):    288.00
+Peak concurrent requests:                64.00
+Total token throughput (tok/s):          236.31
+---------------Time to First Token----------------
+Mean TTFT (ms):                          12383.23
+Median TTFT (ms):                        12373.85
+P99 TTFT (ms):                           12450.18
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          140.39
+Median TPOT (ms):                        140.62
+P99 TPOT (ms):                           142.04
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           141.94
+Median ITL (ms):                         142.12
+P99 ITL (ms):                            273.09
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          155999.93
+Median E2EL (ms):                        156085.08
+P99 E2EL (ms):                           157758.41
+==================================================
+2026-09-29 10:01:43,757 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=1024 max_concurrency=32; benchmark block is reported as NA (ungraded).
+2026-09-29 10:01:43,758 [INFO] llm_module.runner: Running vllm sweep point 5/23  isl=1024 osl=128 max_conc=1 n=4
+2026-09-29 10:01:45,760 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-01-45_isl-1024_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 1024 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 1024} --header Accept-Encoding=identity
+INFO 09-29 10:01:48 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:01:48 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:01:48 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:01:49 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7f54e8dd6480>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=1024, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-01-45_isl-1024_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-0d5b741b-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 1024})
+INFO 09-29 10:01:50 [datasets.py:612] Sampling input_len from [1024, 1024] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+Initial test run completed.
+|          | 00:05 elapsed, 2130:27:40 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:05<00:17,  5.98s/it]
+50%|█████     | 2/4 [00:11<00:11,  5.98s/it]
+75%|███████▌  | 3/4 [00:17<00:05,  5.98s/it]
+100%|██████████| 4/4 [00:23<00:00,  5.97s/it]
+100%|██████████| 4/4 [00:23<00:00,  5.97s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  23.90
+Total input tokens:                      4096
+Total generated tokens:                  512
+Request throughput (req/s):              0.17
+Output token throughput (tok/s):         21.42
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          192.80
+---------------Time to First Token----------------
+Mean TTFT (ms):                          1183.71
+Median TTFT (ms):                        1181.74
+P99 TTFT (ms):                           1190.78
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.72
+Median TPOT (ms):                        37.73
+P99 TPOT (ms):                           37.73
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.65
+Median ITL (ms):                         37.75
+P99 ITL (ms):                            40.29
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          5974.73
+Median E2EL (ms):                        5973.42
+P99 E2EL (ms):                           5979.56
+==================================================
+2026-09-29 10:02:20,573 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=1024 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:02:20,575 [INFO] llm_module.runner: Running vllm sweep point 6/23  isl=1024 osl=128 max_conc=32 n=128
+2026-09-29 10:02:22,577 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 32 --num-prompts 128 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-02-22_isl-1024_osl-128_maxcon-32_n-128.json --dataset-name random --random-input-len 1024 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 1024} --header Accept-Encoding=identity
+INFO 09-29 10:02:25 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:02:25 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:02:25 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:02:26 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7390ccde2480>, seed=0, num_prompts=128, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=1024, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=32, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-02-22_isl-1024_osl-128_maxcon-32_n-128.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-aa4ea9bc-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 1024})
+INFO 09-29 10:02:27 [datasets.py:612] Sampling input_len from [1024, 1024] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+|          | 00:05 elapsed, 1677:49:25 remaining
+Initial test run completed.
+
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+0%|          | 0/128 [00:00<?, ?it/s]
+1%|          | 1/128 [00:53<1:54:11, 53.95s/it]
+26%|██▌       | 33/128 [01:48<04:27,  2.81s/it]
+51%|█████     | 65/128 [02:42<02:15,  2.16s/it]
+76%|███████▌  | 97/128 [03:36<01:00,  1.95s/it]
+100%|██████████| 128/128 [03:36<00:00,  1.69s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     128
+Failed requests:                         0
+Maximum request concurrency:             32
+Benchmark duration (s):                  216.36
+Total input tokens:                      131072
+Total generated tokens:                  16384
+Request throughput (req/s):              0.59
+Output token throughput (tok/s):         75.73
+Peak output token throughput (tok/s):    350.00
+Peak concurrent requests:                64.00
+Total token throughput (tok/s):          681.54
+---------------Time to First Token----------------
+Mean TTFT (ms):                          38011.05
+Median TTFT (ms):                        37989.66
+P99 TTFT (ms):                           38067.69
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          126.59
+Median TPOT (ms):                        126.56
+P99 TPOT (ms):                           129.09
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           125.96
+Median ITL (ms):                         129.46
+P99 ITL (ms):                            137.04
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          54088.12
+Median E2EL (ms):                        54097.24
+P99 E2EL (ms):                           54215.30
+==================================================
+2026-09-29 10:06:10,330 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=1024 osl=128 max_concurrency=32; benchmark block is reported as NA (ungraded).
+2026-09-29 10:06:10,332 [INFO] llm_module.runner: Running vllm sweep point 7/23  isl=2048 osl=128 max_conc=1 n=4
+2026-09-29 10:06:12,335 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-06-12_isl-2048_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 2048 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 2048} --header Accept-Encoding=identity
+INFO 09-29 10:06:14 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:06:14 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:06:14 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:06:15 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7336347e2480>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=2048, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-06-12_isl-2048_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-4e80379e-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 2048})
+INFO 09-29 10:06:16 [datasets.py:612] Sampling input_len from [2048, 2048] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+|          | 00:06 elapsed, 2142:27:53 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:06<00:20,  6.76s/it]
+50%|█████     | 2/4 [00:13<00:13,  6.76s/it]
+75%|███████▌  | 3/4 [00:20<00:06,  6.76s/it]
+100%|██████████| 4/4 [00:27<00:00,  6.76s/it]
+100%|██████████| 4/4 [00:27<00:00,  6.76s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  27.06
+Total input tokens:                      8192
+Total generated tokens:                  512
+Request throughput (req/s):              0.15
+Output token throughput (tok/s):         18.92
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          321.70
+---------------Time to First Token----------------
+Mean TTFT (ms):                          1967.80
+Median TTFT (ms):                        1968.34
+P99 TTFT (ms):                           1972.32
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.76
+Median TPOT (ms):                        37.76
+P99 TPOT (ms):                           37.78
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.47
+Median ITL (ms):                         37.79
+P99 ITL (ms):                            41.43
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          6763.85
+Median E2EL (ms):                        6764.12
+P99 E2EL (ms):                           6766.63
+==================================================
+2026-09-29 10:06:51,155 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=2048 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:06:51,157 [INFO] llm_module.runner: Running vllm sweep point 8/23  isl=2048 osl=128 max_conc=32 n=128
+2026-09-29 10:06:53,159 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 32 --num-prompts 128 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-06-53_isl-2048_osl-128_maxcon-32_n-128.json --dataset-name random --random-input-len 2048 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 2048} --header Accept-Encoding=identity
+INFO 09-29 10:06:55 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:06:55 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:06:55 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:06:56 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7c20a31b6480>, seed=0, num_prompts=128, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=2048, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=32, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-06-53_isl-2048_osl-128_maxcon-32_n-128.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-7f2c52fa-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 2048})
+INFO 09-29 10:06:57 [datasets.py:612] Sampling input_len from [2048, 2048] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+Initial test run completed.
+|          | 00:06 elapsed, 2223:48:39 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+0%|          | 0/128 [00:00<?, ?it/s]
+1%|          | 1/128 [01:19<2:47:21, 79.07s/it]
+26%|██▌       | 33/128 [02:38<06:30,  4.12s/it]
+51%|█████     | 65/128 [03:57<03:19,  3.16s/it]
+76%|███████▌  | 97/128 [05:16<01:28,  2.84s/it]
+100%|██████████| 128/128 [05:16<00:00,  2.47s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     128
+Failed requests:                         0
+Maximum request concurrency:             32
+Benchmark duration (s):                  316.42
+Total input tokens:                      262144
+Total generated tokens:                  16384
+Request throughput (req/s):              0.40
+Output token throughput (tok/s):         51.78
+Peak output token throughput (tok/s):    350.00
+Peak concurrent requests:                64.00
+Total token throughput (tok/s):          880.25
+---------------Time to First Token----------------
+Mean TTFT (ms):                          63029.53
+Median TTFT (ms):                        63056.90
+P99 TTFT (ms):                           63090.88
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          126.56
+Median TPOT (ms):                        126.83
+P99 TPOT (ms):                           129.30
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           125.82
+Median ITL (ms):                         129.89
+P99 ITL (ms):                            137.61
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          79103.18
+Median E2EL (ms):                        79134.23
+P99 E2EL (ms):                           79219.17
+==================================================
+2026-09-29 10:12:22,243 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=2048 osl=128 max_concurrency=32; benchmark block is reported as NA (ungraded).
+2026-09-29 10:12:22,245 [INFO] llm_module.runner: Running vllm sweep point 9/23  isl=4096 osl=128 max_conc=1 n=4
+2026-09-29 10:12:24,247 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-12-24_isl-4096_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 4096 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 4096} --header Accept-Encoding=identity
+INFO 09-29 10:12:26 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:12:26 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:12:26 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:12:27 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7061f7bde480>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=4096, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-12-24_isl-4096_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-223b4520-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 4096})
+INFO 09-29 10:12:28 [datasets.py:612] Sampling input_len from [4096, 4096] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+|          | 00:08 elapsed, 2609:53:16 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:08<00:26,  8.71s/it]
+50%|█████     | 2/4 [00:17<00:17,  8.71s/it]
+75%|███████▌  | 3/4 [00:26<00:08,  8.71s/it]
+100%|██████████| 4/4 [00:34<00:00,  8.71s/it]
+100%|██████████| 4/4 [00:34<00:00,  8.71s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  34.85
+Total input tokens:                      16384
+Total generated tokens:                  512
+Request throughput (req/s):              0.11
+Output token throughput (tok/s):         14.69
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          484.89
+---------------Time to First Token----------------
+Mean TTFT (ms):                          3896.32
+Median TTFT (ms):                        3896.67
+P99 TTFT (ms):                           3898.95
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.91
+Median TPOT (ms):                        37.91
+P99 TPOT (ms):                           37.91
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.69
+Median ITL (ms):                         37.94
+P99 ITL (ms):                            41.28
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          8710.99
+Median E2EL (ms):                        8711.16
+P99 E2EL (ms):                           8713.56
+==================================================
+2026-09-29 10:13:12,676 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=4096 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:13:12,678 [INFO] llm_module.runner: Running vllm sweep point 10/23  isl=4096 osl=128 max_conc=32 n=128
+2026-09-29 10:13:14,680 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 32 --num-prompts 128 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-13-14_isl-4096_osl-128_maxcon-32_n-128.json --dataset-name random --random-input-len 4096 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 4096} --header Accept-Encoding=identity
+INFO 09-29 10:13:17 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:13:17 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:13:17 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:13:18 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7e09875de480>, seed=0, num_prompts=128, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=4096, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=32, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-13-14_isl-4096_osl-128_maxcon-32_n-128.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-f5cab8e1-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 4096})
+INFO 09-29 10:13:19 [datasets.py:612] Sampling input_len from [4096, 4096] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:10 remaining
+Initial test run completed.
+|          | 00:08 elapsed, 2977:07:35 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+0%|          | 0/128 [00:00<?, ?it/s]
+1%|          | 1/128 [02:20<4:58:09, 140.86s/it]
+26%|██▌       | 33/128 [04:41<11:35,  7.32s/it]
+51%|█████     | 65/128 [07:02<05:54,  5.62s/it]
+76%|███████▌  | 97/128 [09:23<02:37,  5.07s/it]
+100%|██████████| 128/128 [09:23<00:00,  4.40s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     128
+Failed requests:                         0
+Maximum request concurrency:             32
+Benchmark duration (s):                  563.38
+Total input tokens:                      524288
+Total generated tokens:                  16384
+Request throughput (req/s):              0.23
+Output token throughput (tok/s):         29.08
+Peak output token throughput (tok/s):    320.00
+Peak concurrent requests:                64.00
+Total token throughput (tok/s):          959.69
+---------------Time to First Token----------------
+Mean TTFT (ms):                          124685.44
+Median TTFT (ms):                        124681.68
+P99 TTFT (ms):                           124758.41
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          127.23
+Median TPOT (ms):                        127.26
+P99 TPOT (ms):                           130.05
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           126.40
+Median ITL (ms):                         130.24
+P99 ITL (ms):                            136.80
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          140843.59
+Median E2EL (ms):                        140849.94
+P99 E2EL (ms):                           140897.93
+==================================================
+2026-09-29 10:22:53,576 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=4096 osl=128 max_concurrency=32; benchmark block is reported as NA (ungraded).
+2026-09-29 10:22:53,578 [INFO] llm_module.runner: Running vllm sweep point 11/23  isl=8192 osl=128 max_conc=1 n=2
+2026-09-29 10:22:55,580 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-22-55_isl-8192_osl-128_maxcon-1_n-2.json --dataset-name random --random-input-len 8192 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 09-29 10:22:58 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:22:58 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:22:58 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:22:59 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7cb0145de480>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-22-55_isl-8192_osl-128_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-a7b607cb-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 09-29 10:22:59 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+|          | 00:12 elapsed, 3750:07:56 remaining
+Initial test run completed.
+
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:12<00:12, 12.61s/it]
+100%|██████████| 2/2 [00:25<00:00, 12.60s/it]
+100%|██████████| 2/2 [00:25<00:00, 12.60s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  25.20
+Total input tokens:                      16384
+Total generated tokens:                  256
+Request throughput (req/s):              0.08
+Output token throughput (tok/s):         10.16
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          660.28
+---------------Time to First Token----------------
+Mean TTFT (ms):                          7776.19
+Median TTFT (ms):                        7776.19
+P99 TTFT (ms):                           7783.62
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          37.99
+Median TPOT (ms):                        37.99
+P99 TPOT (ms):                           37.99
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.69
+Median ITL (ms):                         38.02
+P99 ITL (ms):                            38.93
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          12600.37
+Median E2EL (ms):                        12600.37
+P99 E2EL (ms):                           12607.61
+==================================================
+2026-09-29 10:23:38,255 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:23:38,257 [INFO] llm_module.runner: Running vllm sweep point 12/23  isl=8192 osl=128 max_conc=31 n=62
+2026-09-29 10:23:40,259 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 31 --num-prompts 62 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-23-40_isl-8192_osl-128_maxcon-31_n-62.json --dataset-name random --random-input-len 8192 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 09-29 10:23:42 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:23:42 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:23:42 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:23:43 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x72ac143de480>, seed=0, num_prompts=62, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=31, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-23-40_isl-8192_osl-128_maxcon-31_n-62.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-40b2ddb4-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 09-29 10:23:44 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 00:12 elapsed, 3806:07:03 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 31
+0%|          | 0/62 [00:00<?, ?it/s]
+2%|▏         | 1/62 [04:17<4:21:20, 257.06s/it]
+52%|█████▏    | 32/62 [08:34<06:53, 13.80s/it]
+100%|██████████| 62/62 [08:34<00:00,  8.30s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     62
+Failed requests:                         0
+Maximum request concurrency:             31
+Benchmark duration (s):                  514.57
+Total input tokens:                      507904
+Total generated tokens:                  7936
+Request throughput (req/s):              0.12
+Output token throughput (tok/s):         15.42
+Peak output token throughput (tok/s):    339.00
+Peak concurrent requests:                62.00
+Total token throughput (tok/s):          1002.48
+---------------Time to First Token----------------
+Mean TTFT (ms):                          240870.81
+Median TTFT (ms):                        240758.93
+P99 TTFT (ms):                           241014.68
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          129.20
+Median TPOT (ms):                        129.83
+P99 TPOT (ms):                           132.24
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           128.27
+Median ITL (ms):                         132.29
+P99 ITL (ms):                            138.71
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          257279.65
+Median E2EL (ms):                        257280.66
+P99 E2EL (ms):                           257503.69
+==================================================
+2026-09-29 10:32:34,101 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=128 max_concurrency=31; benchmark block is reported as NA (ungraded).
+2026-09-29 10:32:34,102 [INFO] llm_module.runner: Running vllm sweep point 13/23  isl=8192 osl=1024 max_conc=1 n=2
+2026-09-29 10:32:36,105 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-32-36_isl-8192_osl-1024_maxcon-1_n-2.json --dataset-name random --random-input-len 8192 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 09-29 10:32:38 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:32:38 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:32:38 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:32:39 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x789b295e6480>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-32-36_isl-8192_osl-1024_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-6a0df3b4-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 09-29 10:32:40 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+|          | 00:46 elapsed, 14192:32:00 remaining
+Initial test run completed.
+Starting main benchmark run...
+Traffic request rate: inf
+
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:46<00:46, 46.69s/it]
+100%|██████████| 2/2 [01:33<00:00, 46.69s/it]
+100%|██████████| 2/2 [01:33<00:00, 46.69s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  93.38
+Total input tokens:                      16384
+Total generated tokens:                  2048
+Request throughput (req/s):              0.02
+Output token throughput (tok/s):         21.93
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          197.38
+---------------Time to First Token----------------
+Mean TTFT (ms):                          7782.11
+Median TTFT (ms):                        7782.11
+P99 TTFT (ms):                           7782.25
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          38.03
+Median TPOT (ms):                        38.03
+P99 TPOT (ms):                           38.03
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           38.30
+Median ITL (ms):                         38.03
+P99 ITL (ms):                            41.89
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          46691.55
+Median E2EL (ms):                        46691.55
+P99 E2EL (ms):                           46691.68
+==================================================
+2026-09-29 10:35:01,166 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:35:01,167 [INFO] llm_module.runner: Running vllm sweep point 14/23  isl=8192 osl=1024 max_conc=28 n=56
+2026-09-29 10:35:03,170 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 28 --num-prompts 56 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-35-03_isl-8192_osl-1024_maxcon-28_n-56.json --dataset-name random --random-input-len 8192 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 09-29 10:35:05 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:35:05 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:35:05 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:35:06 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x755798fde480>, seed=0, num_prompts=56, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=28, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-35-03_isl-8192_osl-1024_maxcon-28_n-56.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-bdcd4db4-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 09-29 10:35:07 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 00:46 elapsed, 13581:25:11 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 28
+0%|          | 0/56 [00:00<?, ?it/s]
+2%|▏         | 1/56 [06:02<5:31:50, 362.00s/it]
+52%|█████▏    | 29/56 [12:03<09:38, 21.44s/it]
+100%|██████████| 56/56 [12:03<00:00, 12.93s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     56
+Failed requests:                         0
+Maximum request concurrency:             28
+Benchmark duration (s):                  723.84
+Total input tokens:                      458752
+Total generated tokens:                  57344
+Request throughput (req/s):              0.08
+Output token throughput (tok/s):         79.22
+Peak output token throughput (tok/s):    252.00
+Peak concurrent requests:                56.00
+Total token throughput (tok/s):          713.00
+---------------Time to First Token----------------
+Mean TTFT (ms):                          217477.33
+Median TTFT (ms):                        217437.28
+P99 TTFT (ms):                           217549.67
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          141.19
+Median TPOT (ms):                        141.32
+P99 TPOT (ms):                           141.56
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           142.49
+Median ITL (ms):                         142.92
+P99 ITL (ms):                            152.53
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          361915.38
+Median E2EL (ms):                        361914.77
+P99 E2EL (ms):                           362006.28
+==================================================
+2026-09-29 10:48:00,179 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=1024 max_concurrency=28; benchmark block is reported as NA (ungraded).
+2026-09-29 10:48:00,181 [INFO] llm_module.runner: Running vllm sweep point 15/23  isl=10000 osl=1024 max_conc=1 n=2
+2026-09-29 10:48:02,183 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-48-02_isl-10000_osl-1024_maxcon-1_n-2.json --dataset-name random --random-input-len 10000 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 10000} --header Accept-Encoding=identity
+INFO 09-29 10:48:04 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:48:04 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:48:04 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:48:05 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x725f279e6480>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=10000, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-48-02_isl-10000_osl-1024_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-c60a6276-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 10000})
+INFO 09-29 10:48:06 [datasets.py:612] Sampling input_len from [10000, 10000] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:05 remaining
+Initial test run completed.
+|          | 00:48 elapsed, 9226:23:43 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:48<00:48, 48.63s/it]
+100%|██████████| 2/2 [01:37<00:00, 48.63s/it]
+100%|██████████| 2/2 [01:37<00:00, 48.63s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  97.26
+Total input tokens:                      20000
+Total generated tokens:                  2048
+Request throughput (req/s):              0.02
+Output token throughput (tok/s):         21.06
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          226.70
+---------------Time to First Token----------------
+Mean TTFT (ms):                          9721.43
+Median TTFT (ms):                        9721.43
+P99 TTFT (ms):                           9728.15
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          38.03
+Median TPOT (ms):                        38.03
+P99 TPOT (ms):                           38.04
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           38.37
+Median ITL (ms):                         38.02
+P99 ITL (ms):                            45.28
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          48628.71
+Median E2EL (ms):                        48628.71
+P99 E2EL (ms):                           48632.88
+==================================================
+2026-09-29 10:50:33,105 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=10000 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 10:50:33,107 [INFO] llm_module.runner: Running vllm sweep point 16/23  isl=10000 osl=1024 max_conc=23 n=46
+2026-09-29 10:50:35,110 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 23 --num-prompts 46 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-50-35_isl-10000_osl-1024_maxcon-23_n-46.json --dataset-name random --random-input-len 10000 --random-output-len 1024 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 10000} --header Accept-Encoding=identity
+INFO 09-29 10:50:37 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 10:50:37 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 10:50:37 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 10:50:38 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x73e7781de480>, seed=0, num_prompts=46, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=10000, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=23, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_10-50-35_isl-10000_osl-1024_maxcon-23_n-46.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-8af0424f-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 10000})
+INFO 09-29 10:50:39 [datasets.py:612] Sampling input_len from [10000, 10000] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:06 remaining
+Initial test run completed.
+|          | 00:48 elapsed, 10892:36:40 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 23
+0%|          | 0/46 [00:00<?, ?it/s]
+2%|▏         | 1/46 [06:07<4:35:47, 367.72s/it]
+52%|█████▏    | 24/46 [12:16<09:41, 26.41s/it]
+100%|██████████| 46/46 [12:16<00:00, 16.01s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     46
+Failed requests:                         0
+Maximum request concurrency:             23
+Benchmark duration (s):                  736.32
+Total input tokens:                      460000
+Total generated tokens:                  47104
+Request throughput (req/s):              0.06
+Output token throughput (tok/s):         63.97
+Peak output token throughput (tok/s):    207.00
+Peak concurrent requests:                46.00
+Total token throughput (tok/s):          688.70
+---------------Time to First Token----------------
+Mean TTFT (ms):                          223313.34
+Median TTFT (ms):                        223248.92
+P99 TTFT (ms):                           223413.71
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          141.59
+Median TPOT (ms):                        141.76
+P99 TPOT (ms):                           142.28
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           142.90
+Median ITL (ms):                         142.64
+P99 ITL (ms):                            148.50
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          368159.40
+Median E2EL (ms):                        368160.17
+P99 E2EL (ms):                           368599.99
+==================================================
+2026-09-29 11:03:46,771 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=10000 osl=1024 max_concurrency=23; benchmark block is reported as NA (ungraded).
+2026-09-29 11:03:46,773 [INFO] llm_module.runner: Running vllm sweep point 17/23  isl=16384 osl=128 max_conc=1 n=2
+2026-09-29 11:03:48,775 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-03-48_isl-16384_osl-128_maxcon-1_n-2.json --dataset-name random --random-input-len 16384 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 16384} --header Accept-Encoding=identity
+INFO 09-29 11:03:51 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:03:51 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:03:51 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:03:52 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x72941c5de480>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=16384, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-03-48_isl-16384_osl-128_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-57b9672a-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 16384})
+INFO 09-29 11:03:53 [datasets.py:612] Sampling input_len from [16384, 16384] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+|          | 00:20 elapsed, 6339:48:03 remaining
+Initial test run completed.
+
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:20<00:20, 20.42s/it]
+100%|██████████| 2/2 [00:40<00:00, 20.41s/it]
+100%|██████████| 2/2 [00:40<00:00, 20.41s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  40.83
+Total input tokens:                      32768
+Total generated tokens:                  256
+Request throughput (req/s):              0.05
+Output token throughput (tok/s):         6.27
+Peak output token throughput (tok/s):    27.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          808.82
+---------------Time to First Token----------------
+Mean TTFT (ms):                          15571.72
+Median TTFT (ms):                        15571.72
+P99 TTFT (ms):                           15575.00
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          38.13
+Median TPOT (ms):                        38.13
+P99 TPOT (ms):                           38.13
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           37.84
+Median ITL (ms):                         38.19
+P99 ITL (ms):                            39.10
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          20414.71
+Median E2EL (ms):                        20414.71
+P99 E2EL (ms):                           20417.97
+==================================================
+2026-09-29 11:04:55,025 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=16384 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 11:04:55,026 [INFO] llm_module.runner: Running vllm sweep point 18/23  isl=16384 osl=128 max_conc=15 n=30
+2026-09-29 11:04:57,029 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 15 --num-prompts 30 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-04-57_isl-16384_osl-128_maxcon-15_n-30.json --dataset-name random --random-input-len 16384 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 16384} --header Accept-Encoding=identity
+INFO 09-29 11:04:59 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:04:59 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:04:59 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:05:00 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7e73041d6480>, seed=0, num_prompts=30, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=16384, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=15, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-04-57_isl-16384_osl-128_maxcon-15_n-30.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-31151968-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 16384})
+INFO 09-29 11:05:01 [datasets.py:612] Sampling input_len from [16384, 16384] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:04 remaining
+Initial test run completed.
+|          | 00:20 elapsed, 2830:41:18 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 15
+0%|          | 0/30 [00:00<?, ?it/s]
+3%|▎         | 1/30 [04:07<1:59:49, 247.92s/it]
+53%|█████▎    | 16/30 [08:15<06:15, 26.84s/it]
+100%|██████████| 30/30 [08:15<00:00, 16.52s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     30
+Failed requests:                         0
+Maximum request concurrency:             15
+Benchmark duration (s):                  495.70
+Total input tokens:                      491520
+Total generated tokens:                  3840
+Request throughput (req/s):              0.06
+Output token throughput (tok/s):         7.75
+Peak output token throughput (tok/s):    150.00
+Peak concurrent requests:                30.00
+Total token throughput (tok/s):          999.32
+---------------Time to First Token----------------
+Mean TTFT (ms):                          233562.06
+Median TTFT (ms):                        233586.96
+P99 TTFT (ms):                           233590.80
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          112.48
+Median TPOT (ms):                        112.87
+P99 TPOT (ms):                           115.48
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           111.72
+Median ITL (ms):                         113.90
+P99 ITL (ms):                            117.50
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          247847.38
+Median E2EL (ms):                        247847.53
+P99 E2EL (ms):                           247922.17
+==================================================
+2026-09-29 11:13:39,903 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=16384 osl=128 max_concurrency=15; benchmark block is reported as NA (ungraded).
+2026-09-29 11:13:39,905 [INFO] llm_module.runner: Running vllm sweep point 19/23  isl=32768 osl=128 max_conc=1 n=1
+2026-09-29 11:13:41,907 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-13-41_isl-32768_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 32768 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 32768} --header Accept-Encoding=identity
+INFO 09-29 11:13:44 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:13:44 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:13:44 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:13:45 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x762bb5fd6480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=32768, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-13-41_isl-32768_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-b9d696f8-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 32768})
+INFO 09-29 11:13:46 [datasets.py:612] Sampling input_len from [32768, 32768] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:05 remaining
+Initial test run completed.
+|          | 00:36 elapsed, 6749:27:31 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [00:36<00:00, 36.34s/it]
+100%|██████████| 1/1 [00:36<00:00, 36.34s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  36.34
+Total input tokens:                      32768
+Total generated tokens:                  128
+Request throughput (req/s):              0.03
+Output token throughput (tok/s):         3.52
+Peak output token throughput (tok/s):    26.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          905.24
+---------------Time to First Token----------------
+Mean TTFT (ms):                          31461.53
+Median TTFT (ms):                        31461.53
+P99 TTFT (ms):                           31461.53
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          38.41
+Median TPOT (ms):                        38.41
+P99 TPOT (ms):                           38.41
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           38.11
+Median ITL (ms):                         38.54
+P99 ITL (ms):                            39.36
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          36339.19
+Median E2EL (ms):                        36339.19
+P99 E2EL (ms):                           36339.19
+==================================================
+2026-09-29 11:14:59,570 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=32768 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 11:14:59,571 [INFO] llm_module.runner: Running vllm sweep point 20/23  isl=32768 osl=128 max_conc=7 n=7
+2026-09-29 11:15:01,574 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 7 --num-prompts 7 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-15-01_isl-32768_osl-128_maxcon-7_n-7.json --dataset-name random --random-input-len 32768 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 32768} --header Accept-Encoding=identity
+INFO 09-29 11:15:04 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:15:04 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:15:04 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:15:05 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x779ef49b6480>, seed=0, num_prompts=7, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=32768, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=7, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-15-01_isl-32768_osl-128_maxcon-7_n-7.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-e11fd34f-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 32768})
+INFO 09-29 11:15:05 [datasets.py:612] Sampling input_len from [32768, 32768] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:04 remaining
+Initial test run completed.
+|          | 00:36 elapsed, 6387:31:46 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 7
+0%|          | 0/7 [00:00<?, ?it/s]
+14%|█▍        | 1/7 [03:52<23:13, 232.28s/it]
+100%|██████████| 7/7 [03:52<00:00, 33.18s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     7
+Failed requests:                         0
+Maximum request concurrency:             7
+Benchmark duration (s):                  232.28
+Total input tokens:                      229376
+Total generated tokens:                  896
+Request throughput (req/s):              0.03
+Output token throughput (tok/s):         3.86
+Peak output token throughput (tok/s):    77.00
+Peak concurrent requests:                7.00
+Total token throughput (tok/s):          991.35
+---------------Time to First Token----------------
+Mean TTFT (ms):                          219749.56
+Median TTFT (ms):                        219800.75
+P99 TTFT (ms):                           219802.30
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          98.65
+Median TPOT (ms):                        98.24
+P99 TPOT (ms):                           100.92
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           98.10
+Median ITL (ms):                         98.71
+P99 ITL (ms):                            103.91
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          232277.96
+Median E2EL (ms):                        232277.99
+P99 E2EL (ms):                           232279.68
+==================================================
+2026-09-29 11:19:35,942 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=32768 osl=128 max_concurrency=7; benchmark block is reported as NA (ungraded).
+2026-09-29 11:19:35,944 [INFO] llm_module.runner: Running vllm sweep point 21/23  isl=65536 osl=128 max_conc=1 n=1
+2026-09-29 11:19:37,947 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-19-37_isl-65536_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 65536 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 65536} --header Accept-Encoding=identity
+INFO 09-29 11:19:40 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:19:40 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:19:40 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:19:41 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7ebd7cbda480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=65536, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-19-37_isl-65536_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-068d80e7-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 65536})
+INFO 09-29 11:19:42 [datasets.py:612] Sampling input_len from [65536, 65536] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:06 remaining
+Initial test run completed.
+|          | 01:08 elapsed, 16768:57:23 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [01:08<00:00, 68.89s/it]
+100%|██████████| 1/1 [01:08<00:00, 68.89s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  68.89
+Total input tokens:                      65536
+Total generated tokens:                  128
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         1.86
+Peak output token throughput (tok/s):    26.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          953.20
+---------------Time to First Token----------------
+Mean TTFT (ms):                          63938.59
+Median TTFT (ms):                        63938.59
+P99 TTFT (ms):                           63938.59
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          38.97
+Median TPOT (ms):                        38.97
+P99 TPOT (ms):                           38.97
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           38.66
+Median ITL (ms):                         39.23
+P99 ITL (ms):                            40.40
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          68887.37
+Median E2EL (ms):                        68887.37
+P99 E2EL (ms):                           68887.37
+==================================================
+2026-09-29 11:22:00,946 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 11:22:00,948 [INFO] llm_module.runner: Running vllm sweep point 22/23  isl=65536 osl=128 max_conc=3 n=3
+2026-09-29 11:22:02,950 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 3 --num-prompts 3 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-22-02_isl-65536_osl-128_maxcon-3_n-3.json --dataset-name random --random-input-len 65536 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 65536} --header Accept-Encoding=identity
+INFO 09-29 11:22:05 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:22:05 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:22:05 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:22:06 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x71b96f1d6480>, seed=0, num_prompts=3, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=65536, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=3, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-22-02_isl-65536_osl-128_maxcon-3_n-3.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-2722b7cb-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 65536})
+INFO 09-29 11:22:07 [datasets.py:612] Sampling input_len from [65536, 65536] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:03 remaining
+Initial test run completed.
+|          | 01:08 elapsed, 10150:56:33 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 3
+0%|          | 0/3 [00:00<?, ?it/s]
+33%|███▎      | 1/3 [03:18<06:37, 198.98s/it]
+100%|██████████| 3/3 [03:18<00:00, 66.33s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     3
+Failed requests:                         0
+Maximum request concurrency:             3
+Benchmark duration (s):                  198.98
+Total input tokens:                      196608
+Total generated tokens:                  384
+Request throughput (req/s):              0.02
+Output token throughput (tok/s):         1.93
+Peak output token throughput (tok/s):    57.00
+Peak concurrent requests:                3.00
+Total token throughput (tok/s):          990.02
+---------------Time to First Token----------------
+Mean TTFT (ms):                          191948.21
+Median TTFT (ms):                        192059.28
+P99 TTFT (ms):                           192060.83
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          55.34
+Median TPOT (ms):                        54.45
+P99 TPOT (ms):                           57.06
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           54.91
+Median ITL (ms):                         54.36
+P99 ITL (ms):                            58.29
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          198976.30
+Median E2EL (ms):                        198976.57
+P99 E2EL (ms):                           198977.53
+==================================================
+2026-09-29 11:26:36,715 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=3; benchmark block is reported as NA (ungraded).
+2026-09-29 11:26:36,717 [INFO] llm_module.runner: Running vllm sweep point 23/23  isl=131072 osl=128 max_conc=1 n=1
+2026-09-29 11:26:38,719 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/tt-inference-server/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model Qwen/Qwen3.5-122B-A10B --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-26-38_isl-131072_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 131072 --random-output-len 128 --host 127.0.0.1 --port 8131 --extra-body {"truncate_prompt_tokens": 131072} --header Accept-Encoding=identity
+INFO 09-29 11:26:41 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 09-29 11:26:41 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 09-29 11:26:41 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 09-29 11:26:42 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7ba7999de480>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=131072, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8131, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='Qwen/Qwen3.5-122B-A10B', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/tt-inference-server/workflow_logs/reports_output/release/Qwen__Qwen3.5-122B-A10B_p300x2_release/llm/benchmark_Qwen__Qwen3.5-122B-A10B_2026-09-29_11-26-38_isl-131072_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-674ac515-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 131072})
+INFO 09-29 11:26:43 [datasets.py:612] Sampling input_len from [131072, 131072] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:04 remaining
+Initial test run completed.
+|          | 02:17 elapsed, 23835:50:07 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [02:17<00:00, 137.77s/it]
+100%|██████████| 1/1 [02:17<00:00, 137.77s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  137.77
+Total input tokens:                      131072
+Total generated tokens:                  128
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         0.93
+Peak output token throughput (tok/s):    25.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          952.31
+---------------Time to First Token----------------
+Mean TTFT (ms):                          132665.80
+Median TTFT (ms):                        132665.80
+P99 TTFT (ms):                           132665.80
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          40.19
+Median TPOT (ms):                        40.19
+P99 TPOT (ms):                           40.19
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           39.87
+Median ITL (ms):                         40.63
+P99 ITL (ms):                            41.62
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          137769.59
+Median E2EL (ms):                        137769.59
+P99 E2EL (ms):                           137769.59
+==================================================
+2026-09-29 11:31:19,790 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=131072 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-09-29 11:31:19,791 [INFO] test_module.llm_tests.llm_performance_tests: LLM sweep produced 23 Block(s) over 23 sweep point(s)
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink: BlockAccumulator: +23 block(s), total=25
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 09:43:11'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 09:47:11'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 09:50:33'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:01:43'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:02:20'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:06:10'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:06:50'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:12:22'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:13:12'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:22:53'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:23:38'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:32:33'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:35:00'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:47:59'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 10:50:32'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:03:46'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:04:54'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:13:39'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:14:59'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:19:35'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:22:00'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:26:36'}
+2026-09-29 11:31:19,791 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'tool': 'vllm', 'model': 'Qwen/Qwen3.5-122B-A10B', 'device': 'P300X2', 'timestamp': '2026-09-29 11:31:19'}
+2026-09-29 11:31:19,791 [INFO] workflow.benchmarks: ✅ task=llm_benchmark blocks=23 kind=benchmarks (6539.9s)
+2026-09-29 11:31:19,791 [INFO] workflow.release: --- release: spec_tests ---
+2026-09-29 11:31:19,792 [INFO] workflow.spec_tests: → task=spec_tests
+2026-09-29 11:31:19,792 [INFO] test_module.dispatch: Running spec_tests for model=Qwen3.5-122B-A10B, device=P300X2
+2026-09-29 11:31:19,793 [INFO] test_module.test_categorization_system.test_filter: Loading server tests configuration
+2026-09-29 11:31:19,793 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-09-29 11:31:19,793 [INFO] test_module.test_categorization_system.test_filter: Loading test suites from discovery
+2026-09-29 11:31:19,793 [INFO] test_module.test_categorization_system.suite_loader: Loading suite files from /home/raahem/tt-inference-server/test_module/test_suites
+2026-09-29 11:31:19,793 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 5 suites
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Loaded 8 suites from audio.json (AUDIO)
+2026-09-29 11:31:19,794 [WARNING] test_module.test_categorization_system.suite_loader: Skipping efficientnet on n300: not in compatible_devices ['n150']
+2026-09-29 11:31:19,794 [WARNING] test_module.test_categorization_system.suite_loader: Skipping segformer on n300: not in compatible_devices ['n150']
+2026-09-29 11:31:19,794 [WARNING] test_module.test_categorization_system.suite_loader: Skipping unet on n300: not in compatible_devices ['n150']
+2026-09-29 11:31:19,794 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vit on n300: not in compatible_devices ['n150']
+2026-09-29 11:31:19,794 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vovnet on n300: not in compatible_devices ['n150']
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 9 suites
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Loaded 9 suites from cnn.json (CNN)
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 6 suites
+2026-09-29 11:31:19,794 [INFO] test_module.test_categorization_system.suite_loader: Loaded 6 suites from embedding.json (EMBEDDING)
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping motif on p300: not in compatible_devices ['t3k', 'galaxy', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Expanded 6 test matrices into 29 suites
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Loaded 32 suites from image.json (IMAGE)
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on gpu: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p100: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150x4: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_1_8b on blackhole_galaxy: not in compatible_devices ['n150', 'n300', 't3k', 'gpu', 'p100', 'p150', 'p150x4', 'p150x8', 'p300', 'p300x2', 'galaxy', 'galaxy_t3k']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n150: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n300: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on t3k: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on blackhole_galaxy: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy_t3k: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on gpu: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p100: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x4: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x8: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p300: not in compatible_devices ['p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on blackhole_galaxy: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on gpu: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p100: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on blackhole_galaxy: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on gpu: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p100: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x4: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x8: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300x2: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on n150: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on n300: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on blackhole_galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on galaxy_t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on gpu: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p100: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p150: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p150x8: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_5_122b_a10b on p300: not in compatible_devices ['p300x2', 'p150x4']
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Expanded 4 test matrices into 40 suites
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Loaded 40 suites from llm.json (LLM)
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 2 suites
+2026-09-29 11:31:19,795 [INFO] test_module.test_categorization_system.suite_loader: Loaded 2 suites from tts.json (TTS)
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 15 suites
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.suite_loader: Loaded 15 suites from video.json (VIDEO)
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.test_filter: Building reverse mapping: model -> category
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.test_filter: Expanding 112 test suites
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.test_filter: Including prerequisites by default
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.test_filter: Getting filtered tests
+2026-09-29 11:31:19,796 [INFO] test_module.test_categorization_system.test_filter: Getting prerequisite tests for suite: qwen3-5-122b-a10b-p300x2
+2026-09-29 11:31:19,797 [INFO] test_module.test_categorization_system.test_filter: Skipping prerequisite DeviceLivenessTest for engine vLLM (allowed: ['media', 'forge'])
+2026-09-29 11:31:19,797 [INFO] test_module.test_categorization_system.test_filter: Expanding prerequisite test: LoggerForkSafetyTest
+2026-09-29 11:31:19,797 [INFO] test_module.dispatch: [qwen3-5-122b-a10b-p300x2] 2 test case(s)
+2026-09-29 11:31:19,797 [INFO] test_module.dispatch:   -> LoggerForkSafetyTest (test_module.unit_tests.logger_fork_safety_test)
+2026-09-29 11:31:19,799 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-09-29 11:31:19,799 [INFO] test_module._test_common.base_test: Running tests (attempt 1/121)
+2026-09-29 11:31:19,799 [INFO] test_module.unit_tests.logger_fork_safety_test: Testing logger fork safety with held lock...
+2026-09-29 11:31:19,799 [INFO] test_module.unit_tests.logger_fork_safety_test: Handler lock held by background thread, forking...
+2026-09-29 11:31:19,801 [INFO] test_module.unit_tests.logger_fork_safety_test: Child logged without deadlock
+2026-09-29 11:31:19,801 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-09-29 11:31:19,801 [INFO] test_module.dispatch:   -> VLLMParamConformanceTest (test_module.llm_tests.vllm_param_conformance_test)
+2026-09-29 11:31:19,803 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-09-29 11:31:19,803 [INFO] test_module._test_common.base_test: Running tests (attempt 1/1)
+2026-09-29 11:31:19,803 [INFO] test_module.llm_tests.vllm_param_conformance_test: Running vLLM parameter suite: /home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/bin/python -m pytest /home/raahem/tt-inference-server/llm_module/test_vllm_chat_completions.py --output-path /tmp/vllm_param_lexg1m90 --task-name vllm_chat_completions --endpoint-url http://127.0.0.1:8131/v1/chat/completions --model-name Qwen/Qwen3.5-122B-A10B -q
+2026-09-29 11:55:51,754 [INFO] test_module.llm_tests.vllm_param_conformance_test: vLLM parameter suite exited with code 0
+2026-09-29 11:55:51,755 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-09-29 11:55:51,755 [INFO] workflow_module.blocks_sink: BlockAccumulator: +2 block(s), total=27
+2026-09-29 11:55:51,755 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'num_of_devices': 4}
+2026-09-29 11:55:51,755 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=Qwen__Qwen3.5-122B-A10B_P300X2 targets={'num_of_devices': 4, 'num_concurrent_requests': 4}
+2026-09-29 11:55:51,755 [INFO] test_module.dispatch: spec_tests done: 2 block(s), 0 failure(s) -> exit=0
+2026-09-29 11:55:51,755 [INFO] workflow.spec_tests: ✅ task=spec_tests block=spec_tests (1472.0s)
+2026-09-29 11:55:51,756 [INFO] workflow.release: Acceptance: PASS (0 blocker(s))
+2026-09-29 11:55:51,759 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.md
+2026-09-29 11:55:51,760 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.json
+2026-09-29 11:55:51,761 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.json
+2026-09-29 11:55:51,761 [INFO] report_module.generator: Generated report: md=/home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.md, json=/home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.json
+2026-09-29 11:55:51,761 [INFO] workflow.release: Wrote markdown: /home/raahem/tt-inference-server/workflow_logs/reports_output/release/report_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.md
+2026-09-29 11:55:51,761 [INFO] workflow.release: Wrote json:     /home/raahem/tt-inference-server/workflow_logs/reports_output/release/data/report_data_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_2026-09-29_11-55-51.json
+2026-09-29 11:55:51,761 [INFO] workflow.release: === Workflow done: release (rc=0) ===
+2026-09-29 11:55:51,761 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-09-29 11:55:51,789 - runner.py:42 - INFO: ✅ command=release rc=0
+2026-09-29 11:55:51,789 - run.py:1374 - INFO: Completed run.py.
+2026-09-29 11:55:51,789 - run.py:1380 - INFO: The output of the workflows is not checked and any errors will be in the logs above and in the saved log file.
+2026-09-29 11:55:51,789 - run.py:1384 - INFO: If you encounter any issues please share the log file in a GitHub issue and server log if available.
+2026-09-29 11:55:51,789 - run.py:1388 - INFO: This log file is saved on local machine at: /home/raahem/tt-inference-server/workflow_logs/run_logs/run_2026-09-29_09-22-07_id_qwen35-122b-autoport_Qwen3.5-122B-A10B_p300x2_release_DOH_iNZE.log

@@ -1,0 +1,26 @@
+=== tt-model package (attempt 8: no stale egg-info, narrowed autoport allowlist) 2026-09-26T18:52:17+00:00
+
+real	8m7.924s
+user	0m3.577s
+sys	0m2.556s
+package exit=0
+#47 unpacking to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672
+#47 unpacking to docker.io/tt-model/qwen3-5-122b-a10b-blackholex4:build-191f7f672 15.3s done
+#47 DONE 103.4s
+exporting the image as an OCI layout…
+✓ exporting the image as an OCI layout  9.9s
+  • image/ 2.0 GB as content-addressed blobs
+  ✓ packaged qwen3-5-122b-a10b-blackholex4 →
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4
+  → serve it locally:  tt-model serve
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4/tt_kernel_manifest.json
+  → publish it:        tt-model push
+  /home/raahem/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex
+  4
+total 12
+drwxrwxr-x 3 raahem raahem 4096 Sep 26 13:17 .
+drwxrwxr-x 7 raahem raahem 4096 Sep 26 17:52 ..
+drwxrwxr-x 3 raahem raahem 4096 Sep 26 18:52 build
+=== done 2026-09-26T19:00:25+00:00

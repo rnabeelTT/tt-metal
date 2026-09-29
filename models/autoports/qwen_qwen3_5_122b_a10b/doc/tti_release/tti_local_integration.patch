@@ -1,0 +1,227 @@
+diff --git a/reference_config/evals/eval_config.py b/reference_config/evals/eval_config.py
+index 04d3a7d8..29c95c10 100644
+--- a/reference_config/evals/eval_config.py
++++ b/reference_config/evals/eval_config.py
+@@ -474,6 +474,24 @@ class EvalConfig:
+ # Note: reasoning models (QwQ-32B, DeepSeek-R1-Distill-Llama-70B) need evals allowing more tokens generated
+ 
+ 
++def _qwen35_sampling() -> dict:
++    """Decoding for the Qwen3.5-122B-A10B autoport evals. Default greedy (the non-thinking release configuration).
++    QWEN35_EVAL_SAMPLING selects a model-card preset (README "recommended sampling parameters"):
++      thinking        = "Thinking mode for general tasks": temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5
++      thinking_coding = "Thinking mode for precise coding tasks": temperature 0.6, top_p 0.95, top_k 20 (used by the stage-11 run 6
++                        by mistake; kept so that run is reproducible)
++      instruct        = "Instruct (non-thinking) mode for general tasks": temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5
++    Qwen documents that greedy decoding in thinking mode degrades and can loop, and that presence_penalty reduces repetitions."""
++    preset = os.environ.get("QWEN35_EVAL_SAMPLING")
++    if preset == "thinking":
++        return {"do_sample": "true", "temperature": 1.0, "top_p": 0.95, "top_k": 20, "presence_penalty": 1.5}
++    if preset == "thinking_coding":
++        return {"do_sample": "true", "temperature": 0.6, "top_p": 0.95, "top_k": 20}
++    if preset == "instruct":
++        return {"do_sample": "true", "temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5}
++    return {"do_sample": "false"}
++
++
+ _eval_config_list = [
+     EvalConfig(
+         hf_model_repo="zai-org/GLM-5.2",
+@@ -3235,6 +3253,94 @@ _eval_config_list = [
+             ),
+         ],
+     ),
++    EvalConfig(
++        # Qwen3.5-122B-A10B agentic autoport (models/autoports/qwen_qwen3_5_122b_a10b). Standard lm-eval tasks through the
++        # chat API (the Qwen chat template; the meta_* variants are the Llama-3 prompt-format ports). Published scores are the
++        # model card's THINKING-mode numbers. No full-set GPU/HF reference exists; the ci-nightly subsets carry same-setting
++        # references (mode_reference_scores: the bf16 HF checkpoint answering the identical requests, non-thinking, greedy, on
++        # CPU), which TTI's sample-count-aware subset acceptance grades against. Without a reference TTI grades the ratio to
++        # the published score (tolerance 0.05); at status EXPERIMENTAL any eval FAIL is only informational (see the autoport's
++        # doc/tti_release/RUN_NOTES.md). model_kwargs.timeout raised to 7200 s (lm-eval default 1800 s): thinking-mode
++        # generations at 32-way concurrency run 10-30+ min per request. QWEN35_EVAL_TASKS (comma list) restricts a run to
++        # the named tasks (e.g. the thinking-mode full-set gpqa run).
++        hf_model_repo="Qwen/Qwen3.5-122B-A10B",
++        tasks=[
++            t
++            for t in [
++            EvalTask(
++                task_name="ifeval",
++                use_chat_api=True,
++                max_concurrent=32,
++                model_kwargs={"timeout": 7200},
++                gen_kwargs={
++                    "max_gen_toks": os.environ.get("QWEN35_EVAL_MAX_GEN_TOKS_IFEVAL", "2048"),
++                    **_qwen35_sampling(),
++                    "stream": "false",
++                },
++                score=EvalTaskScore(
++                    published_score=93.4,
++                    published_score_ref="https://huggingface.co/Qwen/Qwen3.5-122B-A10B (IFEval, thinking mode)",
++                    gpu_reference_score=None,
++                    gpu_reference_score_ref="no full-set reference (ci-nightly subset reference in mode_reference_scores)",
++                    score_func=score_task_single_key,
++                    score_func_kwargs={
++                        "result_keys": [
++                            "prompt_level_strict_acc,none",
++                            "inst_level_strict_acc,none",
++                        ],
++                        "unit": "percent",
++                    },
++                    mode_reference_scores={
++                        EvalLimitMode.CI_NIGHTLY: ModeReferenceScore(
++                            score=89.91,
++                            ref="ci-nightly ifeval (doc_ids 0-108), bf16 HF Qwen3_5MoeForCausalLM on CPU, same chat requests, enable_thinking=False, greedy, max_new_tokens 2048; prompt_level_strict_acc; 2026-09-29 (autoport doc/tti_release/RUN_NOTES.md run 8b)",
++                        ),
++                    },
++                ),
++                limit_samples_map={
++                    EvalLimitMode.CI_NIGHTLY: 0.2,
++                    EvalLimitMode.SMOKE_TEST: 0.01,
++                },
++            ),
++            EvalTask(
++                task_name="gpqa_diamond_cot_zeroshot",
++                num_fewshot=0,
++                use_chat_api=True,
++                max_concurrent=32,
++                model_kwargs={"timeout": 7200},
++                gen_kwargs={
++                    "max_gen_toks": os.environ.get("QWEN35_EVAL_MAX_GEN_TOKS_GPQA", "4096"),
++                    **_qwen35_sampling(),
++                    "stream": "false",
++                },
++                score=EvalTaskScore(
++                    published_score=86.6,
++                    published_score_ref="https://huggingface.co/Qwen/Qwen3.5-122B-A10B (GPQA Diamond, thinking mode)",
++                    gpu_reference_score=None,
++                    gpu_reference_score_ref="no full-set reference (ci-nightly subset reference in mode_reference_scores)",
++                    score_func=score_task_single_key,
++                    score_func_kwargs={
++                        "result_keys": [
++                            "exact_match,flexible-extract",
++                        ],
++                        "unit": "percent",
++                    },
++                    mode_reference_scores={
++                        EvalLimitMode.CI_NIGHTLY: ModeReferenceScore(
++                            score=80.00,
++                            ref="ci-nightly gpqa_diamond_cot_zeroshot (doc_ids 0-39), bf16 HF on CPU, same requests, enable_thinking=False, greedy, max_new_tokens 4096; exact_match flexible-extract scored with this venv's boxed_choice filter (lm_eval 0.4.10.dev0); 2026-09-29 (RUN_NOTES run 8b; an earlier value of 60.00 came from the older multi_choice_regex filter)",
++                        ),
++                    },
++                ),
++                limit_samples_map={
++                    EvalLimitMode.CI_NIGHTLY: 0.2,
++                    EvalLimitMode.SMOKE_TEST: 0.01,
++                },
++            ),
++            ]
++            if not os.environ.get("QWEN35_EVAL_TASKS") or t.task_name in os.environ["QWEN35_EVAL_TASKS"].split(",")
++        ],
++    ),
+     EvalConfig(
+         hf_model_repo="mistralai/Mistral-7B-Instruct-v0.3",
+         tasks=[
+diff --git a/test_module/server_tests_config.json b/test_module/server_tests_config.json
+index cf400560..0aea1257 100644
+--- a/test_module/server_tests_config.json
++++ b/test_module/server_tests_config.json
+@@ -391,6 +391,17 @@
+                 "galaxy"
+             ]
+         },
++        "qwen3_5_122b_a10b": {
++            "id_name": "qwen3-5-122b-a10b",
++            "weights": [
++                "Qwen/Qwen3.5-122B-A10B"
++            ],
++            "category": "LLM",
++            "compatible_devices": [
++                "p300x2",
++                "p150x4"
++            ]
++        },
+         "qwen3_32b": {
+             "id_name": "qwen3-32b",
+             "weights": [
+diff --git a/test_module/test_suites/llm.json b/test_module/test_suites/llm.json
+index 7177e4f7..55a715d2 100644
+--- a/test_module/test_suites/llm.json
++++ b/test_module/test_suites/llm.json
+@@ -8,7 +8,8 @@
+                 "llama_3_1_8b",
+                 "llama_3_2_1b",
+                 "llama_70b_family",
+-                "gpt_oss_20b"
++                "gpt_oss_20b",
++                "qwen3_5_122b_a10b"
+             ],
+             "devices": [
+                 "n150",
+diff --git a/workflows/model_spec.py b/workflows/model_spec.py
+index c68ad267..61a09462 100644
+--- a/workflows/model_spec.py
++++ b/workflows/model_spec.py
+@@ -390,7 +390,16 @@ quetzal_impl = ImplSpec(
+     code_path="serving",
+ )
+ 
++# Qwen3.5-122B-A10B agentic autoport (tt-model-bringup skills): generated code under models/autoports.
++qwen35_122b_autoport_impl = ImplSpec(
++    impl_id="qwen35_122b_autoport",
++    impl_name="qwen35-122b-autoport",
++    repo_url="https://github.com/tenstorrent/tt-metal",
++    code_path="models/autoports/qwen_qwen3_5_122b_a10b",
++)
++
+ _IMPL_REGISTRY: Dict[str, ImplSpec] = {
++    "qwen35_122b_autoport": qwen35_122b_autoport_impl,
+     "quetzal": quetzal_impl,
+     "tt_transformers": tt_transformers_impl,
+     "llama3_70b_galaxy": llama3_70b_galaxy_impl,
+diff --git a/workflows/model_specs/dev/llm.yaml b/workflows/model_specs/dev/llm.yaml
+index d8859322..e85bdf17 100644
+--- a/workflows/model_specs/dev/llm.yaml
++++ b/workflows/model_specs/dev/llm.yaml
+@@ -2687,3 +2687,41 @@ templates:
+     Qwen/Qwen3.5-27B:
+       reasoning_parser_name: qwen3
+       tool_call_parser_name: qwen3_coder
++
++# Qwen3.5-122B-A10B agentic autoport (models/autoports/qwen_qwen3_5_122b_a10b), text-only, 4 Blackhole dies (P300x2).
++# Served externally by the tt-metal readiness runner (docker_server / local_server false); bring-up evidence in the
++# autoport's doc/ tree (stage 10 serving config: 768 MiB trace region, FABRIC_1D, on-device sampling, 262144 context, 32 seqs).
++- weights:
++  - Qwen/Qwen3.5-122B-A10B
++  impl: qwen35_122b_autoport
++  inference_engine: VLLM
++  model_type: LLM
++  supported_modalities:
++  - text
++  device_model_specs:
++  - device: P300X2
++    max_concurrency: 32
++    max_context: 262144
++    default_impl: true
++    env_vars:
++      HF_MODEL: Qwen/Qwen3.5-122B-A10B
++      MESH_DEVICE: P300x2
++      ARCH_NAME: blackhole
++      EXTRA_MODELS_DIR: models/autoports
++      QWEN35_TRACE_REGION_MIB: '768'
++    vllm_args:
++      enable_auto_tool_choice: true
++      reasoning_parser: qwen3
++      tool_call_parser: qwen3_xml
++    override_tt_config:
++      fabric_config: FABRIC_1D
++      trace_region_size: 805306368
++      l1_small_size: 24576
++      sample_on_device_mode: all
++  # FUNCTIONAL (not EXPERIMENTAL): eval accuracy failures must block acceptance for this model's reports
++  status: FUNCTIONAL
++  has_builtin_warmup: true
++  metadata:
++    Qwen/Qwen3.5-122B-A10B:
++      reasoning_parser_name: qwen3
++      tool_call_parser_name: qwen3_xml
