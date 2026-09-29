@@ -1,0 +1,48 @@
+{
+ "seeded_width_1": {
+  "rounds": 6,
+  "rows": 1,
+  "unique": 1,
+  "samples": [
+   "15-year-old female student Lily and her father Bill have been recently relocated abroad following mother and Emily"
+  ]
+ },
+ "seeded_width_2": {
+  "rounds": 6,
+  "rows": 2,
+  "unique": 1,
+  "samples": [
+   "15-year-old female student Lily and her father Bill have been recently relocated abroad following mother and Emily"
+  ]
+ },
+ "seeded_width_4": {
+  "rounds": 6,
+  "rows": 4,
+  "unique": 1,
+  "samples": [
+   "15-year-old female student Lily and her father Bill have been recently relocated abroad following mother and Emily"
+  ]
+ },
+ "seeded_width_8": {
+  "rounds": 3,
+  "rows": 8,
+  "unique": 1,
+  "samples": [
+   "15-year-old female student Lily and her father Bill have been recently relocated abroad following mother and Emily"
+  ]
+ },
+ "seeded_width_16": {
+  "rounds": 3,
+  "rows": 16,
+  "unique": 1,
+  "samples": [
+   "15-year-old female student Lily and her father Bill have been recently relocated abroad following mother and Emily"
+  ]
+ },
+ "greedy_width_1": {
+  "unique": 1,
+  "samples": [
+   "1000 words. A man named John is a very good cook. He is very good at cooking. He is very good at cooking. He is very good at cooking. He is very good at cooking. He is very good at cooking. He is very good at cooking. He is very good at cooking"
+  ]
+ }
+}

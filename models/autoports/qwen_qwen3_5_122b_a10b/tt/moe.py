@@ -36,6 +36,8 @@ from loguru import logger
 import ttnn
 
 TILE = 32
+# functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
+ROUTER_TOPK_FIRST = os.environ.get("QWEN35_ROUTER_TOPK_FIRST", "1") == "1"  # default since the perf pass (2026-09-29)
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -323,14 +325,22 @@ class Qwen35MoE:
             compute_kernel_config=self.router_ckc,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
-        probs = ttnn.softmax(logits, dim=-1, numeric_stable=True)
-        ttnn.deallocate(logits)
-        values, ids = ttnn.topk(probs, k=self.top_k, dim=-1, largest=True, sorted=True)
-        ttnn.deallocate(probs)
-        denom = ttnn.sum(values, dim=-1, keepdim=True)
-        scores = ttnn.div(values, denom)
-        ttnn.deallocate(values)
-        ttnn.deallocate(denom)
+        if ROUTER_TOPK_FIRST:
+            # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
+            # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).
+            values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True)
+            ttnn.deallocate(logits)
+            scores = ttnn.softmax(values, dim=-1, numeric_stable=True)
+            ttnn.deallocate(values)
+        else:
+            probs = ttnn.softmax(logits, dim=-1, numeric_stable=True)
+            ttnn.deallocate(logits)
+            values, ids = ttnn.topk(probs, k=self.top_k, dim=-1, largest=True, sorted=True)
+            ttnn.deallocate(probs)
+            denom = ttnn.sum(values, dim=-1, keepdim=True)
+            scores = ttnn.div(values, denom)
+            ttnn.deallocate(values)
+            ttnn.deallocate(denom)
         if ids.dtype != ttnn.uint16:
             ids = ttnn.typecast(ids, ttnn.uint16)
         return scores, ids

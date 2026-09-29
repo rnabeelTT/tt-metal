@@ -84,3 +84,42 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   the sparse matmul kernel is deterministic in isolation, also with garbage padding. The in-model difference needs the
   model's live memory state: in-situ replay probe (`scripts/13-w1replay.py`, chain10): every op of a width-1 decode
   step re-executed 3x on its live inputs, outputs compared bit-wise.
+- 20:18-20:29 in-situ replay probe (`scripts/13-w1replay.py`, `artifacts/stage13/w1replay-c.json`): 3594 ops of a
+  width-1 step re-executed 3x on their live inputs; 63 flagged: `generalized_moe_gate` in EVERY layer (136-328 of the
+  2 x 1024 output elements differ, max |d| 5-12 = other expert ids) and `nlp_concat_heads_decode` in the attention layers
+  (~90 % of elements: most likely an in-place / aliasing false positive). `fused_decoder._route` documents that the
+  TTMoEGate op is used for the SINGLE-ROW decode only (>= 2 rows fall back to the softmax/topk router) and that it was
+  measured bit-non-deterministic with several rows in stage 3 -> it is the width-1 / width-2 discriminator. Experiment:
+  QWEN35_ROUTER_GATE_OP=0 (functional router everywhere) + width-1 stream probe (chain11).
+- 20:30-20:50 chain11 (`artifacts/stage13/w1pairs-gate0.json`, QWEN35_ROUTER_GATE_OP=0 = functional router everywhere,
+  gate op off): width 1 traced 1 unique of 6, eager 1 of 4, async-overlap 1 of 3, widths 2/4/8 1 of 3 -> ROOT CAUSE
+  CONFIRMED: the fused router gate op (TTMoEGate / generalized_moe_gate, single-row decode only) is the width-1
+  non-determinism. Width-1 traced step with the functional router 33.46 ms (gate op 27.45; served width-2 trace 37.4).
+  The functional router (linear, softmax, topk, sum, div) costs ~125 us per layer at width 1. Next: does the gate op
+  become deterministic with per-layer (unshared) scratch buffers as in stage 3 (chain12, QWEN35_SHARE_GATE_BUFFERS=0)?
+- 20:48-20:57 chain12 (gate op on, QWEN35_SHARE_GATE_BUFFERS=0 = per-layer scratch as in stage 3): the 48-layer build
+  fails with the stage-6 L1 clash ("statically allocated circular buffers ... clash with L1 buffers", program 1238) ->
+  the gate op cannot run with per-layer buffers at 48 layers; it stays off at width 1 (it was already unused at >= 2 rows).
+- Router cost: functional router 33.46 vs gate op 27.45 ms per width-1 step (~125 us per layer for linear, softmax,
+  topk, sum, div). Optimization: `ROUTER_TOPK_FIRST` (QWEN35_ROUTER_TOPK_FIRST=1): top-k on the logits then softmax over
+  the k selected values (identical math: the global partition function cancels in the renormalization), 2 ops instead of
+  4. Queued: chain13 (width-1 probe with gate off + topk-first: determinism + step times), chain14 (layer correctness
+  suite incl. prefill 2048 both kinds + full-model prefill-check p2048 with the new router), served run with the width-1
+  trace (QWEN35_DECODE_MIN_WIDTH=1, gate off, topk-first, pairs).
+- 20:58-21:20 chain13 (`artifacts/stage13/w1pairs-topk1.json`, gate off + topk-first + pairs, min width 1): width 1
+  traced 1 unique of 6, eager 1 of 4, async 1 of 3, widths 2/4/8 1 of 3 (the near tie at token 2 now resolves to the
+  other of the two earlier outcomes at every width: a numerics change of the renormalization, consistent across widths).
+  Traced step: w1 32.69 ms (functional 4-op router 33.46, gate op 27.45), w2 36.46, w4 45.73, w8 67.11, w16 85.12,
+  w32 90.94 (-0.7..0.9 ms at every width vs the 4-op router). Remaining width-1 gap to the gate op ~5 ms = the router
+  linear + topk + softmax on a 1-row tile (~100 us per layer; L1-resident router chain is a later experiment).
+- 21:16-21:26 chain14 layer correctness with gate off + topk-first (`logs/13/router-correctness-full.log`): 28/28
+  (prefill vs HF 5..2048 both kinds, chunked 4429, batched decode B=32 PCC 0.9996 / 0.9999, distinct positions, real
+  weights, traced decode, stress determinism). Defaults flipped: router_gate_op off, ROUTER_TOPK_FIRST on,
+  QWEN35_DECODE_MIN_WIDTH 1. Full-model prefill-check p2048 and the served width-1 run follow.
+- 21:27-21:37 prefill-check book_p2048 with gate off + topk-first (`doc/perf_pass/readiness/prefill_check_book_p2048_router.json`):
+  top1 0.98 / top5 1.00 / top100 1.00 (stage-12 router: 0.99 / 1.00 / 1.00; bars top5 >= 0.98, top100 = 1.0). Served
+  run with the width-1 trace (min width 1) running.
+- 21:37-21:56 served run with the width-1 trace, gate off, topk-first, pairs (`13-serve-chain-w1.sh`, `served_w1/`):
+  c1 TTFT p50 408 ms, TPOT 32.7 ms (30.6 t/s/u; stage 10: 37.7 / 26.5); c2 38.1; c4 46.7; c8 67.7; c16 110.3 (client
+  107.0); c32 130.5 (client 125.2). Seeded 1 unique of 6/12/24/24/48 at widths 1..16, greedy width 1: 1 unique of 6.
+  Per-width client aggregate: 28.0 / 44.0 / 65.5 / 84.5 / 100.4 / 140.7 tok/s at 1 / 2 / 4 / 8 / 16 / 32 users.

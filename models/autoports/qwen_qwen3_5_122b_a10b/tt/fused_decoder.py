@@ -34,7 +34,10 @@ from models.demos.blackhole.qwen36.utils.substate import substate
 
 @dataclass(frozen=True)
 class FusionFlags:
-    router_gate_op: bool = True  # TTMoEGate (generalized_moe_gate kernel) instead of the softmax/topk chain
+    # TTMoEGate (generalized_moe_gate kernel) instead of the softmax/topk chain; it only ever ran for the single-row
+    # decode (see _route) and is the root cause of the width-1 decode non-determinism (perf pass, doc/perf_pass/): OFF by
+    # default since 2026-09-29; QWEN35_ROUTER_GATE_OP=1 re-enables it for experiments.
+    router_gate_op: bool = os.environ.get("QWEN35_ROUTER_GATE_OP", "0") == "1"
     shared_expert_packed: bool = True  # one packed [gate|up|sg] matmul for the shared expert
     weight_before_down: bool = True  # scale expert intermediates (not outputs) by routing weights in masked groups
     attn_fused_qkv: bool = True  # one fused q|k|v projection in the gated-attention kernel

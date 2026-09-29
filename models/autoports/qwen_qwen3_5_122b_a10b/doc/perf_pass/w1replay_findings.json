@@ -1,0 +1,2150 @@
+{
+ "steps": [
+  {
+   "ops": 7677,
+   "checked": 3594,
+   "token": 3482,
+   "findings": [
+    {
+     "idx": 113,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 5.0
+    },
+    {
+     "idx": 272,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 4.84375
+    },
+    {
+     "idx": 431,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 4.96875
+    },
+    {
+     "idx": 564,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 230523,
+     "max_abs_diff": 22.499977111816406
+    },
+    {
+     "idx": 586,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 11.8671875
+    },
+    {
+     "idx": 745,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.921875
+    },
+    {
+     "idx": 904,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.7890625
+    },
+    {
+     "idx": 1063,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 11.6484375
+    },
+    {
+     "idx": 1196,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 236843,
+     "max_abs_diff": 22.500043869018555
+    },
+    {
+     "idx": 1218,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 280,
+     "max_abs_diff": 11.1015625
+    },
+    {
+     "idx": 1377,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 280,
+     "max_abs_diff": 9.9765625
+    },
+    {
+     "idx": 1536,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 280,
+     "max_abs_diff": 9.8515625
+    },
+    {
+     "idx": 1695,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 280,
+     "max_abs_diff": 8.84375
+    },
+    {
+     "idx": 1828,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 224469,
+     "max_abs_diff": 22.5
+    },
+    {
+     "idx": 1850,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 11.4296875
+    },
+    {
+     "idx": 2009,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 320,
+     "max_abs_diff": 11.4296875
+    },
+    {
+     "idx": 2168,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 11.0703125
+    },
+    {
+     "idx": 2327,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.2578125
+    },
+    {
+     "idx": 2460,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 235342,
+     "max_abs_diff": 22.500125885009766
+    },
+    {
+     "idx": 2482,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 272,
+     "max_abs_diff": 9.73828125
+    },
+    {
+     "idx": 2641,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 272,
+     "max_abs_diff": 10.5859375
+    },
+    {
+     "idx": 2800,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 288,
+     "max_abs_diff": 9.716796875
+    },
+    {
+     "idx": 2959,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 288,
+     "max_abs_diff": 10.150390625
+    },
+    {
+     "idx": 3092,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 236164,
+     "max_abs_diff": 22.499975204467773
+    },
+    {
+     "idx": 3114,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 10.6875
+    },
+    {
+     "idx": 3273,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 10.125
+    },
+    {
+     "idx": 3432,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 10.625
+    },
+    {
+     "idx": 3591,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 11.8671875
+    },
+    {
+     "idx": 3724,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237518,
+     "max_abs_diff": 22.500896453857422
+    },
+    {
+     "idx": 3746,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.4140625
+    },
+    {
+     "idx": 3905,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.84375
+    },
+    {
+     "idx": 4064,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.265625
+    },
+    {
+     "idx": 4223,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 9.890625
+    },
+    {
+     "idx": 4356,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 234831,
+     "max_abs_diff": 22.50001335144043
+    },
+    {
+     "idx": 4378,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 312,
+     "max_abs_diff": 10.28125
+    },
+    {
+     "idx": 4537,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 312,
+     "max_abs_diff": 9.7109375
+    },
+    {
+     "idx": 4696,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.328125
+    },
+    {
+     "idx": 4855,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.5390625
+    },
+    {
+     "idx": 4988,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237285,
+     "max_abs_diff": 22.5035400390625
+    },
+    {
+     "idx": 5010,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 10.71875
+    },
+    {
+     "idx": 5169,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 9.6015625
+    },
+    {
+     "idx": 5328,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 11.0390625
+    },
+    {
+     "idx": 5487,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.984375
+    },
+    {
+     "idx": 5620,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237500,
+     "max_abs_diff": 22.5
+    },
+    {
+     "idx": 5642,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 256,
+     "max_abs_diff": 9.15625
+    },
+    {
+     "idx": 5801,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.09375
+    },
+    {
+     "idx": 5960,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.8046875
+    },
+    {
+     "idx": 6119,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 256,
+     "max_abs_diff": 11.3046875
+    },
+    {
+     "idx": 6252,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237498,
+     "max_abs_diff": 22.500144958496094
+    },
+    {
+     "idx": 6274,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 9.515625
+    },
+    {
+     "idx": 6433,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 9.890625
+    },
+    {
+     "idx": 6592,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 9.2578125
+    },
+    {
+     "idx": 6751,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 236,
+     "max_abs_diff": 10.375
+    },
+    {
+     "idx": 6884,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237504,
+     "max_abs_diff": 22.5018310546875
+    },
+    {
+     "idx": 6906,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.515625
+    },
+    {
+     "idx": 7065,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.640625
+    },
+    {
+     "idx": 7224,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 9.34375
+    },
+    {
+     "idx": 7383,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 9.421875
+    },
+    {
+     "idx": 7516,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237498,
+     "max_abs_diff": 22.49994468688965
+    },
+    {
+     "idx": 7538,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 9.5546875
+    },
+    {
+     "idx": 7606,
+     "op": "ttnn.plus_one",
+     "shapes": [
+      [
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    },
+    {
+     "idx": 7607,
+     "op": "ttnn.plus_one",
+     "shapes": [
+      [
+       1,
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    },
+    {
+     "idx": 7670,
+     "op": "ttnn.manual_seed",
+     "shapes": [
+      [
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    }
+   ]
+  },
+  {
+   "ops": 7677,
+   "checked": 3594,
+   "token": 8660,
+   "findings": [
+    {
+     "idx": 113,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 4.90625
+    },
+    {
+     "idx": 272,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 5.0625
+    },
+    {
+     "idx": 431,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 136,
+     "max_abs_diff": 4.65625
+    },
+    {
+     "idx": 564,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 230514,
+     "max_abs_diff": 22.500032424926758
+    },
+    {
+     "idx": 586,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 11.1484375
+    },
+    {
+     "idx": 745,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.84375
+    },
+    {
+     "idx": 904,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 11.515625
+    },
+    {
+     "idx": 1063,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 11.0078125
+    },
+    {
+     "idx": 1196,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 236837,
+     "max_abs_diff": 22.500076293945312
+    },
+    {
+     "idx": 1218,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.6171875
+    },
+    {
+     "idx": 1377,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 11.09375
+    },
+    {
+     "idx": 1536,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 320,
+     "max_abs_diff": 10.8671875
+    },
+    {
+     "idx": 1695,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.11328125
+    },
+    {
+     "idx": 1828,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 224475,
+     "max_abs_diff": 22.5
+    },
+    {
+     "idx": 1850,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.462890625
+    },
+    {
+     "idx": 2009,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 11.296875
+    },
+    {
+     "idx": 2168,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.5
+    },
+    {
+     "idx": 2327,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 328,
+     "max_abs_diff": 10.4375
+    },
+    {
+     "idx": 2460,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 235322,
+     "max_abs_diff": 22.500125885009766
+    },
+    {
+     "idx": 2482,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.48828125
+    },
+    {
+     "idx": 2641,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.69921875
+    },
+    {
+     "idx": 2800,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 9.83984375
+    },
+    {
+     "idx": 2959,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.4140625
+    },
+    {
+     "idx": 3092,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 236187,
+     "max_abs_diff": 22.499977111816406
+    },
+    {
+     "idx": 3114,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 11.609375
+    },
+    {
+     "idx": 3273,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 11.203125
+    },
+    {
+     "idx": 3432,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.484375
+    },
+    {
+     "idx": 3591,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 11.2890625
+    },
+    {
+     "idx": 3724,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237499,
+     "max_abs_diff": 22.500011444091797
+    },
+    {
+     "idx": 3746,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 10.4609375
+    },
+    {
+     "idx": 3905,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 10.2734375
+    },
+    {
+     "idx": 4064,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 9.82421875
+    },
+    {
+     "idx": 4223,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 10.09375
+    },
+    {
+     "idx": 4356,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 234832,
+     "max_abs_diff": 22.5
+    },
+    {
+     "idx": 4378,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.65234375
+    },
+    {
+     "idx": 4537,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 9.40234375
+    },
+    {
+     "idx": 4696,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.16796875
+    },
+    {
+     "idx": 4855,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.96875
+    },
+    {
+     "idx": 4988,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237284,
+     "max_abs_diff": 22.503326416015625
+    },
+    {
+     "idx": 5010,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 304,
+     "max_abs_diff": 11.6328125
+    },
+    {
+     "idx": 5169,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 8.7734375
+    },
+    {
+     "idx": 5328,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 10.765625
+    },
+    {
+     "idx": 5487,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 300,
+     "max_abs_diff": 9.8984375
+    },
+    {
+     "idx": 5620,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237504,
+     "max_abs_diff": 22.5
+    },
+    {
+     "idx": 5642,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 276,
+     "max_abs_diff": 8.5703125
+    },
+    {
+     "idx": 5801,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 276,
+     "max_abs_diff": 10.2734375
+    },
+    {
+     "idx": 5960,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 276,
+     "max_abs_diff": 10.515625
+    },
+    {
+     "idx": 6119,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 276,
+     "max_abs_diff": 10.9140625
+    },
+    {
+     "idx": 6252,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237509,
+     "max_abs_diff": 22.500144958496094
+    },
+    {
+     "idx": 6274,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 9.390625
+    },
+    {
+     "idx": 6433,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 8.9140625
+    },
+    {
+     "idx": 6592,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 9.9453125
+    },
+    {
+     "idx": 6751,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 244,
+     "max_abs_diff": 10.3828125
+    },
+    {
+     "idx": 6884,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237514,
+     "max_abs_diff": 22.50183868408203
+    },
+    {
+     "idx": 6906,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.5625
+    },
+    {
+     "idx": 7065,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 10.25
+    },
+    {
+     "idx": 7224,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 8.640625
+    },
+    {
+     "idx": 7383,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 260,
+     "max_abs_diff": 9.171875
+    },
+    {
+     "idx": 7516,
+     "op": "ttnn.experimental.nlp_concat_heads_decode",
+     "shapes": [
+      [
+       1,
+       1,
+       32,
+       2048
+      ]
+     ],
+     "elems_differ": 237515,
+     "max_abs_diff": 22.49988555908203
+    },
+    {
+     "idx": 7538,
+     "op": "ttnn.experimental.deepseek.moe.generalized_moe_gate",
+     "shapes": [
+      [
+       1,
+       32,
+       32
+      ],
+      [
+       1,
+       32,
+       32
+      ]
+     ],
+     "elems_differ": 316,
+     "max_abs_diff": 9.837890625
+    },
+    {
+     "idx": 7606,
+     "op": "ttnn.plus_one",
+     "shapes": [
+      [
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    },
+    {
+     "idx": 7607,
+     "op": "ttnn.plus_one",
+     "shapes": [
+      [
+       1,
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    },
+    {
+     "idx": 7670,
+     "op": "ttnn.manual_seed",
+     "shapes": [
+      [
+       1
+      ]
+     ],
+     "elems_differ": 0,
+     "max_abs_diff": 0.0
+    }
+   ]
+  }
+ ]
+}

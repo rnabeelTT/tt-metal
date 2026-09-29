@@ -142,11 +142,13 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # stage 10: decode bucketing - one decode trace per power-of-two width up to B, selected per step from the plugin's
         # front-packed active prefix (QWEN35_DECODE_BUCKETING=0 -> the single full-width trace of stage 9)
         self._decode_widths = decode_buckets.widths(B) if (decode_buckets.enabled() and B > 1) else [B]
-        # QWEN35_DECODE_MIN_WIDTH (default 2): smallest decode trace width kept; a single live user runs on the width-2
-        # trace with one idle row (37.7 ms per step vs 25.1 ms at width 1 and 124 ms at width 32). Width 1 is
-        # intermittently non-deterministic on device on the 48-layer model (greedy re-runs fork; doc/optimized_vllm
-        # work_log 05:50-07:40); every width >= 2 was bit-reproducible in > 150 streams.
-        min_width = int(os.environ.get("QWEN35_DECODE_MIN_WIDTH", "2"))
+        # QWEN35_DECODE_MIN_WIDTH (default 1 since the perf pass, 2 in stages 10-12): smallest decode trace width kept.
+        # The width-1 fork (greedy re-runs of one user diverged, doc/optimized_vllm work_log 05:50-07:40) was the fused
+        # router gate op, which only ran for the single row; with the functional router (fused_decoder.FusionFlags
+        # .router_gate_op off) width 1 is bit-reproducible and a single user runs its own trace (doc/perf_pass/).
+        min_width = int(
+            os.environ.get("QWEN35_DECODE_MIN_WIDTH", "1")
+        )  # 1 since the perf pass: the width-1 trace is deterministic with the functional router
         self._decode_widths = [w for w in self._decode_widths if w >= min_width] or [B]
         self._seeded_full_width = os.environ.get("QWEN35_SEEDED_FULL_WIDTH", "1") == "1"
         self._trace_region_mib = cls._trace_region_mib(mesh_device)

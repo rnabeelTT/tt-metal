@@ -21,9 +21,9 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 
 | workload | result |
 |---|---|
-| 1 user, 128 / 128 tokens | TTFT 426 ms (`vllm bench serve`, stage 10) / 394-398 ms (TTI release rows), TPOT 37.7 ms (26.5 t/s/u) |
-| 32 users, 128 / 128 tokens | TPOT 125-133 ms, 288 total tok/s (release report), CI burst 129 tok/s |
-| per-width TPOT 1 / 2 / 4 / 8 / 16 / 32 users | 37.7 / 39.4 / 51.8 / 93.1 / 107.6 / 125.1 ms |
+| 1 user, 128 / 128 tokens | TTFT 408 ms (p50), TPOT 32.7 ms (30.6 t/s/u) on the width-1 trace (perf pass, `doc/perf_pass/`); stage 10/11: 394-426 ms, 37.7 ms on the width-2 trace |
+| 32 users, 128 / 128 tokens | TPOT 125-131 ms, 288 total tok/s (release report), CI burst 129 tok/s (unchanged by the perf pass: weight-bandwidth bound) |
+| per-width TPOT 1 / 2 / 4 / 8 / 16 / 32 users | 32.7 / 38.1 / 46.7 / 67.7 / 107.0 / 125.2 ms (perf pass; stage 10: 37.7 / 39.4 / 51.8 / 93.1 / 107.6 / 125.1) |
 | long prompt, 1 user (stage 12, group-parallel MoE prefill) | TTFT 4.0 s at 8192, 16.4 s at 32768, 72.3 s at 131072 tokens (stage 11: 7.8 / 31.4 / 132.6 s); decode unchanged; `doc/optimized_prefill/` |
 | Hub bundle (final image `36b6aa8bb6e4`, thinking off by default), served from the Hub on a reset device (`doc/tti_release/RUN_NOTES.md` round 3) | healthy in 12.8 min; `tt-model curl` answers with defaults; thinking opt-in works; 32 concurrent 126.1 tok/s; 131072-token prompt OK |
 | accuracy (TTI ci-nightly subsets, non-thinking greedy, graded vs the bf16 HF checkpoint in the same setting) | ifeval 92.66 vs HF 89.91 (published 93.4 is thinking mode); gpqa_diamond 77.5 vs HF 80.0 (a pass by one item under TTI's sample-count rule, both budget-cut at 4096 tokens; published 86.6 is thinking mode): stage-11 status `release-readiness-ci-subset-pass`; full sets non-thinking 87.99 / 68.69 (`doc/tti_release/RUN_NOTES.md`) |
@@ -75,6 +75,10 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   step is intermittently non-deterministic on device (greedy re-runs fork on 48 layers; bisected in
   `doc/optimized_vllm/README.md` section 3, not the MoE gather, not attention / GDN padding). Widths >= 2 are
   bit-reproducible. The width-1 trace measures 25.1 ms: about 12 ms per token is left on the table for one user.
+- **Width-1 decode was non-deterministic until the perf pass**: the fused router gate op (`generalized_moe_gate`,
+  single-row decode only) forked greedy re-runs; it is off by default now (functional two-op router), a single user runs
+  the width-1 trace (32.7 ms per token), and served seeded / greedy completions reproduce at every width (`doc/perf_pass/`).
+  The pairs decode MoE path (widths 1-8) cut the 8-user step 93 -> 68 ms.
 - **Seeded requests run at full width (32).** Cross-width numerics differ (gather vs masked MoE, SDPA grid), so a batch
   with any `seed` runs the width-32 trace to keep seeded outputs reproducible regardless of co-tenants.
 - **Prefill is serialised** per admission at ~2000 tok/s (stage 12: group-parallel `ttnn.sparse_matmul` factory over all
@@ -135,6 +139,7 @@ images / videos:
 | shared code touched | `models/demos/blackhole/qwen36/`, `models/experimental/gated_attention_gated_deltanet/`, `models/tt_transformers/`, `models/common/` (per-stage commits list the hunks) |
 | tests | `models/autoports/qwen_qwen3_5_122b_a10b/tests/` |
 | stage-12 prefill evidence | `doc/optimized_prefill/` (README, work_log, Tracy before/after CSVs, readiness prefill checks, served before/after) |
+| perf-pass evidence (stage 13) | `doc/perf_pass/` (README, work_log, width-1 investigation artifacts, served per-width runs) |
 | per-stage evidence | `doc/{functional_decoder,fused_decoder,optimized_decoder,multichip_decoder,optimized_multichip_decoder,full_model,optimized_full_model,datatype_sweep,vllm_integration,optimized_vllm,tti_release}/` |
 | bundle manifest | `models/autoports/qwen_qwen3_5_122b_a10b/tt-model.yaml`; HF repo `raahemnabeel/qwen3-5-122b-a10b-blackholex4` (private) |
 | bring-up workspace | `~/qwen35-122b-bringup/` (scripts per stage, logs, STATUS.md, staged bundle under `pkgbuild/`) |
