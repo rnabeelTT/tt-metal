@@ -1,0 +1,82 @@
+{
+  "source": "vllm bench serve",
+  "profile": "single_user_decode",
+  "comparison_scope": "Primary batch-1 serving decode profile for headline t/s/u. TTFT is reported separately and is not blended into the TPOT-derived decode value beyond normal single-request timing.",
+  "raw_result_file": "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json",
+  "command": [
+    "/home/raahem/tt-metal/python_env/bin/vllm",
+    "bench",
+    "serve",
+    "--backend",
+    "vllm",
+    "--model",
+    "Qwen/Qwen3.5-122B-A10B",
+    "--base-url",
+    "http://127.0.0.1:8131",
+    "--endpoint",
+    "/v1/completions",
+    "--dataset-name",
+    "random",
+    "--random-input-len",
+    "128",
+    "--random-output-len",
+    "128",
+    "--num-prompts",
+    "64",
+    "--ignore-eos",
+    "--percentile-metrics",
+    "ttft,tpot,itl,e2el",
+    "--save-result",
+    "--result-filename",
+    "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json",
+    "--max-concurrency",
+    "32",
+    "--temperature",
+    "0.0"
+  ],
+  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model Qwen/Qwen3.5-122B-A10B --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 128 --random-output-len 128 --num-prompts 64 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json --max-concurrency 32 --temperature 0.0",
+  "config": {
+    "prompt_len": 128,
+    "output_len": 128,
+    "num_requests": 64,
+    "concurrency": 32,
+    "temperature": 0.0,
+    "generation_config_mode": "explicit",
+    "dataset_name": "random",
+    "ignore_eos": true
+  },
+  "elapsed_s": 57.24001566786319,
+  "completed_requests": 64,
+  "total_input_tokens": 8192.0,
+  "total_output_tokens": 8192.0,
+  "requested_output_tokens": 8192,
+  "missing_output_tokens": 0,
+  "ttft_ms": {
+    "p50": 12053.829738404602,
+    "p99": 12066.71783757396,
+    "mean": 12050.082545763871
+  },
+  "tpot_ms": {
+    "p50": 131.32181526693392,
+    "p99": 132.5475170110961,
+    "mean": 130.46243314688115
+  },
+  "itl_ms": {
+    "p50": 131.744101527147,
+    "p99": 136.73907345393673,
+    "mean": 130.4624338123448
+  },
+  "e2el_ms": {
+    "p50": 28619.410263374448,
+    "p99": 28731.921859981958,
+    "mean": 28618.81155541778
+  },
+  "itl_p50_decode_tps": 7.590472654245864,
+  "itl_mean_decode_tps": 7.665041734836749,
+  "vllm_mean_tpot_decode_tps": 7.665041773934646,
+  "mean_per_request_decode_tps": 7.665041773934646,
+  "mean_per_request_decode_tps_basis": "1000 / mean_tpot_ms from vllm bench serve; this is the TPOT-derived decode value. For burst-serving profiles, scheduler admission and chunked prefill can affect TPOT, so use the single-user profile for headline decode t/s/u.",
+  "output_throughput_tok_per_s": 143.1166624330488,
+  "request_throughput_per_s": 1.1180989252581937,
+  "total_token_throughput_tok_per_s": 286.2333248660976
+}

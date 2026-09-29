@@ -7,7 +7,10 @@ Reuses `recurrent_gated_delta_rule_decode_ttnn`; weights interleaved. GDN norm u
 (no +1) + SiLU(z) gate — distinct from QK/layer norms.
 """
 
+import os
+
 import torch
+from loguru import logger
 
 import ttnn
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
@@ -931,15 +934,35 @@ class TPGatedDeltaNet:
             ttnn.deallocate(src)
         ttnn.deallocate(new_rec)
 
+    _SLICE_WRITE_SLOTS = (
+        os.environ.get("QWEN36_GDN_SLICE_WRITE_SLOTS", "0") == "1"
+    )  # measured neutral (0.77 vs 0.80 ms per layer): off
+
     def _write_index(self, buf, src, idx, dim):
         """Replace slice `idx` of `buf` along `dim` with `src` (extent 1 along `dim`), preserving
         the other slices, via an in-place copy into `buf`. Consumes `src` (and the temporary
-        slices). `src` must already match `buf`'s dtype."""
+        slices). `src` must already match `buf`'s dtype.
+
+        Rank-4 buffers written along dim 0 (the recurrent state [B, Nv, Dk, Dv]) take the in-place
+        `ttnn.experimental.slice_write` of one height-sharded L1 copy of `src` (tile-aligned start):
+        one op and no traffic over the other B-1 slots, instead of slicing the buffer around the
+        slot, concatenating and copying the whole [B, ...] tensor back (~3 x the buffer in DRAM
+        traffic per layer per admission; a quarter of the served engine's host time under
+        continuous admissions in the Qwen3.5-122B perf pass). The 3-D conv-tap buffers keep the
+        rebuild (their slot is a row inside one tile)."""
         n = buf.shape[dim]
         if n == 1:
             ttnn.copy(src, buf)
             ttnn.deallocate(src)
             return
+        if self._SLICE_WRITE_SLOTS and dim == 0 and len(buf.shape) == 4 and buf.layout == ttnn.TILE_LAYOUT:
+            try:
+                self._slice_write_slot(buf, src, idx)
+                ttnn.deallocate(src)
+                return
+            except Exception as e:  # noqa: BLE001 - fall back to the rebuild path once, loudly
+                logger.warning(f"GDN slot slice_write rejected ({str(e)[:120]}); rebuild path")
+                type(self)._SLICE_WRITE_SLOTS = False
         parts = []
         if idx > 0:
             parts.append(self._slice_along(buf, dim, 0, idx))
@@ -951,6 +974,28 @@ class TPGatedDeltaNet:
         ttnn.deallocate(new)
         for p in parts:
             ttnn.deallocate(p)
+
+    def _slice_write_slot(self, buf, src, idx):
+        """In-place write of `src` [1, Nv, Dk, Dv] into slot `idx` of `buf` [B, Nv, Dk, Dv]: the tiled
+        slice_write wants a height-sharded input; shard the Nv*Dk rows over up to 48 cores."""
+        _, nv, dk, dv = (int(x) for x in src.shape)
+        nhw = nv * dk
+        n_tiles = nhw // ttnn.TILE_SIZE
+        grid_size = self.mesh.compute_with_storage_grid_size()
+        if n_tiles % 48 == 0:
+            num_cores = 48
+            grid = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(7, 5))})
+        else:
+            num_cores = max(c for c in range(1, min(48, grid_size.x * grid_size.y) + 1) if n_tiles % c == 0)
+            grid = ttnn.num_cores_to_corerangeset(num_cores, grid_size, row_wise=True)
+        shard_memcfg = ttnn.MemoryConfig(
+            ttnn.TensorMemoryLayout.HEIGHT_SHARDED,
+            ttnn.BufferType.L1,
+            ttnn.ShardSpec(grid, (nhw // num_cores, dv), ttnn.ShardOrientation.ROW_MAJOR),
+        )
+        sharded = ttnn.to_memory_config(src, shard_memcfg)
+        ttnn.experimental.slice_write(sharded, buf, [idx, 0, 0, 0], [idx + 1, nv, dk, dv], [1, 1, 1, 1])
+        ttnn.deallocate(sharded)
 
     def write_slot(self, slot, rec, convs):
         """Write one user's B=1 prefill state into decode `slot`, preserving every other (live)

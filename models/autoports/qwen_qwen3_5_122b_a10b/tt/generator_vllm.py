@@ -51,6 +51,62 @@ def _context_contract():
         return json.load(f)
 
 
+def _sampling_params_fingerprint(sp):
+    """Hashable view of the formatted per-step sampling params (per-lane lists + log-prob settings)."""
+
+    def _t(v):
+        if isinstance(v, (list, tuple)):
+            return tuple(_t(x) for x in v)
+        if hasattr(v, "tolist"):
+            return tuple(v.tolist()) if getattr(v, "ndim", 1) else float(v)
+        return v
+
+    return tuple(
+        _t(getattr(sp, name, None))
+        for name in (
+            "temperature",
+            "top_k",
+            "top_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "repetition_penalty",
+            "enable_log_probs",
+            "num_logprobs",
+        )
+    )
+
+
+def _memoize_sampling_params(sampling_module):
+    """The common sampler re-applies the whole batch's sampling params on EVERY decode step (`apply_decode_state` ->
+    `reset_sampling_params` -> four host->device copies + the log-prob / penalty resets): ~20 % of the engine's host
+    time at 8 users (perf pass, doc/perf_pass/hostprof). Skip the reset when the formatted params equal the last
+    applied ones. Any other write to the sampler's device params (a prefill admission's `reset_sampling_params(...,
+    empty_slots=...)`, a direct `tt_sampling.reset_params`) invalidates the memo so the next step re-applies."""
+    state = {"fp": None, "inside": False}
+    orig_reset = sampling_module.reset_sampling_params
+    orig_tt_reset = sampling_module.tt_sampling.reset_params
+
+    def reset_sampling_params(sampling_params, empty_slots=None):
+        fp = _sampling_params_fingerprint(sampling_params) if empty_slots is None else None
+        if fp is not None and fp == state["fp"]:
+            return
+        state["inside"] = True
+        try:
+            orig_reset(sampling_params, empty_slots=empty_slots)
+        finally:
+            state["inside"] = False
+        state["fp"] = fp
+
+    def tt_reset_params(*a, **kw):
+        if not state["inside"]:
+            state["fp"] = None  # written behind the memo's back: re-apply on the next step
+        return orig_tt_reset(*a, **kw)
+
+    sampling_module.reset_sampling_params = reset_sampling_params
+    sampling_module.tt_sampling.reset_params = tt_reset_params
+    sampling_module._qwen35_params_memo = state
+
+
 class TT_Qwen3_5MoeProcessingInfo(Qwen3_5MoeProcessingInfo):
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
         # text-only scope of this bringup: the architecture is multimodal, the served model takes no images / videos
@@ -125,6 +181,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # seeded requests in one batch then produce identical text - the semantics a seed promises.
         if getattr(model, "sampling", None) is not None:
             model.sampling.seed_manager.salt_duplicate_seeds = False
+            if os.environ.get("QWEN35_SAMPLING_PARAMS_MEMO", "1") == "1":
+                _memoize_sampling_params(model.sampling)
         self._context = max_seq_len
         self._warm_phase = {"prefill_programs": False, "decode_programs": False, "traces": False}
         self._live_slots = set()  # slots with a running request as of the last decode (start_pos >= 0) or prefill

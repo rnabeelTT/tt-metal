@@ -1154,6 +1154,42 @@ def test_perf_traced_decode_batched(mesh_device, layer_idx, batch):
     )
 
 
+@pytest.mark.perf
+@mesh_tp(MESH_PARAMS)
+@pytest.mark.parametrize("layer_idx", [L0], ids=["gdn"])
+def test_perf_slot_write(mesh_device, layer_idx):
+    """Admission cost of the GDN slot write: 32 users prefilled one at a time (37 tokens) into a B=32 layer; the wall
+    of the 32 prefill+write_slot calls, and of 32 direct write_slot calls with a device snapshot (perf pass turn 3c)."""
+    B, seq_len = 32, 37
+    h = _mc(mesh_device, layer_idx, batch=B, max_seq_len=1024, real=True, hf=False)
+    hidden = _hidden(B, seq_len, h.H, seed=3300)
+    h.tt_prefill(hidden[0:1], user_id=0)  # compile
+    ttnn.synchronize_device(mesh_device)
+    t0 = time.time()
+    for u in range(B):
+        h.tt_prefill(hidden[u : u + 1], user_id=u)
+    ttnn.synchronize_device(mesh_device)
+    wall_pw = 1e3 * (time.time() - t0) / B
+    dn = h.tt.layer.attention
+    t0 = time.time()
+    n = 0
+    for u in range(B):
+        rs = list(dn.rec_state.shape)
+        r = ttnn.slice(dn.rec_state, [0, 0, 0, 0], [1] + rs[1:])
+        r = ttnn.clone(r) if r.buffer_address() == dn.rec_state.buffer_address() else r
+        convs = [ttnn.slice(c, [0, 0, 0], [1, 1, list(c.shape)[-1]]) for c in dn.conv_states]
+        convs = [
+            ttnn.clone(c) if c.buffer_address() in {cs.buffer_address() for cs in dn.conv_states} else c for c in convs
+        ]
+        dn.write_slot(u, r, convs)
+        n += 1
+    ttnn.synchronize_device(mesh_device)
+    wall_ws = 1e3 * (time.time() - t0) / n
+    print(
+        f"PERF_SLOT {h.kind}: prefill(37)+write_slot {wall_pw:.2f} ms per user | write_slot alone {wall_ws:.2f} ms per user (slice_write={getattr(type(dn), '_SLICE_WRITE_SLOTS', None)})"
+    )
+
+
 def _perf_traced_decode(mesh_device, layer_idx):
     base_ms = float("nan")
     if PERF_BASELINE:

@@ -78,6 +78,19 @@ minimum is in `served_pairs/`):
 Reproducibility on the served path with the width-1 trace (`served_w1/seedprobe.json`): seeded completions 1 unique of
 6 / 12 / 24 / 24 / 48 at widths 1 / 2 / 4 / 8 / 16, greedy width-1 re-runs 1 unique of 6 (stage 10 at width 1: 6 of 6).
 
+## Turn 3 — served-step host overhead and admission cost
+
+Host profile of the vLLM EngineCore during served benchmarks (`hostprof/pyspy_c{8,32}.raw`, `scripts/13-pyspy-summary.py`):
+at 32 users 31.8 % of the engine's host time re-applied unchanged sampling parameters every step (`apply_decode_state`:
+penalty copies 16.6 %, k / p / temperature resets 15.8 %), and under continuous admissions 23 % was the per-admission
+GDN slot write (36 layers x rebuild of the whole [B, ...] state buffer around one slot).
+
+| change | result |
+|---|---|
+| sampling-params memo (`generator_vllm._memoize_sampling_params`, `QWEN35_SAMPLING_PARAMS_MEMO`, on): skip the sampler reset when the formatted params equal the last applied ones; prefill-side or direct sampler writes invalidate it | plugin sampling suite 73 passed / 4 skipped (= stage 9), qualitative coherent; served TPOT c1 / c8 / c32 32.7 / 67.7 / 130.5 ms with and without -> **no latency effect** (the host work was overlapped with the device step); kept as CPU hygiene |
+| GDN slot write by in-place `ttnn.experimental.slice_write` of the recurrent state (`TPGatedDeltaNet._write_index`, `QWEN36_GDN_SLICE_WRITE_SLOTS`; conv taps keep the rebuild) | correctness 9 / 9 (batched decode B = 32, distinct positions, reset after history, prefill after traced decode); per-layer write_slot 0.80 -> 0.77 ms per admitted user (`test_perf_slot_write`): the write is op-launch bound, not traffic bound -> **neutral, off by default** |
+| step-synchronization probe (`13-stepsync-probe.py`): traced step with deferred vs blocking vs plugin-style overlapped readback | < 0.3 ms difference at widths 1 / 8 / 32 -> the served-vs-trace gap at 16-32 users (107 / 130 vs 85 / 91 ms) is device work the served step does and the in-process trace does not; open (next turn: per-step phase timestamps in the adapter) |
+
 ## Rejected in this pass
 
 - Expert-sorted MoE at decode (`sorted_min_tokens` 256 -> 8 with the group-parallel factory): per layer w8 4.16 /

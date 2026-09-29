@@ -131,3 +131,40 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
 - 22:11-22:25 Hub verification of the turn-1 bundle (rev 5fef4bd0, image f6b91cc768b9): all checks pass; 8K 4.5 s, 128K
   72.6 s; near-tie greedy texts differ from the stage-12 image (default greeting "Hello!"). Host-profiling run (chain16:
   py-spy on the EngineCore at c8 / c32) next.
+
+## Turn 3b — host-side per-step overhead (served step 20-35 ms above the in-process trace at 16-32 users)
+- 22:26-22:40 chain16: held server with the shipped defaults, py-spy (200 Hz, 30 s) on the vLLM EngineCore during the
+  readiness benchmark at c8 and c32 (`doc/perf_pass/hostprof/pyspy_c{8,32}.raw`, `scripts/13-pyspy-summary.py`). c8
+  window (32 requests at concurrency 8 = continuous admissions): 54 % of samples inside ttnn op calls; decode_forward 26 %
+  of which `sample_decode_on_device -> apply_decode_state -> reset_sampling_params` 20 % (the common sampler re-applies
+  the whole batch's k / p / temperature / log-prob / penalty params on EVERY step: 4 host->device copies + resets);
+  prefill admissions 30 % of which `_write_gdn_slot_device` 21 % (36 per-layer slot writes); `read_decode_output` 9 %.
+- Fix for the first item: `generator_vllm._memoize_sampling_params` (QWEN35_SAMPLING_PARAMS_MEMO, default on): skip
+  `reset_sampling_params` when the formatted params equal the last applied ones; any prefill-side or direct sampler
+  write invalidates the memo. Validation chain17: readiness `sampling` + `qualitative` stages on the served path, then
+  benchmark c1 / c8 / c32 with the memo on and off.
+- c32 window (`pyspy_c32.raw`, 4158 samples): 60 % inside ttnn op calls; `apply_decode_state` 31.8 % of the engine's
+  host time (penalties `_copy_host_to_device` 16.6 %, `tt_sampling.reset_params` 15.8 %), prefill admissions 32.5 % of
+  which `_write_gdn_slot_device` 23.2 % (`write_slot` 19.8 %, `_slice_along` 11.1 %), `finalize_decode` 6.2 %,
+  `read_decode_output` 5.9 %. Served TPOT in this window: c8 67.5 ms, c32 131.5 ms.
+- 22:43-23:06 chain17 part 1 (memo on): readiness `sampling` stage = the plugin's sampling test suite 73 passed / 4
+  skipped (stage 9: 73 / 4), `qualitative` 6 prompts coherent (`served_memo/sampling_tests.log`, `vllm_qualitative_outputs.json`).
+  Benchmarks c1 / c8 / c32 with the memo on, then off, follow.
+- 23:06-23:20 chain17 part 2, memo ON: c1 TTFT p50 406 ms / TPOT 32.7 ms, c8 3270 ms / 67.7 ms, c32 12054 ms / 130.5 ms =
+  identical to the memo-off served numbers (32.7 / 67.7 / 130.5): the sampler-reset host time is overlapped with the
+  device step; removing it does not shorten the served step at any width. Kept on (validated harmless, less CPU) but
+  no TPOT gain. The served - in-process gap (c32 130 vs 91 ms, c16 107 vs 85) therefore is not host CPU inside the step:
+  probe queued (`13-stepsync-probe.py`): traced step at widths 1 / 8 / 32 with deferred readback (the in-process number),
+  blocking per-step readback, and the plugin's overlapped async readback.
+- 23:20-23:33 chain17 part 3, memo OFF controls: c1 32.6 ms, c8 67.7 ms, c32 130.5 ms TPOT (TTFT p50 398 / 3261 / 12006
+  ms) = the memo-on values within noise. Memo: no served effect; stays on as validated, CPU-saving hygiene.
+- 23:43-00:00 step-sync probe (`artifacts/stage13/stepsync.json`, 48 layers, 40 steps each): width 1 deferred 32.69 /
+  blocking readback 32.86 / plugin-style overlapped 32.68 ms; width 8 67.10 / 67.37 / 67.10; width 32 90.94 / 91.21 /
+  90.94 -> per-step readback synchronization costs < 0.3 ms at every width. The served step at 16-32 users (107 / 130 ms
+  vs 85 / 91 in-process, greedy in both) is therefore neither host CPU nor sync: the served decode step does more device
+  work. Candidates for the next turn: per-step page-table upload and its consumers (32 x 4096-block table), slot-remap /
+  reset_batch full-width steps, the served sampler variant; needs per-step phase timestamps in the adapter.
+- 23:56 chain18b `test_perf_slot_write` (GDN layer, B=32): write_slot alone 0.80 ms (rebuild) vs 0.77 ms (slice_write) per
+  admitted user; prefill(37)+write 11.8 vs 10.6 ms. The slot write is host-launch bound (conv taps + slices), the traffic
+  saving is invisible -> knob default off. Turn 3 summary: both "obvious" host fixes are latency-neutral; the served
+  wide-batch gap needs the API-server / engine split (chain20 running).
