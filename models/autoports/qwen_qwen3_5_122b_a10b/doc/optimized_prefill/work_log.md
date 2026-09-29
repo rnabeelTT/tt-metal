@@ -43,3 +43,15 @@
   32768: 21.6 s, 131072: 93.5 s -> decomposition: counting_mm 132.6 -> 93.5 s, grouped matmuls 93.5 -> 72.3 s. Texts identical.
 - 16:14-16:26 chain4 control: prefill-check p8192 with the grouped path off: top1 0.95 / top5 1.00 / top100 1.00 = the
   grouped result. Stage closed at the layer, full-model and served levels; commit, container rebuild, private push, Hub verify next.
+- 16:23-16:31 commit 6da58d94a83 (amended to drop overwritten readiness_vllm working files); `tt-model package` rebuilt the
+  image in 5 min on the warm cache: image 5eba8ab305a3, manifest tt_metal sha 6da58d94a83; 16:32 pushed private (Hub
+  revision 1e17833e). 16:33-16:47 first Hub verification served the OLD image 36b6aa8bb6e4: `tt-model serve --refresh`
+  compares the installed revision with the Hub tip through a 3 s network call, and the script inherited HF_HUB_OFFLINE=1
+  (its export line carried a `HF_HUB3_OFFLINE` typo from stage 11), so the refresh returned nothing and the installed
+  stage-11 revision was served (8K prompt 8.3 s, 128K 132.7 s = stage-11 timings; functional checks passed on that image).
+  Fixed the export; rerun queued behind the stage-13 probes.
+- 17:18-17:33 Hub verification rerun (`logs/12/verify-hub-run2.log`, HF_HUB_OFFLINE=0): `tt-model serve --refresh` moved
+  the install cb1f080e -> 1e17833e and started image 5eba8ab305a3; healthy in 10.7 min; /v1/models 262144; chat, tool call
+  (get_weather Paris), tt-model curl default / thinking on (603 reasoning chars) / thinking off, non-aligned 2381-token
+  prompt, 32-request burst 126.3 tok/s, 8192-token prompt and 131072-token prompt 72.9 s wall for 16 new tokens (old
+  image: 132.7 s), completion text identical. Stage 12 closed end to end.

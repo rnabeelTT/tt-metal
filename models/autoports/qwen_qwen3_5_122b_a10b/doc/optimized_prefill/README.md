@@ -158,3 +158,13 @@ The 131072-token greedy completion is also byte-identical to the stage-10 comple
 and convulsed. The teeth were bared, glaring like ..."), and the 8192 / 32768 completions are stable across repetitions.
 Prefill throughput falls from ~2040 tok/s at 8K to ~1810 tok/s at 128K because attention over the growing KV (chunk-outer
 SDPA per 2048-token segment) is now a visible share of the segment; the MoE block no longer dominates.
+
+## 4. Shipped
+
+Commit 6da58d94a83 (local branch `qwen3_5_122b_a10b`). Bundle rebuilt from it (`tt-model package`: image
+`tt-model/qwen3-5-122b-a10b-blackholex4:5eba8ab305a3`, manifest tt_metal sha 6da58d94a83) and pushed private to
+`raahemnabeel/qwen3-5-122b-a10b-blackholex4` (Hub revision 1e17833e). Verified from the Hub on reset devices
+(`scripts/12-verify-hub.sh`, `logs/12/verify-hub-run2.log`): healthy in 10.7 min, chat / tool call / `tt-model curl`
+variants / non-aligned prompt / 32-request burst (126 tok/s) pass; 8192-token prompt + 16 tokens in 4.6 s and 131072-token prompt + 16 tokens in 72.9 s wall (the
+stage-11 image: 132.7 s in the same harness, same completion text). Note for operators: `tt-model serve --refresh` needs
+Hub access (`HF_HUB_OFFLINE=0`); offline it silently serves the installed revision.
