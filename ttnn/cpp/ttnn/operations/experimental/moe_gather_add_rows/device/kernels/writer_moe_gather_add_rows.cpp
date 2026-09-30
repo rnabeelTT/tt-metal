@@ -18,12 +18,8 @@ void kernel_main() {
     constexpr uint32_t Wt = get_compile_time_arg_val(0);
     constexpr uint32_t Wt_c = get_compile_time_arg_val(1);
     constexpr uint32_t col_splits = get_compile_time_arg_val(2);
-    constexpr uint32_t K = get_compile_time_arg_val(3);
-    constexpr uint32_t cb_acc_a = get_compile_time_arg_val(4);
-    constexpr uint32_t cb_acc_b = get_compile_time_arg_val(5);
-    // K-1 add passes alternate the accumulator buffers: the last one is acc_b for an even K
-    constexpr uint32_t cb_final = ((K - 1) & 1) ? cb_acc_b : cb_acc_a;
-    constexpr auto out_args = TensorAccessorArgs<6>();
+    constexpr uint32_t cb_final = get_compile_time_arg_val(3);  // dedicated output buffer (never an add intermediate)
+    constexpr auto out_args = TensorAccessorArgs<4>();
 
     Noc noc;
     const auto s_out = TensorAccessor(out_args, out_addr);

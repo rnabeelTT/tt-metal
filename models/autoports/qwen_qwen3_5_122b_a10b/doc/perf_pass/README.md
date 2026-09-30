@@ -146,7 +146,7 @@ MoE block device time per layer at 2048 tokens: 16.45 -> 11.24 -> 10.57 ms; whol
 | 16384 | 7993.2 | 5980.6 | **5744.9** (-28 %) |
 
 Correctness: layer suite 14/14 (kernel) and 12/12 (kernel + skip) with PCCs identical to the counting-sort path;
-full-model prefill-check vs HF PCHECK. Served (`served_kernelskip/`): SERVED.
+full-model prefill-check vs HF: book_p2048 top1 0.99 / top5 1.00 / top100 1.00 and book_p8192 0.97 / 1.00 / 1.00 (stage 12: 0.99 / 1.00 / 1.00 and 0.95 / 1.00 / 1.00; bars top5 >= 0.98, top100 = 1.0). Served (`served_kernelskip/`, same server settings as turn 4): 1 user TTFT p50 371 -> 258 ms, TPOT 32.6 -> 32.0 ms (31.3 t/s/u); 32 users TTFT p50 11.1 -> 8.2 s, TPOT 130 ms (the weight-bandwidth floor, unchanged); direct long prompts 8192 / 32768 / 131072 tokens TTFT 4.0 / 16.4 / 72.3 -> 2.89 / 11.8 / 54.1 s (2840 / 2780 / 2420 prompt tok/s), greedy completions byte-identical to the turn-4 server. Bundle rebuilt from c9b9139df6e (image e63ad8e67d71), pushed private (Hub revision 2ce007aa) and verified from the Hub: burst 155 tok/s (137), 8K prompt 3.3 s (4.5), 128K prompt 54.5 s (72.6).
 
 Rejected in this turn: 64-row expert groups (fewer weight re-reads but +50 % padding rows: MoE 11.2 -> 11.8 ms);
 4096-token segments (above); the `sort_u16` dispatch. Still open (measured, not done): the un-dispatch as one

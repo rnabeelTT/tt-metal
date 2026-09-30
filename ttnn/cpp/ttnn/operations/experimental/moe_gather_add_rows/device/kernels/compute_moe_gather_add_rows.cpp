@@ -4,9 +4,11 @@
 
 // MoE un-dispatch, compute: per work item tilize the K gathered row-major blocks and add them up (bf16, slot order
 // 0..K-1, the same association as the k successive ttnn.add calls it replaces). Slot 0 is tilized straight into
-// accumulator A; every further slot is tilized into `til` and added into the other accumulator (ping-pong).
-// The tilize goes through the kernel library helper (the production tilize op's path: register reconfiguration +
-// fast tilize + init/uninit per block); the add re-configures the unpack/pack registers for the tiled operands.
+// accumulator A; every further slot is tilized into `til` and added into the other accumulator (ping-pong); the LAST
+// add packs into the dedicated output buffer `out` (the writer must never see an intermediate sum: a shared buffer with
+// two consumers desynchronised the pointers and hung the two-item cores). The tilize goes through the kernel library
+// helper (the production tilize op's path: register reconfiguration + fast tilize + init/uninit per block); the add
+// re-configures the unpack/pack registers for the tiled operands.
 
 #include <cstdint>
 
@@ -27,16 +29,25 @@ void kernel_main() {
     constexpr uint32_t cb_til = get_compile_time_arg_val(3);
     constexpr uint32_t cb_acc_a = get_compile_time_arg_val(4);
     constexpr uint32_t cb_acc_b = get_compile_time_arg_val(5);
+    constexpr uint32_t cb_out = get_compile_time_arg_val(6);
     const uint32_t item_count = get_arg_val<uint32_t>(0);
     constexpr uint32_t dst_tiles = 8;
 
     compute_kernel_hw_startup(cb_in, cb_til, cb_acc_a);
 
     for (uint32_t it = 0; it < item_count; ++it) {
+        if constexpr (K == 1) {
+            compute_kernel_lib::tilize<Wt_c, cb_in, cb_out>(1);
+            continue;
+        }
+        compute_kernel_hw_startup(cb_in, cb_til, cb_acc_a);  // back from the binary-add state to the tilize state
         compute_kernel_lib::tilize<Wt_c, cb_in, cb_acc_a>(1);
         uint32_t cur = cb_acc_a;
         uint32_t nxt = cb_acc_b;
         for (uint32_t j = 1; j < K; ++j) {
+            if (j == K - 1) {
+                nxt = cb_out;
+            }
             compute_kernel_lib::tilize<Wt_c, cb_in, cb_til>(1);
             // tilize leaves the unpack/math/pack state configured for the tilize path; the binary add needs the full
             // start-up sequence again (same mid-kernel re-init the layernorm kernel does after its tilize, tt-metal
@@ -64,7 +75,7 @@ void kernel_main() {
             cb_push_back(nxt, Wt_c);
             const uint32_t tmp = cur;
             cur = nxt;
-            nxt = tmp;
+            nxt = tmp;  // (unused after the last add: cur is cb_out, which the writer drains)
         }
     }
 }

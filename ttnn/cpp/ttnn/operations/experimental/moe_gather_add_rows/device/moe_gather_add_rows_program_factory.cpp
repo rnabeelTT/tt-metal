@@ -38,7 +38,7 @@ MoeGatherAddRowsProgramFactory::cached_program_t MoeGatherAddRowsProgramFactory:
             break;
         }
     }
-    while ((Wt / col_splits) * tile_bytes * 5 > 1'200'000 && Wt % (col_splits * 2) == 0) {
+    while ((Wt / col_splits) * tile_bytes * 6 > 1'200'000 && Wt % (col_splits * 2) == 0) {
         col_splits *= 2;
     }
     const uint32_t Wt_c = Wt / col_splits;
@@ -55,20 +55,21 @@ MoeGatherAddRowsProgramFactory::cached_program_t MoeGatherAddRowsProgramFactory:
             CircularBufferConfig(pages * page_size, {{index, fmt}}).set_page_size(index, page_size));
     };
     const uint32_t cb_in = tt::CBIndex::c_0, cb_til = tt::CBIndex::c_1, cb_acc_a = tt::CBIndex::c_2,
-                   cb_acc_b = tt::CBIndex::c_3, cb_und = tt::CBIndex::c_4;
+                   cb_acc_b = tt::CBIndex::c_3, cb_und = tt::CBIndex::c_4, cb_out = tt::CBIndex::c_5;
     make_cb(cb_in, 2 * Wt_c, tile_bytes, tt::DataFormat::Float16_b);  // row-major gathered block (double-buffered)
     make_cb(cb_til, Wt_c, tile_bytes, tt::DataFormat::Float16_b);
     make_cb(cb_acc_a, Wt_c, tile_bytes, tt::DataFormat::Float16_b);
     make_cb(cb_acc_b, Wt_c, tile_bytes, tt::DataFormat::Float16_b);
+    make_cb(cb_out, Wt_c, tile_bytes, tt::DataFormat::Float16_b);  // the writer's buffer: never an add intermediate
     const uint32_t und_bytes = tt::align(32 * K * 4, hal::get_l1_alignment());
     make_cb(cb_und, 1, und_bytes, tt::DataFormat::UInt32);
 
     std::vector<uint32_t> reader_ct = {T, K, Wt_c, col_splits, Hc * 2, cb_in, cb_und};
     TensorAccessorArgs(*t.rows.buffer()).append_to(reader_ct);
     TensorAccessorArgs(*t.undispatch.buffer()).append_to(reader_ct);
-    std::vector<uint32_t> writer_ct = {Wt, Wt_c, col_splits, K, cb_acc_a, cb_acc_b};
+    std::vector<uint32_t> writer_ct = {Wt, Wt_c, col_splits, cb_out};
     TensorAccessorArgs(*out.buffer()).append_to(writer_ct);
-    std::vector<uint32_t> compute_ct = {Wt_c, K, cb_in, cb_til, cb_acc_a, cb_acc_b};
+    std::vector<uint32_t> compute_ct = {Wt_c, K, cb_in, cb_til, cb_acc_a, cb_acc_b, cb_out};
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/moe_gather_add_rows/device/kernels/";
     auto reader = CreateKernel(

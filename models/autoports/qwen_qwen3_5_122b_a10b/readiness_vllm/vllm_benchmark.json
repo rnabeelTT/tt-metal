@@ -12,7 +12,7 @@
     "--model",
     "Qwen/Qwen3.5-122B-A10B",
     "--base-url",
-    "http://localhost:8131",
+    "http://127.0.0.1:8131",
     "--endpoint",
     "/v1/completions",
     "--dataset-name",
@@ -22,7 +22,7 @@
     "--random-output-len",
     "128",
     "--num-prompts",
-    "1",
+    "64",
     "--ignore-eos",
     "--percentile-metrics",
     "ttft,tpot,itl,e2el",
@@ -30,73 +30,53 @@
     "--result-filename",
     "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json",
     "--max-concurrency",
-    "1",
+    "32",
     "--temperature",
     "0.0"
   ],
-  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model Qwen/Qwen3.5-122B-A10B --base-url http://localhost:8131 --endpoint /v1/completions --dataset-name random --random-input-len 128 --random-output-len 128 --num-prompts 1 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json --max-concurrency 1 --temperature 0.0",
+  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model Qwen/Qwen3.5-122B-A10B --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 128 --random-output-len 128 --num-prompts 64 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_result.json --max-concurrency 32 --temperature 0.0",
   "config": {
     "prompt_len": 128,
     "output_len": 128,
-    "num_requests": 1,
-    "concurrency": 1,
+    "num_requests": 64,
+    "concurrency": 32,
     "temperature": 0.0,
     "generation_config_mode": "explicit",
     "dataset_name": "random",
     "ignore_eos": true
   },
-  "elapsed_s": 5.215097684995271,
-  "completed_requests": 1,
-  "total_input_tokens": 128.0,
-  "total_output_tokens": 128.0,
-  "requested_output_tokens": 128,
+  "elapsed_s": 49.375398764852434,
+  "completed_requests": 64,
+  "total_input_tokens": 8192.0,
+  "total_output_tokens": 8192.0,
+  "requested_output_tokens": 8192,
   "missing_output_tokens": 0,
   "ttft_ms": {
-    "p50": 426.40901706181467,
-    "p99": 426.40901706181467,
-    "mean": 426.40901706181467
+    "p50": 8157.938126474619,
+    "p99": 8178.686507013626,
+    "mean": 8157.977553728415
   },
   "tpot_ms": {
-    "p50": 37.70361818816865,
-    "p99": 37.70361818816865,
-    "mean": 37.70361818816865
+    "p50": 130.6442914284971,
+    "p99": 132.37762200220774,
+    "mean": 130.1459012107429
   },
   "itl_ms": {
-    "p50": 37.754504941403866,
-    "p99": 41.1660908255726,
-    "mean": 37.70362276319913
+    "p50": 131.43947394564748,
+    "p99": 134.87779242685065,
+    "mean": 130.14590216346366
   },
   "e2el_ms": {
-    "p50": 5214.768526959233,
-    "p99": 5214.768526959233,
-    "mean": 5214.768526959233
+    "p50": 24687.224115943536,
+    "p99": 24750.318473593798,
+    "mean": 24686.507007492764
   },
-  "itl_p50_decode_tps": 26.48690537863045,
-  "itl_mean_decode_tps": 26.522650257790524,
-  "vllm_mean_tpot_decode_tps": 26.522653476100572,
-  "mean_per_request_decode_tps": 26.522653476100572,
+  "itl_p50_decode_tps": 7.6080645332886645,
+  "itl_mean_decode_tps": 7.6836841066574415,
+  "vllm_mean_tpot_decode_tps": 7.6836841629051245,
+  "mean_per_request_decode_tps": 7.6836841629051245,
   "mean_per_request_decode_tps_basis": "1000 / mean_tpot_ms from vllm bench serve; this is the TPOT-derived decode value. For burst-serving profiles, scheduler admission and chunked prefill can affect TPOT, so use the single-user profile for headline decode t/s/u.",
-  "output_throughput_tok_per_s": 24.544123184552785,
-  "request_throughput_per_s": 0.19175096237931863,
-  "total_token_throughput_tok_per_s": 49.08824636910557,
-  "secondary_benchmarks": {
-    "ci_serving_burst": {
-      "summary_file": "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_ci_serving_benchmark.json",
-      "raw_result_file": "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_ci_serving_result.json",
-      "log_file": "/home/raahem/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/readiness_vllm/vllm_ci_serving_benchmark.log",
-      "config": {
-        "prompt_len": 100,
-        "output_len": 100,
-        "num_requests": 32,
-        "concurrency": null,
-        "temperature": 0.0,
-        "generation_config_mode": "explicit",
-        "dataset_name": "random",
-        "ignore_eos": true
-      },
-      "output_throughput_tok_per_s": 129.35832615713633,
-      "vllm_mean_tpot_decode_tps": 7.472351989195325,
-      "comparison_scope": "vLLM-nightly-style 100/100/32 serving-burst profile for CI parity and serving capacity. Do not use as headline decode t/s/u because burst admission and chunked prefill can affect TPOT."
-    }
-  }
+  "output_throughput_tok_per_s": 165.9125840990964,
+  "request_throughput_per_s": 1.2961920632741906,
+  "total_token_throughput_tok_per_s": 331.8251681981928
 }

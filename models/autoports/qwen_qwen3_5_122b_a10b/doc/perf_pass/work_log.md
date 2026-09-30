@@ -292,3 +292,12 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   2048 / 4097 / 8192 / 16384 tokens = 214.1 / 249.3 / 701.3 / 1596.3 / 2828.3 / 5744.9 ms (turn 4: 303.2 / 348.1 / 984.5 /
   2208.7 / 3959.0 / 7993.2: -29 % at every length); prefill-check book_p2048 vs HF top1 0.99 / top5 1.00 / top100 1.00
   (unchanged). 8192-token check and the served chain follow.
+- 04:48 chain29 prefill-check book_p8192 vs HF: top1 0.97 / top5 1.00 / top100 1.00 (stage 12: 0.95 / 1.00 / 1.00).
+  Committed c9b9139df6e; bundle rebuilt (image e63ad8e67d71, ccache build, new ops + bindings present in the image) and
+  pushed private (Hub revision 2ce007aa, 04:48); from-Hub verification queued behind the served chain.
+- 04:56-05:1x turn-5 bundle verified FROM THE HUB (`logs/13/verify-hub-t5.log`): healthy in 10.3 min, tt-model curl
+  default / thinking on / thinking off pass, 32-request burst 155.3 tok/s (turn 4: 137), 131072-token prompt 54.5 s wall
+  for 16 new tokens (turn 4: 72.6 s), 8192-token prompt 3.3 s (turn 4: 4.5 s), tool call, non-aligned 2381-token prompt.
+- 05:19-05:23 chain29 served (`served_kernelskip/`): 1 user TTFT p50 257.6 ms (turn 4: 371), TPOT 32.0 ms (31.3 t/s/u);
+  32 users TTFT p50 8158 ms (11052), TPOT 130.1 ms (floor); direct 8192 / 32768 / 131072-token prompts TTFT 2.89 / 11.8 /
+  54.1 s (4.0 / 16.4 / 72.3), completions byte-identical. Turn 5 shipped.
