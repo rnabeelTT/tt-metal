@@ -22,9 +22,10 @@ import torch
 import ttnn
 from models.tt_transformers.tt.common import Mode
 
-# GDN block rows of the rows mode. 128 = the model's prefill chunk (every prefill program config is built for it); 32 = the
-# fused chunk kernel's native chunk (QWEN35_MTP_GDN_ROWS=32 to try the smaller block: less padding work per pass).
-GDN_CHUNK = int(os.environ.get("QWEN35_MTP_GDN_ROWS", "128"))
+# GDN block rows of the rows mode: 32 (default) = one tile, the fused chunk kernel's native chunk (validated vs the 128-row
+# block at PCC 1.0; ~0.3 ms less per GDN layer in the pass, commit 0.30 vs 0.54 ms per layer); 128 = the model's prefill
+# chunk (QWEN35_MTP_GDN_ROWS=128: the prefill-form norm path).
+GDN_CHUNK = int(os.environ.get("QWEN35_MTP_GDN_ROWS", "32"))
 
 
 def rebuild_conv_carry(dn):
@@ -108,11 +109,24 @@ def _layer_forward_rows(layer, x, R, BW, *, cos, sin, position_tensor, page_tabl
             att.rows_pos_masks = None
     # ---- GDN layer: prefill form on a 128-row padded block
     args = layer.args
-    x128 = ttnn.pad(x, [(0, 0), (0, 0), (0, GDN_CHUNK - BW), (0, 0)], value=0.0)
-    attn_cfg = dict(args.get_norm_config("attn", Mode.PREFILL))
-    attn_cfg["distributed_output_mem_config"] = ttnn.L1_MEMORY_CONFIG
-    attn_in = layer._decode_norm(layer.attention_norm, x128, Mode.PREFILL, attn_cfg)
-    ttnn.deallocate(x128)
+    # a [1,1,BW<=32,H/TP] TILE tensor already spans one 32-row tile, so padding to 32 rows can ALIAS x (no copy); the
+    # decode-form norm below frees its input, which then freed x itself (residual add on a freed buffer: PCC 0.22)
+    x_src = x if GDN_CHUNK > 32 else ttnn.clone(x, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    x128 = ttnn.pad(x_src, [(0, 0), (0, 0), (0, GDN_CHUNK - BW), (0, 0)], value=0.0)
+    if x_src is not x and x128.buffer_address() != x_src.buffer_address():
+        ttnn.deallocate(x_src)
+    if GDN_CHUNK > 32:
+        # prefill-form norm: distributed rmsnorm whose post-norm all-gather is fused into the GDN in-proj matmul
+        # (forward_prefill takes the K-sharded input when T > TILE)
+        attn_cfg = dict(args.get_norm_config("attn", Mode.PREFILL))
+        attn_cfg["distributed_output_mem_config"] = ttnn.L1_MEMORY_CONFIG
+        attn_in = layer._decode_norm(layer.attention_norm, x128, Mode.PREFILL, attn_cfg)
+    else:
+        # one 32-row tile: forward_prefill takes a REPLICATED input (no fused AG-matmul at T <= TILE), which the
+        # decode-form norm (gather-then-norm) produces; the prefill config here gave PCC 0.22
+        attn_in = layer._decode_norm(layer.attention_norm, x128, Mode.DECODE, args.get_norm_config("attn", Mode.DECODE))
+    if x128.is_allocated():
+        ttnn.deallocate(x128)
     dn = layer.attention
     rebuild_conv_carry(dn)
     sink = None
@@ -125,7 +139,10 @@ def _layer_forward_rows(layer, x, R, BW, *, cos, sin, position_tensor, page_tabl
         else:
             sink = {}
             saved.append(sink)
-    out128 = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=R, capture_state=True, scan_sink=sink)
+    # chunk_size is the model's GDN chunk constant (its cached chunk masks), not the block's row count
+    out128 = dn.forward_prefill(
+        attn_in, chunk_size=int(args.gdn_chunk_size), valid_len=R, capture_state=True, scan_sink=sink
+    )
     ttnn.deallocate(attn_in)
     attn_out = ttnn.slice(out128, (0, 0, 0, 0), (1, 1, BW, out128.shape[-1]))
     ttnn.deallocate(out128)

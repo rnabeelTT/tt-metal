@@ -481,3 +481,43 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   step (served 67.7 ms): the decode-pairs MoE at 8 rows (64 padded pairs) is the cost. Levers queued: rows width = the
   smallest decode width holding k + 1 rows (k = 3 -> 4 rows: half the pairs), the expert-sorted MoE path for the rows
   (dispatch kernel + skip-padding grouped matmuls + gather-add: ~5 ops instead of ~18 per layer).
+- 15:06 Tracy with a 32-row GDN block (`QWEN35_MTP_GDN_ROWS=32`; the fused chunk kernel's native chunk): pass device
+  3.18 ms (128-row block: 3.49) -> ~0.3 ms less per GDN layer (~11 ms per full-model pass); scan-only commit 0.295 ms
+  per layer (was 0.542: prep 46 + scan 18 us, relayouts halved) -> ~11 ms instead of 20 for the 36 layers. Correctness
+  test (verify pass vs sequential decode) and full runs with the 32-row block queued; k = 3 (4-row width) runs queued.
+- 15:19 expert-sorted MoE for the rows (`QWEN35_MTP_MOE_ROWS=sorted`): correct (verify PCC 0.99791) but SLOWER: pass
+  5.19 ms vs 3.49 on the 2-layer model. The sparse matmuls do get cheaper (341 + 257 us vs 446 + 322 per 2 layers) and the
+  dispatch / gather-add kernels are small (158 + 93 us), but the 32-row expert groups pad the 64 pairs to ~2048 rows: the
+  row gather (embedding, 1215 us) and the untilize before the un-dispatch (492 us) dominate. Rejected for rows mode; the
+  knob stays (default pairs).
+- 15:10 the 32-row GDN block was WRONG in the verify test (PCC 0.22): `forward_prefill` takes a K-sharded input only when
+  T > TILE (fused norm-AG + in-proj matmul); at T = 32 it expects a replicated input, but the rows mode fed it the
+  prefill-form distributed norm output (post-AG skipped). Fix: at a 32-row block the attention norm runs in decode form
+  (gather-then-norm, replicated). Test + full runs (prose, code, k = 4) requeued behind the k = 3 runs.
+- 15:33 k = 3 (4-row width, 128-row GDN block), prose: 2.29 tokens per pass (k = 4: 2.37); pass 63.7 ms (k = 4, 8 rows:
+  81.0), commit 22.4, drafts 3 x 1.43, rows 1.54 -> 87 ms per pass = 26.2 tok/s (k = 4: 21.8; plain decode 30.6). Half the
+  pairs (32 vs 64) took 17 ms off the pass; the 32-row GDN block should take ~10 ms off the pass and ~10 off the commit.
+- 15:42 k = 3 code: 16 passes for 64 tokens = 4.00 tokens per pass (15 of 16 passes accepted all 3 drafts), 64 / 64 equal
+  to greedy, 71.9 ms per pass -> 55.6 tok/s = 1.8x plain traced decode (30.6). Only one commit in 16 passes (all
+  accepted -> no commit), so the pass (63.7 ms) is the whole cost there.
+- 15:43 the 32-row GDN block still fails (PCC 0.22, every row's argmax identical) with the decode-form norm -> the
+  failure is inside forward_prefill at T = 32 (candidates: out-proj matmul_reduce_scatter at M = 32, fused-out relayout,
+  one-chunk fused scan); bisecting probe (`scripts/14-gdn32-probe.py`) queued.
+- 15:58 probe (`scripts/14-gdn32-probe.py`, GDN layer 0 of the 2-layer generator): `forward_prefill` on a 32-row block
+  with a REPLICATED input matches the 128-row block at PCC 1.00000 (output and state; also with mmrs / fused-out off), so
+  the layer path is fine at T = 32 (this generator has `_fuse_agmm` off: replicated input at every T; a K-sharded input
+  fails at T = 32 as expected). The rows mode passed `chunk_size = 32` to forward_prefill (the probe passed 128): the
+  fused adapter's cached chunk masks are the model's 128 chunk -> keep `args.gdn_chunk_size`. Test requeued.
+- 16:50 probe 2 (rows-mode GDN layer 0 at 32 vs 128 rows, same input): decode-form norm vs prefill-form norm PCC 0.99999,
+  GDN output PCC 1.00000 / state 0.99997 -> both pieces are right; the whole rows call then died with
+  `input_tensor_a.is_allocated()` at the residual add. Root cause of the PCC 0.22: a [1,1,8,H/TP] TILE tensor already
+  spans one 32-row tile, so `ttnn.pad` to 32 rows ALIASES the input, and the decode-form norm frees its input -> the
+  residual x itself was freed (the eager test read a freed buffer: deterministic garbage, identical PCCs across every
+  variant). Fix: clone before padding at a 32-row block. Test + full runs requeued.
+- 17:10 32-row GDN block verify test PASSES (PCC 0.99791, same as the 128-row block). Full model, prose, k = 3, 32-row
+  block: pass 51.9 ms (128-row: 63.7), commit 14.2 (22.4), drafts 3 x 1.41, head rows 1.53 -> 71.5 ms per pass; this run's
+  text took the other side of the token-3 near-tie and accepted 2.00 tokens per pass -> 28.0 tok/s (at the earlier 2.29 it
+  is 32 tok/s: prose is break-even with plain decode at 30.6). Code at k = 3 accepts 4.00 tokens per pass with almost no
+  commits -> ~57 ms per pass -> ~70 tok/s (2.3x). Measurement stops here (per the user: no further full runs unless a
+  decision needs one); defaults set: 32-row GDN block, k = 3, masked K/V writes, gather argmax, scan-only commit. Known
+  remaining lever: overlap the commit (14 ms) with the next pass's drafts (4 ms) on a second command queue (~6 %).

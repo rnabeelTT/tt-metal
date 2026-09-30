@@ -502,6 +502,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
     # ---- routed experts, sorted dispatch (prefill) ----------------------------------------------------------
     def _routed_masked(self, x4, scores, ids, T, chunk):
         if chunk == TILE and 0 < T <= int(self.opt.pairs_max_tokens):
+            if getattr(self, "rows_sorted", False) and self.opt.prefill_mode == "sorted":
+                return self._routed_sorted(x4, scores, ids, T)  # MTP rows mode (see _routed_gather)
             return self._routed_pairs(x4, scores, ids, T)  # decode step wider than the gather limit
         if self.opt.prefill_mode != "sorted" or not (self.opt.sorted_min_tokens <= T <= self.opt.sorted_max_tokens):
             return super()._routed_masked(x4, scores, ids, T, chunk)

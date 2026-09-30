@@ -86,6 +86,18 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
 
+## Status (2026-09-30 17:15): traced step measured, config chosen
+- Traced single-user MTP step (`tt/mtp_traced.py`, 4 traces: pass / GDN scan-only commit / head draft / head rows) on
+  the full model, k = 3 (4-row width), 32-row GDN block: 71.5 ms per pass = pass 51.9 + commit 14.2 (skipped when every
+  draft is accepted) + 3 drafts x 1.41 + head rows 1.53. Prose: 2.0-2.3 tokens per pass -> 28-32 tok/s (plain traced
+  decode 30.6): break-even. Code: 4.0 tokens per pass, ~57 ms per pass -> ~70 tok/s (2.3x). json / chat (3.7 / 3.2 tokens
+  per pass eager) land in between. The pass is a batched decode step over the candidate rows (its cost is the decode-pairs
+  MoE at 4 rows + the GDN prefill form); the day's fixes: head allocated before capture, multi-core argmax (-9 ms), masked
+  per-row K/V writes, scan-only commit (0.72 -> 0.30 ms per GDN layer), 4-row width (-17 ms), 32-row GDN block (-12 / -8 ms).
+  Rejected: expert-sorted MoE for the rows (32-row groups pad 64 pairs to 2048 rows: slower).
+- Next: the serving hook (variable-width block output shim in generator_vllm, see "Plugin route (b)"), then the second
+  command queue overlap of commit and drafts.
+
 ## Status (2026-09-30 11:45)
 - The v1 loop WORKS on the full model: prose k = 4, 2.09 tokens per pass over 48 tokens (acceptance 0:10 1:7 2:1 3:2
   4:3), greedy-equal until a bf16 near-tie. The verify pass is exact up to bf16 numerics (`tools/mtp_pass_check.py`:

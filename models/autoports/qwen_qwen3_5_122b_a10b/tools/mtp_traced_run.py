@@ -19,7 +19,9 @@ MODEL_DIR = "models/autoports/qwen_qwen3_5_122b_a10b"
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompt", default="prose")
-    ap.add_argument("--k", type=int, default=4)
+    ap.add_argument(
+        "--k", type=int, default=3
+    )  # 4 rows = the served decode width; k = 4 (8 rows) costs +17 ms per pass
     ap.add_argument("--new", type=int, default=64)
     ap.add_argument("--layers", default=None)
     ap.add_argument("--profile", type=int, default=0, help="Tracy mode: replay each program N times between signposts")
