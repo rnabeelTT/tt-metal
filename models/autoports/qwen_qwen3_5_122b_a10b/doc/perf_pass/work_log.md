@@ -344,3 +344,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
 - 06:38 chain31 served (`served_undispatch/`): 1 user TTFT p50 274.3 ms (noise; 257.6 in chain29) TPOT 32.0; 32 users
   TTFT p50 7488 ms (8158) TPOT 131.1; direct 8192 / 32768 / 131072 tokens TTFT 2.64 / 10.91 / 50.61 s (2.89 / 11.81 / 54.14),
   completions byte-identical. Shipping: package -> push -> verify from the Hub (13-ship.sh).
+- 06:46 turn-5b bundle: image 1a248468eae8 packaged from bab8b2c662b (no host recompilation needed: only kernel sources
+  changed), pushed private (Hub revision a16fa483); from-Hub verification queued behind the MTP acceptance run.
+- 07:40 turn-5b bundle (image 1a248468eae8, Hub revision a16fa483) verified FROM THE HUB (`logs/13/verify-hub-t5b.log`):
+  healthy in 10.0 min, /v1/models 262144, chat, tool call, tt-model curl default / thinking on / off, non-aligned
+  2381-token prompt, 32-request burst 160.2 tok/s (turn-5a image 155.3, turn 4 137), 131072-token prompt 51.0 s wall
+  (54.5 / 72.6), 8192-token prompt 3.1 s (3.3 / 4.5). Turn 5b shipped.

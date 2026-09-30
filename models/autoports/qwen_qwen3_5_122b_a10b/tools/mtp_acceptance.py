@@ -98,6 +98,10 @@ def main():
         pos = P
         for i in range(args.new):
             tok_i = preds[i]
+            if i % 8 == 0:
+                logger.info(
+                    f"[{name}] replay step {i}/{args.new} pos {pos} accepted so far {sum(accepted)} ({time.time()-t0:.0f}s)"
+                )
             gen.decode_forward(
                 torch.tensor([[tok_i]]),
                 torch.tensor([pos]),
@@ -109,6 +113,10 @@ def main():
             # drafts extend preds[i+1] (the model's next token) at position pos+1
             cur_tok, cur_hid, cur_pos = preds[i + 1], hidden, pos + 1
             drafts = []
+            if i == 0:
+                logger.info(
+                    f"[{name}] first decode step done; hidden {tuple(hidden.shape)} {hidden.dtype}; drafting k={args.k}"
+                )
             for j in range(args.k):
                 tokens_tt, cur_pos_tt, rot_idxs, pt_tt = model.prepare_decode_inputs_host(
                     torch.tensor([cur_tok]), cur_pos, page_table
