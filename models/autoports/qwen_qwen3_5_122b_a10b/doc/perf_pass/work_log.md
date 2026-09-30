@@ -598,3 +598,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   142 ms: break-even at best for prose, ~1.6x for code (4 tokens per pass). Multi-user MTP pays for high-acceptance
   workloads (code / structured output) at <= 8 users and loses elsewhere until the 8-32-row decode MoE gets cheaper
   (the pairs / masked glue that also caps the served 4-16-user decode) and the commit is scan-only (~1/3 of today's).
+- 22:41 MULTI-SLOT SERVING works on the reduced model (QWEN35_MTP=3, --max-num-seqs 2): sequential requests reproduce the
+  single-slot texts, and a concurrent prose + code pair (both slots live: two prefills into slots 0 / 1, then 32 batched
+  passes) returns the same two texts as the sequential requests. The warm-up path needed the GDN prefill scratch bound
+  around its eager prefills (a batched model's [1, ...] state copy into the [B, ...] buffers failed otherwise). The
+  serve script's concurrent block waited on the server process (a plain `wait`) - fixed to wait on the two curls.
+  Multi-user MTP therefore serves end to end, but stays opt-in (the full-model measurements above).
