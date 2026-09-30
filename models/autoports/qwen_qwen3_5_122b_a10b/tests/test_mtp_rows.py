@@ -80,11 +80,13 @@ def test_attention_rows_mode(mesh_device, R, prefix):
         y = layer.forward(x_t, cos, sin, position_tensor=cur_pos_tt, page_table=pt_tt, mode="decode")
         return ttnn.to_torch(y, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float().reshape(-1, H)[:n]
 
-    # prefix: one row per step (plain decode)
+    # every call here carries BW rows of one user (dummies included), so every call needs the per-row K/V write: with
+    # the batched per-user update the dummy rows of the prefix steps race the real row inside its KV tile
+    layer.attention.rows_kv_write = True
+    # prefix: one real row per step
     for t in range(prefix):
         step(x_all[0, t : t + 1], [t])
-    # the verify rows: R positions in ONE call, K/V written one row at a time (rows_kv_write)
-    layer.attention.rows_kv_write = True
+    # the verify rows: R positions in ONE call
     y_rows = step(x_all[0, prefix : prefix + R], list(range(prefix, prefix + R)))
     layer.attention.rows_kv_write = False
     pccs = []
@@ -121,7 +123,7 @@ def test_gdn_rows_cost(mesh_device):
         ttnn.synchronize_device(mesh_device)
         t0 = _time.perf_counter()
         for it in range(10):
-            hm.tt_prefill(hidden, start=start + (it + 1) * T)
+            hm.tt_prefill(hidden, start=start)  # chunk starts must be 128-aligned: re-run the same continuation
         ttnn.synchronize_device(mesh_device)
         results[name] = 1e3 * (_time.perf_counter() - t0) / 10
     x, kw = hm.decode_inputs(_hidden(1, 1, H, seed=3), torch.tensor([2000]))
@@ -134,3 +136,53 @@ def test_gdn_rows_cost(mesh_device):
     ttnn.synchronize_device(mesh_device)
     results["decode_B1"] = 1e3 * (_time.perf_counter() - t0) / 10
     print("GDN_ROWS_COST " + " | ".join(f"{k} {v:.3f} ms" for k, v in results.items()))
+
+
+@pytest.mark.parametrize("mesh_device", [(1, 4)], indirect=True)
+@pytest.mark.parametrize(
+    "device_params", [{"fabric_config": ttnn.FabricConfig.FABRIC_1D, "l1_small_size": 24576}], indirect=True
+)
+@pytest.mark.parametrize("R", [5, 8], ids=["r5", "r8"])
+def test_gdn_rows_mode(mesh_device, R):
+    """GDN layer 0 (real weights, B = 1 state): a 256-token prefill, 3 plain decode steps (the taps advance), then R rows
+    in ONE rows-mode call (`layer_forward_rows`) vs the HF layer's causal prefill over the same 256 + 3 + R rows."""
+    import time as _time
+
+    from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_multichip_decoder import L0, _hidden, _mc
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import layer_forward_rows
+
+    os.environ.setdefault("MESH_DEVICE", "P300x2")
+    BW = 8
+    hm = _mc(mesh_device, L0, batch=1, max_seq_len=8192, real=True, hf=True, max_batch_size=1)
+    H = hm.H
+    P0, D = 256, 3
+    T = P0 + D + R
+    hidden = _hidden(1, T, H, seed=5)
+    y_ref = hm.hf_prefill(hidden).float()
+    hm.tt_prefill(hidden[:, :P0])
+    for t in range(D):
+        x, kw = hm.decode_inputs(hidden[:, P0 + t].reshape(1, 1, H), torch.tensor([P0 + t]))
+        out = hm.tt.decode_forward(x, **kw)
+        ttnn.deallocate(out)
+    layer = hm.tt.layer
+    rows = torch.cat([hidden[0, P0 + D : P0 + D + R], torch.zeros(BW - R, H, dtype=hidden.dtype)], dim=0)
+    x_rows = ttnn.from_torch(
+        rows.reshape(1, 1, BW, H),
+        dtype=ttnn.bfloat16,
+        layout=ttnn.TILE_LAYOUT,
+        device=mesh_device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        mesh_mapper=ttnn.ShardTensorToMesh(mesh_device, dim=-1),
+    )
+    t0 = _time.perf_counter()
+    y = layer_forward_rows(layer, x_rows, R)
+    ttnn.synchronize_device(mesh_device)
+    dt = 1e3 * (_time.perf_counter() - t0)
+    y_dev = ttnn.to_torch(y, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float().reshape(-1, H)[:R]
+    pccs = []
+    for j in range(R):
+        _, pcc = comp_pcc(y_ref[0, P0 + D + j : P0 + D + j + 1], y_dev[j : j + 1], 0.99)
+        pccs.append(pcc)
+        print(f"ROWS gdn R={R} row {j} (pos {P0 + D + j}): PCC {pcc}")
+    print(f"ROWS_GDN R={R}: min PCC {min(pccs):.5f} (rows call {dt:.2f} ms host wall incl. compile)")
+    assert min(pccs) >= 0.99, pccs

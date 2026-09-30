@@ -389,3 +389,18 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   [10, 14, 17, 10, 13]. Summary (k = 4, 64 greedy steps each, `doc/perf_pass/mtp/acceptance_k4_*.json`): prose 2.89,
   code 4.86, json 3.98, chat 3.03 tokens per pass (Qwen3.8 bundle at its k = 4: chat 2.94, code 4.45, json 4.75,
   prose 2.09). Break-even for a verify pass costing c x a decode step is c < tokens/pass; target c ~ 1.5-1.7.
+- 09:48 `test_attention_rows_mode[r5]` PASSES with `rows_kv_write` (min PCC 0.9954 over the 5 rows written in one call):
+  the attention rows mode of the verify pass is validated at prefix 0; prefix-40 variants and the GDN cost test rerun.
+- 09:49 `test_gdn_rows_cost` (GDN layer 0, real weights, eager host wall with sync, 10 iters): prefill chunk T = 32 6.48 ms,
+  T = 128 9.39 ms, decode B = 1 2.11 ms -> the GDN prefill form on a 32-row chunk costs ~3x a GDN decode step per layer;
+  over 36 layers a verify pass lands near ~1.8 decode steps (prose 1.6x, code 2.7x at the measured acceptance) ->
+  build the rows mode with the prefill form first, fuse later.
+- 09:51 rows-mode attention with a 40-position prefix: PCC 0.94-0.97 -> the TEST's prefix steps (one real row + 7
+  dummies per call, batched write) raced too; per-row write for every call in the test; rerun queued. `tt/mtp_rows.py`
+  (`layer_forward_rows`: attention rows via decode + rows_kv_write, GDN rows via the prefill form on a 128-row padded
+  block with valid_len = R and the conv carry rebuilt from the taps, decode-mode ffn norm + pairs MoE) written;
+  `test_gdn_rows_mode` (256-token prefill, 3 decode steps, then R rows) queued.
+- 09:53 `test_gdn_rows_mode`: GDN layer 0 after a 256-token prefill + 3 decode steps, R rows in ONE rows-mode call
+  (prefill form, valid_len = R, conv carry rebuilt from the taps) vs the HF causal prefill: R = 5 min PCC 0.99989,
+  R = 8 0.99859. Both layer kinds now have a validated rows mode; `tt/mtp_verify.py` (whole-model verify pass over R
+  rows with the GDN scratch bound + slot copy, host greedy accept) written; equivalence test vs sequential decode queued.
