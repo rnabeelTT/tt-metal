@@ -201,8 +201,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         self._mtp = None
         mtp_k = int(os.environ.get("QWEN35_MTP", "0") or 0)
         if mtp_k > 0:
-            if B != 1:
-                raise ValueError(f"QWEN35_MTP={mtp_k} serves ONE request at a time: pass --max-num-seqs 1 (got {B})")
+            if B * (mtp_k + 1) > 32:
+                raise ValueError(
+                    f"QWEN35_MTP={mtp_k}: {B} slots x {mtp_k + 1} rows exceed one 32-row pass (max-num-seqs <= {32 // (mtp_k + 1)})"
+                )
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
@@ -446,15 +448,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
 
         logger.info(f"Prefilling {N} request(s) into slots {slots} (lengths {plens})")
         if self._mtp is not None:
-            assert N == 1, "MTP serving prefills one request at a time"
-            self._mtp.begin_prefill(tokens[0, : plens[0]].tolist(), pt[0])
+            for u in range(N):
+                self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
                 out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
             except Exception:
                 self._mtp.abort_prefill()
                 raise
-            tok0 = int(out[0, 0]) if sampler is not None else int(torch.argmax(out[0, -1]).item())
-            self._mtp.end_prefill(tok0, plens[0])
+            tok0 = [int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)]
+            if self._mtp.multi:
+                self._mtp.end_prefill(tok0, plens, slots)
+            else:
+                self._mtp.end_prefill(tok0[0], plens[0])
             self._live_slots |= set(slots)
             return out, torch.zeros(N, dtype=torch.long)
         out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
@@ -541,8 +546,20 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         pos = torch.as_tensor(start_pos).reshape(-1)
         out = torch.full((tokens.numel(), self._mtp.k + 1), -1, dtype=torch.int32)
         live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
-        assert len(live) <= 1, "MTP serving is single-user"
         page_table = kwargs.get("page_table", args[2] if len(args) > 2 else None)
+        if self._mtp.multi:
+            slot_remap = kwargs.get("slot_remap", args[10] if len(args) > 10 else None)
+            if slot_remap is not None:
+                self.model[0]._remap_gdn_slots(slot_remap)
+            emitted = self._mtp.step_multi(pos, page_table, slot_remap=slot_remap)
+            for i in live:
+                ids = emitted[i] if i < len(emitted) else []
+                if ids:
+                    out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
+            self._live_slots = set(live)
+            self._decode_steps = getattr(self, "_decode_steps", 0) + 1
+            return out
+        assert len(live) <= 1, "single-user MTP step got several live rows"
         for i in live:
             row = None
             if page_table is not None:

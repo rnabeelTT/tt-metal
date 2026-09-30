@@ -130,6 +130,18 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   + ~15 ms commit = ~1.9 decode steps -> prose 1.5x, chat 1.6x, json 2.1x, code 2.6x single-user; the fused GDN rows
   kernel is the lever after that.
 
+## Multi-user MTP: measured 2026-09-30 22:30 (blocks 1-5 built, traced step == eager loop token for token)
+- Full model, k = 3: 2 users 116 ms per pass for 4.27 tokens (36.8 tok/s aggregate vs 52.5 plain = 0.70x); 4 users
+  203 ms per pass for 8.0 tokens (39.4 vs 85.6 = 0.46x). The pass is a B x 4-row decode step (the served width-8 /
+  width-16 costs) plus the GDN batched form and a 30-50 ms whole-layer commit; prose-like acceptance does not pay for
+  it. Estimated break-even for prose at 8 users (32-row pass); code (4 tokens per pass) ~1.6x at <= 8 users.
+- Decision: keep multi-user MTP opt-in and off by default (single-user k = 3 remains the served MTP mode). What would
+  flip it: (1) scan-only batched commit (saves ~20-35 ms per pass; the single-user version exists), (2) a cheaper
+  8-32-row decode MoE (the pairs / masked relayout glue), which is the same lever that caps the served 4-16-user
+  decode - do it as a decode optimisation first, then re-measure MTP at 4 / 8 users, (3) exact speculative sampling.
+- Serving plumbing for B slots (`MtpServing.step_multi`, queued prefills, slot remap) is built; validated on the
+  reduced model (see work_log), not measured served on the full model (the traced numbers above bound it).
+
 ## Multi-user MTP (turn started 2026-09-30 20:20)
 Goal: every live user drafts k tokens and is verified in ONE pass per step, then default-on with exact sampling.
 - Rows: B users x R = k + 1 candidate rows, user-major in one decode-layout block of BW = rows_width(B x R) rows (<= 32:

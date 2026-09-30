@@ -579,3 +579,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   tap was a per-call `from_torch` (a host write inside the capture: TT_FATAL !trace_id_ and a hung process) -> it now
   uses the persistent zero source. Reduced model, 2 users, k = 3, N = 16: traced tokens equal to the eager multi loop
   32 / 32, same 15 passes; 9.1 ms per pass (pass 3.8, commit 0.9, 3 drafts x 1.47). Full-model runs (2 and 4 users) queued.
+- 22:10 MULTI-USER block 5 (code, device test queued): `MtpServing` generalised to B = --max-num-seqs slots on top of
+  `MtpTracedMulti` (B == 1 keeps the single-user runner): queued per-request prefills (the served multi-slot prefill runs
+  them in order; the hook pops the next request at chunk_start 0 and keeps that slot's page-table row and first-token
+  hidden), `end_prefill` hands every slot to the runner, `step_multi` maps the plugin's [B_pad] positions / page tables
+  / slot_remap onto the slots (a slot the plugin considers live without a prefill here = its warm-up dummy step: run
+  as a phantom slot), the adapter emits the per-slot rows. Serve script: SEQS (max-num-seqs), CONC=1 fires prose + code
+  together.
+- 22:30 FULL-MODEL multi-user traced step (k = 3, N = 32 per user, real head drafts; traced == eager token for token):
+    2 users (8-row pass):  pass 82.0 ms, commit 31.6 (12 / 15 passes), drafts 3 x 1.56, rows 1.9 -> 116 ms per pass,
+                           4.27 tokens per pass -> 36.8 tok/s aggregate; plain 2-user decode 38.1 ms/step = 52.5 tok/s (0.70x)
+    4 users (16-row pass): pass 143.6 ms, commit 49.5 (16 / 16), drafts 3 x 1.72, rows 2.7 -> 203 ms per pass,
+                           8.00 tokens per pass -> 39.4 tok/s; plain 4-user decode 46.7 ms/step = 85.6 tok/s (0.46x)
+  Reading: the pass costs like a served decode step of B x 4 rows (8 rows ~ 67.7 ms + GDN form + K/V rows; 16 rows ~
+  107 ms + ...), and the batched whole-layer commit adds 30-50 ms, while prose-like acceptance (~2.1 tokens per user per
+  pass) only buys ~2.1 plain steps of width B (76 / 93 ms). The weight-amortisation argument holds only where the
+  decode step is bandwidth-bound and nearly flat in rows: 8 users -> 32-row pass (~125 ms + commit) vs 2.1 x 67.7 =
+  142 ms: break-even at best for prose, ~1.6x for code (4 tokens per pass). Multi-user MTP pays for high-acceptance
+  workloads (code / structured output) at <= 8 users and loses elsewhere until the 8-32-row decode MoE gets cheaper
+  (the pairs / masked glue that also caps the served 4-16-user decode) and the commit is scan-only (~1/3 of today's).
