@@ -30,8 +30,9 @@ def rebuild_conv_carry(dn):
     ttnn.deallocate(window)
 
 
-def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None, page_table=None):
-    """x: decode-layout block [1, 1, BW, dim/TP] (rows 0..R-1 real). Returns the same layout."""
+def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None, page_table=None, saved=None):
+    """x: decode-layout block [1, 1, BW, dim/TP] (rows 0..R-1 real). Returns the same layout. With `saved` (a list), a GDN
+    layer appends its 128-row normed input instead of freeing it, for the GDN-only commit (`mtp_verify.commit_gdn`)."""
     BW = x.shape[2]
     assert 1 <= R <= BW <= 32, (R, BW)
     if layer.is_full_attention:
@@ -51,7 +52,10 @@ def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None,
     dn = layer.attention
     rebuild_conv_carry(dn)
     out128 = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=R, capture_state=True)
-    ttnn.deallocate(attn_in)
+    if saved is not None:
+        saved.append(attn_in)
+    else:
+        ttnn.deallocate(attn_in)
     attn_out = ttnn.slice(out128, (0, 0, 0, 0), (1, 1, BW, out128.shape[-1]))
     ttnn.deallocate(out128)
     h = ttnn.add(x, attn_out)

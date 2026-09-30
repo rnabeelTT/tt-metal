@@ -404,3 +404,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   (prefill form, valid_len = R, conv carry rebuilt from the taps) vs the HF causal prefill: R = 5 min PCC 0.99989,
   R = 8 0.99859. Both layer kinds now have a validated rows mode; `tt/mtp_verify.py` (whole-model verify pass over R
   rows with the GDN scratch bound + slot copy, host greedy accept) written; equivalence test vs sequential decode queued.
+- 09:55 `test_attention_rows_mode` all variants pass with the per-row K/V write: R = 5 prefix 0 / 40 and R = 8 prefix 40
+  min PCC 0.9954 / 0.9962 / 0.9962 (the shipped-policy layer figure).
+- 09:57 `test_verify_pass_matches_sequential_decode` (2-layer generator): the whole-model verify pass over 5 rows vs the
+  same 5 tokens decoded one per step: per-row logits PCC 0.9979-0.9995, argmax 4 / 5 (a near-tie on the 2-layer model's
+  near-uniform logits). v1 MTP loop (`mtp_generate_eager`: draft k, verify pass, host greedy accept, exact GDN commit by
+  re-running the accepted prefix, head KV over the accepted rows) written; reduced-model mechanics test and the
+  full-model greedy-equivalence tool (`tools/mtp_generate_full.py`) queued.

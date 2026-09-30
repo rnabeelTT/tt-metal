@@ -86,6 +86,19 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
 
+## Status (2026-09-30 10:00) and the commit design
+- Done: head (bfp8 attention) PCC 0.99; acceptance measured; rows mode per layer validated (attention: per-row K/V
+  write, PCC 0.995-0.996; GDN: prefill form with the carried state, PCC 0.9986-0.9999); whole-model verify pass over 5
+  rows = sequential decode at PCC 0.998-0.9995 (`tt/mtp_rows.py`, `tt/mtp_verify.py`); v1 eager loop
+  (`mtp_generate_eager`) under test vs plain greedy.
+- Exact GDN commit without a second full pass: the accepted rows 0..a of a verify pass have exactly the activations the
+  pass computed (causality), so the commit only needs the GDN layers replayed on the pass's saved normed inputs with
+  `valid_len = a + 1` (36 x [1,1,128,H] bf16 = 27 MB kept per pass; the valid_len mask is a device tensor -> trace-safe).
+  Cost ~ the GDN share of a pass (~15 ms traced estimate) instead of a whole second pass; skipped when a == k.
+- Estimated traced pass: ~32 ms (48 layers in rows mode, decode-like) + ~15 ms (GDN prefill form over decode-form)
+  + ~15 ms commit = ~1.9 decode steps -> prose 1.5x, chat 1.6x, json 2.1x, code 2.6x single-user; the fused GDN rows
+  kernel is the lever after that.
+
 ## Milestones and gates
 1. Host reference: torch MTP head forward on CPU vs the checkpoint (draft acceptance rate on the book/AIME prompts, k=1..4)
    -> expected tokens per step. 2. TT MTP layer PCC vs the reference (stage-1 style test). 3. Width-R verify + device accept
