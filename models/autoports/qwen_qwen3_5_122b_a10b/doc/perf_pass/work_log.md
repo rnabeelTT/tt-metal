@@ -567,3 +567,7 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   padded to a served width with -1 masks, next-draft hidden per user by a one-hot selection). Test (2-layer generator,
   B = 2, k = 3, N = 12, forced-greedy drafts): user 0 equal to greedy 12 / 12, user 1 9 / 12 (a repeated token ended one
   step early: the 2-layer model's near-tie), 5 passes for 24 tokens.
+- 21:11 MULTI-USER block 3: `RowsLen` (device-resident per-user row counts: [B,T,1] masks + [B,K-1,T+K-1] conv one-hots,
+  staged by host copies) accepted by the fused chunk adapter (B > 1 device masks) and the conv FIR (already batched):
+  the batched verify pass with RowsLen matches the host-length path exactly (PCC 0.99903, 8 / 8) - the traced multi-user
+  pass and commit can now stage their lengths without host allocations.

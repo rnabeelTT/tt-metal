@@ -21,6 +21,46 @@ from models.tt_transformers.tt.common import Mode
 GDN_T = 32  # the batched chunk form's row block per user (one tile; the fused chunk kernel's native chunk)
 
 
+class RowsLen:
+    """Device-resident per-user row counts of one batched GDN rows block (the multi-user analogue of PrefillLen):
+    mask_f32 / mask_q [B, T, 1] (1.0 for rows < len_u) and conv_sel [B, K-1, T+K-1] (one-hot rows selecting the last
+    K-1 real conv inputs of every user). `stage(lens)` is a host -> device copy (no allocation: trace-safe)."""
+
+    def __init__(self, mesh_device, B: int, T: int, conv_k: int, q_dtype=ttnn.bfloat16):
+        self.mesh, self.B, self.bucket, self.K = mesh_device, int(B), int(T), int(conv_k)
+        z = lambda *shape: torch.zeros(*shape, dtype=torch.float32)
+        dev = lambda t, dt: ttnn.from_torch(
+            t,
+            dtype=dt,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+        )
+        self.mask_f32 = dev(z(self.B, self.bucket, 1), ttnn.float32)
+        self.mask_q = dev(z(self.B, self.bucket, 1), q_dtype)
+        self.conv_sel = dev(z(self.B, self.K - 1, self.bucket + self.K - 1), ttnn.bfloat16)
+        self.lens = None
+
+    def stage(self, lens):
+        lens = [int(v) for v in lens]
+        assert len(lens) == self.B and all(1 <= v <= self.bucket for v in lens), (lens, self.B, self.bucket)
+        m = torch.zeros(self.B, self.bucket, 1, dtype=torch.float32)
+        sel = torch.zeros(self.B, self.K - 1, self.bucket + self.K - 1, dtype=torch.float32)
+        for b, n in enumerate(lens):
+            m[b, :n, 0] = 1.0
+            for j in range(self.K - 1):
+                sel[b, j, n + j] = 1.0  # x[i] sits at padded index (K-1)+i: the window x[n-K+1 .. n-1]
+        host = lambda t, dt: ttnn.from_torch(t, dtype=dt, layout=ttnn.TILE_LAYOUT)
+        ttnn.copy_host_to_device_tensor(host(m, ttnn.float32), self.mask_f32)
+        ttnn.copy_host_to_device_tensor(host(m, self.mask_q.dtype), self.mask_q)
+        ttnn.copy_host_to_device_tensor(host(sel, ttnn.bfloat16), self.conv_sel)
+        self.lens = lens
+
+    def __lt__(self, other):  # the adapter compares an int valid_len against T; a RowsLen takes the device path first
+        return NotImplemented
+
+
 def rebuild_batched_conv_carry(dn):
     """dn._batched_conv_carry [B, K-1, D] = the decode conv taps conv_states[1..K-1] ([1, B, D] each), oldest first."""
     B = dn.conv_states[1].shape[1]
@@ -78,7 +118,8 @@ def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None):
     ttnn.deallocate(n2)
     xb = ttnn.reshape(xb_flat, (B, GDN_T, H))
     rebuild_batched_conv_carry(dn)
-    out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=list(valid_lens), carry=True)
+    vl = valid_lens if isinstance(valid_lens, RowsLen) else list(valid_lens)
+    out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=vl, carry=True)
     if saved is not None:
         saved.append(xb_flat)  # the commit replays the layer on this block with the accepted lengths
     elif xb_flat.is_allocated():
@@ -115,9 +156,8 @@ def commit_multi(model, snap, saved_xb, accepted_lens):
         H = xb_flat.shape[-1]
         xb = ttnn.reshape(xb_flat, (B, GDN_T, H))
         rebuild_batched_conv_carry(dn)
-        out = dn.forward_prefill_batched(
-            xb, chunk_size=int(layer.args.gdn_chunk_size), valid_lens=list(accepted_lens), carry=True
-        )
+        vl = accepted_lens if isinstance(accepted_lens, RowsLen) else list(accepted_lens)
+        out = dn.forward_prefill_batched(xb, chunk_size=int(layer.args.gdn_chunk_size), valid_lens=vl, carry=True)
         ttnn.deallocate(out)
 
 
@@ -180,7 +220,7 @@ def select_rows(h_block, row_ids, H):
     return out
 
 
-def verify_pass_multi(model, rows_per_user, positions_per_user, page_table_rows, *, bw=None, saved=None):
+def verify_pass_multi(model, rows_per_user, positions_per_user, page_table_rows, *, bw=None, saved=None, rows_len=None):
     """rows_per_user: list over B users of R token ids; positions_per_user: list over B users of R positions;
     page_table_rows: torch [B, blocks]. Returns (hidden [1,1,BW,H] replicated, logits [1,1,BW,V/TP] vocab-sharded,
     R). Row u * R + i is user u's candidate i."""
@@ -220,7 +260,7 @@ def verify_pass_multi(model, rows_per_user, positions_per_user, page_table_rows,
                 att.rows_kv_write = False
                 att.rows_pos_masks = None
         else:
-            y = _gdn_rows_batched(layer, x, B, R, [R] * B, saved=saved)
+            y = _gdn_rows_batched(layer, x, B, R, rows_len if rows_len is not None else [R] * B, saved=saved)
         ttnn.deallocate(x)
         x = y
     h = model._final_norm_decode(x)

@@ -151,7 +151,9 @@ def chunk_gated_delta_rule_fused_adapter(
     if _dev_len:
         # PrefillLen: persistent [1,T,1] masks staged by the caller — no host write, fixed program for any length
         # (the mask is all ones for a full bucket; the multiplies are then exact identities).
-        assert B == 1 and valid_len.bucket == T and len(q.shape) == 3, (B, valid_len, T, tuple(q.shape))
+        # PrefillLen (B = 1, [1,T,1] masks) or a batched RowsLen ([B,T,1] masks: the multi-user MTP rows pass)
+        assert valid_len.bucket == T and len(q.shape) == 3, (B, valid_len, T, tuple(q.shape))
+        assert valid_len.mask_f32.shape[0] in (1, B), (tuple(valid_len.mask_f32.shape), B)
         _dram = ttnn.DRAM_MEMORY_CONFIG
         beta = ttnn.multiply(beta, valid_len.mask_f32, memory_config=_dram)
         g = ttnn.multiply(g, valid_len.mask_f32, memory_config=_dram)

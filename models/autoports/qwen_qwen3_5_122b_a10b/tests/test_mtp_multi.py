@@ -69,23 +69,39 @@ def test_multi_user_verify_pass_matches_batched_decode(mesh_device):
             if i + 1 < R:
                 rows[u].append(int(lg.argmax().item()))
     restore_gdn_state(model, snap)
+    # the batched verify pass over the same R tokens of both users: host per-row lengths, then the device-resident
+    # RowsLen masks the traced pass will use (both must match the batched decode)
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_multi import GDN_T, RowsLen
+
+    dn0 = next(l.attention for l in model.layers if not l.is_full_attention)
+    rl = RowsLen(mesh_device, B, GDN_T, dn0.K)
+    rl.stage([R] * B)
+    for tag, rows_len in (("host lengths", None), ("device RowsLen", rl)):
+        if rows_len is not None:
+            snap2 = snapshot_gdn_state(model)  # the first pass advanced the state: restore for the second
+        h, lg_tt, _ = verify_pass_multi(
+            model, rows, [[P[u] + i for i in range(R)] for u in range(B)], gen.page_table[:B], rows_len=rows_len
+        )
+        lg = ttnn.to_torch(lg_tt, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
+        lg = lg.reshape(-1, lg.shape[-1])[:, :V]
+        ttnn.deallocate(lg_tt)
+        ttnn.deallocate(h)
+        pccs, agree = [], 0
+        for u in range(B):
+            for i in range(R):
+                _, pcc = comp_pcc(ref[u][i], lg[u * R + i], 0.98)
+                pccs.append(pcc)
+                same = int(lg[u * R + i].argmax().item()) == int(ref[u][i].argmax().item())
+                agree += int(same)
+                print(
+                    f"MULTI [{tag}] user {u} row {i} (pos {P[u] + i}): PCC {pcc:.5f} argmax {'ok' if same else 'DIFF'}"
+                )
+        print(f"MULTI_VERIFY [{tag}] B={B} R={R}: min PCC {min(pccs):.5f} argmax agreement {agree}/{B * R}")
+        assert min(pccs) >= 0.98, (tag, pccs)
+        if rows_len is None:
+            restore_gdn_state(model, snap)  # back to the post-prefill state for the second variant
+    free_gdn_snapshot(snap2)
     free_gdn_snapshot(snap)
-    # the batched verify pass over the same R tokens of both users
-    h, lg_tt, _ = verify_pass_multi(model, rows, [[P[u] + i for i in range(R)] for u in range(B)], gen.page_table[:B])
-    lg = ttnn.to_torch(lg_tt, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
-    lg = lg.reshape(-1, lg.shape[-1])[:, :V]
-    ttnn.deallocate(lg_tt)
-    ttnn.deallocate(h)
-    pccs, agree = [], 0
-    for u in range(B):
-        for i in range(R):
-            _, pcc = comp_pcc(ref[u][i], lg[u * R + i], 0.98)
-            pccs.append(pcc)
-            same = int(lg[u * R + i].argmax().item()) == int(ref[u][i].argmax().item())
-            agree += int(same)
-            print(f"MULTI user {u} row {i} (pos {P[u] + i}): PCC {pcc:.5f} argmax {'ok' if same else 'DIFF'}")
-    print(f"MULTI_VERIFY B={B} R={R}: min PCC {min(pccs):.5f} argmax agreement {agree}/{B * R}")
-    assert min(pccs) >= 0.98, pccs
 
 
 @pytest.mark.parametrize("mesh_device", [(1, 4)], indirect=True)
