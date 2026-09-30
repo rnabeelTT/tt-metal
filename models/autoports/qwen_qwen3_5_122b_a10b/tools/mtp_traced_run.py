@@ -22,6 +22,7 @@ def main():
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--new", type=int, default=64)
     ap.add_argument("--layers", default=None)
+    ap.add_argument("--profile", type=int, default=0, help="Tracy mode: replay each program N times between signposts")
     args = ap.parse_args()
     from transformers import AutoTokenizer
 
@@ -31,15 +32,24 @@ def main():
         mesh_shape=ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=512 * 1024 * 1024
     )
     layer_indices = [int(s) for s in args.layers.split(",")] if args.layers else None
+
+    def flush():
+        # Tracy: the device profiler buffers hold a few hundred ops; read them out at every stage boundary
+        if args.profile:
+            ttnn.synchronize_device(mesh)
+            ttnn.ReadDeviceProfiler(mesh)
+
     gen = build_generator(
         MODEL_DIR,
         mesh,
         max_seq_len=4096,
         warm_decode_trace=False,
         warm_prefill_trace=False,
+        warm_prefill=not args.profile,  # profile: fewer warm-up ops (programs compile at first use, before any capture)
         layer_indices=layer_indices,
         mtp_head=True,
     )
+    flush()
     head = gen.mtp_head
     ids = tok(PROMPTS[args.prompt], add_special_tokens=False)["input_ids"]
     t0 = time.time()
@@ -49,25 +59,51 @@ def main():
 
     # prefill + head prompt rows (eager), then the traced step: warm (compiles) -> capture -> loop
     tok0, hid_last, P = prefill_with_head(gen, head, ids)
+    flush()
     runner = MtpTraced(gen, head, args.k)
     ttnn.copy(hid_last, runner.d_hid)
     ttnn.deallocate(hid_last)
     t0 = time.time()
-    runner.warm()
+    runner.warm(flush=flush)
     logger.info(f"warm (eager compile of the 4 programs) {time.time() - t0:.1f}s")
     # the warm run advanced the state / KV with dummy rows: redo the prefill so the loop starts from the prompt state
     tok0, hid_last, P = prefill_with_head(gen, head, ids)
+    flush()
     ttnn.copy(hid_last, runner.d_hid)
     ttnn.deallocate(hid_last)
     t0 = time.time()
-    runner.capture()
+    runner.capture(flush=flush)
     logger.info(f"captured 4 traces in {time.time() - t0:.1f}s")
     # the captures also ran the programs once: prefill again for the measured loop
     tok0, hid_last, P = prefill_with_head(gen, head, ids)
+    flush()
     ttnn.copy(hid_last, runner.d_hid)
     ttnn.deallocate(hid_last)
     for v in runner.timing.values():
         v.clear()
+    if args.profile:
+        from tracy import signpost
+
+        n = args.profile
+        rows = [tok0] + [tok0 + 1 + j for j in range(args.k)]
+        for name, fn in (
+            ("PASS", lambda: runner.verify(rows, P)),
+            ("COMMIT", lambda: runner.commit(3)),
+            ("DRAFT", lambda: runner.draft(tok0, P)),
+            ("ROWS", lambda: runner.head_rows(rows[1:], P)),
+        ):
+            fn()  # one un-signposted replay first
+            flush()
+            signpost(f"MTP_{name}_MESH")
+            for _ in range(n):
+                fn()
+                flush()
+            signpost(f"MTP_{name}_MESH_END")
+        print(f"MTP_PROFILE done: {n} replays per program; walls {runner.timing_summary()}", flush=True)
+        flush()
+        runner.release()
+        ttnn.close_mesh_device(mesh)
+        return
     t0 = time.time()
     mtp, passes, hist = runner.generate(tok0, P, args.new, log=logger.info)
     t_mtp = time.time() - t0

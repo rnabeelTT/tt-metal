@@ -116,3 +116,11 @@ def test_mtp_generate_matches_greedy(mesh_device):
         f"MTP_GENERATE forced-greedy drafts: passes {passes_f} ({N / passes_f:.2f} tokens per pass), equal {agree_f}/{N}"
     )
     assert passes_f < N, "the verify pass accepted none of the greedy continuation"
+    # the scan-only GDN commit (conv FIR + chunk scan on the pass's saved inputs) must reproduce the re-run commit
+    head.allocate_kv_cache(kv_shape)
+    forced_c, passes_c = mtp_generate_eager(
+        gen, head, ids, N, k, log=logger.info, gdn_commit=True, draft_fn=lambda toks: greedy[len(toks) : len(toks) + k]
+    )
+    same = sum(int(a == b) for a, b in zip(forced, forced_c))
+    print(f"MTP_GENERATE forced-greedy + scan commit: passes {passes_c}, tokens equal to the re-run commit {same}/{N}")
+    assert same >= N - 2, (forced, forced_c)

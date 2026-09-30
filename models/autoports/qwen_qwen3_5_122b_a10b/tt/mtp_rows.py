@@ -15,10 +15,16 @@ The caller owns the state binding (the GDN prefill scratch holds the user's slot
 """
 from __future__ import annotations
 
+import os
+
+import torch
+
 import ttnn
 from models.tt_transformers.tt.common import Mode
 
-GDN_CHUNK = 128
+# GDN block rows of the rows mode. 128 = the model's prefill chunk (every prefill program config is built for it); 32 = the
+# fused chunk kernel's native chunk (QWEN35_MTP_GDN_ROWS=32 to try the smaller block: less padding work per pass).
+GDN_CHUNK = int(os.environ.get("QWEN35_MTP_GDN_ROWS", "128"))
 
 
 def rebuild_conv_carry(dn):
@@ -30,10 +36,62 @@ def rebuild_conv_carry(dn):
     ttnn.deallocate(window)
 
 
-def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None, page_table=None, saved=None):
+def rows_width(R: int) -> int:
+    """Decode-layout width for R real rows: the smallest served decode width (power of two, >= 2) that holds them. Every
+    dummy row costs MoE work (T x k pairs), so k = 3 (R = 4 -> width 4) halves the MoE of a pass vs k = 4 (R = 5 -> 8).
+    """
+    bw = 2
+    while bw < R:
+        bw *= 2
+    return bw
+
+
+def rows_pos_masks_host(positions, bw):
+    """Host [bw, bw] int32 for `TPAttention.rows_pos_masks`: row b = -1 everywhere except [b, b] = positions[b] (the
+    paged K/V update skips users at index -1, so one call per row writes exactly that row)."""
+    m = torch.full((bw, bw), -1, dtype=torch.int32)
+    for b, p in enumerate(positions):
+        m[b, b] = int(p)
+    return ttnn.from_torch(m, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT)
+
+
+def layer_forward_rows(
+    layer,
+    x,
+    R,
+    *,
+    cos=None,
+    sin=None,
+    position_tensor=None,
+    page_table=None,
+    saved=None,
+    rows_pos_masks=None,
+    gdn_index=0,
+):
     """x: decode-layout block [1, 1, BW, dim/TP] (rows 0..R-1 real). Returns the same layout. With `saved` (a list), a GDN
     layer appends its 128-row normed input instead of freeing it, for the GDN-only commit (`mtp_verify.commit_gdn`)."""
     BW = x.shape[2]
+    # QWEN35_MTP_MOE_ROWS=sorted: routed experts through the expert-sorted path (see Qwen35MoEOptimized._routed_gather)
+    layer.feed_forward.rows_sorted = os.environ.get("QWEN35_MTP_MOE_ROWS", "pairs") == "sorted"
+    try:
+        return _layer_forward_rows(
+            layer,
+            x,
+            R,
+            BW,
+            cos=cos,
+            sin=sin,
+            position_tensor=position_tensor,
+            page_table=page_table,
+            saved=saved,
+            rows_pos_masks=rows_pos_masks,
+            gdn_index=gdn_index,
+        )
+    finally:
+        layer.feed_forward.rows_sorted = False
+
+
+def _layer_forward_rows(layer, x, R, BW, *, cos, sin, position_tensor, page_table, saved, rows_pos_masks, gdn_index):
     # R: the real row count (host int; the GDN kernels then build their masks with a host write) or a device-resident
     # `PrefillLen` (bucket 128) staged by the caller: the traced pass needs the latter (no host write inside a capture)
     R_int = R if isinstance(R, int) else BW
@@ -41,10 +99,13 @@ def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None,
     if layer.is_full_attention:
         att = layer.attention
         att.rows_kv_write = True
+        # QWEN35_MTP_KV_ROWMASK=0: the older per-row slice / reshard write (A/B baseline)
+        att.rows_pos_masks = rows_pos_masks if os.environ.get("QWEN35_MTP_KV_ROWMASK", "1") == "1" else None
         try:
             return layer.forward(x, cos, sin, position_tensor=position_tensor, page_table=page_table, mode="decode")
         finally:
             att.rows_kv_write = False
+            att.rows_pos_masks = None
     # ---- GDN layer: prefill form on a 128-row padded block
     args = layer.args
     x128 = ttnn.pad(x, [(0, 0), (0, 0), (0, GDN_CHUNK - BW), (0, 0)], value=0.0)
@@ -54,11 +115,18 @@ def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None,
     ttnn.deallocate(x128)
     dn = layer.attention
     rebuild_conv_carry(dn)
-    out128 = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=R, capture_state=True)
+    sink = None
     if saved is not None:
-        saved.append(attn_in)
-    else:
-        ttnn.deallocate(attn_in)
+        # the commit re-runs only the conv FIR + chunk scan on these (see TPGatedDeltaNet.commit_scan); `saved` holds one
+        # dict per GDN layer: pre-created dicts of persistent buffers are copied into (traced pass), missing entries are
+        # appended and filled with clones (eager pass)
+        if len(saved) > gdn_index:
+            sink = saved[gdn_index]
+        else:
+            sink = {}
+            saved.append(sink)
+    out128 = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=R, capture_state=True, scan_sink=sink)
+    ttnn.deallocate(attn_in)
     attn_out = ttnn.slice(out128, (0, 0, 0, 0), (1, 1, BW, out128.shape[-1]))
     ttnn.deallocate(out128)
     h = ttnn.add(x, attn_out)

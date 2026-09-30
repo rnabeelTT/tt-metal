@@ -18,12 +18,19 @@ writes, the `PrefillLen.stage` mask writes and the argmax read-backs. Host greed
 """
 from __future__ import annotations
 
+import os
 import time
 
 import torch
 
 import ttnn
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import GDN_CHUNK, layer_forward_rows, rebuild_conv_carry
+from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import (
+    GDN_CHUNK,
+    layer_forward_rows,
+    rebuild_conv_carry,
+    rows_pos_masks_host,
+    rows_width,
+)
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_len import PrefillLen
 
 _DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -44,7 +51,8 @@ def _host_i32(vals, shape):
 
 
 class MtpTraced:
-    def __init__(self, gen, head, k: int, bw: int = 8):
+    def __init__(self, gen, head, k: int, bw: int | None = None):
+        bw = bw or rows_width(k + 1)
         assert 1 <= k < bw <= 32
         self.gen, self.head, self.k, self.BW = gen, head, int(k), int(bw)
         self.model = gen.model
@@ -63,10 +71,11 @@ class MtpTraced:
             torch.zeros(BW, dtype=torch.int32), torch.zeros(BW, dtype=torch.int32), self.page_table.repeat(BW, 1)
         )
         self.p_tok, self.p_pos, self.p_rot, self.p_pt = dev(tok), dev(pos), dev(rot), dev(pt)
+        self.p_masks = dev(rows_pos_masks_host([0] * BW, BW))  # per-row K/V write positions (-1 = skip)
         self.plen = PrefillLen(self.mesh, GDN_CHUNK, K)  # valid rows of the pass (R)
         self.plen_commit = PrefillLen(self.mesh, GDN_CHUNK, K)  # accepted rows (a + 1)
         # ---- persistent pass outputs / commit inputs
-        self.saved = [None] * len(self.gdn_layers)  # 128-row normed GDN inputs, allocated at the warm run
+        self.saved = [{} for _ in self.gdn_layers]  # per GDN layer: persistent scan inputs (filled at the warm run)
         self.snap_rec = [ttnn.clone(dn.rec_state) for dn in self.dn_layers]
         self.snap_conv = [[ttnn.clone(c) for c in dn.conv_states] for dn in self.dn_layers]
         self.h_out = None  # [1,1,BW,H] replicated
@@ -103,8 +112,15 @@ class MtpTraced:
     # ------------------------------------------------------------------------------------------------ programs
     def _argmax_max(self, logits):
         """Per-shard argmax + max over the vocab dim of [1,1,B,V/TP] (read back by the host, combined across shards)."""
-        am = ttnn.argmax(logits, dim=-1, keepdim=True)  # [1,1,B,1] uint32
-        mx = ttnn.max(logits, dim=-1, keepdim=True)  # [1,1,B,1]
+        # argmax on a TILE input is single-core (9.2 ms for 8 x 62080!); the ROW_MAJOR path is multi-core
+        lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT)
+        am = ttnn.argmax(lg_rm, dim=-1, keepdim=True)  # [1,1,B,1] uint32
+        if os.environ.get("QWEN35_MTP_ARGMAX_MODE", "gather") == "gather":
+            # the winning value by a gather at the argmax index (ttnn.max over the tile logits cost 244 us)
+            mx = ttnn.gather(lg_rm, -1, am)  # [1,1,B,1] (gather takes UINT32 / UINT16 indices; argmax gives UINT32)
+        else:
+            mx = ttnn.max(logits, dim=-1, keepdim=True)  # [1,1,B,1]
+        ttnn.deallocate(lg_rm)
         return am, mx
 
     def _pass_body(self):
@@ -119,19 +135,25 @@ class MtpTraced:
         x = m.embd(tok)
         x = ttnn.reshape(x, (1, 1, BW, x.shape[-1]))
         x = ttnn.to_memory_config(x, _DRAM)
-        saved = []
+        gi = 0
         for layer in m.layers:
+            # GDN layers copy their scan inputs into self.saved[gi] (persistent after the first warm run)
             y = layer_forward_rows(
-                layer, x, self.plen, cos=cos, sin=sin, position_tensor=self.p_pos, page_table=self.p_pt, saved=saved
+                layer,
+                x,
+                self.plen,
+                cos=cos,
+                sin=sin,
+                position_tensor=self.p_pos,
+                page_table=self.p_pt,
+                saved=self.saved,
+                rows_pos_masks=self.p_masks,
+                gdn_index=gi,
             )
+            if not layer.is_full_attention:
+                gi += 1
             ttnn.deallocate(x)
             x = y
-        for i, t in enumerate(saved):
-            if self.saved[i] is None:
-                self.saved[i] = t  # first (warm) run: adopt the tensors as the persistent buffers
-            else:
-                ttnn.copy(t, self.saved[i])
-                ttnn.deallocate(t)
         h = m._final_norm_decode(x)
         ttnn.deallocate(x)
         logits = ttnn.linear(h, m.lm_head_weight, compute_kernel_config=m._lm_head_ckc())
@@ -151,11 +173,10 @@ class MtpTraced:
             ttnn.copy(rec, dn.rec_state)
             for t, c in zip(taps, dn.conv_states):
                 ttnn.copy(t, c)
-        for layer, attn_in in zip(self.gdn_layers, self.saved):
+        for layer, sink in zip(self.gdn_layers, self.saved):
             dn = layer.attention
             rebuild_conv_carry(dn)
-            out = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=self.plen_commit, capture_state=True)
-            ttnn.deallocate(out)
+            dn.commit_scan(sink, self.plen_commit)  # conv FIR (taps) + chunk scan only
         return ()
 
     def _draft_body(self):
@@ -187,8 +208,9 @@ class MtpTraced:
         ttnn.deallocate(picked)
 
     # ------------------------------------------------------------------------------------------------ warm / capture
-    def warm(self):
-        """Eager run of every program once (compiles them; allocates the persistent outputs)."""
+    def warm(self, flush=None):
+        """Eager run of every program once (compiles them; allocates the persistent outputs). `flush()` (optional) runs
+        between programs (the Tracy tool reads the device profiler there: its buffers hold a few hundred ops)."""
         self.plen.stage(self.k + 1)
         self.plen_commit.stage(1)
         # the pass runs twice: the first run adopts its outputs as the persistent buffers, the second compiles the copies
@@ -205,10 +227,12 @@ class MtpTraced:
             outs = body()
             for t in outs:
                 ttnn.deallocate(t)
+            if flush:
+                flush()
         self._select_hidden(0)
         ttnn.synchronize_device(self.mesh)
 
-    def capture(self):
+    def capture(self, flush=None):
         for name, body in (
             ("pass", self._pass_body),
             ("commit", self._commit_body),
@@ -220,6 +244,8 @@ class MtpTraced:
             ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
             self.traces[name] = tid
             self.outs[name] = outs
+            if flush:
+                flush()
         ttnn.synchronize_device(self.mesh)
 
     def release(self):
@@ -271,6 +297,7 @@ class MtpTraced:
         self._write(self.p_tok, _host_u32(list(rows) + [0] * (BW - R), (1, 1, 1, S)))
         self._write(self.p_pos, _host_i32(positions, (BW,)))
         self._write(self.p_rot, _host_u32(positions, (1, BW)))
+        self._write(self.p_masks, rows_pos_masks_host(positions, BW))
         self.plen.stage(R)
         return self._run("pass")[:R]
 

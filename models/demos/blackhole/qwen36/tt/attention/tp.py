@@ -633,20 +633,38 @@ class TPAttention:
                 # MTP verify "rows" mode: the B rows are consecutive positions of ONE user (same page-table row). The
                 # per-user update modifies one row inside a cache tile per core, so B rows in the same 32-position tile
                 # would race (last writer wins); write them one row at a time instead (B <= 8 small ops per K / V).
-                ttnn.deallocate(k_sh)
-                ttnn.deallocate(v_sh)
-                _cfg1 = self._kv_shard_cfg(1)
-                for b in range(B):
-                    pos_b = ttnn.slice(cur_pos_tt, (b,), (b + 1,))
-                    pt_b = ttnn.slice(page_table, (b, 0), (b + 1, page_table.shape[-1]))
-                    for cache, src in ((keys, k_p), (values, v_p)):
-                        row = ttnn.slice(src, (0, b, 0, 0), (1, b + 1, 32, HD), memory_config=_L1)
-                        row_sh = ttnn.to_memory_config(row, _cfg1)
-                        ttnn.deallocate(row)
-                        ttnn.experimental.paged_update_cache(cache, row_sh, update_idxs_tensor=pos_b, page_table=pt_b)
-                        ttnn.deallocate(row_sh)
-                    ttnn.deallocate(pos_b)
-                    ttnn.deallocate(pt_b)
+                _masks = getattr(self, "rows_pos_masks", None)  # [B, B] int32: row b = -1 except [b, b] = position b
+                if _masks is not None:
+                    # One update call per row on the FULL sharded K / V: the kernel skips every user whose index is -1,
+                    # so each call writes one row (no per-row slice / reshard: 2 ops per row instead of ~10).
+                    for b in range(B):
+                        pos_b = ttnn.reshape(ttnn.slice(_masks, (b, 0), (b + 1, B)), (B,))
+                        ttnn.experimental.paged_update_cache(
+                            keys, k_sh, update_idxs_tensor=pos_b, page_table=page_table
+                        )
+                        ttnn.experimental.paged_update_cache(
+                            values, v_sh, update_idxs_tensor=pos_b, page_table=page_table
+                        )
+                        ttnn.deallocate(pos_b)
+                    ttnn.deallocate(k_sh)
+                    ttnn.deallocate(v_sh)
+                else:
+                    ttnn.deallocate(k_sh)
+                    ttnn.deallocate(v_sh)
+                    _cfg1 = self._kv_shard_cfg(1)
+                    for b in range(B):
+                        pos_b = ttnn.slice(cur_pos_tt, (b,), (b + 1,))
+                        pt_b = ttnn.slice(page_table, (b, 0), (b + 1, page_table.shape[-1]))
+                        for cache, src in ((keys, k_p), (values, v_p)):
+                            row = ttnn.slice(src, (0, b, 0, 0), (1, b + 1, 32, HD), memory_config=_L1)
+                            row_sh = ttnn.to_memory_config(row, _cfg1)
+                            ttnn.deallocate(row)
+                            ttnn.experimental.paged_update_cache(
+                                cache, row_sh, update_idxs_tensor=pos_b, page_table=pt_b
+                            )
+                            ttnn.deallocate(row_sh)
+                        ttnn.deallocate(pos_b)
+                        ttnn.deallocate(pt_b)
                 ttnn.deallocate(k_p)
                 ttnn.deallocate(v_p)
             else:

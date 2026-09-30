@@ -16,7 +16,7 @@ from __future__ import annotations
 import torch
 
 import ttnn
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import layer_forward_rows
+from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import layer_forward_rows, rows_pos_masks_host, rows_width
 from models.tt_transformers.tt.common import Mode
 
 
@@ -70,23 +70,22 @@ def commit_gdn(model, pre_state, saved_inputs, accepted_rows):
     """Exact GDN commit after a verify pass: the accepted rows 0..a of the pass have exactly the activations the pass
     computed (causality), so only the GDN layers need replaying, on the pass's saved 128-row normed inputs with
     valid_len = accepted_rows, from the pre-pass state restored in place."""
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import GDN_CHUNK, rebuild_conv_carry
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rebuild_conv_carry
 
     restore_gdn_state(model, pre_state)
     gdn_layers = [layer for layer in model.layers if not layer.is_full_attention]
     assert len(gdn_layers) == len(saved_inputs), (len(gdn_layers), len(saved_inputs))
-    for layer, attn_in in zip(gdn_layers, saved_inputs):
+    for layer, sink in zip(gdn_layers, saved_inputs):
         dn = layer.attention
         rebuild_conv_carry(dn)
-        out = dn.forward_prefill(attn_in, chunk_size=GDN_CHUNK, valid_len=accepted_rows, capture_state=True)
-        ttnn.deallocate(out)
+        dn.commit_scan(sink, accepted_rows)  # conv FIR (taps) + chunk scan only, from the pass's saved inputs
 
 
 def verify_pass(model, tokens, positions, page_table_row, *, bw=None, saved=None):
     """tokens: list of R ints (t_P, drafts...), positions: list of R ints (P .. P+R-1), page_table_row: torch [1, blocks].
     Returns (hidden [1,1,BW,H] replicated, logits [1,1,BW,V/TP] vocab-sharded, R). The caller binds the GDN scratch."""
     R = len(tokens)
-    BW = bw or max(8, -(-R // 8) * 8)
+    BW = bw or rows_width(R)
     assert R <= BW <= 32
     mesh = model.mesh_device
     dev = ttnn.DRAM_MEMORY_CONFIG
@@ -101,14 +100,30 @@ def verify_pass(model, tokens, positions, page_table_row, *, bw=None, saved=None
         ttnn.to_device(t, mesh, memory_config=dev) for t in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt)
     )
     cos, sin = model._rope_from_idxs(rot_idxs)
+    masks = ttnn.to_device(rows_pos_masks_host(pos_list, BW), mesh, memory_config=dev)
     tok = model._decode_tokens_view(tokens_tt, BW)
     x = model.embd(tok)
     x = ttnn.reshape(x, (1, 1, BW, x.shape[-1]))
     x = ttnn.to_memory_config(x, dev)
+    gi = 0
     for layer in model.layers:
-        y = layer_forward_rows(layer, x, R, cos=cos, sin=sin, position_tensor=cur_pos_tt, page_table=pt_tt, saved=saved)
+        y = layer_forward_rows(
+            layer,
+            x,
+            R,
+            cos=cos,
+            sin=sin,
+            position_tensor=cur_pos_tt,
+            page_table=pt_tt,
+            saved=saved,
+            rows_pos_masks=masks,
+            gdn_index=gi,
+        )
+        if not layer.is_full_attention:
+            gi += 1
         ttnn.deallocate(x)
         x = y
+    ttnn.deallocate(masks)
     h = model._final_norm_decode(x)
     logits = ttnn.linear(h, model.lm_head_weight, compute_kernel_config=model._lm_head_ckc())
     for t in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt, cos, sin):
@@ -293,8 +308,10 @@ def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gd
                 h, logits2, _ = verify_pass(model, rows[: a + 1], positions[: a + 1], page_table)
                 ttnn.deallocate(logits2)
         if saved:
-            for t in saved:
-                ttnn.deallocate(t)
+            for sink in saved:
+                for key, t in sink.items():
+                    if key != "meta":
+                        ttnn.deallocate(t)
         free_gdn_snapshot(pre)
         accepted_rows = rows[1 : a + 1]  # d_1..d_a
         # the head's KV for the accepted rows (row i = token rows[i], hidden row i-1), then the hidden for the next draft

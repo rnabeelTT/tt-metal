@@ -222,6 +222,15 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
     return tw
 
 
+def _sink_put(sink, name, t):
+    """Store a device copy of `t` under `name`: copy into an existing (persistent) tensor, else keep a clone."""
+    dst = sink.get(name)
+    if dst is None:
+        sink[name] = ttnn.clone(t, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    else:
+        ttnn.copy(t, dst)
+
+
 class TPGatedDeltaNet:
     """Standalone TP GDN decode (per-device value-head recurrence + all-reduce)."""
 
@@ -604,12 +613,17 @@ class TPGatedDeltaNet:
         ttnn.deallocate(ab)
         return qkv, z, a, b
 
-    def forward_prefill(self, x, chunk_size=128, valid_len=None, capture_state=False, return_state=False):
+    def forward_prefill(
+        self, x, chunk_size=128, valid_len=None, capture_state=False, return_state=False, scan_sink=None
+    ):
         """Causal chunk-prefill from scratch. x [1,1,T,dim]: K-sharded (dim/tp per device) when the
         fused in-proj AG-matmul path is active (``_fuse_agmm`` and T>TILE — the norm skips its
         post-AG); replicated otherwise. Output reduce-scattered.
 
         valid_len: real token count (rest is padding). capture_state: save rec/conv state for decode.
+        scan_sink (dict, optional): receives device copies of the pre-conv qkv and the UNMASKED scan inputs
+        (q, k, v, beta, g) so `commit_scan` can recompute the state for a shorter valid_len (MTP commit);
+        an existing tensor under a key is copied into (persistent buffers), otherwise a clone is stored.
         return_state: when True (per-user batched prefill), return
         ``(output, final_state, conv_new_state)`` for one user's from-scratch B=1
         pass and skip all self.* writeback; the caller stitches per-user states via
@@ -640,6 +654,8 @@ class TPGatedDeltaNet:
         # Prefill qkvzab in L1: keeps proj + q/k/v/z/a/b resident for conv+gate prep.
         qkv, z, a, b = self._project_qkvzab(x, T, out_mc=ttnn.L1_MEMORY_CONFIG)
 
+        if scan_sink is not None:
+            _sink_put(scan_sink, "qkv", qkv)
         # FIR conv1d; conv_state = previous chunk's last K-1 inputs (None/zero from scratch)
         _cstate = self.conv_carry if carry else None
         if self._gdn_conv1d and valid_len is None:
@@ -680,6 +696,10 @@ class TPGatedDeltaNet:
         ttnn.deallocate(b)
         g = ttnn.reshape(ttnn.multiply(tw["neg_exp_A"], _softplus_add(a, tw["dt_bias"])), (1, T, Nv))
         ttnn.deallocate(a)
+        if scan_sink is not None:
+            for _n, _t in (("q", q), ("k", k), ("v", v), ("beta", beta), ("g", g)):
+                _sink_put(scan_sink, _n, _t)
+            scan_sink["meta"] = (chunk_size, _qkv_head_dims)
 
         # Fused chunk_gated_delta_rule; also used for masked valid_len.
         from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import (
@@ -792,6 +812,61 @@ class TPGatedDeltaNet:
         if return_state:
             return out, captured[0], captured[1]
         return out
+
+    def commit_scan(self, saved, valid_len):
+        """MTP commit: recompute this layer's recurrent state and decode conv taps for a SHORTER valid_len from the
+        rows-mode pass's saved inputs (`scan_sink` of forward_prefill), continuing from the current rec_state /
+        conv_carry (the caller restored the pre-pass snapshot and rebuilt conv_carry). Only the conv FIR (for the
+        taps) and the chunk scan run again: ~0.2 ms per layer instead of the whole layer."""
+        from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import (
+            chunk_gated_delta_rule_fused_adapter,
+            fused_chunk_enabled,
+        )
+
+        tw = self.tw
+        B, D = 1, self.qkv_dim_tp
+        chunk_size, _qkv_head_dims = saved["meta"]
+        _conv, conv_new_state = _causal_conv1d_fir(
+            saved["qkv"],
+            None,
+            None,
+            self.K,
+            self.mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            conv_state=self.conv_carry,
+            weight_taps=tw["conv_taps"],
+            bias_dev=None,
+            valid_len=valid_len,
+        )
+        ttnn.deallocate(_conv)
+        _use_fused = fused_chunk_enabled()
+        _delta_fn = chunk_gated_delta_rule_fused_adapter if _use_fused else chunk_gated_delta_rule_seq_adapter
+        _extra = {"const_tiles": self._fused_const_tiles} if _use_fused else {}
+        o, final_state = _delta_fn(
+            saved["q"],
+            saved["k"],
+            saved["v"],
+            saved["beta"],
+            saved["g"],
+            chunk_size=chunk_size,
+            scale=self.scale,
+            initial_state=self.rec_state,
+            device=self.mesh,
+            cached_masks=self.chunk_seq_masks,
+            valid_len=valid_len,
+            qkv_head_dims=_qkv_head_dims,
+            return_o_bh=self._gdn_fuse_out,
+            **_extra,
+        )
+        ttnn.deallocate(o)
+        ttnn.copy(final_state, self.rec_state)
+        ttnn.deallocate(final_state)
+        ttnn.copy(conv_new_state, self.conv_carry)
+        ttnn.copy(self._zero_conv0, self.conv_states[0])
+        for j in range(self.K - 1):
+            src = ttnn.reshape(ttnn.slice(conv_new_state, (0, j, 0), (1, j + 1, D)), (1, B, D))
+            ttnn.copy(src, self.conv_states[j + 1])
+        ttnn.deallocate(conv_new_state)
 
     def forward_prefill_collect(self, x, chunk_size=128, valid_len=None):
         """Per-user prefill that stashes this user's B=1 state for later assembly.

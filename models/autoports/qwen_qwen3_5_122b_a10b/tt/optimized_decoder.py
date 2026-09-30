@@ -391,6 +391,10 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
     # ---- routed experts, pairs dispatch (decode, few tokens) ---------------------------------------------------
     def _routed_gather(self, x4, scores, ids, T):
         if 0 < T <= int(self.opt.pairs_max_tokens):
+            if getattr(self, "rows_sorted", False) and self.opt.prefill_mode == "sorted":
+                # MTP rows mode: the expert-sorted path (dispatch kernel, two grouped sparse matmuls with the padding
+                # groups skipped, gather-add un-dispatch) instead of the pairs path's ~18 relayout ops
+                return self._routed_sorted(x4, scores, ids, T)
             return self._routed_pairs(x4, scores, ids, T)
         return super()._routed_gather(x4, scores, ids, T)
 

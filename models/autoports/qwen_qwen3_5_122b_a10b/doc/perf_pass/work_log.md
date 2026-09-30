@@ -455,3 +455,29 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   head rows 1.94 ms. Break-even needs pass + commit + drafts < 2.37 x 32.7 ms = 77 ms; today 134 ms. Next: per-op Tracy
   profile of the pass on the 2-layer model (the pass is op-count bound like decode: the GDN prefill form and 8 per-row
   K/V writes per attention layer add ops), then cut ops (single R-row K/V write, GDN glue), fewer GDN chunk rows.
+- 14:31 Tracy of the traced programs (2-layer model, 5 replays, per-op device time, device 0), BASELINE (per-row slice /
+  reshard K/V writes, 128-row GDN block, tile argmax): pass 291 ops / 12.9 ms device, of which `ArgMaxDeviceOperation` on
+  the [8, 62080] TILE logits = 9.25 ms (single-core for TILE inputs; ROW_MAJOR is multi-core) and the draft step's argmax
+  1.98 ms x 4. The two layers + LM head are ~3.3 ms: MoE on 8 rows (sparse gate_up 222 us + down 162 us per layer), LM head
+  385 us, tilize-with-padding 13 ops 351 us, binary 26 ops 264 us, slice 71 ops 131 us, GDN prefill form (qkvzab matmul 94,
+  out-proj RS 85, prep 68 + scan 65 us) is small. Commit (1 GDN layer): 75 ops / 0.72 ms. Fixes: argmax over a ROW_MAJOR
+  view (multi-core), the masked K/V writes (already in), fewer glue ops next.
+- 14:34 Tracy with the masked K/V writes (`rows_pos_masks`: one paged update per row on the full sharded K/V, users at -1
+  skipped) and the ROW_MAJOR multi-core argmax: pass 252 ops / 3.73 ms device (was 291 / 12.9), argmax 118 us (was 9249),
+  PagedUpdateCache 16 ops 50 us, slices 47 ops 100 us (was 71 / 131). Host wall per pass 4.35 ms (was 13.8) on the 2-layer
+  model. Remaining pass time is the B = 8 decode-pairs MoE (sparse gate_up 223 + down 161 us per layer, tilize-with-padding
+  13 ops 351 us, binary 26 ops 264 us) + LM head 384 + max 244 us: a rows pass costs about a B = 8 decode step (served
+  67.7 ms) plus the GDN prefill form. Draft step 416 ops / 5.9 ms per 4 steps (1.5 ms each: head layer + LM head 384 us);
+  head rows 170 ops / 1.9 ms. Commit (whole GDN layer replay) 75 ops / 0.72 ms per layer -> replaced by `commit_scan`
+  (conv FIR + chunk scan on the pass's saved q/k/v/beta/g and pre-conv qkv; expected ~0.2 ms per layer).
+- 14:44 scan-only commit (`TPGatedDeltaNet.commit_scan`: conv FIR for the taps + chunk scan on the pass's saved
+  q/k/v/beta/g and pre-conv qkv, from the restored snapshot) reproduces the whole-layer re-run commit token for token on
+  the 2-layer generator (forced-greedy drafts, 16 / 16). Tracy: commit 58 ops / 0.54 ms per GDN layer (was 75 / 0.72);
+  what remains is the fused-chunk adapter's relayouts (untilize 10 ops 118 us, tilize 3 ops 82 us) around prep 68 +
+  scan 65 us.
+- 15:02 full-model traced step v3 (masked K/V writes, multi-core argmax + gather, scan-only commit; prose k = 4, N = 64):
+  2.37 tokens per pass; per pass 107 ms = pass 81.0 (was 90.7) + commit 22.4 (was 28.6; 23 of 27 passes) + drafts 4 x 1.45
+  (was 3.76) + head rows 1.95 -> 21.8 tok/s (plain traced decode 30.6). The pass is ~1.5 ms per layer, i.e. a B = 8 decode
+  step (served 67.7 ms): the decode-pairs MoE at 8 rows (64 padded pairs) is the cost. Levers queued: rows width = the
+  smallest decode width holding k + 1 rows (k = 3 -> 4 rows: half the pairs), the expert-sorted MoE path for the rows
+  (dispatch kernel + skip-padding grouped matmuls + gather-add: ~5 ops instead of ~18 per layer).
