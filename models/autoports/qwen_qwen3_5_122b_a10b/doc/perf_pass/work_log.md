@@ -191,3 +191,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   c8 3004 (3234), c16 5693 (6274), c32 11052 (12120); TPOT unchanged (32.6 / 38.1 / 46.7 / 67.7 / 109.9 / 130.0); seeded
   1 unique of 6..48 at widths 1-16, greedy width 1 1 of 6; client aggregate 28.5 / 45.1 / 68.0 / 88.4 / 106.2 / 152.0 tok/s.
   Adopted: MULTICHIP_SELECTED.sorted_min_tokens = 128.
+- 01:25 width-1 follow-up sized: `ttnn.experimental.kda.qkv_causal_conv1d_silu` (ROW_MAJOR DRAM [B, seq, C] + [B, K-1, C]
+  state, split q/k/v outputs) does not fit the TILE/L1 GDN decode shift register without ~6 surrounding layout/state ops
+  -> not pursued; a fused GDN decode step is kernel work. Turn-4 bundle rebuild -> push -> Hub verify running.
+- 01:16-01:37 turn-4 bundle: image c6e9186de5d4, Hub revision 024095e6, verified from the Hub (`logs/13/verify-hub-t4.log`):
+  all checks pass; burst 137 tok/s (was 127), 8K 4.5 s, 128K 72.6 s; default greeting back to the long form (near tie).

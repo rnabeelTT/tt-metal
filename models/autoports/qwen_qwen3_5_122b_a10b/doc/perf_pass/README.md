@@ -127,16 +127,26 @@ prefill is ~35 ms shorter; TPOT unchanged; seeded / greedy completions reproduce
   functional router costs ~5 ms per step more than the (racy) fused gate op (linear + topk + softmax on a 1-row tile, DRAM
   intermediates: an L1-resident router chain is the next small step); the largest
   op groups are the GDN decode mixer (~50 ops: conv shift register, head layouts, recurrence) and the attention block.
-  `ttnn.experimental.kda` ships fused kernels (`qkv_causal_conv1d_silu`, `sigmoid_gated_rms_norm`, recurrent scans)
-  that could replace several of them.
+  `ttnn.experimental.kda` ships fused kernels (`qkv_causal_conv1d_silu`, `sigmoid_gated_rms_norm`, recurrent scans);
+  evaluated on paper for the GDN decode shift register (3 copies + multiply + 3 mac + silu = 8 ops per layer): the
+  kernel wants ROW_MAJOR DRAM [B, seq, channels] inputs and a [B, K-1, channels] state and returns split q / k / v, so
+  the TILE / L1 decode path would spend ~6 layout and state ops around it -> no op-count win without a bespoke
+  TILE-layout variant. A fused GDN decode step (conv + gate + recurrence + norm) is the real single-user lever and is
+  kernel work beyond a low-hanging pass.
 
 ## Shipped
 
-Commits 62010702d98 (pairs path) and 4e7f349857d (width-1 fix, two-op router, min width 1) on the local branch
-`qwen3_5_122b_a10b`. Bundle rebuilt from 4e7f349857d (image `tt-model/qwen3-5-122b-a10b-blackholex4:f6b91cc768b9`),
-pushed private (`raahemnabeel/qwen3-5-122b-a10b-blackholex4`, Hub revision 5fef4bd0), verified from the Hub on reset
-devices (`logs/13/verify-hub.log`): healthy in 10.8 min, /v1/models 262144, chat, tool call, `tt-model curl` default /
-thinking on (1005 reasoning chars) / thinking off, non-aligned 2381-token prompt, 32-request burst 127 tok/s, 8192-token
-prompt 4.5 s and 131072-token prompt 72.6 s wall for 16 new tokens. Greedy continuations at near ties differ from the
-stage-12 image (the default greeting is now "Hello!", the 128K completion's wording changes mid-sentence): the two-op
-router renormalizes in a different order at bf16, a numerics change of the same class as a batch-width change.
+Commits 62010702d98 (pairs path), 4e7f349857d (width-1 fix, two-op router, min width 1), 29c5dfa2171 / 098fafa7216
+(docs, host probes, neutral knobs) and 3ec334e38a3 (sorted prefill from 128 tokens) on the local branch
+`qwen3_5_122b_a10b`. Bundle rebuilt from 3ec334e38a3 (image `tt-model/qwen3-5-122b-a10b-blackholex4:c6e9186de5d4`),
+pushed private (`raahemnabeel/qwen3-5-122b-a10b-blackholex4`, Hub revision 024095e6) and verified from the Hub on reset
+devices (`logs/13/verify-hub-t4.log`): healthy in 10.5 min, /v1/models 262144, chat, tool call, `tt-model curl` default /
+thinking on (1134 reasoning chars) / thinking off, non-aligned 2381-token prompt, 32-request burst 137 tok/s (stage 12
+image: 127), 8192-token prompt 4.5 s and 131072-token prompt 72.6 s wall for 16 new tokens. Greedy continuations at near
+ties can differ from earlier images (router renormalization order, sorted-path accumulation order): the default greeting
+changed twice across the stage-13 images, each time to a valid sentence.
+
+Net served effect of the pass vs the stage-11 release (128-token prompts, 128 output tokens, same server settings):
+1 user TTFT 394-426 -> 371 ms and TPOT 37.7 -> 32.6 ms (26.5 -> 30.6 t/s/u); 4 users TPOT 51.8 -> 46.7 ms; 8 users
+93.1 -> 67.7 ms (aggregate 66.8 -> 88.4 tok/s); 16 / 32 users unchanged at the weight-bandwidth floor with TTFT
+6.3 -> 5.7 s and 12.1 -> 11.1 s; seeded and greedy completions reproduce at every width.
