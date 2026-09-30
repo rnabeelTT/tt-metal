@@ -550,3 +550,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   (66 tok/s); text coherent and equal to the standalone tool's. The client-side numbers of that run were polluted by the
   request builder (a ttnn import inside the timed window); a properly timed run with the readiness benchmark
   (streaming TTFT / TPOT, concurrency 1) queued. KV pool with the head budgeted: 1.66 M tokens (was 1.82 M).
+- 20:07 SERVED MTP, full model, k = 3, single user (timed requests + the readiness streaming benchmark, c = 1, 4 requests
+  of 128 random prompt tokens / 128 out): prose 128 tokens in 4.10 s incl. TTFT = 31.2 tok/s (plain serving 29.4 at
+  32.0 ms TPOT + 0.26 s TTFT: 1.06x); code 2.28 s = 56.2 tok/s (1.9x); benchmark TPOT mean 19.4 ms (P99 24.9) = 51.5
+  t/s/u vs 31.3 plain (1.65x), ITL p50 60.1 ms (one pass emits ~3 tokens at once), TTFT p50 329 ms (plain 258-274: the
+  eager bucket prefill + the head's prompt rows). Commit fee950b4098. MTP turn closed for single user; next: multi-user.

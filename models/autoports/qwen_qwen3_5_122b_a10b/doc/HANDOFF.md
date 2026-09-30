@@ -124,8 +124,17 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
 - Building: the new ops are part of the `ttnn` target (`ninja -C build_Release ttnn`); the linked library is
   `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
   copy + atomic `mv` while device jobs run. Kernels compile on first use.
-- Next levers (not done): MTP decode (`doc/perf_pass/mtp_plan.md`, in progress), one weight pass per expert in the
-  grouped sparse matmul, a fused GDN decode step.
+- MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`): opt-in,
+  single user. Serve with `QWEN35_MTP=3` (k drafts per pass) and `--max-num-seqs 1`; greedy accept (temperature > 0
+  requests still get the model's own tokens: exact for greedy, approximate otherwise); `QWEN35_MTP_GDN_ROWS=32` (GDN
+  block rows of the verify pass; 128 = the prefill-form norm path), `QWEN35_MTP_MOE_ROWS=pairs` (`sorted` is slower),
+  `QWEN35_MTP_KV_ROWMASK=1`. The plugin runs with an import-time shim (`tt/mtp_plugin_shim.py`) for a variable number of
+  tokens per step; the KV pool shrinks by the head's K/V (13th KV layer + 1.5 GiB). Measured (full model, c = 1): TPOT
+  19.4 ms = 51.5 t/s/u vs 31.3 plain; code prompts 1.9x, prose ~1.06x; TTFT +60 ms (eager bucket prefill + head rows).
+  Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls), `tools/mtp_pass_check.py` (verify pass
+  vs decode, row by row), `tools/mtp_generate_full.py` (eager loop), `tools/mtp_acceptance.py`.
+- Next levers (not done): multi-user MTP + speculative sampling (then default-on), chunked prefill interleaved with
+  decode, one weight pass per expert in the grouped sparse matmul, a fused GDN decode step.
 
 ## 5. Vision enablement path (not done in this bring-up)
 

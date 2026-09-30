@@ -86,6 +86,14 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
 
+## Status (2026-09-30 20:10): SERVED (single user, opt-in)
+- `QWEN35_MTP=3` + `--max-num-seqs 1` serves speculative decoding through vLLM (tt/mtp_plugin_shim.py, tt/mtp_serving.py,
+  generator_vllm hooks; commit fee950b4098). Full model, readiness benchmark c = 1: TPOT 19.4 ms = 51.5 t/s/u (plain 31.3),
+  ITL p50 60 ms, TTFT p50 329 ms (plain 258-274); prompts: prose 1.06x, code 1.9x end to end. Off by default: prose is
+  break-even, single user only, greedy accept only (temperature > 0 requests would need speculative sampling).
+- Next turn: multi-user MTP (batched rows pass over every live user's k + 1 rows, per-user accept / commit with per-row
+  valid lengths, batched head drafts) + exact speculative sampling, then default-on when positive at every width.
+
 ## Status (2026-09-30 17:15): traced step measured, config chosen
 - Traced single-user MTP step (`tt/mtp_traced.py`, 4 traces: pass / GDN scan-only commit / head draft / head rows) on
   the full model, k = 3 (4-row width), 32-row GDN block: 71.5 ms per pass = pass 51.9 + commit 14.2 (skipped when every
