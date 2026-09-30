@@ -30,6 +30,12 @@ def main():
     ap.add_argument("--new", type=int, default=48)
     ap.add_argument("--layers", default=None, help="comma-separated checkpoint layer indices for a reduced model")
     ap.add_argument("--gdn-commit", action="store_true", help="GDN-only exact commit instead of re-running the pass")
+    ap.add_argument(
+        "--force-greedy",
+        action="store_true",
+        help="draft the plain greedy continuation instead of the head's tokens: checks the verify pass + commit alone "
+        "(every draft must be accepted)",
+    )
     args = ap.parse_args()
     from transformers import AutoTokenizer
 
@@ -39,7 +45,17 @@ def main():
         mesh_shape=ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=256 * 1024 * 1024
     )
     layer_indices = [int(s) for s in args.layers.split(",")] if args.layers else None
-    gen = build_generator(MODEL_DIR, mesh, max_seq_len=4096, warm_decode_trace=False, layer_indices=layer_indices)
+    # no prefill bucket traces: the head's weights / KV are allocated AFTER the generator's captures and a replayed
+    # trace's baked intermediates would overwrite them (observed: all-zero head logits after the traced greedy run). A
+    # serving MTP generator allocates the head before any capture.
+    gen = build_generator(
+        MODEL_DIR,
+        mesh,
+        max_seq_len=4096,
+        warm_decode_trace=False,
+        warm_prefill_trace=False,
+        layer_indices=layer_indices,
+    )
     model = gen.model
     head = Qwen35MtpHead(model, gen.args.load_state_dict())
     kv_shape = next(tuple(l.attention.paged_k.shape) for l in model.layers if l.is_full_attention)
@@ -50,7 +66,10 @@ def main():
     logger.info(f"greedy {args.new} tokens in {t_greedy:.1f}s (eager): {tok.decode(greedy)!r}")
     head.allocate_kv_cache(kv_shape)
     t0 = time.time()
-    mtp, passes = mtp_generate_eager(gen, head, ids, args.new, args.k, log=logger.info, gdn_commit=args.gdn_commit)
+    draft_fn = (lambda toks: greedy[len(toks) : len(toks) + args.k]) if args.force_greedy else None
+    mtp, passes = mtp_generate_eager(
+        gen, head, ids, args.new, args.k, log=logger.info, gdn_commit=args.gdn_commit, draft_fn=draft_fn
+    )
     t_mtp = time.time() - t0
     agree = sum(int(a == b) for a, b in zip(greedy, mtp))
     first_diff = next((i for i, (a, b) in enumerate(zip(greedy, mtp)) if a != b), None)

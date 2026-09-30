@@ -86,6 +86,17 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
 
+## Status (2026-09-30 11:45)
+- The v1 loop WORKS on the full model: prose k = 4, 2.09 tokens per pass over 48 tokens (acceptance 0:10 1:7 2:1 3:2
+  4:3), greedy-equal until a bf16 near-tie. The verify pass is exact up to bf16 numerics (`tools/mtp_pass_check.py`:
+  rows vs eager decode PCC 0.9966-0.9991, every argmax disagreement one 0.125-margin near-tie). Two pitfalls found on the
+  way: (1) the head must be allocated BEFORE any trace capture (a replayed prefill trace zeroed a head built after it ->
+  `build_generator(mtp_head=True)`, tools use `warm_prefill_trace=False`); (2) the B = 1 loop runs the pass in place on
+  the bound GDN state with a device snapshot for the commit (the scratch-bind + slot-copy path failed an allocation
+  assert).
+- Next: GDN-only commit check, other prompts, then the traced pass (fixed BW = 8 rows, persistent inputs, device accept),
+  the head's prefill inside the bucket prefill, plugin route (b).
+
 ## Status (2026-09-30 10:00) and the commit design
 - Done: head (bfp8 attention) PCC 0.99; acceptance measured; rows mode per layer validated (attention: per-row K/V
   write, PCC 0.995-0.996; GDN: prefill form with the carried state, PCC 0.9986-0.9999); whole-model verify pass over 5

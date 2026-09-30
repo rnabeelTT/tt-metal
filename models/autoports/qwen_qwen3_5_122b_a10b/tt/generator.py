@@ -77,6 +77,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         external_kv=False,
         tt_generator=None,
         prebuilt=None,
+        mtp_head=False,
     ):
         """``external_kv=True`` (vLLM serving): no KV pool, page table or warm-up here — the serving adapter hands the
         vLLM-owned cache to :meth:`bind_kv_cache` and drives :meth:`warm_programs` / :meth:`capture_traces` from the
@@ -134,6 +135,16 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             f"Qwen35MoeGenerator: B={self.max_batch_size} max_seq_len={self.max_seq_len} kv {self.kv_cache_shape} {self.kv_dtype} "
             f"({len(self.kv_cache)} attention layers), layers={len(self.model.layers)}"
         )
+        # MTP head (speculative decoding): built and its KV allocated HERE, before any warm-up / capture - a device buffer
+        # allocated after a trace capture can alias the trace's freed intermediates and gets overwritten by the next
+        # replay (observed as all-zero head logits when the head was built after the bucket-trace captures).
+        self.mtp_head = None
+        if mtp_head:
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp import Qwen35MtpHead
+
+            self.mtp_head = Qwen35MtpHead(self.model, self.args.load_state_dict())
+            self.mtp_head.allocate_kv_cache(self.kv_cache_shape, self.kv_dtype)
+            logger.info(f"MTP head ready (layer {self.mtp_head.layer_idx}); kv {self.kv_cache_shape}")
         # ORDER MATTERS (qwen36 #48536 rule): every prefill program and every persistent prefill allocation (masked-bucket
         # programs, expert-sorted dispatch constants, GDN conv carry, fused out-proj buffers) must exist BEFORE the decode
         # trace is captured. A prefill that first runs after the capture allocates into the trace's freed scratch range;
@@ -852,6 +863,7 @@ def build_generator(model_dir, mesh_device, **kwargs):
         warm_host_trace=bool(kwargs.get("warm_host_trace", False)),
         warm_prefill=bool(kwargs.get("warm_prefill", True)),
         warm_prefill_trace=bool(kwargs.get("warm_prefill_trace", os.environ.get("QWEN35_PREFILL_TRACE", "1") == "1")),
+        mtp_head=bool(kwargs.get("mtp_head", False)),
     )
     gen._owns_mesh = owns_mesh
     return gen

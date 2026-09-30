@@ -411,3 +411,27 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   near-uniform logits). v1 MTP loop (`mtp_generate_eager`: draft k, verify pass, host greedy accept, exact GDN commit by
   re-running the accepted prefix, head KV over the accepted rows) written; reduced-model mechanics test and the
   full-model greedy-equivalence tool (`tools/mtp_generate_full.py`) queued.
+- 10:08 v1 loop on the reduced generator: `TT_FATAL input_tensor.is_allocated()` in `copy_slot_into_scratch` (the batched
+  rec_state reported deallocated at bind time). A probe (`scripts/14-gdn-alloc-probe.py`: build, head, greedy, reset,
+  all-logits prefill, bind / unbind) shows every GDN buffer allocated at every step, so the failure was specific to the
+  scratch-bind + slot-copy path; the loop now runs the pass IN PLACE on the B = 1 generator's bound state (the pass
+  advances it; a device snapshot of rec + taps is taken before the pass and restored for the commit). Verify test passes
+  again (PCC 0.9979-0.9995).
+- 10:20 first full-model loop (`tools/mtp_generate_full.py`, prose, k = 4, N = 48): drafts `[0, 0, 0, 0]` on every pass,
+  MTP text diverges from greedy at token 3. Diagnostics (`head draft dbg`): the head's input hidden is sane (rms 2.24)
+  but the head's logits are ALL ZERO (max 0.000, argmax 0) and its hidden output is zero -> the head's weights / KV were
+  overwritten. Cause: the tool builds the head AFTER `build_generator` captured the prefill bucket traces, then runs the
+  greedy baseline through the traced prefill; a replay's baked intermediates alias the head's later allocations
+  (the #48536 rule). Fix: the MTP tools build the generator with `warm_prefill_trace=False`; the generator gets an
+  `mtp_head=True` option that builds the head and its KV before any warm-up / capture (the serving path).
+- 10:56 k = 0 loop (pass of one row per step, no drafts): also diverges at token 3 -> the pass itself, not the head.
+  `tools/mtp_pass_check.py` (no traces, no head: eager prefill, 15 eager decode steps with a state snapshot before each,
+  then the verify pass from every snapshot over R greedy tokens vs the decode logits of the same steps), prose:
+  R = 1: 9 / 10 argmax, PCC min 0.99775 mean 0.99905; R = 2: 18 / 20, 0.99701 / 0.99882; R = 5: 47 / 50, 0.99658 /
+  0.99865. EVERY disagreement is the same token: decode ' the' vs pass ' this' at a 0.125 logit margin (bf16 near-tie),
+  reproduced identically as row 0, 1 or 2 of a pass -> the verify pass is exact up to bf16 numerics on the full model;
+  the token-3 divergence of the loops is that one near-tie.
+- 11:40 full-model loop without prefill traces (prose, k = 4, N = 48, v1 commit by re-running the accepted prefix):
+  23 passes for 48 tokens = 2.09 tokens per pass (acceptance histogram 0:10 1:7 2:1 3:2 4:3), greedy-equal up to token 8
+  (then a near-tie divergence, text stays coherent). Eager host walls: greedy 5.9 s, MTP 8.6 s (untraced; the traced
+  pass is the next step). GDN-only commit variant and code / json / chat prompts queued.

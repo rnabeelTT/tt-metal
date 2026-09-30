@@ -23,6 +23,11 @@ def copy_slot_into_scratch(prev_bindings, slot: int):
     """After `_bind_gdn_prefill_scratch()` (which returned `prev_bindings`), copy decode slot `slot` of every GDN layer's
     batched buffers (saved in prev_bindings) into the bound B=1 scratch: rec_state[slot] and the K conv taps."""
     for dn, B_b, rec_b, conv_b, carry_b, zero0_b, stable_b in prev_bindings:
+        assert rec_b.is_allocated(), (
+            f"batched rec_state (B={B_b}) is not allocated at bind time; scratch bound already? "
+            f"{rec_b is dn.rec_state} shapes {tuple(rec_b.shape)} vs scratch {tuple(dn.rec_state.shape)}"
+        )
+        assert dn.rec_state.is_allocated(), "GDN prefill scratch rec_state not allocated"
         rec = ttnn.slice(rec_b, (slot, 0, 0, 0), (slot + 1, rec_b.shape[1], rec_b.shape[2], rec_b.shape[3]))
         if rec.dtype != dn.rec_state.dtype:
             rec = ttnn.typecast(rec, dn.rec_state.dtype)
@@ -36,18 +41,37 @@ def copy_slot_into_scratch(prev_bindings, slot: int):
             ttnn.deallocate(tap)
 
 
-def snapshot_scratch(model):
-    """Device clones of the bound scratch (rec + taps per GDN layer) for `model._write_gdn_slot_device`."""
+def snapshot_gdn_state(model):
+    """Device clones of every GDN layer's currently bound state (rec_state + the K conv taps)."""
     return model._snapshot_gdn_scratch_device()
 
 
-def commit_gdn(model, prev_bindings, slot, saved_inputs, accepted_rows):
+def restore_gdn_state(model, snap):
+    """Copy a snapshot back into the bound buffers in place (addresses preserved); keeps the snapshot."""
+    recs, convs = snap
+    dn_layers = [layer.attention for layer in model.layers if not layer.is_full_attention]
+    for dn, rec, taps in zip(dn_layers, recs, convs):
+        ttnn.copy(rec, dn.rec_state)
+        for m in range(dn.K):
+            ttnn.copy(taps[m], dn.conv_states[m])
+
+
+def free_gdn_snapshot(snap):
+    recs, convs = snap
+    for r in recs:
+        ttnn.deallocate(r)
+    for taps in convs:
+        for t in taps:
+            ttnn.deallocate(t)
+
+
+def commit_gdn(model, pre_state, saved_inputs, accepted_rows):
     """Exact GDN commit after a verify pass: the accepted rows 0..a of the pass have exactly the activations the pass
     computed (causality), so only the GDN layers need replaying, on the pass's saved 128-row normed inputs with
-    valid_len = accepted_rows, from the slot state copied into the bound scratch again."""
+    valid_len = accepted_rows, from the pre-pass state restored in place."""
     from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import GDN_CHUNK, rebuild_conv_carry
 
-    copy_slot_into_scratch(prev_bindings, slot)
+    restore_gdn_state(model, pre_state)
     gdn_layers = [layer for layer in model.layers if not layer.is_full_attention]
     assert len(gdn_layers) == len(saved_inputs), (len(gdn_layers), len(saved_inputs))
     for layer, attn_in in zip(gdn_layers, saved_inputs):
@@ -104,7 +128,7 @@ def greedy_accept(logits_rows: torch.Tensor, drafts: list[int]):
     return a, am[a]
 
 
-def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gdn_commit=False):
+def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gdn_commit=False, draft_fn=None):
     """v1 MTP greedy loop (eager, host accept, exact): prefill (eager all-logits path, captures the bucket hidden for the
     head's own prefill), then per pass: draft k tokens with the head, run the verify pass over [t, d_1..d_k], accept the
     matching prefix a, commit the GDN state by re-running the pass on the accepted a+1 rows (exact but doubles the
@@ -152,6 +176,8 @@ def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gd
             ttnn.deallocate(lg)
         return last
 
+    dbg = {"n": 0}
+
     def head_draft(tok, hid, pos, k):
         drafts, cur_tok, cur_hid, cur_pos = [], tok, hid, pos
         for _ in range(k):
@@ -163,7 +189,16 @@ def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gd
             )
             lg, h_next = head.decode_step(tokens_tt, cur_hid, cur_pos_tt, rot_idxs, pt_tt)
             lgt = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
-            d = int(lgt.reshape(-1, lgt.shape[-1])[0, : gen.args.vocab_size].argmax().item())
+            row = lgt.reshape(-1, lgt.shape[-1])[0, : gen.args.vocab_size]
+            d = int(row.argmax().item())
+            if log and dbg["n"] < 3:
+                dbg["n"] += 1
+                hid_t = ttnn.to_torch(ttnn.get_device_tensors(cur_hid)[0]).float().reshape(-1)
+                log(
+                    f"head draft dbg: pos {cur_pos} tok {cur_tok} hid {tuple(cur_hid.shape)} rms {hid_t.pow(2).mean().sqrt():.4f} "
+                    f"nan {int(torch.isnan(hid_t).sum())} | logits nan {int(torch.isnan(row).sum())} max {row.max():.3f} "
+                    f"argmax {d} top5 {row.topk(5).indices.tolist()}"
+                )
             drafts.append(d)
             cur_tok, cur_hid, cur_pos = d, h_next, cur_pos + 1
         return drafts
@@ -183,36 +218,36 @@ def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gd
     passes = 0
     while len(out_tokens) < max_new_tokens:
         t_cur = out_tokens[-1]
-        drafts = head_draft(t_cur, hid_last, pos, k)
+        # draft_fn(out_tokens) -> k tokens replaces the head (e.g. the plain greedy continuation: every draft must then be
+        # accepted if the verify pass + commit are exact)
+        drafts = draft_fn(out_tokens) if draft_fn is not None else head_draft(t_cur, hid_last, pos, k)
+        drafts = list(drafts)[:k]
         rows = [t_cur] + drafts
-        positions = [pos + i for i in range(k + 1)]
-        prev = model._bind_gdn_prefill_scratch()
-        try:
-            copy_slot_into_scratch(prev, 0)
-            saved = [] if gdn_commit else None
-            h, logits, R = verify_pass(model, rows, positions, page_table, saved=saved)
-            lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
-            lg = lg.reshape(-1, lg.shape[-1])[:R, : gen.args.vocab_size]
-            a, nxt = greedy_accept(lg, drafts)
-            ttnn.deallocate(logits)
-            if a < k:
-                if gdn_commit:
-                    # exact GDN-only commit on the pass's saved normed inputs (the accepted rows' activations are those
-                    # of the pass); the pass's hidden rows 0..a stay valid for the head
-                    commit_gdn(model, prev, 0, saved, a + 1)
-                else:
-                    # v1: re-run the whole pass over the accepted a+1 rows
-                    ttnn.deallocate(h)
-                    copy_slot_into_scratch(prev, 0)
-                    h, logits2, _ = verify_pass(model, rows[: a + 1], positions[: a + 1], page_table)
-                    ttnn.deallocate(logits2)
-            if saved:
-                for t in saved:
-                    ttnn.deallocate(t)
-            recs, convs = model._snapshot_gdn_scratch_device()
-        finally:
-            model._unbind_gdn_prefill_scratch(prev)
-        model._write_gdn_slot_device(0, recs, convs)
+        kk = len(drafts)
+        positions = [pos + i for i in range(kk + 1)]
+        # B = 1 generator: the bound GDN state IS the user's state; the pass advances it in place, the exact commit
+        # restores the pre-pass snapshot and replays the accepted prefix
+        pre = snapshot_gdn_state(model)
+        saved = [] if gdn_commit else None
+        h, logits, R = verify_pass(model, rows, positions, page_table, saved=saved)
+        lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
+        lg = lg.reshape(-1, lg.shape[-1])[:R, : gen.args.vocab_size]
+        a, nxt = greedy_accept(lg, drafts)
+        ttnn.deallocate(logits)
+        if a < kk:
+            if gdn_commit:
+                # GDN-only replay of the accepted rows on the pass's saved normed inputs (their activations are exactly
+                # the pass's, by causality); the pass's hidden rows 0..a stay valid for the head
+                commit_gdn(model, pre, saved, a + 1)
+            else:
+                ttnn.deallocate(h)
+                restore_gdn_state(model, pre)
+                h, logits2, _ = verify_pass(model, rows[: a + 1], positions[: a + 1], page_table)
+                ttnn.deallocate(logits2)
+        if saved:
+            for t in saved:
+                ttnn.deallocate(t)
+        free_gdn_snapshot(pre)
         accepted_rows = rows[1 : a + 1]  # d_1..d_a
         # the head's KV for the accepted rows (row i = token rows[i], hidden row i-1), then the hidden for the next draft
         h_rows = [ttnn.slice(h, (0, 0, i, 0), (1, 1, i + 1, H)) for i in range(a + 1)]

@@ -12,7 +12,7 @@ import torch
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import build_generator
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_verify import copy_slot_into_scratch, verify_pass
+from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_verify import verify_pass
 from models.common.utility_functions import comp_pcc
 
 MODEL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,14 +49,9 @@ def test_verify_pass_matches_sequential_decode(mesh_device):
     gen.prefill_forward(
         torch.tensor(ids).reshape(1, -1), page_table=page_table, prompt_lens=[P], return_all_logits=True
     )
-    prev = model._bind_gdn_prefill_scratch()
-    try:
-        copy_slot_into_scratch(prev, 0)
-        h, logits, _ = verify_pass(model, toks, [P + i for i in range(R)], page_table)
-        lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
-        lg = lg.reshape(-1, lg.shape[-1])[:R, : gen.args.vocab_size]
-    finally:
-        model._unbind_gdn_prefill_scratch(prev)
+    h, logits, _ = verify_pass(model, toks, [P + i for i in range(R)], page_table)  # in place on the bound B=1 state
+    lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
+    lg = lg.reshape(-1, lg.shape[-1])[:R, : gen.args.vocab_size]
     pccs, agree = [], 0
     for i in range(R):
         _, pcc = comp_pcc(seq_logits[i], lg[i], 0.99)
@@ -84,7 +79,15 @@ def test_mtp_generate_matches_greedy(mesh_device):
     from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_verify import mtp_generate_eager
 
     os.environ.setdefault("MESH_DEVICE", "P300x2")
-    gen = build_generator(MODEL_DIR, mesh_device, max_seq_len=4096, layer_indices=[0, 3], warm_decode_trace=False)
+    # no prefill traces: the head is allocated after the captures and a replay would overwrite it (see tools/mtp_generate_full)
+    gen = build_generator(
+        MODEL_DIR,
+        mesh_device,
+        max_seq_len=4096,
+        layer_indices=[0, 3],
+        warm_decode_trace=False,
+        warm_prefill_trace=False,
+    )
     model = gen.model
     head = Qwen35MtpHead(model, gen.args.load_state_dict())
     kv_shape = next(tuple(l.attention.paged_k.shape) for l in model.layers if l.is_full_attention)
@@ -93,12 +96,23 @@ def test_mtp_generate_matches_greedy(mesh_device):
     N, k = 16, 3
     greedy = gen.generate(ids, N, enable_trace=False, on_device_sampling=False)
     head.allocate_kv_cache(kv_shape)
+    # the head's drafts are meaningless on a 2-layer model: run the loop's mechanics (pass, accept, commit, head KV
+    # bookkeeping) with the head, then with the greedy continuation forced as the drafts, which the verify pass must
+    # accept except at bf16 near-ties (the 2-layer model's logits are near-uniform, so those are frequent here; the
+    # full-model equivalence is measured by tools/mtp_pass_check.py and tools/mtp_generate_full.py)
     mtp, passes = mtp_generate_eager(gen, head, ids, N, k, log=logger.info)
     agree = sum(int(a == b) for a, b in zip(greedy, mtp))
     print(
         f"MTP_GENERATE N={N} k={k}: passes {passes} ({N / passes:.2f} tokens per pass), tokens equal to greedy {agree}/{N}"
     )
     print(f"  greedy {greedy}\n  mtp    {mtp}")
-    # the 2-layer model's logits are near-uniform (frequent bf16 near-ties): the mechanics are what this checks; the
-    # exact token equality is measured on the full model by tools/mtp_generate_full.py
-    assert agree >= N // 2, (greedy, mtp)
+    assert len(mtp) == N and 1 <= passes <= N
+    head.allocate_kv_cache(kv_shape)
+    forced, passes_f = mtp_generate_eager(
+        gen, head, ids, N, k, log=logger.info, draft_fn=lambda toks: greedy[len(toks) : len(toks) + k]
+    )
+    agree_f = sum(int(a == b) for a, b in zip(greedy, forced))
+    print(
+        f"MTP_GENERATE forced-greedy drafts: passes {passes_f} ({N / passes_f:.2f} tokens per pass), equal {agree_f}/{N}"
+    )
+    assert passes_f < N, "the verify pass accepted none of the greedy continuation"
