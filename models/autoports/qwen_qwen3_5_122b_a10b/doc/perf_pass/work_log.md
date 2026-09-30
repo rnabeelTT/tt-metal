@@ -562,3 +562,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   transpose - `ttnn.pad` on a [B, R, dim] tensor hits "FillPad N_slices > 1 not supported", and the decode-form norm's
   L1 width-sharded output has to be interleaved before the matmul). Test (2-layer generator, B = 2, R = 4) vs the batched
   sequential decode of both users: PCC 0.99903-0.99943, argmax 8 / 8.
+- 21:02 MULTI-USER block 2: eager loop `mtp_generate_multi` (batched head drafts over B users, one batched verify pass,
+  per-user accept, ONE batched commit = restore + batched replay with per-row accepted lengths, batched head K/V rows
+  padded to a served width with -1 masks, next-draft hidden per user by a one-hot selection). Test (2-layer generator,
+  B = 2, k = 3, N = 12, forced-greedy drafts): user 0 equal to greedy 12 / 12, user 1 9 / 12 (a repeated token ended one
+  step early: the 2-layer model's near-tie), 5 passes for 24 tokens.
