@@ -555,3 +555,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   32.0 ms TPOT + 0.26 s TTFT: 1.06x); code 2.28 s = 56.2 tok/s (1.9x); benchmark TPOT mean 19.4 ms (P99 24.9) = 51.5
   t/s/u vs 31.3 plain (1.65x), ITL p50 60.1 ms (one pass emits ~3 tokens at once), TTFT p50 329 ms (plain 258-274: the
   eager bucket prefill + the head's prompt rows). Commit fee950b4098. MTP turn closed for single user; next: multi-user.
+- 20:42 MULTI-USER turn, block 1: `tt/mtp_multi.py::verify_pass_multi` - B users x R rows user-major in one decode-layout
+  block; attention rows as the batched decode step with per-row positions / page tables / K/V masks (already row-keyed),
+  GDN rows through `forward_prefill_batched` (users = independent sequences, state written in place; conv left-context
+  rebuilt from the taps; the per-user [B, T, dim] block built by a one-hot placement matmul and gathered back by its
+  transpose - `ttnn.pad` on a [B, R, dim] tensor hits "FillPad N_slices > 1 not supported", and the decode-form norm's
+  L1 width-sharded output has to be interleaved before the matmul). Test (2-layer generator, B = 2, R = 4) vs the batched
+  sequential decode of both users: PCC 0.99903-0.99943, argmax 8 / 8.

@@ -130,6 +130,26 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   + ~15 ms commit = ~1.9 decode steps -> prose 1.5x, chat 1.6x, json 2.1x, code 2.6x single-user; the fused GDN rows
   kernel is the lever after that.
 
+## Multi-user MTP (turn started 2026-09-30 20:20)
+Goal: every live user drafts k tokens and is verified in ONE pass per step, then default-on with exact sampling.
+- Rows: B users x R = k + 1 candidate rows, user-major in one decode-layout block of BW = rows_width(B x R) rows (<= 32:
+  up to 8 users per pass at k = 3; 16 / 32 users = 2 / 4 passes per step, or later a 128-row pass through the
+  expert-sorted MoE). Attention rows: the batched decode step with per-row positions / page tables and the per-row K/V
+  write (already row-keyed). GDN rows: `TPGatedDeltaNet.forward_prefill_batched` (users = independent sequences,
+  writes rec_state[u] / conv_states[*][u] in place; conv left-context rebuilt from the taps; kernel cap B <= 4 per launch
+  at TP = 4 -> grouped launches for more users). MoE: the block width's decode path (pairs <= 8 rows, masked 16 / 32).
+- Accept / commit per user: host argmax compare per user; commit = restore the whole batched snapshot + ONE batched
+  replay with per-row valid lengths a_u + 1 (the fused chunk adapter takes a per-row list; users with a_u = k replay to
+  the same state) - scan-only variant (saved q/k/v/beta/g, batched) once the whole-layer form is validated.
+- Head: drafts batched over users (B rows per head step, k steps), head K/V rows for the accepted tokens as one
+  BW-row program with -1 masks, next-draft hidden per user by a [B, BW] one-hot matmul; per-slot host state (tok, pos)
+  follows the plugin's slot_remap like the GDN slots do.
+- Plugin: the shim is already per row (ragged rows, one placeholder per frame, lookahead k); drop the B == 1 guard.
+- Exact sampling: accept by rejection sampling (p_target(d) vs q_draft(d) per row, both from device gathers at the draft
+  ids) with the residual sample from max(0, p - q) - needs a device op or a per-row logits readback; greedy first.
+- Step 1 (done first): `tt/mtp_multi.py` eager `verify_pass_multi` + `tests/test_mtp_multi.py` (B = 2 vs the batched
+  sequential decode).
+
 ## Why k = 3 (2026-09-30 18:15, from the measured k = 3 prose histogram 9 / 7 / 5 / 7 over 28 passes)
 The pass cost is set by the row WIDTH (k + 1 rows padded to the next served decode width: k = 2 and k = 3 both run
 4 rows -> the same 51.9 ms pass), so k = 2 saves one draft (1.4 ms) and gives up the third accepted token in a quarter of
