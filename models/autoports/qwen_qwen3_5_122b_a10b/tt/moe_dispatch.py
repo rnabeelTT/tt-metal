@@ -49,24 +49,31 @@ def dispatch_rows(T: int, k: int, E: int, group: int = TILE) -> int:
 #   "sort_u16": ttnn.sort on uint16 ids (DRAM multi-core factory; hang-free but ~4 ms per 512-token chunk);
 #   "sort_fp32": the original fp32 ttnn.sort (cross-core-exchange factory; its sort_barrier deadlocks intermittently on
 #   one device of the (1,4) mesh - the 48-layer warm-up hang, doc/full_model/triage/warm_hang_*.txt).
-#   "counting_mm" (default, stage 12): counting sort whose running count is a BLOCK-TRIANGULAR MATMUL (fp32 accumulate, exact
+#   "counting_mm" (stage 12): counting sort whose running count is a BLOCK-TRIANGULAR MATMUL (fp32 accumulate, exact
 #   integers) instead of ttnn.cumsum on the [Rp, E] one-hot: the dim-2 cumsum ran on ~4 cores and needed two full-tensor
 #   permutes (25 of the 53 ms MoE device time per 2048-token layer, stage-12 profile); the matmuls use the whole grid.
+#   "kernel" (default, perf pass turn 5): ONE single-core program, ttnn.experimental.moe_sorted_dispatch, reads the tiled
+#   top-k outputs in place and emits the same row layout bit for bit (test_dispatch_modes_equivalent): the whole dispatch
+#   build is ~1.7 ms device at 2048 tokens vs ~6 ms for counting_mm (MoE block 16.5 -> 11.2 ms per layer).
 DISPATCH_MODE = os.environ.get(
-    "QWEN35_DISPATCH_MODE", "counting_mm"
-)  # "counting_mm" | "counting_h" | "counting" | "sort_u16" | "sort_fp32"
+    "QWEN35_DISPATCH_MODE", "kernel"
+)  # "kernel" | "counting_mm" | "counting_h" | "counting" | "sort_u16" | "sort_fp32"
 SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
+# Un-dispatch through the multi-core gather-add kernel (ttnn.experimental.moe_gather_add_rows) instead of k x
+# (slice + embedding gather + add); only available with the kernel dispatch (it consumes the raw undispatch stick).
+UNDISPATCH_KERNEL = DISPATCH_MODE == "kernel" and os.environ.get("QWEN35_UNDISPATCH_KERNEL", "0") == "1"
 
 
 class SortedDispatch:
     """Builds the dispatch/un-dispatch index tensors for one prefill call."""
 
-    def __init__(self, device, E: int, k: int, group: int = TILE):
+    def __init__(self, device, E: int, k: int, group: int = TILE, pad_group_id: int = 0):
         assert group % TILE == 0
         self.device = device
         self.E = E
         self.k = k
         self.group = group
+        self.pad_group_id = pad_group_id  # kernel mode only: expert id of padding groups (0 or a sentinel >= E)
         # constants: expert ids as a row [1,1,1,E] (fp32) for one-hot comparisons
         self.arange_E = ttnn.arange(0, E, 1, dtype=ttnn.float32, device=device, layout=ttnn.TILE_LAYOUT)
         self.arange_E = ttnn.reshape(self.arange_E, (1, 1, 1, E))
@@ -185,6 +192,8 @@ class SortedDispatch:
             Rd <= MAX_DISPATCH_ROWS
         ), f"sorted dispatch admits at most {MAX_DISPATCH_ROWS} dispatched rows (T={T}: {Rd})"
         f32, u32 = ttnn.float32, ttnn.uint32
+        if DISPATCH_MODE == "kernel":
+            return self._build_kernel(ids, scores, T, R, Rd, G)
 
         # ---- flat, token-major (token t, slot j) -> position t*k + j
         # reshape/pad run on the fp32 copy (reshape_view accepts bf16/fp32/int32/uint32 only)
@@ -440,6 +449,53 @@ class SortedDispatch:
         }
 
 
+def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
+    """One single-core program (ttnn.experimental.moe_sorted_dispatch) computes every dispatch map: the same row
+    layout as the counting sort (experts ascending, each padded to whole `group` blocks, one trailing padding group),
+    so the outputs are bit-identical to the counting_* modes (test_dispatch_modes_equivalent)."""
+    k, E, gs = self.k, self.E, self.group
+    RM = ttnn.ROW_MAJOR_LAYOUT
+    dram = ttnn.DRAM_MEMORY_CONFIG
+    # the op reads the tiled [1,1,T,k] top-k outputs in place (uint16 ids, bf16 scores): no typecast / untilize / reshape
+    ids_t = self._tiled(ids)
+    sc_t = self._tiled(scores)
+    op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
+    src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=dram, pad_group_id=self.pad_group_id)
+    for t in (ids_t, sc_t):
+        if t is not ids and t is not scores:
+            ttnn.deallocate(t)
+    weights = ttnn.reshape(ttnn.to_layout(ttnn.reshape(w_disp, (1, 1, 1, Rd)), ttnn.TILE_LAYOUT), (1, 1, Rd, 1))
+    ttnn.deallocate(w_disp)
+    # one-hot of the group experts (the sparse op still validates a [1,G,1,E] sparsity operand)
+    grp_f = self._f32(
+        ttnn.to_layout(ttnn.typecast(ttnn.reshape(group_ids, (1, 1, 1, G)), ttnn.uint32), ttnn.TILE_LAYOUT)
+    )
+    group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)
+    ttnn.deallocate(grp_f)
+    group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
+    out = {
+        "src_tok": ttnn.reshape(src_tok, (1, Rd)),
+        "weights": weights,
+        "group_mask": group_mask,
+        "group_ids": ttnn.reshape(group_ids, (1, G)),
+        "Rd": Rd,
+        "G": G,
+    }
+    if UNDISPATCH_KERNEL:
+        # the un-dispatch kernel reads the raw [1, T*k] stick; no tilized copy needed
+        out["undispatch_rm"] = und
+        out["undispatch"] = None
+    else:
+        out["undispatch"] = ttnn.reshape(
+            ttnn.to_layout(ttnn.reshape(und, (1, 1, 1, R)), ttnn.TILE_LAYOUT), (1, 1, T, k)
+        )
+        ttnn.deallocate(und)
+    return out
+
+
+SortedDispatch._build_kernel = _kernel_dispatch
+
+
 def gather_rows(x4, src_tok_rm, Rd: int, group: int = TILE):
     """X_disp [1, G, group, H] tiled bf16 from x4 [1,1,T,H] tiled bf16 and the uint32 row index [1, Rd]."""
     T, H = x4.shape[2], x4.shape[3]
@@ -449,9 +505,18 @@ def gather_rows(x4, src_tok_rm, Rd: int, group: int = TILE):
     return ttnn.reshape(rows, (1, Rd // group, group, H))
 
 
-def undispatch_rows(y_disp4, weights, undispatch_u32, T: int, k: int, H: int):
-    """Sum the k dispatched rows of every token: y_disp4 [1,G,32,H] tiled -> [1,1,T,H] tiled bf16."""
+def undispatch_rows(y_disp4, weights, undispatch_u32, T: int, k: int, H: int, undispatch_rm=None):
+    """Sum the k dispatched rows of every token: y_disp4 [1,G,32,H] tiled -> [1,1,T,H] tiled bf16.
+
+    `undispatch_rm` (uint32 ROW_MAJOR [1, T*k], the dispatch kernel's raw stick) selects the fused multi-core gather-add
+    kernel; otherwise `undispatch_u32` (uint32 tiled [1,1,T,k]) drives k embedding gathers + adds."""
     Rd = y_disp4.shape[1] * y_disp4.shape[2]
+    if undispatch_rm is not None:
+        assert weights is None
+        y_rm = ttnn.to_layout(ttnn.reshape(y_disp4, (Rd, H)), ttnn.ROW_MAJOR_LAYOUT)
+        out = ttnn.moe_gather_add_rows(y_rm, undispatch_rm, T, k, memory_config=DRAM)
+        ttnn.deallocate(y_rm)
+        return out
     if weights is not None:
         y = ttnn.multiply(ttnn.reshape(y_disp4, (1, 1, Rd, H)), weights, memory_config=DRAM)
         y_rm = ttnn.to_layout(ttnn.reshape(y, (Rd, H)), ttnn.ROW_MAJOR_LAYOUT)

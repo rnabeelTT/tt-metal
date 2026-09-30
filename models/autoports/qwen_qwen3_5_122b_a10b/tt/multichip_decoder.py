@@ -190,6 +190,9 @@ class MultichipConfig:
             base = base.with_(sorted_min_tokens=int(env_min))
         elif self.sorted_min_tokens is not None:
             base = base.with_(sorted_min_tokens=int(self.sorted_min_tokens))  # prefill MoE path threshold (stage 7)
+        env_gs = os.environ.get("QWEN35_SORTED_GROUP_ROWS")
+        if env_gs:  # perf-pass experiment knob: rows per expert block of the sorted dispatch (multiple of 32)
+            base = base.with_(sorted_group_rows=int(env_gs))
         return base.with_(
             kv_dtype=self.kv_dtype,
             gdn_state_fp32=(self.gdn_state_dtype == ttnn.float32),

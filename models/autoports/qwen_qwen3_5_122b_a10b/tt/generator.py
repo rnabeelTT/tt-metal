@@ -348,7 +348,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         # warm-up table: rows own distinct blocks for the longest warm-up bucket (2048 tokens = 32 blocks); every other
         # column points at the scratch block (valid, never read)
         B, W = self.max_batch_size, int(page_table_width)
-        per_user = min(32, W)
+        per_user = min(
+            max(32, int(getattr(self.model, "PREFILL_SEGMENT", 2048)) // self.block_size), W
+        )  # blocks for the longest bucket
         assert per_user * B <= num_blocks, f"KV cache too small for the warm-up: {num_blocks} blocks < {per_user * B}"
         pt = torch.full((B, W), self.kv_scratch_block, dtype=torch.int32)
         for u in range(B):
@@ -609,12 +611,13 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         t = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh_device, dim=0))
         return t.float().reshape(-1, self.args.vocab_size)[:1].reshape(1, 1, -1)
 
-    def _prefill_single(self, tokens, page_table, segment=2048, want_sharded=False):
+    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
         logits ``[1, 1, vocab]`` after the last real token; with ``want_sharded`` the pair ``(host logits, device
         vocab-sharded logits [1,1,32,vocab/TP] of the last segment)`` for on-device sampling (row 0)."""
+        segment = segment or int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         T = tokens.shape[1]
         logits, sh = None, None
         for cs in range(0, T, segment):

@@ -66,6 +66,8 @@ add_subdirectory(dropout)
 add_subdirectory(fft)
 add_subdirectory(multi_scale_deformable_attn)
 add_subdirectory(plusone)
+add_subdirectory(moe_sorted_dispatch)
+add_subdirectory(moe_gather_add_rows)
 add_subdirectory(reshape)
 add_subdirectory(ssm)
 add_subdirectory(tensor_prefetcher)
@@ -113,6 +115,8 @@ target_link_libraries(
         TTNN::Ops::Experimental::FFT
         TTNN::Ops::Experimental::MultiScaleDeformableAttn
         TTNN::Ops::Experimental::PlusOne
+        TTNN::Ops::Experimental::MoeSortedDispatch
+        TTNN::Ops::Experimental::MoeGatherAddRows
         TTNN::Ops::Experimental::Reshape
         TTNN::Ops::Experimental::SSM
         TTNN::Ops::Experimental::TensorPrefetcher
@@ -165,6 +169,8 @@ target_sources(
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::FFT>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::MultiScaleDeformableAttn>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::PlusOne>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::MoeSortedDispatch>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::MoeGatherAddRows>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::Reshape>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::SSM>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::TensorPrefetcher>

@@ -66,7 +66,8 @@ void py_module(nb::module_& mod) {
             std::size_t,
             std::size_t,
             std::size_t,
-            std::optional<CoreRangeSet>>(),
+            std::optional<CoreRangeSet>,
+            bool>(),
         nb::kw_only(),
         nb::arg("compute_with_storage_grid_size"),
         nb::arg("in0_block_w").noconvert(),
@@ -74,7 +75,12 @@ void py_module(nb::module_& mod) {
         nb::arg("out_subblock_w").noconvert(),
         nb::arg("per_core_M").noconvert(),
         nb::arg("per_core_N").noconvert(),
-        nb::arg("allowed_worker_cores") = nb::none());
+        nb::arg("allowed_worker_cores") = nb::none(),
+        nb::arg("skip_padding_groups") = false);
+    matmul_multi_core_reuse_program_config.def_rw(
+        "skip_padding_groups", &MatmulMultiCoreReuseProgramConfig::skip_padding_groups, R"doc(
+        Group-parallel sparse matmul only: skip groups whose index is >= the number of experts (padding groups).
+    )doc");
     matmul_multi_core_reuse_program_config.def_rw(
         "compute_with_storage_grid_size", &MatmulMultiCoreReuseProgramConfig::compute_with_storage_grid_size, R"doc(
         Grid size for compute cores with storage capability.

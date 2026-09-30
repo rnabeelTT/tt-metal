@@ -50,6 +50,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     const uint32_t out_subblock_w = pc->out_subblock_w;
     const uint32_t per_core_M = pc->per_core_M;
     const uint32_t per_core_N = pc->per_core_N;
+    const bool skip_padding_groups = pc->skip_padding_groups;
 
     // ---- shapes
     const auto& ashape = get_matmul_tensor_padded_shape(a, /*transpose=*/false);
@@ -189,6 +190,11 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         Mt * Kt,     // MtKt: compact group stride in in0
     };
     tt::tt_metal::TensorAccessorArgs(*in0_buffer).append_to(reader_compile_time_args);
+    if (skip_padding_groups) {
+        reader_compile_time_args.push_back(idx_page_size);
+        reader_compile_time_args.push_back(E);
+        tt::tt_metal::TensorAccessorArgs(*idx_buffer).append_to(reader_compile_time_args);
+    }
 
     const uint32_t in1_num_subblocks = per_core_N / out_subblock_w;
     const uint32_t out_num_subblocks_h = per_core_M / out_subblock_h;
@@ -221,18 +227,26 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     tt::tt_metal::TensorAccessorArgs(*idx_buffer).append_to(writer_compile_time_args);
 
     // ---- kernels
-    const std::unordered_map<std::string, uint32_t> reader_named_args = {{"cb_in0", tt::CBIndex::c_0}};
+    const std::unordered_map<std::string, uint32_t> reader_named_args = {
+        {"cb_in0", tt::CBIndex::c_0}, {"cb_idx_in0", tt::CBIndex::c_8}};
     const std::unordered_map<std::string, uint32_t> writer_named_args = {
         {"cb_in1", tt::CBIndex::c_1}, {"cb_out", tt::CBIndex::c_4}, {"cb_idx", tt::CBIndex::c_7}};
+    std::map<std::string, std::string> dm_defines;
+    if (skip_padding_groups) {
+        dm_defines["SKIP_PADDING_GROUPS"] = "1";
+    }
 
     auto in0_reader_kernel = tt_metal::CreateKernel(
         program,
-        "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0.cpp",
+        skip_padding_groups
+            ? "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_grouped_skip.cpp"
+            : "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0.cpp",
         all_cores,
         tt_metal::DataMovementConfig{
             .processor = tt_metal::DataMovementProcessor::RISCV_1,
             .noc = tt_metal::NOC::RISCV_1_default,
             .compile_args = reader_compile_time_args,
+            .defines = dm_defines,
             .named_compile_args = reader_named_args});
     auto in1_writer_kernel = tt_metal::CreateKernel(
         program,
@@ -242,6 +256,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             .processor = tt_metal::DataMovementProcessor::RISCV_0,
             .noc = tt_metal::NOC::RISCV_0_default,
             .compile_args = writer_compile_time_args,
+            .defines = dm_defines,
             .named_compile_args = writer_named_args});
 
     std::map<std::string, std::string> mm_kernel_defines;
@@ -281,9 +296,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             out_subblock_num_tiles,
             groups_per_core,  // batch
             out_block_tiles,
-            0u,  // untilize_out
-            0u,  // get_batch_from_reader
-            0u,  // in0_transpose_tile
+            0u,                             // untilize_out
+            skip_padding_groups ? 1u : 0u,  // get_batch_from_reader: group validity through the BRISC mailbox
+            0u,                             // in0_transpose_tile
         };
     };
     const std::unordered_map<std::string, uint32_t> compute_named_args = {
@@ -340,6 +355,14 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         tt_metal::CircularBufferConfig(
             idx_page_size, {{tt::CBIndex::c_7, tt_metal::datatype_to_dataformat_converter(indices.dtype())}})
             .set_page_size(tt::CBIndex::c_7, idx_page_size));
+    if (skip_padding_groups) {  // the in0 reader's own copy of the id list
+        tt_metal::CreateCircularBuffer(
+            program,
+            all_cores,
+            tt_metal::CircularBufferConfig(
+                idx_page_size, {{tt::CBIndex::c_8, tt_metal::datatype_to_dataformat_converter(indices.dtype())}})
+                .set_page_size(tt::CBIndex::c_8, idx_page_size));
+    }
     if (interm0_data_format != output_data_format) {
         tt_metal::CreateCircularBuffer(
             program,
@@ -372,7 +395,10 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         const auto& core = cores[i];
         const uint32_t groups_here = core_group_1.contains(core) ? groups_g1 : groups_g2;
         tt_metal::SetRuntimeArgs(
-            program, in0_reader_kernel, core, {in0_buffer->address(), groups_written * Mt * Kt, groups_here});
+            program,
+            in0_reader_kernel,
+            core,
+            {in0_buffer->address(), groups_written * Mt * Kt, groups_here, idx_buffer->address(), groups_written});
         tt_metal::SetRuntimeArgs(
             program,
             in1_writer_kernel,
@@ -406,6 +432,7 @@ void SparseMatmulMultiCoreReuseGroupedProgramFactory::override_runtime_arguments
     for (const auto& core : sv.cores) {
         auto& r = reader_args_by_core[core.x][core.y];
         r[0] = in0_addr;
+        r[3] = idx_addr;
         auto& w = writer_args_by_core[core.x][core.y];
         w[0] = in1_addr;
         w[2] = out_addr;

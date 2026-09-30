@@ -1234,6 +1234,14 @@ def test_perf_prefill_2048_whole(mesh_device, layer_idx):
 
 
 @pytest.mark.perf
+@mesh_tp(PERF_PREFILL_PARAMS)
+@pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
+def test_perf_prefill_4096_whole(mesh_device, layer_idx):
+    """4096 tokens in ONE call = the production 4096 bucket (one expert-sorted MoE dispatch); stage-12 prefill baseline."""
+    _perf_prefill(mesh_device, layer_idx, 4096)
+
+
+@pytest.mark.perf
 @mesh_tp(MESH_PARAMS)
 @pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
 def test_perf_traced_decode(mesh_device, layer_idx):
@@ -1323,7 +1331,7 @@ def test_perf_single_traced_decode(device, layer_idx):
 @pytest.mark.perf
 @mesh_tp(PERF_PREFILL_PARAMS)
 @pytest.mark.parametrize("layer_idx", [L0], ids=["gdn"])
-@pytest.mark.parametrize("seq_len", [2048], ids=["2048"])
+@pytest.mark.parametrize("seq_len", [2048, 4096], ids=["2048", "4096"])
 def test_perf_moe_prefill(mesh_device, layer_idx, seq_len):
     """Stage-12 prefill profile: the MoE block alone on a replicated [1,1,T,H] input (the production 2048 bucket calls it
     once per layer), with a device-profiler flush between the expert-sorted phases (dispatch build / row gather / gate-up

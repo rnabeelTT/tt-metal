@@ -110,6 +110,23 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
 - **TTI v0.22.0 does not know this model**: the local patch (impl spec, dev catalog template, eval config, spec-test matrix)
   is recorded in `doc/tti_release/`, not pushed.
 
+### Perf pass turn 5 (2026-09-30): long-prompt prefill
+
+- The expert-sorted prefill path (T >= 128) now builds its dispatch with ONE device kernel,
+  `ttnn.experimental.moe_sorted_dispatch` (new op under `ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/`;
+  bit-identical to the former matmul counting sort), the grouped sparse matmul skips the zero-fill of its output and
+  skips the static padding groups (`MatmulMultiCoreReuseProgramConfig.skip_padding_groups`, new field). 48-layer traced
+  prefill at 2048 / 8192 tokens: 985 / 3959 ms -> see `doc/perf_pass/README.md` turn 5 (about -30 %).
+- Knobs (defaults are the shipped values): `QWEN35_DISPATCH_MODE=kernel` (`counting_mm` restores the stage-12 path),
+  `QWEN35_SKIP_PAD_GROUPS=1`, `QWEN35_UNDISPATCH_KERNEL=0` (the fused un-dispatch kernel `moe_gather_add_rows` is in the
+  tree but not enabled), `QWEN35_PREFILL_SEGMENT=2048` (do not raise: whole-layer programs fail above 2048 rows),
+  `QWEN35_SORTED_GROUP_ROWS=32` (64 measured slower).
+- Building: the new ops are part of the `ttnn` target (`ninja -C build_Release ttnn`); the linked library is
+  `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
+  copy + atomic `mv` while device jobs run. Kernels compile on first use.
+- Next levers (not done): MTP decode (`doc/perf_pass/mtp_plan.md`), one weight pass per expert in the grouped sparse
+  matmul, the fused un-dispatch kernel, a fused GDN decode step.
+
 ## 5. Vision enablement path (not done in this bring-up)
 
 The checkpoint's vision tower (`model.visual.*`, 333 tensors, Qwen3-VL style ViT) is loadable:

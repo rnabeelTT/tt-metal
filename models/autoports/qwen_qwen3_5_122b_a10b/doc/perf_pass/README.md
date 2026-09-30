@@ -112,6 +112,49 @@ continuation, dispatch vs sort, stress bit-identity); full-model prefill-check b
 benchmark, 128-token prompts) 1 user 408 -> 371 ms, 8 users 3234 -> 3004 ms, 32 users 12120 -> 11052 ms (every serialized 128-token
 prefill is ~35 ms shorter; TPOT unchanged; seeded / greedy completions reproduce at every width; `served_min128/`). `MULTICHIP_SELECTED.sorted_min_tokens` is 128 (env `QWEN35_SORTED_MIN_TOKENS` still overrides).
 
+## Turn 5 — long-prompt prefill: the MoE dispatch as one kernel, no zero-fills, no padding groups (adopted)
+
+The question "why is prefill still serialized?": within a request every op already spans all 440 cores; the serial
+parts are the 2048-token segment loop and the scheduler's one-prefill-at-a-time. Per 2048-token segment a layer spent
+~20 ms of which ~16.5 ms was the MoE block, and of that ~6 ms was dispatch bookkeeping in ~100 small ops on a
+[T*k, E] fp32 one-hot (row-proportional, so larger segments did not help: 4096-token segments gave -13 % per token,
+failed at whole-layer 4096 rows, and segfaulted the 48-layer bench; a device sort of the 16K keys alone cost 17 ms).
+Three changes, all in the expert-sorted prefill path (T >= 128), all bit-identical or PCC-identical:
+
+1. `ttnn.experimental.moe_sorted_dispatch` (new op, `ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/`): one
+   single-core dataflow kernel reads the tiled `[1,1,T,k]` top-k ids / scores in place and does the counting sort in L1
+   (histogram, padded per-expert offsets, group ids, source-token / weight / destination-row scatter) -> four sticks.
+   Same row layout as the counting sort bit for bit (`test_dispatch_modes_equivalent`, T = 256 .. 2048 and identical
+   routing); 1.26 ms device at 2048 tokens (+0.4 ms glue) instead of ~6 ms. `QWEN35_DISPATCH_MODE=kernel` (default).
+2. The grouped sparse matmul no longer zero-fills its output (`SparseMatmulDeviceOperation::create_output_tensors`
+   recognised only the `nnz` compact shape as fully written; the group-parallel factory writes every group): -0.88 ms
+   per layer of `FILL` unary ops.
+3. Padding groups skipped: the dispatch marks the static trailing padding groups (~16 % of the groups at 2048 tokens)
+   with a sentinel expert id and the grouped factory (`MatmulMultiCoreReuseProgramConfig.skip_padding_groups`, the
+   in0 reader reads the id list, the in1 writer signals validity to compute through the BRISC mailbox) skips their
+   weight / activation reads and output writes: expert matmuls 4.34 -> 3.67 ms per layer; real groups bit-identical
+   (`test_grouped_skip_padding_groups`, trailing and interleaved sentinels). `QWEN35_SKIP_PAD_GROUPS=1` (default).
+
+MoE block device time per layer at 2048 tokens: 16.45 -> 11.24 -> 10.57 ms; whole layers 20.7 -> 15.5 ms (GDN) and
+18.3 -> 13.1 ms (attention). 48-layer traced prefill (`prefill_bucket_bench_48layers_{min128,kernel,kernelskip}.json`):
+
+| prompt tokens | turn 4 | kernel dispatch + no zero-fill | + padding skip (shipped) |
+|---|---|---|---|
+| 128 | 303.2 ms | 249.0 ms | **214.1 ms** (-29 %) |
+| 2048 | 984.5 | 732.6 | **701.3** (-29 %) |
+| 8192 | 3959.0 | 2950.9 | **2828.3** (-29 %) |
+| 16384 | 7993.2 | 5980.6 | **5744.9** (-28 %) |
+
+Correctness: layer suite 14/14 (kernel) and 12/12 (kernel + skip) with PCCs identical to the counting-sort path;
+full-model prefill-check vs HF PCHECK. Served (`served_kernelskip/`): SERVED.
+
+Rejected in this turn: 64-row expert groups (fewer weight re-reads but +50 % padding rows: MoE 11.2 -> 11.8 ms);
+4096-token segments (above); the `sort_u16` dispatch. Still open (measured, not done): the un-dispatch as one
+multi-core gather-add kernel (`ttnn.experimental.moe_gather_add_rows`, written, off by default until its compute-kernel
+init issue is closed; would take the 2.1 ms un-dispatch + 0.7 ms untilize to ~1 ms) and reading each expert's weights
+once per layer instead of once per 32-row group (~1.0 GB vs 0.34 GB of expert reads per chip per layer; ~-1.9 ms).
+The Qwen3.8 bundle study (`qwen38_bundle_study.md`) and the MTP plan (`mtp_plan.md`) are in this directory.
+
 ## Rejected in this pass
 
 - Expert-sorted MoE at decode (`sorted_min_tokens` 256 -> 8 with the group-parallel factory): per layer w8 4.16 /

@@ -196,3 +196,99 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   -> not pursued; a fused GDN decode step is kernel work. Turn-4 bundle rebuild -> push -> Hub verify running.
 - 01:16-01:37 turn-4 bundle: image c6e9186de5d4, Hub revision 024095e6, verified from the Hub (`logs/13/verify-hub-t4.log`):
   all checks pass; burst 137 tok/s (was 127), 8K 4.5 s, 128K 72.6 s; default greeting back to the long form (near tie).
+
+## Turn 5 — long-prompt prefill: larger segments (user question: "why is prefill still serialized?")
+- Within a request every prefill op already spans all 440 cores (TP 4); the serial parts are the segment loop (2048
+  tokens per bucket program, one after another) and the scheduler's one-prefill-at-a-time across requests. Per 2048-token
+  segment ~1.0 s over 48 layers (~20 ms per layer): expert matmuls ~5 ms, attention / GDN / projections ~7 ms, MoE
+  dispatch bookkeeping ~8-10 ms in ~170 small ops (mostly fixed cost per op) -> the lever is fewer, fuller segments
+  (then fusing the bookkeeping; batched prefill across requests only for concurrency fairness).
+- Code (behind QWEN35_PREFILL_SEGMENT, default 2048): `Qwen35MoeModel.PREFILL_SEGMENT`, `_PREFILL_MASK_BUCKETS` gains 4096
+  (and 8192 only when asked; the sorted dispatch index math is exact to 7196 tokens, so 8192 would need the masked path or
+  a check), segmented prefill + `_prefill_single` use the knob, the warm-up page table covers the longest bucket.
+- Queued: chain23 (layer Tracy of the MoE phases at 4096 tokens; whole-layer walls 2048 vs 4096), chain24 (48-layer traced
+  prefill bench 2048 / 4096 / 8192 / 16384 tokens with segment 4096 vs 2048, 1 GiB trace region).
+- 01:45 chain23 Tracy MoE at 4096 tokens (`artifacts/stage13/tracy_moe_4096`): device 40.54 ms vs 2 x 23.24 at 2048 ->
+  -13 % per token; every major op scales ~linearly with rows (BinaryNg on the one-hot 4.52 -> 8.15 ms, sparse matmuls
+  4.68 -> 7.82, counting matmuls 2.69 -> 4.94, 1-core scatters 2.40 -> 4.66, embeddings 2.12 -> 3.09, slices 1.66 -> 3.29).
+  Host walls with syncs: dispatch 6.66 -> 11.55, gate/up 2.87 -> 4.71, down 2.75 -> 4.39, undispatch 2.52 -> 4.23.
+  So larger segments amortize little; the dispatch bookkeeping (~11 ms device of the 23 at 2048) is row-proportional
+  work on the [Rp, E] fp32 one-hot + single-core scatters -> a leaner dispatch (sort_u16 keys + O(Rp)/O(E) vectors, or a
+  fused kernel) is the prefill lever. chain25 queued: Tracy of the MoE phases with QWEN35_DISPATCH_MODE=sort_u16.
+- 01:46 chain23 whole-layer walls: 2048 GDN 87.9 / attention 85.2 ms; the 4096-in-one-call layer test failed at a program
+  build (`program.cpp:2065`, L1 circular-buffer assert) in the non-MoE part of the layer -> some attention / GDN /
+  projection program config does not fit 4096 rows; the first 48-layer bench attempt died on a class-scope NameError
+  in the new bucket-list expression (fixed: the env is read inline). chain24 re-queued behind the sort_u16 Tracy.
+- 01:55 chain25 Tracy of the MoE phases with `sort_u16`: the device sort of 16K uint16 keys alone costs 17.4 ms at 2048
+  tokens (dispatch build 25.0 ms host wall vs 6.7 for counting_mm) -> sort-based dispatch is dead; the counting sort stays.
+- 02:09 chain24: the 4096-token-segment 48-layer bench segfaulted (exit 139, after the whole-layer L1 CB assert at 4096
+  rows in chain23) -> segment stays 2048 (`QWEN35_PREFILL_SEGMENT` kept as a knob, default 2048, documented as unsafe
+  above 2048). Control run at segment 2048 (`prefill_bucket_bench_48layers_seg2048.json`): 2048 / 4096 / 8192 / 16384
+  tokens = 984.5 / 1969.5 / 3959.0 / 7993.2 ms traced (0.48-0.49 ms per token, linear).
+
+## Turn 5 (continued) — the dispatch bookkeeping as ONE kernel: `ttnn.experimental.moe_sorted_dispatch`
+- New op (`ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/`, classic Program API, one core, one RISCV_0
+  dataflow kernel): reads the tiled `[1,1,T,k]` top-k outputs in place (uint16 ids, bf16 scores; the tile/face index math
+  is in the kernel, so no typecast / untilize / reshape in front), does the integer counting sort over the T*k pairs
+  in L1 (histogram, padded per-expert offsets, group ids, scatter of source token / weight / destination row) and
+  writes four sticks: `src_tok` uint32 [1,Rd], `weights` bf16 [1,Rd], `group_ids` uint16 [1,G], `undispatch` uint32
+  [1,T*k]. Python: `SortedDispatch._build_kernel` (QWEN35_DISPATCH_MODE=kernel); the outputs keep the exact row layout
+  of the counting sort. First attempt exposed only `ttnn._ttnn.operations.experimental...`; the nanobind name
+  `moe_sorted_dispatch` is re-exported at `ttnn.moe_sorted_dispatch` (namespace renamed `moe_dispatch_nb` after a clash
+  with the function name). Build note: `ninja -C build_Release ttnn` links to `build_Release/ttnn/_ttnn.so`
+  (NOT `build_Release/lib/`, which still holds the 09-10 build) and Python loads `ttnn/ttnn/_ttnn.so`: copy + atomic
+  `mv` (a `cp` over the loaded file would corrupt a running job).
+- 02:10 `test_dispatch_modes_equivalent` (T = 256 / 500 / 513 / 1000 / 1023 / 2048): kernel == counting_mm == counting_h
+  bit for bit on all five tensors, first run. Host wall per build (incl. sync): 5.98 -> 1.66 ms at 2048 (1.41 -> 0.41 at 256).
+- 02:12-02:18 Tracy of the MoE block at 2048 (`artifacts/stage13/tracy_moe_kernel{,2}`, device time, 4 dies merged):
+  16.45 ms (counting_mm) -> 13.75 (kernel, stick inputs: the two data-moving RM reshapes cost 1.66 ms) -> 12.11 ms
+  (kernel reading the tiled top-k outputs). The kernel itself: 1.19-1.26 ms (single RISC over 16K pairs); the rest of
+  the dispatch build is now 0.4 ms (group one-hot for the sparse-op signature, weights relayout). Remaining MoE time:
+  sparse matmuls 4.32, gather (embedding) 1.44, un-dispatch 0.73 untilize + 8 x (0.075 gather + 0.10 add) = 2.1,
+  swiglu/weights 0.4, zero-fills 0.13 + 0.75 (see next), router 0.25.
+- 02:21 the two `UnaryDeviceOperation FILL 0` before each sparse matmul (0.88 ms per layer) are `SparseMatmulDeviceOperation::
+  create_output_tensors` zero-filling the caller-provided output because only the `nnz` compact shape was recognised as
+  "fully written"; the grouped factory writes every one of its G groups too -> `compact_output = grouped || ...`
+  (sparse_matmul_device_operation.cpp). Installed before the 48-layer bench of chain26.
+- 02:20-02:25 chain26 layer tests with QWEN35_DISPATCH_MODE=kernel: 14 passed (prefill/decode vs HF at 513 / 1000 /
+  2048, chunked prefill, real-weight, prefill after traced decode), PCCs unchanged (GDN 0.9985-0.9999, attention 0.99996+).
+  48-layer traced bench + prefill-check (2048 / 8192 book references) running.
+- Study of the user's `sjettTT/qwen3.8-flash-next_p150x4` bundle (`qwen38_bundle_study.md`): its MoE is EP4 through a
+  forked `moe_compute` (not portable), but its 2048-row expert stream (1.84 ms/layer, weights read once per expert) and
+  0.14 ms fused combine bound what our sparse path should reach: our gate/up + down read ~1.0 GB of expert blocks per
+  layer per chip (once per 32-row group, ~3 groups per expert) for 340 MB of unique weights -> "one weight pass per
+  expert" (ragged M per expert in the grouped factory) is the next big lever (~-2.5 ms/layer), then the un-dispatch.
+- Un-dispatch kernel written: `ttnn.experimental.moe_gather_add_rows(rows RM [Rd,H], undispatch RM [1,T*k], T, k)` ->
+  TILE [1,1,T,H]; multi-core (work item = 32-token tile x column block, ~128 items at 2048 x 3072), reader gathers the k
+  rows of a token tile as row-major blocks, compute tilizes + adds in slot order (same bf16 association as the k adds it
+  replaces), writer stores tiles. Knob QWEN35_UNDISPATCH_KERNEL (off until `test_gather_add_rows_matches_reference` passes).
+- 03:07 chain26's prefill-check (2048 tokens) hung in the T=128 all-zero-token program warm-up (blocked in a device read,
+  py-spy) -> killed; bench + layer tests had passed the same warm-up minutes earlier. 03:25 the un-dispatch kernel's own
+  unit test hangs the device on its first call (T=500) -> the prefill-check process had imported `moe_dispatch.py` while
+  QWEN35_UNDISPATCH_KERNEL still defaulted to on (flipped to off two minutes later), so the hang is the new
+  `moe_gather_add_rows` kernel, not the dispatch kernel. Watcher run queued to locate it; a warm-up reproducer (chain27,
+  dispatch=kernel, un-dispatch kernel off) queued to confirm the kernel-dispatch path is clean.
+- 03:30 64-row expert groups (QWEN35_SORTED_GROUP_ROWS=64, Tracy `tracy_moe_kernel_gs64`, device time at 2048 tokens):
+  sparse matmuls 4.32 -> 3.58 ms (509 vs 761 groups) but the row gather 2.04 -> 3.07, untilize 0.81 -> 1.05, un-dispatch
+  +0.24 (Rd 24352 -> 32576 rows): MoE block 11.23 (32-row groups, zero-fill skipped) -> 11.83 ms -> rejected; the
+  activation traffic of the wider padding outweighs the fewer weight re-reads. Also shows the expert matmuls are not
+  purely weight-bandwidth bound (-33 % groups -> -17 % time).
+- 03:52 chain27: the 48-layer generator init (all-zero-token warm-up of every bucket) with QWEN35_DISPATCH_MODE=kernel and
+  the un-dispatch kernel off passes twice (128-token dev 256 / 258 ms) -> the kernel-dispatch path is clean; the chain26
+  hang was the un-dispatch kernel. Padding-group skip unit test (`test_grouped_skip_padding_groups`): real groups
+  bit-identical with 126 trailing + interleaved sentinel groups skipped; gate/up 2.59 -> 2.16 ms, down 1.78 -> 1.49 ms
+  per call at 761 groups (host wall).
+- 03:55 Tracy MoE at 2048, kernel dispatch + zero-fill skip (`tracy_moe_kernel3`): 11.24 ms device per layer (was 16.45
+  with counting_mm): sparse matmuls 4.34, gather 1.44, dispatch kernel 1.26 (+0.4 ms glue), un-dispatch 2.1 + untilize
+  0.73, swiglu/weights 0.4, router 0.25.
+- 03:58 whole-layer Tracy at 2048 tokens, kernel dispatch (`artifacts/stage12/tracy_kernel`): GDN layer 20.70 -> 15.47 ms
+  device (GDN block 4.2 unchanged, MoE 16.5 -> 11.3), attention layer 18.32 -> 13.12 (attention block 1.9); 36 x 15.47 +
+  12 x 13.12 = 714 ms vs the 733 ms traced 48-layer bench (the rest: embeddings, norm, LM head, host gaps).
+- 04:17 chain28: padding-group skip at layer level: 12 layer tests pass with PCCs identical to the non-skip run (the
+  padding groups' outputs were never read); Tracy MoE at 2048 (`tracy_moe_kernel_skip`): sparse matmuls
+  4.34 -> ~3.6 ms (host wall gate/up 2.86 -> 2.33, down 2.68 -> 1.67). Defaults flipped in code: QWEN35_DISPATCH_MODE
+  = kernel, QWEN35_SKIP_PAD_GROUPS = 1. chain29 (final validation: bench, prefill-check, served) queued.
+- 04:18-04:36 chain29 (shipped config: kernel dispatch + zero-fill skip + padding skip): 48-layer traced prefill 128 / 161 /
+  2048 / 4097 / 8192 / 16384 tokens = 214.1 / 249.3 / 701.3 / 1596.3 / 2828.3 / 5744.9 ms (turn 4: 303.2 / 348.1 / 984.5 /
+  2208.7 / 3959.0 / 7993.2: -29 % at every length); prefill-check book_p2048 vs HF top1 0.99 / top5 1.00 / top100 1.00
+  (unchanged). 8192-token check and the served chain follow.

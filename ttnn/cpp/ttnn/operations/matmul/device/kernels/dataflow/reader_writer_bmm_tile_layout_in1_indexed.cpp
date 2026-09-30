@@ -18,6 +18,10 @@
 
 #include <stdint.h>
 #include "api/dataflow/dataflow_api.h"
+#ifdef SKIP_PADDING_GROUPS
+#include "ckernel.h"
+#include "ckernel_defs.h"
+#endif
 #include "api/dataflow/noc.h"
 #include "api/dataflow/dataflow_buffer.h"
 #include "api/tensor/noc_traits.h"
@@ -86,7 +90,20 @@ void kernel_main() {
         const uint32_t gb = start_batch + b;
         ASSERT(gb < num_groups_total);
         const uint32_t group_id = ids[gb];
+#ifdef SKIP_PADDING_GROUPS
+        // padding groups (id >= num_experts) are skipped by all three kernels: the compute kernel learns it through
+        // the BRISC mailbox (get_batch_from_reader), the in0 reader reads the same id list
+        const bool group_valid = group_id < num_experts;
+        ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, group_valid);
+        ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, group_valid);
+        ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, group_valid);
+        if (!group_valid) {
+            out_tensor_start_tile_id += MtNt;
+            continue;
+        }
+#else
         ASSERT(group_id < num_experts);
+#endif
         uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt;
         for (uint32_t block = 0; block < num_blocks; ++block) {
             dfb_in1.reserve_back(in1_block_num_tiles);

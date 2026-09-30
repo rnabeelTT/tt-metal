@@ -20,6 +20,9 @@ struct MatmulMultiCoreReuseProgramConfig {
     std::size_t per_core_M{};
     std::size_t per_core_N{};
     std::optional<CoreRangeSet> allowed_worker_cores = std::nullopt;
+    // Group-parallel sparse matmul only: groups whose `indices` entry is >= the number of experts (padding groups of an
+    // expert-sorted MoE dispatch) are skipped entirely (no weight / activation reads, no output writes).
+    bool skip_padding_groups = false;
 };
 
 struct MatmulMultiCoreReuseMultiCastProgramConfig {

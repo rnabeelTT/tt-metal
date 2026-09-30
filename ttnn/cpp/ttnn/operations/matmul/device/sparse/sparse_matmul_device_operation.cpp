@@ -503,11 +503,15 @@ SparseMatmulDeviceOperation::tensor_return_value_t SparseMatmulDeviceOperation::
     const auto& input_tensors = tensor_args.input_tensors;
     // A compact output is fully written by the in1 writer (one block per non-zero sparsity entry),
     // so it skips the zero-fill below; expanded outputs rely on it to zero the skipped blocks.
-    const bool compact_output = !optional_output_tensors.empty() && optional_output_tensors[0].has_value() &&
-                                operation_attributes.nnz.has_value() &&
-                                optional_output_tensors[0]->logical_shape() ==
-                                    compute_sparse_matmul_compact_output_shape(
-                                        input_tensors.at(0), input_tensors.at(1), operation_attributes.nnz.value());
+    // The grouped (group-parallel indexed) factory also writes every one of its G output groups, so its output is
+    // compact as well: no zero-fill either way (it costs a full pass over the output, ~0.9 ms at 761 groups x 3072).
+    const bool grouped = is_grouped_mode(operation_attributes);
+    const bool compact_output =
+        grouped || (!optional_output_tensors.empty() && optional_output_tensors[0].has_value() &&
+                    operation_attributes.nnz.has_value() &&
+                    optional_output_tensors[0]->logical_shape() ==
+                        compute_sparse_matmul_compact_output_shape(
+                            input_tensors.at(0), input_tensors.at(1), operation_attributes.nnz.value()));
 
     if (!optional_output_tensors.empty() and optional_output_tensors[0].has_value()) {
         output_tensors.reserve(optional_output_tensors.size());
@@ -536,8 +540,11 @@ SparseMatmulDeviceOperation::tensor_return_value_t SparseMatmulDeviceOperation::
     for (const auto& output_spec : output_specs) {
         output_tensors.emplace_back(create_device_tensor(output_spec, device));
     }
-    // Compact output requires a caller-supplied tensor, so this path is never compact.
+    // Compact output requires a caller-supplied tensor, so this path is never compact (except grouped: fully written).
     for (auto& output_tensor : output_tensors) {
+        if (grouped) {
+            break;
+        }
         output_tensor = ttnn::zeros_like(
             output_tensor,
             std::nullopt,

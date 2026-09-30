@@ -64,6 +64,17 @@ class _CacheRoot(type(Path())):
 class Qwen35MoeModel(Qwen36Model):
     """qwen36 full model with the optimized multichip MoE layer; see the module docstring for the decode contract."""
 
+    # Prefill segment length (perf pass turn 5): the segmented prefill and the served single-request prefill run one
+    # bucket program per PREFILL_SEGMENT tokens (stages 6-13: 2048). QWEN35_PREFILL_SEGMENT=4096 adds a 4096-token
+    # bucket (expert-sorted dispatch is exact to 7196 tokens; needs a larger trace region): fewer, fuller segments
+    # amortize the per-segment dispatch bookkeeping of the MoE block.
+    PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048"))
+    _PREFILL_MASK_BUCKETS = tuple(
+        b
+        for b in (128, 256, 512, 1024, 2048, 4096, 8192)
+        if b <= max(2048, int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048")))  # class-body scope: no PREFILL_SEGMENT
+    )
+
     DECODER_LAYER_CLS = Qwen35MoeOptimizedDecoderLayer
 
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None):
@@ -494,7 +505,7 @@ class Qwen35MoeModel(Qwen36Model):
         vlen = int(valid_len or T)
         pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
         outs = []
-        seg = 2048
+        seg = self.PREFILL_SEGMENT
         for cs in range(0, vlen, seg):
             n = min(seg, vlen - cs)
             bucket = self._mask_bucket_for(n)

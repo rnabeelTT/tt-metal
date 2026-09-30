@@ -196,7 +196,7 @@ def test_grouped_on_mesh(mesh_device):
 
 
 @pytest.mark.parametrize(
-    "T", [256, 500, 513, 1000, 1023, 2048], ids=["t256", "t500", "t513", "t1000", "t1023", "t2048"]
+    "T", [256, 500, 513, 1000, 1023, 2048, -128], ids=["t256", "t500", "t513", "t1000", "t1023", "t2048", "t128same"]
 )
 def test_dispatch_modes_equivalent(device, T):
     """The matmul-based counting sort (`counting_mm`) must produce exactly the same dispatch tensors as the cumsum-based
@@ -204,13 +204,17 @@ def test_dispatch_modes_equivalent(device, T):
     import models.autoports.qwen_qwen3_5_122b_a10b.tt.moe_dispatch as md
 
     E, k, gs = 256, 8, 32
+    same = T < 0  # every token routes to the same k experts (the all-zero-token program warm-up)
+    T = abs(T)
     torch.manual_seed(T)
     ids = torch.stack([torch.randperm(E)[:k] for _ in range(T)]).to(torch.int32).reshape(1, 1, T, k)
+    if same:
+        ids[:] = ids[0, 0, :1]
     scores = torch.rand(1, 1, T, k, dtype=torch.bfloat16)
     ids_t = ttnn.from_torch(ids, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
     sc_t = ttnn.from_torch(scores, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
     outs = {}
-    for mode in ("counting_h", "counting_mm"):
+    for mode in ("counting_h", "counting_mm", "kernel"):
         md.DISPATCH_MODE = mode
         d = md.SortedDispatch(device, E, k, group=gs)
         m = d.build(ids_t, sc_t, T)
@@ -219,13 +223,122 @@ def test_dispatch_modes_equivalent(device, T):
             for key in ("src_tok", "weights", "group_mask", "group_ids", "undispatch")
         }
         outs[mode]["G"] = m["G"]
-    a, b = outs["counting_h"], outs["counting_mm"]
-    assert a["G"] == b["G"]
-    for key in ("src_tok", "undispatch", "group_ids"):
-        assert torch.equal(a[key].to(torch.int64), b[key].to(torch.int64)), key
-    assert torch.equal(a["group_mask"], b["group_mask"])
-    assert torch.equal(a["weights"], b["weights"])
+    a = outs["counting_h"]
+    for other in ("counting_mm", "kernel"):
+        b = outs[other]
+        assert a["G"] == b["G"], other
+        for key in ("src_tok", "undispatch", "group_ids"):
+            assert torch.equal(a[key].to(torch.int64).reshape(-1), b[key].to(torch.int64).reshape(-1)), (other, key)
+        assert torch.equal(a["group_mask"], b["group_mask"]), other
+        assert torch.equal(a["weights"].reshape(-1), b["weights"].reshape(-1)), other
     # the dispatch must be a permutation covering every (token, slot) pair exactly once
     u = a["undispatch"].to(torch.int64).flatten()
     assert u.numel() == T * k and torch.unique(u).numel() == T * k
-    print(f"DISPATCH_EQUIV T={T}: counting_mm == counting_h (G={a['G']})")
+    if same:
+        return
+    print(f"DISPATCH_EQUIV T={T}: counting_mm == kernel == counting_h (G={a['G']})")
+    # timing of the dispatch build alone (host wall incl. sync, 5 iters) per mode
+    for mode in ("counting_mm", "kernel"):
+        md.DISPATCH_MODE = mode
+        d = md.SortedDispatch(device, E, k, group=gs)
+        d.build(ids_t, sc_t, T)
+        ttnn.synchronize_device(device)
+        t0 = time.perf_counter()
+        for _ in range(5):
+            m = d.build(ids_t, sc_t, T)
+        ttnn.synchronize_device(device)
+        print(f"DISPATCH_PERF T={T} {mode}: {1e3 * (time.perf_counter() - t0) / 5:.3f} ms per build (host wall)")
+
+
+@pytest.mark.parametrize("T,H", [(500, 3072), (2048, 3072), (2048, 512)], ids=["t500", "t2048", "t2048_h512"])
+def test_gather_add_rows_matches_reference(device, T, H):
+    """The fused un-dispatch kernel (ttnn.moe_gather_add_rows) must equal the k x (gather + add) reference bit for bit
+    (same bf16 add order) on a real dispatch permutation, and match a torch fp32 sum closely."""
+    import models.autoports.qwen_qwen3_5_122b_a10b.tt.moe_dispatch as md
+
+    E, k, gs = 256, 8, 32
+    torch.manual_seed(T + H)
+    ids = torch.stack([torch.randperm(E)[:k] for _ in range(T)]).to(torch.int32).reshape(1, 1, T, k)
+    scores = torch.rand(1, 1, T, k, dtype=torch.bfloat16)
+    ids_t = ttnn.from_torch(ids, dtype=ttnn.uint16, layout=ttnn.TILE_LAYOUT, device=device)
+    sc_t = ttnn.from_torch(scores, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
+    md.DISPATCH_MODE, md.UNDISPATCH_KERNEL = "kernel", True
+    m = md.SortedDispatch(device, E, k, group=gs).build(ids_t, sc_t, T)
+    Rd, G = m["Rd"], m["G"]
+    y = torch.randn(1, G, gs, H, dtype=torch.bfloat16)
+    y_t = ttnn.from_torch(y, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
+    out_k = ttnn.to_torch(md.undispatch_rows(y_t, None, None, T, k, H, undispatch_rm=m["undispatch_rm"])).float()
+    und = ttnn.to_torch(m["undispatch_rm"]).to(torch.int64).reshape(T, k)
+    und_t = ttnn.from_torch(
+        und.reshape(1, 1, T, k).to(torch.int32), dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device
+    )
+    out_ref = ttnn.to_torch(md.undispatch_rows(y_t, None, und_t, T, k, H)).float()
+    assert out_k.shape == out_ref.shape == (1, 1, T, H)
+    assert torch.equal(out_k, out_ref), (out_k - out_ref).abs().max()
+    torch_ref = y.float().reshape(Rd, H)[und.reshape(-1)].reshape(T, k, H).sum(1)
+    assert torch.allclose(out_k.reshape(T, H), torch_ref, atol=0.25, rtol=0.05)
+    print(
+        f"UNDISPATCH_EQUIV T={T} H={H}: kernel == k x (gather + add) reference, torch max abs err "
+        f"{(out_k.reshape(T, H) - torch_ref).abs().max():.4f}"
+    )
+    for name, fn in (
+        ("k_gather_add", lambda: md.undispatch_rows(y_t, None, und_t, T, k, H)),
+        ("kernel", lambda: md.undispatch_rows(y_t, None, None, T, k, H, undispatch_rm=m["undispatch_rm"])),
+    ):
+        fn()
+        ttnn.synchronize_device(device)
+        t0 = time.perf_counter()
+        for _ in range(5):
+            fn()
+        ttnn.synchronize_device(device)
+        print(f"UNDISPATCH_PERF T={T} H={H} {name}: {1e3 * (time.perf_counter() - t0) / 5:.3f} ms (host wall)")
+
+
+@pytest.mark.parametrize(
+    "G,gs,E,K,N,w_dtype",
+    [
+        (761, 32, 256, 3072, 512, ttnn.bfloat4_b),
+        (761, 32, 256, 256, 3072, ttnn.bfloat4_b),
+        (37, 32, 256, 3072, 512, ttnn.bfloat8_b),
+    ],
+    ids=["gu2048", "dn2048", "odd37_bfp8"],
+)
+def test_grouped_skip_padding_groups(device, G, gs, E, K, N, w_dtype):
+    """With `skip_padding_groups`, groups whose id is a sentinel (>= E) are skipped by all three kernels; the real groups'
+    outputs must be bit-identical to the run without skipping (padding groups are never read by the layer)."""
+    x_t, w_t, idx_t, ones, ids, ref = _make(device, G, gs, E, K, N, w_dtype)
+    # the layer's layout: real groups first (expert-ascending), padding groups at the end -> sentinel the last 16 %
+    n_pad = max(1, G // 6)
+    ids_s = ids.clone()
+    ids_s[G - n_pad :] = 0xFFFF
+    idx_s = ttnn.from_torch(ids_s.reshape(1, G), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    cfg = grouped_config(device, gs, K, N)
+    cfg_skip = grouped_config(device, gs, K, N)
+    cfg_skip.skip_padding_groups = True
+    out_full = ttnn.to_torch(_run(device, x_t, w_t, idx_t, ones, cfg, CKC)).float()
+    out_skip = ttnn.to_torch(_run(device, x_t, w_t, idx_s, ones, cfg_skip, CKC)).float()
+    real = G - n_pad
+    assert torch.equal(out_full[:, :real], out_skip[:, :real]), (out_full[:, :real] - out_skip[:, :real]).abs().max()
+    pcc = comp_pcc(ref[:, :real], out_skip[:, :real], 0.9995)
+    assert pcc[0], pcc[1]
+    # sentinel groups interleaved with real ones (not only trailing) must also be skipped without disturbing neighbours
+    ids_m = ids.clone()
+    ids_m[1::7] = 0xFFFF
+    idx_m = ttnn.from_torch(ids_m.reshape(1, G), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    out_mixed = ttnn.to_torch(_run(device, x_t, w_t, idx_m, ones, cfg_skip, CKC)).float()
+    keep = torch.ones(G, dtype=torch.bool)
+    keep[1::7] = False
+    assert torch.equal(out_full[:, keep], out_mixed[:, keep])
+    # timing: skip vs full at the layer's padding share
+    for name, idx, c in (("full", idx_t, cfg), ("skip16pct", idx_s, cfg_skip)):
+        _run(device, x_t, w_t, idx, ones, c, CKC)
+        ttnn.synchronize_device(device)
+        t0 = time.perf_counter()
+        _run(device, x_t, w_t, idx, ones, c, CKC, iters=10)
+        ttnn.synchronize_device(device)
+        print(
+            f"SKIPPAD_PERF {G}x{gs}x{K}x{N} {name}: {1e3 * (time.perf_counter() - t0) / 10:.3f} ms per call (host wall)"
+        )
+    print(
+        f"SKIPPAD_EQUIV {G}x{gs}x{K}x{N}: real groups identical with {n_pad} trailing + interleaved sentinel groups skipped"
+    )

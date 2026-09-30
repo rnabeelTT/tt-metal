@@ -16,7 +16,10 @@ Internal key scheme (matches ``models/demos/blackhole/qwen36/tt/weight_mapping.p
     layers.N.linear_attn.{q,k,v}_conv.weight    <- slices of ...layers.N.linear_attn.conv1d.weight
     layers.N.<everything else>                  <- model.language_model.layers.N.<everything else>
 
-``mtp.*`` (multi-token prediction head) is dropped. ``model.visual.*`` (vision tower) is NOT part of
+``mtp.*`` (multi-token prediction head) is not part of the layer mapping; :meth:`StreamingStateDict.mtp_state`
+materializes it on demand in the same internal scheme (``mtp.layers.0.*`` with the per-expert tensors fused into the
+main layers' ``mlp.experts.gate_up_proj`` / ``down_proj`` layout, plus ``mtp.fc``, ``mtp.norm``, ``mtp.pre_fc_norm_*``).
+``model.visual.*`` (vision tower) is NOT part of
 the text mapping but stays reachable through :meth:`StreamingStateDict.visual_keys` /
 :meth:`StreamingStateDict.visual_tensor` for the later vision enablement.
 """
@@ -72,8 +75,10 @@ class StreamingStateDict(Mapping):
         self._visual: dict[str, str] = {}
         self._layer_keys: dict[int, list[str]] = {}
         q, k = linear_q_dim, linear_k_dim
+        self._mtp: dict[str, str] = {}
         for hf_key, shard in weight_map.items():
             if hf_key.startswith("mtp."):
+                self._mtp[hf_key] = shard
                 continue
             if hf_key.startswith(_VISUAL_PREFIX):
                 self._visual[hf_key[len(_VISUAL_PREFIX) :]] = shard
@@ -148,6 +153,63 @@ class StreamingStateDict(Mapping):
 
     def shard_names(self) -> set[str]:
         return {e.shard for e in self._entries.values()}
+
+    # -- MTP head -----------------------------------------------------------------------------
+    def has_mtp(self) -> bool:
+        return bool(self._mtp)
+
+    def mtp_keys(self) -> list[str]:
+        """Checkpoint names of the multi-token-prediction head (``mtp.*``)."""
+        return sorted(self._mtp)
+
+    def mtp_state(self, fuse_experts: bool = True) -> dict[str, torch.Tensor]:
+        """The MTP head in the internal scheme: ``mtp.fc.weight`` [H, 2H], ``mtp.pre_fc_norm_embedding.weight``,
+        ``mtp.pre_fc_norm_hidden.weight``, ``mtp.norm.weight`` and ONE full-attention MoE decoder layer under
+        ``mtp.layers.0.`` whose routed experts are fused like the main layers' checkpoint tensors:
+        ``mlp.experts.gate_up_proj`` [E, 2I, H] (gate rows first, then up) and ``mlp.experts.down_proj`` [E, H, I]
+        (the checkpoint stores the MTP experts per expert: ``experts.N.{gate,up,down}_proj``). Reads ~5 GB bf16 once."""
+        if not self._mtp:
+            raise KeyError("checkpoint has no mtp.* tensors")
+        out: dict[str, torch.Tensor] = {}
+        per_expert: dict[tuple[int, int, str], str] = {}  # (layer, expert, proj) -> hf key
+        for hf_key in self._mtp:
+            parts = hf_key.split(".")
+            if (
+                len(parts) >= 7
+                and parts[1] == "layers"
+                and parts[3] == "mlp"
+                and parts[4] == "experts"
+                and parts[5].isdigit()
+            ):
+                per_expert[(int(parts[2]), int(parts[5]), parts[6])] = hf_key
+                if fuse_experts:
+                    continue
+            out[hf_key] = self._shard(self._mtp[hf_key]).get_tensor(hf_key)
+        if fuse_experts and per_expert:
+            layers = sorted({li for li, _, _ in per_expert})
+            for li in layers:
+                experts = sorted({e for l2, e, _ in per_expert if l2 == li})
+                gate_up = []
+                down = []
+                for e in experts:
+                    g = self._shard(self._mtp[per_expert[(li, e, "gate_proj")]]).get_tensor(
+                        per_expert[(li, e, "gate_proj")]
+                    )
+                    u = self._shard(self._mtp[per_expert[(li, e, "up_proj")]]).get_tensor(
+                        per_expert[(li, e, "up_proj")]
+                    )
+                    d = self._shard(self._mtp[per_expert[(li, e, "down_proj")]]).get_tensor(
+                        per_expert[(li, e, "down_proj")]
+                    )
+                    gate_up.append(torch.cat([g, u], dim=0))  # [2I, H]
+                    down.append(d)  # [H, I]
+                out[f"mtp.layers.{li}.mlp.experts.gate_up_proj"] = torch.stack(gate_up, dim=0)
+                out[f"mtp.layers.{li}.mlp.experts.down_proj"] = torch.stack(down, dim=0)
+        return out
+
+    def mtp_shapes(self) -> dict[str, list[int]]:
+        """Shapes of the mtp.* tensors without reading them (safetensors slices)."""
+        return {k: list(self._shard(s).get_slice(k).get_shape()) for k, s in sorted(self._mtp.items())}
 
     def visual_keys(self) -> list[str]:
         """Vision-tower tensor names (without the ``model.visual.`` prefix). Not loaded by the text port."""

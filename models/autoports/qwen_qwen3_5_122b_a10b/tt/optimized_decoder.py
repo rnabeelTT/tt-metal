@@ -76,6 +76,9 @@ class OptimizationConfig:
     )  # below this many tokens the masked path took over (per-expert padding dominated with the multicast factory;
     # re-evaluated in the post-stage-12 perf pass with the group-parallel factory: QWEN35_SORTED_MIN_TOKENS sweeps it)
     sorted_group_rows: int = 32  # rows per expert block (multiple of 32): fewer weight re-reads vs more padding
+    # kernel dispatch + grouped sparse matmul: mark the trailing padding groups with a sentinel expert id and skip them
+    # in the expert matmuls (no weight / activation reads, no output writes); ~16 % of the groups at 2048 tokens
+    skip_pad_groups: bool = os.environ.get("QWEN35_SKIP_PAD_GROUPS", "1") == "1"
     sorted_max_tokens: int = (
         4096  # largest prefill chunk routed to the sorted path (index math exact to 7196; checked to 4096)
     )
@@ -505,7 +508,15 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
         if getattr(self, "_dispatch", None) is None:
-            self._dispatch = SortedDispatch(self.device, E, k, group=gs)
+            from .moe_dispatch import DISPATCH_MODE as _dmode
+
+            skip = (
+                bool(getattr(opt, "skip_pad_groups", False))
+                and bool(getattr(opt, "sorted_grouped", False))
+                and _dmode == "kernel"
+            )
+            self._dispatch = SortedDispatch(self.device, E, k, group=gs, pad_group_id=0xFFFF if skip else 0)
+            self._skip_pad_groups = skip
             self._cfg_sorted_gu = sparse_matmul_program_config(
                 gs,
                 2 * Nl,
@@ -566,9 +577,11 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         ttnn.deallocate(din)
         ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
-        y = undispatch_rows(down, None, m["undispatch"], T, k, H)
+        y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
         ttnn.deallocate(down)
-        ttnn.deallocate(m["undispatch"])
+        for key in ("undispatch", "undispatch_rm"):
+            if m.get(key) is not None:
+                ttnn.deallocate(m[key])
         return y
 
     def _grouped_configs(self, gs, H, Nl):
@@ -606,6 +619,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                     out_subblock_w=sw,
                     per_core_M=gs // 32,
                     per_core_N=n_tiles,
+                    skip_padding_groups=bool(getattr(self, "_skip_pad_groups", False)),
                 )
 
             gu_tiles = -(-(2 * Nl) // self.tile_gu.tile_shape[1])
