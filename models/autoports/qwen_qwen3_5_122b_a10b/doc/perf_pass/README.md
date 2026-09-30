@@ -66,14 +66,14 @@ functional two-op router, pairs path; readiness benchmark runner 128 / 128 token
 per-width client (TPOT from stream timing); `served_w1/`; the intermediate run with the pairs path alone on the width-2
 minimum is in `served_pairs/`):
 
-| users | TTFT p50 | TPOT stage 10 -> pairs only -> final | t/s/u final | aggregate tok/s stage 10 -> final |
+| users | TTFT p50 stage 10 -> final (turn 4) | TPOT stage 10 -> pairs only -> final | t/s/u final | aggregate tok/s stage 10 -> final (client) |
 |---|---|---|---|---|
-| 1 (own width-1 trace) | 408 ms | 37.7 -> 37.3 -> **32.7 ms** | **30.6** | 24.6 -> 28.0 |
-| 2 | 0.82-1.13 s | 39.4 -> 39.1 -> 38.1 ms | 26.2 | 43.1 -> 44.0 |
-| 4 | 1.62-1.96 s | 51.8 -> 47.7 -> 46.7 ms | 21.4 | 60.8 -> 65.5 |
-| 8 | 3.24-3.57 s | 93.1 -> 68.5 -> 67.7 ms | 14.8 | 66.8 -> 84.5 |
-| 16 | 6.5-6.8 s | 107.6 -> 107.5 -> 107.0 ms | 9.3 | 100.6 -> 100.4 |
-| 32 | 12.9-13.3 s | 125.1 -> 124.9 -> 125.2 ms | 8.0 | 140.6 -> 140.7 |
+| 1 (own width-1 trace) | 394-426 -> **371 ms** | 37.7 -> 37.3 -> **32.7 ms** | **30.6** | 24.6 -> 28.5 |
+| 2 | 0.91 -> 0.85 s | 39.4 -> 39.1 -> 38.1 ms | 26.2 | 43.1 -> 45.1 |
+| 4 | 1.79 -> 1.65 s | 51.8 -> 47.7 -> 46.7 ms | 21.4 | 60.8 -> 68.0 |
+| 8 | 3.23 -> 3.00 s | 93.1 -> 68.5 -> 67.7 ms | 14.8 | 66.8 -> 88.4 |
+| 16 | 6.27 -> 5.69 s | 107.6 -> 107.5 -> 107.0 ms | 9.3 | 100.6 -> 106.2 |
+| 32 | 12.12 -> 11.05 s | 125.1 -> 124.9 -> 124.7 ms | 8.0 | 140.6 -> 152.0 |
 
 Reproducibility on the served path with the width-1 trace (`served_w1/seedprobe.json`): seeded completions 1 unique of
 6 / 12 / 24 / 24 / 48 at widths 1 / 2 / 4 / 8 / 16, greedy width-1 re-runs 1 unique of 6 (stage 10 at width 1: 6 of 6).
@@ -89,7 +89,28 @@ GDN slot write (36 layers x rebuild of the whole [B, ...] state buffer around on
 |---|---|
 | sampling-params memo (`generator_vllm._memoize_sampling_params`, `QWEN35_SAMPLING_PARAMS_MEMO`, on): skip the sampler reset when the formatted params equal the last applied ones; prefill-side or direct sampler writes invalidate it | plugin sampling suite 73 passed / 4 skipped (= stage 9), qualitative coherent; served TPOT c1 / c8 / c32 32.7 / 67.7 / 130.5 ms with and without -> **no latency effect** (the host work was overlapped with the device step); kept as CPU hygiene |
 | GDN slot write by in-place `ttnn.experimental.slice_write` of the recurrent state (`TPGatedDeltaNet._write_index`, `QWEN36_GDN_SLICE_WRITE_SLOTS`; conv taps keep the rebuild) | correctness 9 / 9 (batched decode B = 32, distinct positions, reset after history, prefill after traced decode); per-layer write_slot 0.80 -> 0.77 ms per admitted user (`test_perf_slot_write`): the write is op-launch bound, not traffic bound -> **neutral, off by default** |
-| step-synchronization probe (`13-stepsync-probe.py`): traced step with deferred vs blocking vs plugin-style overlapped readback | < 0.3 ms difference at widths 1 / 8 / 32 -> the served-vs-trace gap at 16-32 users (107 / 130 vs 85 / 91 ms) is device work the served step does and the in-process trace does not; open (next turn: per-step phase timestamps in the adapter) |
+| step-synchronization probe (`13-stepsync-probe.py`): traced step with deferred vs blocking vs plugin-style overlapped readback | < 0.3 ms difference at widths 1 / 8 / 32 |
+| API-server vs engine CPU during the c32 benchmark (`hostprof/cpu_c32.txt`, `/metrics`) | api_server 4 %, engine 411 % (dispatch threads): the API server is not the bound |
+| **resolution of the served-vs-trace gap** (107 / 130 served vs 85 / 91 ms in-process at 16 / 32 users) | the in-process probes gave every user the SAME prompt -> same experts -> a fraction of the expert-weight bytes; served users differ and touch ~all 256 experts. The layer perf test with distinct users predicts 2.786 x 48 = 134 ms. Widths 16-32 are at the weight-bandwidth floor; there is no host gap |
+
+## Turn 4 — short-prompt TTFT: expert-sorted prefill from the 128-token bucket (adopted)
+
+Stage 7 pinned the expert-sorted prefill path at bucket 256 because the masked chunks won at 128 tokens with the
+multicast sparse-matmul factory (344 vs 456 ms). With the stage-12 group-parallel factory the sorted 128-token bucket
+is the faster one. 48-layer traced prefill bench (`prefill_bucket_bench_48layers_min{256,128,64}.json`, best of 3):
+
+| prompt tokens | threshold 256 (stage 7-12) | threshold 128 (adopted) | control (64 = 128, repeat) |
+|---|---|---|---|
+| 128 | 344.9 ms | **303.2 ms** (-12 %) | 302.2 ms |
+| 161 (bucket 256) | 347.1 | 348.1 | 344.4 |
+| 256 | 343.1 | 344.8 | 344.7 |
+| 333 (bucket 512) | 436.3 | 436.8 | 440.5 |
+| 512 | 437.5 | 436.9 | 440.2 |
+
+Correctness at threshold 128: layer suite 13/13 (prefill vs HF at 129 and 333 tokens both kinds, non-aligned
+continuation, dispatch vs sort, stress bit-identity); full-model prefill-check book_p128 top1 0.95 / top5 1.00 / top100 1.00 (stage-7 masked path 0.97 / 0.99 / 1.00; bars top5 >= 0.98, top100 = 1.0); served TTFT p50 (readiness
+benchmark, 128-token prompts) 1 user 408 -> 371 ms, 8 users 3234 -> 3004 ms, 32 users 12120 -> 11052 ms (every serialized 128-token
+prefill is ~35 ms shorter; TPOT unchanged; seeded / greedy completions reproduce at every width; `served_min128/`). `MULTICHIP_SELECTED.sorted_min_tokens` is 128 (env `QWEN35_SORTED_MIN_TOKENS` still overrides).
 
 ## Rejected in this pass
 
@@ -100,8 +121,8 @@ GDN slot write (36 layers x rebuild of the whole [B, ...] state buffer around on
 ## Where the remaining time is
 
 - Widths >= 16 are weight-bandwidth bound: a step touches ~all 256 experts -> ~55 GB of bfp4 expert weights per step
-  over 48 layers (~108 ms at ~512 GB/s per die); measured device step 86-92 ms in-process, served 107-125 ms -> the
-  ~20-35 ms gap at wide batches is host-side serving overhead per step (next lever for aggregate tok/s).
+  over 48 layers (~108 ms at ~512 GB/s per die); served 107 / 130 ms at 16 / 32 users is that floor plus ~15 %.
+  (The lower in-process numbers came from identical prompts for all users: fewer experts, fewer bytes.)
 - Width 1 (32.7 ms): ~96 device ops per layer (4600 per step + 2400 deallocations, eager count): op-launch bound; the
   functional router costs ~5 ms per step more than the (racy) fused gate op (linear + topk + softmax on a 1-row tile, DRAM
   intermediates: an L1-resident router chain is the next small step); the largest

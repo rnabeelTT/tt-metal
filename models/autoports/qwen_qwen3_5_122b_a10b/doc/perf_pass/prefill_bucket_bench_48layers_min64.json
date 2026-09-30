@@ -1,0 +1,51 @@
+{
+ "layers": "all",
+ "equiv": [],
+ "timing": [
+  {
+   "len": 128,
+   "traced_ms": 302.2,
+   "traced_ms_all": [
+    302.2,
+    303.5,
+    304.7
+   ]
+  },
+  {
+   "len": 161,
+   "traced_ms": 344.4,
+   "traced_ms_all": [
+    344.7,
+    344.4,
+    345.0
+   ]
+  },
+  {
+   "len": 256,
+   "traced_ms": 344.7,
+   "traced_ms_all": [
+    346.6,
+    345.8,
+    344.7
+   ]
+  },
+  {
+   "len": 333,
+   "traced_ms": 440.5,
+   "traced_ms_all": [
+    440.5,
+    440.9,
+    443.7
+   ]
+  },
+  {
+   "len": 512,
+   "traced_ms": 440.2,
+   "traced_ms_all": [
+    440.2,
+    453.2,
+    440.3
+   ]
+  }
+ ]
+}

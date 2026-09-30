@@ -168,3 +168,26 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   admitted user; prefill(37)+write 11.8 vs 10.6 ms. The slot write is host-launch bound (conv taps + slices), the traffic
   saving is invisible -> knob default off. Turn 3 summary: both "obvious" host fixes are latency-neutral; the served
   wide-batch gap needs the API-server / engine split (chain20 running).
+- 00:09-00:15 chain20 (API-server vs engine at c32): api_server 4 % CPU (median), engine 411 % (ttnn dispatch threads);
+  TPOT 132.9 ms; /metrics TTFT mean 12.04 s -> the API server is not the bound. RESOLUTION of the served-vs-trace gap:
+  the in-process 48-layer probes fed all users the SAME prompt, so the router chose the same few experts for every row
+  and the masked MoE read a fraction of the expert weights (w32 91 ms); served users differ and touch ~all 256 experts
+  -> the weight-bandwidth floor (~108 ms per step) + overheads = 125-131 ms. The layer perf test with distinct users
+  already showed it: 2.786 ms x 48 = 134 ms. Widths 16-32 are at the roofline; no host gap exists.
+- Turn 4 plan: short-prompt TTFT. The masked prefill path at 128-256 tokens iterates ~all experts serially per chunk on
+  32 cores (mcast factory); the expert-sorted path now has group-parallel matmuls -> sweep QWEN35_SORTED_MIN_TOKENS 256
+  (shipped) vs 128 vs 64 on the 48-layer traced prefill bench at 128 / 161 / 256 / 333 / 512 tokens (chain21).
+- 00:13-00:32 chain21 48-layer traced prefill bench (`prefill_bucket_bench_48layers_min{256,128,64}.json`): threshold 256
+  (shipped): 128 tok 344.9 ms, 161 347.1, 256 343.1, 333 436.3, 512 437.5; threshold 128: 128 tok 303.2 ms (-12 %),
+  161 348.1, 256 344.8, 333 436.8, 512 436.9 (unchanged: bucket 256 was already sorted). The 128-token bucket through the
+  group-parallel sorted path beats the masked path; 64 = 128 (no smaller bucket), run as a repeat control. Adoption
+  checks queued (chain22: layer PCC at 129 / 333 both kinds, non-aligned continuation, dispatch vs sort, stress;
+  full-model prefill-check book_p128; served c1 TTFT).
+- 00:42-00:46 chain22 layer correctness at threshold 128: 13/13 (prefill T=129 GDN PCC 0.99944, seq333, non-aligned
+  continuation, dispatch vs sort, stress bit-identity). Default flipped: MULTICHIP_SELECTED.sorted_min_tokens 256 -> 128.
+- 00:47-00:57 prefill-check book_p128 at threshold 128 (`readiness/prefill_check_book_p128_min128.json`): top1 0.95 / top5
+  1.00 / top100 1.00 (stage 7, masked: 0.97 / 0.99 / 1.00). Served c1..c32 + seedprobe with threshold 128 running.
+- 00:56-01:15 served with threshold 128 (`served_min128/`): TTFT p50 c1 371 ms (was 408), c2 854 (914), c4 1649 (1793),
+  c8 3004 (3234), c16 5693 (6274), c32 11052 (12120); TPOT unchanged (32.6 / 38.1 / 46.7 / 67.7 / 109.9 / 130.0); seeded
+  1 unique of 6..48 at widths 1-16, greedy width 1 1 of 6; client aggregate 28.5 / 45.1 / 68.0 / 88.4 / 106.2 / 152.0 tok/s.
+  Adopted: MULTICHIP_SELECTED.sorted_min_tokens = 128.

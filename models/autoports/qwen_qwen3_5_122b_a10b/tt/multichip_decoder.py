@@ -242,8 +242,9 @@ MULTICHIP_SELECTED = MultichipConfig(  # stage-7 selected policy: seven decode o
     moe_gather_tail=True,
     gdn_norm_fold=True,
     gdn_conv_l1=True,
-    sorted_min_tokens=256,  # expert-sorted prefill dispatch from bucket 256 (161-token TTFT 567.9 -> 551.3 ms; at 128 the masked
-    # chunks win: 344 vs 456 ms) — README section 4
+    sorted_min_tokens=128,  # expert-sorted prefill dispatch from bucket 128 (perf pass 2026-09-30: with the group-parallel
+    # sparse matmul factory the 128-token bucket runs 345 -> 303 ms on 48 layers; stage 7 had pinned 256 because the
+    # multicast factory made the masked chunks win at 128: 344 vs 456 ms) — doc/perf_pass/README.md turn 4
 )  # norm_ag_persistent measured -5 us/step but NOT adopted: attention traced-decode replays
 # were no longer bit-identical with the persistent all-gather output buffer (final suite 3, test_mc_traced_decode[attn])
 
