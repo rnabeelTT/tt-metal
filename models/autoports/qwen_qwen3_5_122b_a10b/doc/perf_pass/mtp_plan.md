@@ -122,6 +122,14 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   + ~15 ms commit = ~1.9 decode steps -> prose 1.5x, chat 1.6x, json 2.1x, code 2.6x single-user; the fused GDN rows
   kernel is the lever after that.
 
+## Why k = 3 (2026-09-30 18:15, from the measured k = 3 prose histogram 9 / 7 / 5 / 7 over 28 passes)
+The pass cost is set by the row WIDTH (k + 1 rows padded to the next served decode width: k = 2 and k = 3 both run
+4 rows -> the same 51.9 ms pass), so k = 2 saves one draft (1.4 ms) and gives up the third accepted token in a quarter of
+the passes: prose 2.11 tokens per pass at ~64 ms = 30.2 ms per token vs k = 3's 2.29 at ~68 ms = 29.6 ms per token
+(plain decode 32.7); code drops from 4.0 to 3.0 tokens per pass (70 -> ~55 tok/s). k = 1 (2 rows, ~44 ms pass est.)
+lands at the same ~30 ms per token on prose. No k moves prose past ~1.1x; the prose levers are the 4-row pairs-MoE
+relayout glue (~17 ms of the pass, shared with the served 4-user decode) and the commit / draft overlap (~3 ms).
+
 ## Plugin route (b) - what the vllm-tt-plugin allows today (read 2026-09-30 12:30, plugin at ~/vllm-tt-plugin)
 - The block-output path (`model_capabilities["output_tokens_per_step"] = K`, `TTScheduler`) is DiffusionGemma's fixed
   256-token canvas: every step (prefill included) must return exactly K tokens per request (`model_runner.py:2314`,

@@ -521,3 +521,32 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   commits -> ~57 ms per pass -> ~70 tok/s (2.3x). Measurement stops here (per the user: no further full runs unless a
   decision needs one); defaults set: 32-row GDN block, k = 3, masked K/V writes, gather argmax, scan-only commit. Known
   remaining lever: overlap the commit (14 ms) with the next pass's drafts (4 ms) on a second command queue (~6 %).
+- 17:50 serving hook written. `tt/mtp_plugin_shim.py` (host-only, 20 tests pass; the plugin's own 76 runner / scheduler
+  tests pass with the shim not applied): variable-width AR output through the vllm-tt-plugin - `_coerce_output_block`
+  and `_get_output_tokens` accept 1..k+1 ids per row (-1 trailing pads), `_apply_sampled_tokens_to_state` appends the
+  non-pad ids and advances num_tokens by that many (clips at max_model_len), `_build_runner_output` emits ragged lists,
+  `TTScheduler._update_request_with_output` uses upstream's per-token check_stop (EOS / stop / max_tokens trim inside a
+  row) and consumes one placeholder per frame, `num_lookahead_tokens = k` so the KV slots cover the verify window,
+  `_is_still_prefilling` compares the gap against k+1. `tt/mtp_serving.py` + generator_vllm `QWEN35_MTP=k`: single-user
+  (--max-num-seqs 1); head built at model construction, its KV with the model's; eager masked-bucket prefill (no bucket
+  traces) with the `_run_bucket_hidden` hook feeding the head's prompt rows in 32-row groups (rows selected by a one-hot
+  matmul: fixed programs), the four MTP traces captured in the trace phase instead of the decode / bucket traces;
+  decode_forward -> `MtpServing.step` -> host int32 [1, k+1] row. Reduced-model serve test queued.
+- 18:54 MTP SERVED end to end on the reduced 2-layer model through vLLM (`scripts/14-serve-mtp.sh`: QWEN35_MTP=3,
+  --max-num-seqs 1): two 64-token greedy completions (24 tok/s incl. TTFT on the 2-layer model, ~1.2 tokens per pass
+  on its garbage text). Four attempts fixed on the way: 23 programs compiling at the first request (the eager served
+  prefill with the head hook and the sampler variants are now warmed before the captures), the plugin's warm-up dummy
+  decode reaching the step before any prefill / capture (eager fallback + initialised state), the generator's own eager
+  warm-up decode routed into the step (bypass flag), and the plugin's read / host-format hooks receiving the host
+  [1, k+1] row (pass-through overrides). The plugin's steady async path hands a host token that can lag the device: the
+  model owns the continuation and only checks the plugin's token when `reload_inputs` / `reset_batch` is set.
+  Full-model served run (prose + code, 128 tokens) launched.
+- 19:12 first full-model MTP server: out of DRAM allocating the head's paged K/V (two 1017 MB buffers) after vLLM had
+  taken the pool sized for 12 KV layers (`get_max_tokens_all_users`). MTP mode now budgets the head as a 13th KV layer
+  (kv bytes per token x 13/12) plus 1.5 GiB for its weights, the step buffers and slack; the adapter logs the head K/V
+  shape / dtype at allocation. Relaunched.
+- 19:34 MTP SERVED on the FULL model through vLLM (QWEN35_MTP=3, --max-num-seqs 1): prose 128 tokens, 55 passes, 2.36 tokens
+  per pass, 70.0 ms per pass inside the step (33.7 tok/s of device steps); code 3.94 tokens per pass, 59.7 ms per pass
+  (66 tok/s); text coherent and equal to the standalone tool's. The client-side numbers of that run were polluted by the
+  request builder (a ttnn import inside the timed window); a properly timed run with the readiness benchmark
+  (streaming TTFT / TPOT, concurrency 1) queued. KV pool with the head budgeted: 1.66 M tokens (was 1.82 M).

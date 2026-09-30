@@ -107,6 +107,14 @@ def _memoize_sampling_params(sampling_module):
     sampling_module._qwen35_params_memo = state
 
 
+_MTP_K = int(os.environ.get("QWEN35_MTP", "0") or 0)
+if _MTP_K > 0:
+    # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin: import-time monkeypatches
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(_MTP_K + 1)
+
+
 class TT_Qwen3_5MoeProcessingInfo(Qwen3_5MoeProcessingInfo):
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
         # text-only scope of this bringup: the architecture is multimodal, the served model takes no images / videos
@@ -137,6 +145,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         "supports_async_decode_overlap": True,
         "supports_sample_on_device": True,
         "supports_chunked_prefill": False,
+        **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
     # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
@@ -185,6 +194,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 _memoize_sampling_params(model.sampling)
         self._context = max_seq_len
         self._warm_phase = {"prefill_programs": False, "decode_programs": False, "traces": False}
+        # QWEN35_MTP=k: single-user speculative decoding with the checkpoint's MTP head (tt/mtp_serving.py). The head is
+        # built HERE (before any warm-up / capture: a buffer allocated after a capture aliases freed trace scratch);
+        # its KV follows the model's in allocate_kv_cache. Needs the plugin's variable-width output shim
+        # (mtp_plugin_shim, applied at import when QWEN35_MTP is set) and --max-num-seqs 1.
+        self._mtp = None
+        mtp_k = int(os.environ.get("QWEN35_MTP", "0") or 0)
+        if mtp_k > 0:
+            if B != 1:
+                raise ValueError(f"QWEN35_MTP={mtp_k} serves ONE request at a time: pass --max-num-seqs 1 (got {B})")
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
+
+            self._mtp = MtpServing(self._gen, mtp_k)
         self._live_slots = set()  # slots with a running request as of the last decode (start_pos >= 0) or prefill
         logger.info(
             f"{cls.__name__}: B={B} max_model_len={max_seq_len} layers={len(model.layers)} policy="
@@ -260,6 +281,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
     _TRANSIENT_HEADROOM_GIB = 1.25
+    _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
+    _KV_LAYERS = 12  # attention layers holding paged K/V
     # The context contract's DRAM total (31.331 GiB) was measured with a 512 MiB trace region; a larger region (stage 10:
     # 768 MiB for the per-width decode traces) shrinks the allocator's DRAM by the difference.
     _CONTRACT_TRACE_REGION_MIB = 512
@@ -282,11 +305,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         c = _context_contract()["datatype_sweep_stage8"]
         B = int(max_num_seqs or 1)
         nonkv = float(c["non_kv_footprint_gib"]) + (B - 1) * cls._PER_SLOT_GIB
+        kv_bytes_per_token = int(c["kv_bytes_per_token_per_device"])
+        if int(os.environ.get("QWEN35_MTP", "0") or 0) > 0:
+            # the MTP head: one more attention layer's paged K/V over the same blocks (13 instead of 12 KV layers) plus
+            # its weights (~0.35 GiB per die) and the step's persistent buffers (~0.1 GiB); the first full-model MTP
+            # server ran out of DRAM allocating the head's K/V after vLLM had taken the whole pool
+            nonkv += cls._MTP_HEAD_GIB
+            kv_bytes_per_token = kv_bytes_per_token * (cls._KV_LAYERS + 1) // cls._KV_LAYERS
         trace_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
         cls._budget_trace_region_mib = trace_mib
         trace_extra_gib = (trace_mib - cls._CONTRACT_TRACE_REGION_MIB) / 1024
         pool_gib = float(c["dram_total_gib_per_device"]) - trace_extra_gib - nonkv - cls._TRANSIENT_HEADROOM_GIB
-        tokens = int(pool_gib * 2**30 / int(c["kv_bytes_per_token_per_device"]))
+        tokens = int(pool_gib * 2**30 / kv_bytes_per_token)
         tokens = max(tokens // BLOCK_SIZE * BLOCK_SIZE, BLOCK_SIZE * B)
         logger.info(
             f"KV token pool for {B} slots: {pool_gib:.3f} GiB = {tokens} tokens ({tokens / max(B, 1):.0f} per user at full "
@@ -313,6 +343,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         kv = self._gen.model.allocate_kv_caches(shape, self._gen.kv_dtype, batch_size=self._gen.max_batch_size)
         width = min(math.ceil(self._context / block), num_blocks)  # == the plugin's max_num_blocks_per_req
         self._gen.bind_kv_cache(kv, num_blocks, width)
+        if self._mtp is not None:
+            self._mtp.allocate_kv(shape, self._gen.kv_dtype)
+            hk = self._mtp.head.kv_cache[0]
+            logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
         logger.info(
             f"KV cache: vLLM {num_blocks} blocks (+1 scratch, {alloc_blocks} allocated) x {block} tokens, "
             f"{self._gen.kv_dtype}, {num_layers} attention layers, page-table width {width}"
@@ -325,6 +359,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             if not self._warm_phase["prefill_programs"]:
                 assert self._gen.kv_cache is not None, "allocate_kv_cache must run before the warm-up"
                 self._gen._warm_prefill()
+                if self._mtp is not None:
+                    self._mtp.warm()  # the MTP step programs + the head prompt-rows programs, before any capture
+                    self._mtp.warm_prefill_path()  # the eager served prefill with the hook, every bucket
                 self._warm_phase["prefill_programs"] = True
             return
         # phase 2 for prefill is folded into warmup_model_decode(enable_trace=True): the bucket traces are captured AFTER
@@ -338,14 +375,29 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             if not self._warm_phase["decode_programs"]:
                 if not self._warm_phase["prefill_programs"]:
                     self._gen._warm_prefill()
+                    if self._mtp is not None:
+                        self._mtp.warm()
+                        self._mtp.warm_prefill_path()
                     self._warm_phase["prefill_programs"] = True
-                for w in self._decode_widths:  # every width's programs BEFORE any trace is parked
-                    self._gen._warm_decode_eager(B=w)
+                # every width's programs BEFORE any trace is parked (MTP: the prefill sampler variants live here too;
+                # the generator's eager decode must reach the REAL decode path, not the MTP step)
+                self._mtp_bypass = True
+                try:
+                    for w in self._decode_widths:
+                        self._gen._warm_decode_eager(B=w)
+                finally:
+                    self._mtp_bypass = False
                 self._gen._program_cache_before_captures = self._gen.program_cache_entries()
                 self._warm_phase["decode_programs"] = True
             return
         if not self._warm_phase["traces"]:
-            self._gen.capture_traces(widths=self._decode_widths)
+            if self._mtp is not None:
+                # MTP: the four step traces only - no decode trace (the step replaces it) and no prefill bucket traces
+                # (the eager buckets expose every segment's hidden to the head through the _run_bucket_hidden hook)
+                self._mtp.capture()
+                self._gen._program_cache_after_warmup = self._gen.program_cache_entries()
+            else:
+                self._gen.capture_traces(widths=self._decode_widths)
             self._warm_phase["traces"] = True
 
     # ------------------------------------------------------------------ prefill
@@ -393,6 +445,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[0])
 
         logger.info(f"Prefilling {N} request(s) into slots {slots} (lengths {plens})")
+        if self._mtp is not None:
+            assert N == 1, "MTP serving prefills one request at a time"
+            self._mtp.begin_prefill(tokens[0, : plens[0]].tolist(), pt[0])
+            try:
+                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
+            except Exception:
+                self._mtp.abort_prefill()
+                raise
+            tok0 = int(out[0, 0]) if sampler is not None else int(torch.argmax(out[0, -1]).item())
+            self._mtp.end_prefill(tok0, plens[0])
+            self._live_slots |= set(slots)
+            return out, torch.zeros(N, dtype=torch.long)
         out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
         self._live_slots |= set(slots)
         self._log_program_cache(
@@ -435,6 +499,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             self._contract_v1_steps = getattr(self, "_contract_v1_steps", 0) + 1
             if reload_inputs or sampling_reset:
                 self._contract_v1_reloads = getattr(self, "_contract_v1_reloads", 0) + 1
+        if self._mtp is not None and not getattr(self, "_mtp_bypass", False):
+            return self._mtp_decode(args, kwargs)
         slot_remap = kwargs.get("slot_remap")
         if slot_remap is None and len(args) > 10:
             slot_remap = args[10]
@@ -451,6 +517,42 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         self._decode_steps = getattr(self, "_decode_steps", 0) + 1
         if self._decode_steps % 2000 == 0:
             self._log_program_cache(f"after {self._decode_steps} served decode steps")
+        return out
+
+    # MTP steps return a host int32 [B_pad, k+1] tensor; the plugin still routes it through the model's read / host-format
+    # hooks (the base Generator's versions expect per-device handles), so pass host tensors through untouched
+    def read_decode_output(self, tt_out, async_read=False):
+        if isinstance(tt_out, torch.Tensor):
+            return (tt_out, []) if async_read else tt_out
+        return super().read_decode_output(tt_out, async_read=async_read)
+
+    def process_decode_output_host(self, tt_out, is_tokens=True):
+        if isinstance(tt_out, torch.Tensor):
+            return tt_out
+        return super().process_decode_output_host(tt_out, is_tokens=is_tokens)
+
+    def _mtp_decode(self, args, kwargs):
+        """MTP step: the plugin hands the last emitted token at position num_tokens - 1 (padding rows at -1); returns a
+        host int32 [B_pad, k+1] row of the accepted drafts + the verified next token, -1 padded (the shim appends the
+        non-pad ids and advances the request by that many)."""
+        tokens = kwargs.get("tokens", args[0] if args else None)
+        start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
+        tokens = torch.as_tensor(tokens).reshape(-1)
+        pos = torch.as_tensor(start_pos).reshape(-1)
+        out = torch.full((tokens.numel(), self._mtp.k + 1), -1, dtype=torch.int32)
+        live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
+        assert len(live) <= 1, "MTP serving is single-user"
+        page_table = kwargs.get("page_table", args[2] if len(args) > 2 else None)
+        for i in live:
+            row = None
+            if page_table is not None:
+                pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+                row = pt[i]
+            authoritative = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
+            ids = self._mtp.step(int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative)
+            out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
+        self._live_slots = set(live)
+        self._decode_steps = getattr(self, "_decode_steps", 0) + 1
         return out
 
     def _select_decode_bucket(self, args, kwargs, start_pos, slot_remap):

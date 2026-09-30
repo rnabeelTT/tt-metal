@@ -254,10 +254,17 @@ class MtpTraced:
         self.traces = {}
 
     # ------------------------------------------------------------------------------------------------ per-pass host side
+    _BODIES = {"pass": "_pass_body", "commit": "_commit_body", "draft": "_draft_body", "rows": "_rows_body"}
+
     def _run(self, name):
         t0 = time.perf_counter()
-        ttnn.execute_trace(self.mesh, self.traces[name], cq_id=0, blocking=False)
-        outs = self.outs[name]
+        eager = name not in self.traces
+        if eager:
+            # no capture yet (the serving warm-up's dummy decode runs before the trace phase): run the program eagerly
+            outs = getattr(self, self._BODIES[name])()
+        else:
+            ttnn.execute_trace(self.mesh, self.traces[name], cq_id=0, blocking=False)
+            outs = self.outs[name]
         res = None
         if outs:
             am, mx = outs
@@ -269,6 +276,9 @@ class MtpTraced:
             res = [int(am_h[shard[b], b].item()) + int(shard[b].item()) * width for b in range(am_h.shape[1])]
         else:
             ttnn.synchronize_device(self.mesh)
+        if eager:
+            for t in outs:
+                ttnn.deallocate(t)
         self.timing[name].append(time.perf_counter() - t0)
         return res
 
