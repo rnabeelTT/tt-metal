@@ -571,3 +571,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   staged by host copies) accepted by the fused chunk adapter (B > 1 device masks) and the conv FIR (already batched):
   the batched verify pass with RowsLen matches the host-length path exactly (PCC 0.99903, 8 / 8) - the traced multi-user
   pass and commit can now stage their lengths without host allocations.
+- 21:52 MULTI-USER block 4: `tt/mtp_traced_multi.py::MtpTracedMulti` - the traced step over ALL B slots: fixed-width
+  pass (B x R rows, RowsLen lengths, persistent saved blocks, batched snapshot), batched commit (restore + one batched
+  replay with the accepted lengths), head drafts over the B slots with masked per-row K/V writes (a dead slot's stale
+  page-table row must never be written), head rows for the accepted tokens (hidden gathered from the pass block by a
+  one-hot), next-draft hidden selection, per-slot host state with slot remap. The batched GDN form's shifted-out zero
+  tap was a per-call `from_torch` (a host write inside the capture: TT_FATAL !trace_id_ and a hung process) -> it now
+  uses the persistent zero source. Reduced model, 2 users, k = 3, N = 16: traced tokens equal to the eager multi loop
+  32 / 32, same 15 passes; 9.1 ms per pass (pass 3.8, commit 0.9, 3 drafts x 1.47). Full-model runs (2 and 4 users) queued.

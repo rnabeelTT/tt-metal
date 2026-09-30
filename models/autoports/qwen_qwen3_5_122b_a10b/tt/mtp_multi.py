@@ -95,7 +95,7 @@ def _placement(layer, B, R, BW):
     return cache[key]
 
 
-def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None):
+def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None, gdn_index=0):
     """GDN layer over the user-major rows block x [1,1,BW,dim/TP] (rows u*R+i real for i < valid_lens[u])."""
     args = layer.args
     dn = layer.attention
@@ -121,7 +121,13 @@ def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None):
     vl = valid_lens if isinstance(valid_lens, RowsLen) else list(valid_lens)
     out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=vl, carry=True)
     if saved is not None:
-        saved.append(xb_flat)  # the commit replays the layer on this block with the accepted lengths
+        # the commit replays the layer on this block with the accepted lengths: appended (eager) or copied into the
+        # persistent buffer already at this index (traced pass)
+        if len(saved) > gdn_index:
+            ttnn.copy(xb_flat, saved[gdn_index])
+            ttnn.deallocate(xb_flat)
+        else:
+            saved.append(xb_flat)
     elif xb_flat.is_allocated():
         ttnn.deallocate(xb_flat)
     # out: the users' T rows, reduce-scattered -> [B*T, dim/TP]; rows i < R of every user back into the block's rows
@@ -150,7 +156,7 @@ def commit_multi(model, snap, saved_xb, accepted_lens):
     restore_gdn_state(model, snap)
     gdn_layers = [layer for layer in model.layers if not layer.is_full_attention]
     assert len(gdn_layers) == len(saved_xb)
-    B = len(accepted_lens)
+    B = accepted_lens.B if isinstance(accepted_lens, RowsLen) else len(accepted_lens)
     for layer, xb_flat in zip(gdn_layers, saved_xb):
         dn = layer.attention
         H = xb_flat.shape[-1]
@@ -249,6 +255,16 @@ def verify_pass_multi(model, rows_per_user, positions_per_user, page_table_rows,
     x = model.embd(tok)
     x = ttnn.reshape(x, (1, 1, BW, x.shape[-1]))
     x = ttnn.to_memory_config(x, dev)
+    h, logits = rows_block_forward(model, x, cos, sin, cur_pos_tt, pt_tt, masks, B, R, rows_len, saved)
+    for t in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt, cos, sin, masks):
+        ttnn.deallocate(t)
+    return h, logits, R
+
+
+def rows_block_forward(model, x, cos, sin, cur_pos_tt, pt_tt, masks, B, R, rows_len, saved):
+    """The layers over an embedded user-major rows block x [1,1,BW,dim/TP] (device inputs given): returns
+    (final-normed hidden [1,1,BW,H] replicated, vocab-sharded logits). Shared by the eager pass and the traced body."""
+    gi = 0
     for layer in model.layers:
         if layer.is_full_attention:
             att = layer.attention
@@ -260,15 +276,16 @@ def verify_pass_multi(model, rows_per_user, positions_per_user, page_table_rows,
                 att.rows_kv_write = False
                 att.rows_pos_masks = None
         else:
-            y = _gdn_rows_batched(layer, x, B, R, rows_len if rows_len is not None else [R] * B, saved=saved)
+            y = _gdn_rows_batched(
+                layer, x, B, R, rows_len if rows_len is not None else [R] * B, saved=saved, gdn_index=gi
+            )
+            gi += 1
         ttnn.deallocate(x)
         x = y
     h = model._final_norm_decode(x)
     ttnn.deallocate(x)
     logits = ttnn.linear(h, model.lm_head_weight, compute_kernel_config=model._lm_head_ckc())
-    for t in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt, cos, sin, masks):
-        ttnn.deallocate(t)
-    return h, logits, R
+    return h, logits
 
 
 def prefill_multi_with_head(gen, head, prompts):

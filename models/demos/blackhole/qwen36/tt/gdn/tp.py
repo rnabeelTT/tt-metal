@@ -1240,12 +1240,20 @@ class TPGatedDeltaNet:
         else:
             self.rec_state = final_state  # [B, Nv, Dk, Dv]
         # conv_states[0] = shifted-out zero; conv_states[m] row u = conv_new_state[u, m-1].
-        zero0 = ttnn.from_torch(
-            torch.zeros(1, B, D, dtype=torch.bfloat16),
-            dtype=ttnn.bfloat16,
-            layout=ttnn.TILE_LAYOUT,
-            device=self.mesh,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+        # the shifted-out zero tap: the persistent zero source when it has the batched shape (no host write -> the
+        # batched form can be trace-captured, e.g. the multi-user MTP rows pass), else a fresh tensor
+        _z0 = getattr(self, "_zero_conv0", None)
+        _persistent_zero0 = _z0 is not None and tuple(_z0.shape) == (1, B, D)
+        zero0 = (
+            _z0
+            if _persistent_zero0
+            else ttnn.from_torch(
+                torch.zeros(1, B, D, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+            )
         )
         new_conv = [zero0]
         for m in range(1, self.K):
@@ -1262,8 +1270,11 @@ class TPGatedDeltaNet:
         if self._stable_state and self.conv_states is not None:
             for m in range(self.K):
                 ttnn.copy(new_conv[m], self.conv_states[m])
-                ttnn.deallocate(new_conv[m])
+                if not (m == 0 and _persistent_zero0):
+                    ttnn.deallocate(new_conv[m])
         else:
+            if _persistent_zero0:
+                new_conv[0] = ttnn.clone(zero0)
             self.conv_states = new_conv
 
         # ---- output (gated RMSNorm + SiLU(z) gate + row-parallel out proj + all-reduce) ----
