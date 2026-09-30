@@ -301,3 +301,46 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
 - 05:19-05:23 chain29 served (`served_kernelskip/`): 1 user TTFT p50 257.6 ms (turn 4: 371), TPOT 32.0 ms (31.3 t/s/u);
   32 users TTFT p50 8158 ms (11052), TPOT 130.1 ms (floor); direct 8192 / 32768 / 131072-token prompts TTFT 2.89 / 11.8 /
   54.1 s (4.0 / 16.4 / 72.3), completions byte-identical. Turn 5 shipped.
+
+## MTP turn (started 2026-09-30 04:50) — plan in mtp_plan.md
+- 05:25 `test_mtp_head_matches_reference` (reduced model layers 0 + 3 and the MTP head as virtual layer 48, 8 single-row
+  decode steps at positions 0..7 vs the torch reference's causal pass): runs end to end first time; logits PCC 0.947-0.981
+  vs the bf16 reference, argmax agreement 5 / 8 - the comparison includes bfp4 experts + bfp4 LM head vs bf16, so the
+  test now also reports the post-norm hidden PCC and the device hidden through a bf16 head (rerun queued).
+- 05:27 un-dispatch kernel fixed: the watcher showed 92 of 110 cores done and the 18 two-item cores stuck (unpack UABD /
+  math MWDD / pack in-kernel, reader in cb_reserve_back) -> the writer waited on the SAME accumulator buffer the compute
+  kernel used as its add intermediate (two consumers: it drained a partial sum and the pointers desynchronised; the
+  one-item cores won the race). Fix: a dedicated output buffer for the last add (+ hardware re-init between the tilize
+  and the add phases). `test_gather_add_rows_matches_reference[t500]` passes under the watcher: bit-identical to the
+  k x (gather + add) reference, 4.88 -> 1.14 ms host wall. Full unit test + layer tests + Tracy (chain30) queued.
+- 05:30 MTP head rerun with the post-norm hidden PCC: 0.953-0.988 (logits through a bf16 head: the same), so the gap is
+  in the mix / layer, not the bfp4 LM head. Reference point: the shipped bfp4 policy gives the full-attention layer
+  0.993 (prefill) / 0.995 (decode) vs HF (`SHIPPED_POLICY_PCC`). Next run isolates the mix (norms + fc) and the layer
+  alone (reference mix in). Un-dispatch kernel unit test: 3 / 3 bit-identical, 2.32 -> 1.18 ms host wall at 2048 x 3072.
+- 05:36 MTP head isolation: the mix (norms + fc) matches the reference at PCC 0.99987-0.99989; the layer alone, fed the
+  reference's mix output on a fresh KV cache, gives 0.955-0.986 (same as the end-to-end hidden PCC) -> the MTP layer
+  itself is more sensitive to the shipped bfp4 policy than the main attention layers (0.995 under the same policy).
+  Probe queued: the head test under routed-experts-bfp8 / attention-bfp8 / both overrides (QWEN35_PRECISION_CONFIG).
+  Layer tests with the un-dispatch kernel: 12 / 12, PCCs bit-identical to the run without it.
+- 05:38 Tracy MoE at 2048 with the un-dispatch kernel (`tracy_moe_kernel_undispatch`): 10.57 -> 9.43 ms device per layer
+  (un-dispatch phase 3.05 -> 1.93: MoeGatherAddRows 0.44 ms replaces 8 x (gather 0.075 + add 0.10); the untilize of the
+  down output, 0.81 ms, remains), 89 -> 35 ops per MoE block. Default flipped to QWEN35_UNDISPATCH_KERNEL=1; chain31
+  (48-layer bench, prefill-checks, served) queued.
+- 05:43 MTP precision probe (QWEN35_PRECISION_CONFIG overrides on the reduced model + head): routed experts bfp8 ->
+  hidden PCC unchanged (0.954); attention + GDN mixers bfp8 (HiFi2) + routed bfp8 -> 0.992 (layer-only 0.992, reference
+  top-1 inside the device top-5 8 / 8, argmax 6 / 8). The MTP layer's attention projections are the bfp4-sensitive part
+  -> `Qwen35MtpHead` builds its layer on an args copy with bfp8 attention weights at HiFi2 (~20 MB per die;
+  QWEN35_MTP_ATTN_DTYPE=bfp4 restores the shipped policy). Head test requeued under the shipped global policy.
+- 05:50 chain31 bench (kernel dispatch + padding skip + un-dispatch kernel): 128 / 161 / 2048 / 4097 / 8192 tokens =
+  190.8 / 225.4 / 645.0 / 1461.9 / 2611.1 ms (turn 4: 303.2 / 348.1 / 984.5 / 2208.7 / 3959.0: -35 %).
+- 06:12 chain31: 16384 tokens 5287.6 ms (turn 4: 7993.2); prefill-check book_p2048 0.99 / 1.00 / 1.00 and book_p8192
+  0.97 / 1.00 / 1.00 with the un-dispatch kernel (unchanged). Served chain running.
+- 06:16 harness control (`test_layer_decode_rows_harness`): the MTP layer built with bfp8 attention weights, driven row by
+  row through the decode harness with a random fractured residual in, matches the HF layer at PCC 0.99879 (the main
+  layer-3 control passed too; its PCC line was filtered out of the log). Head test under the shipped global policy queued.
+- 06:23 `test_mtp_head_matches_reference` PASSES under the shipped global policy with the head's bfp8 attention
+  (hidden PCC 0.990, logits 0.982, reference top-1 inside the device top-5 8 / 8); the global attention-bfp8 probe gave
+  the same, both-bfp8 0.992 (experts add ~0.002; not worth ~0.6 GB per die for the MTP layer).
+- 06:38 chain31 served (`served_undispatch/`): 1 user TTFT p50 274.3 ms (noise; 257.6 in chain29) TPOT 32.0; 32 users
+  TTFT p50 7488 ms (8158) TPOT 131.1; direct 8192 / 32768 / 131072 tokens TTFT 2.64 / 10.91 / 50.61 s (2.89 / 11.81 / 54.14),
+  completions byte-identical. Shipping: package -> push -> verify from the Hub (13-ship.sh).

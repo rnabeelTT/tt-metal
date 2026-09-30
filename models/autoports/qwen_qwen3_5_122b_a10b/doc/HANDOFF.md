@@ -116,16 +116,16 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   `ttnn.experimental.moe_sorted_dispatch` (new op under `ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/`;
   bit-identical to the former matmul counting sort), the grouped sparse matmul skips the zero-fill of its output and
   skips the static padding groups (`MatmulMultiCoreReuseProgramConfig.skip_padding_groups`, new field). 48-layer traced
-  prefill at 2048 / 8192 tokens: 985 / 3959 ms -> see `doc/perf_pass/README.md` turn 5 (about -30 %).
+  prefill at 2048 / 8192 tokens: 985 / 3959 -> 645 / 2611 ms (`doc/perf_pass/README.md` turn 5).
 - Knobs (defaults are the shipped values): `QWEN35_DISPATCH_MODE=kernel` (`counting_mm` restores the stage-12 path),
-  `QWEN35_SKIP_PAD_GROUPS=1`, `QWEN35_UNDISPATCH_KERNEL=0` (the fused un-dispatch kernel `moe_gather_add_rows` is in the
-  tree but not enabled), `QWEN35_PREFILL_SEGMENT=2048` (do not raise: whole-layer programs fail above 2048 rows),
+  `QWEN35_SKIP_PAD_GROUPS=1`, `QWEN35_UNDISPATCH_KERNEL=1` (the fused un-dispatch kernel `moe_gather_add_rows`; 0 restores
+  the k gather + add ops), `QWEN35_PREFILL_SEGMENT=2048` (do not raise: whole-layer programs fail above 2048 rows),
   `QWEN35_SORTED_GROUP_ROWS=32` (64 measured slower).
 - Building: the new ops are part of the `ttnn` target (`ninja -C build_Release ttnn`); the linked library is
   `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
   copy + atomic `mv` while device jobs run. Kernels compile on first use.
-- Next levers (not done): MTP decode (`doc/perf_pass/mtp_plan.md`), one weight pass per expert in the grouped sparse
-  matmul, the fused un-dispatch kernel, a fused GDN decode step.
+- Next levers (not done): MTP decode (`doc/perf_pass/mtp_plan.md`, in progress), one weight pass per expert in the
+  grouped sparse matmul, a fused GDN decode step.
 
 ## 5. Vision enablement path (not done in this bring-up)
 

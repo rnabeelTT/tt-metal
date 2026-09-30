@@ -42,6 +42,24 @@ trace/accept design), and a read of `vllm-tt-plugin` (no speculative-decoding su
 - Weights: 1 extra layer (~1/48 of the expert bytes: ~0.4 GiB bfp4 per chip + attention), MTP experts need the per-expert
   -> fused `[E, 2I, H]` repack in `weights.py` (today `mtp.*` are dropped).
 
+## Findings so far (2026-09-30)
+- Head weights load in the main layers' fused layout (`StreamingStateDict.mtp_state`); torch reference in
+  `tests/reference_mtp.py`; device head in `tt/mtp.py` (the optimized decoder layer as virtual layer 48).
+- Precision: with the shipped bfp4 mixers the MTP layer's output reaches only PCC 0.95 vs the reference (main attention
+  layers: 0.995); bfp8 attention weights (HiFi2) bring it to 0.99 (routed experts' dtype irrelevant) -> the head's layer
+  is built with bfp8 attention projections (~20 MB per die).
+
+## Verify-pass design (decided 2026-09-30 after reading the GDN and KDA kernels)
+- The bucket prefill path is out (the 128-token bucket costs 191 ms per 48 layers: more than R decode steps). The verify
+  pass is a "rows" mode per layer: GDN in prefill form on ONE 32-row chunk (R valid rows, recurrent + conv state carried
+  from the user's decode state: `TPGatedDeltaNet.forward_prefill` with the chunk-outer carry, or the KDA kernels
+  `qkv_causal_conv1d_silu` + `prepare_chunk_recurrence` + `recurrent_chunk_scan`, which take a 32-token chunk and an
+  initial state), attention as a batched decode of the R rows (same page-table row, positions P..P+k; the KV of all rows
+  is written before the SDPA reads, so row j sees rows < j), MoE through the pairs path on the R real rows only
+  (R*k pairs). Estimated pass cost ~1.3-1.5x a decode step at R = 5; the GDN rows part is the term to fuse later.
+- Accept on device (Qwen3.8 arithmetic), commit the GDN state lazily from the accepted count (per-row prefix states
+  from the chunk scan, select slot a), KV rows overwritten by position.
+
 ## Milestones and gates
 1. Host reference: torch MTP head forward on CPU vs the checkpoint (draft acceptance rate on the book/AIME prompts, k=1..4)
    -> expected tokens per step. 2. TT MTP layer PCC vs the reference (stage-1 style test). 3. Width-R verify + device accept

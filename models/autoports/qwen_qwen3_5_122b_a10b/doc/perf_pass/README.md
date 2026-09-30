@@ -148,11 +148,20 @@ MoE block device time per layer at 2048 tokens: 16.45 -> 11.24 -> 10.57 ms; whol
 Correctness: layer suite 14/14 (kernel) and 12/12 (kernel + skip) with PCCs identical to the counting-sort path;
 full-model prefill-check vs HF: book_p2048 top1 0.99 / top5 1.00 / top100 1.00 and book_p8192 0.97 / 1.00 / 1.00 (stage 12: 0.99 / 1.00 / 1.00 and 0.95 / 1.00 / 1.00; bars top5 >= 0.98, top100 = 1.0). Served (`served_kernelskip/`, same server settings as turn 4): 1 user TTFT p50 371 -> 258 ms, TPOT 32.6 -> 32.0 ms (31.3 t/s/u); 32 users TTFT p50 11.1 -> 8.2 s, TPOT 130 ms (the weight-bandwidth floor, unchanged); direct long prompts 8192 / 32768 / 131072 tokens TTFT 4.0 / 16.4 / 72.3 -> 2.89 / 11.8 / 54.1 s (2840 / 2780 / 2420 prompt tok/s), greedy completions byte-identical to the turn-4 server. Bundle rebuilt from c9b9139df6e (image e63ad8e67d71), pushed private (Hub revision 2ce007aa) and verified from the Hub: burst 155 tok/s (137), 8K prompt 3.3 s (4.5), 128K prompt 54.5 s (72.6).
 
+Follow-up in the same turn, the fused un-dispatch kernel (`ttnn.experimental.moe_gather_add_rows`, default
+`QWEN35_UNDISPATCH_KERNEL=1`): a multi-core op (work item = 32-token tile x column block) whose reader gathers the k
+expert-output rows of every token as row-major blocks, whose compute tilizes and adds them in slot order (the same bf16
+association as the k successive adds it replaces, so the layer PCCs are bit-identical) and whose writer stores the tiles;
+0.44 ms device instead of 8 x (0.075 gather + 0.10 add), 89 -> 35 ops per MoE block, MoE 10.57 -> 9.43 ms per layer.
+Its first version hung: the writer waited on the accumulator buffer the compute kernel also used as an intermediate
+(two consumers), which the watcher showed as 92 finished cores and 18 two-item cores stuck; a dedicated output buffer
+fixed it. 48-layer traced prefill 128 / 2048 / 8192 / 16384 tokens: 190.8 / 645.0 / 2611.1 / 5287.6 ms (-37 / -35 /
+-34 / -34 % vs turn 4); prefill-check book_p2048 0.99 / 1.00 / 1.00 and book_p8192 0.97 / 1.00 / 1.00 (unchanged); served (`served_undispatch/`): 1 user TTFT p50 274 ms / TPOT 32.0 ms (run-to-run noise on 4 requests: 258 ms in the previous run), 32 users TTFT p50 7.49 s (8.16) / TPOT 131 ms, 8192 / 32768 / 131072-token prompts 2.64 / 10.9 / 50.6 s (2.89 / 11.8 / 54.1; turn 4: 4.0 / 16.4 / 72.3), completions byte-identical.
+
 Rejected in this turn: 64-row expert groups (fewer weight re-reads but +50 % padding rows: MoE 11.2 -> 11.8 ms);
-4096-token segments (above); the `sort_u16` dispatch. Still open (measured, not done): the un-dispatch as one
-multi-core gather-add kernel (`ttnn.experimental.moe_gather_add_rows`, written, off by default until its compute-kernel
-init issue is closed; would take the 2.1 ms un-dispatch + 0.7 ms untilize to ~1 ms) and reading each expert's weights
-once per layer instead of once per 32-row group (~1.0 GB vs 0.34 GB of expert reads per chip per layer; ~-1.9 ms).
+4096-token segments (above); the `sort_u16` dispatch. Still open (measured, not done): reading each expert's weights once per layer instead of once per 32-row group
+(~1.0 GB vs 0.34 GB of expert reads per chip per layer; ~-1.9 ms), the untilize of the down output (0.8 ms) that the
+un-dispatch kernel still needs, and the row gather (1.4 ms).
 The Qwen3.8 bundle study (`qwen38_bundle_study.md`) and the MTP plan (`mtp_plan.md`) are in this directory.
 
 ## Rejected in this pass

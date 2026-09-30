@@ -61,7 +61,7 @@ DISPATCH_MODE = os.environ.get(
 SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
 # Un-dispatch through the multi-core gather-add kernel (ttnn.experimental.moe_gather_add_rows) instead of k x
 # (slice + embedding gather + add); only available with the kernel dispatch (it consumes the raw undispatch stick).
-UNDISPATCH_KERNEL = DISPATCH_MODE == "kernel" and os.environ.get("QWEN35_UNDISPATCH_KERNEL", "0") == "1"
+UNDISPATCH_KERNEL = DISPATCH_MODE == "kernel" and os.environ.get("QWEN35_UNDISPATCH_KERNEL", "1") == "1"
 
 
 class SortedDispatch:

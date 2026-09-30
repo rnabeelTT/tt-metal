@@ -13,6 +13,9 @@ fractured residual into the layer, replicated full-dim vectors into the fc and t
 """
 from __future__ import annotations
 
+import copy
+import os
+
 import torch
 
 import ttnn
@@ -33,7 +36,19 @@ class Qwen35MtpHead:
         prefix = "mtp.layers.0."
         layer_state = {f"layers.{self.layer_idx}." + k[len(prefix) :]: v for k, v in st.items() if k.startswith(prefix)}
         layer_cls = type(model.layers[0])
-        self.layer = layer_cls(self.device, args, layer_state, self.layer_idx, tensor_cache_path, tt_ccl=model.tt_ccl)
+        # The MTP layer is more sensitive to the shipped bfp4 token-mixer weights than the main attention layers (hidden PCC
+        # vs the torch reference 0.95 with bfp4 mixers, 0.99 with bfp8; the routed experts' dtype made no difference), and
+        # its attention projections are ~20 MB per die: build it on an args copy with bfp8 attention weights at HiFi2.
+        layer_args = copy.copy(args)
+        attn_dtype = os.environ.get("QWEN35_MTP_ATTN_DTYPE", "bfp8")
+        if attn_dtype == "bfp8":
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            layer_args.attn_weight_dtype = ttnn.bfloat8_b
+            layer_args.mixer_compute_cfg = tpc.COMPUTE_HIFI2
+        self.layer = layer_cls(
+            self.device, layer_args, layer_state, self.layer_idx, tensor_cache_path, tt_ccl=model.tt_ccl
+        )
         assert self.layer.is_full_attention
         del layer_state
         tp = getattr(args, "num_devices", 1) > 1

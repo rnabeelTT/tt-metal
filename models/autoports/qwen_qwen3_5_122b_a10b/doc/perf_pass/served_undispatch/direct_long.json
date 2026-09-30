@@ -1,0 +1,54 @@
+{
+ "book_tokens": 194119,
+ "long_8192": {
+  "prompt_tokens": 8192,
+  "reps": [
+   {
+    "ttft_s": 2.643278941977769,
+    "wall_s": 4.673303645802662,
+    "chunks": 64,
+    "text": "?\"\n\n\"Been abroad not often of late years; during the last two or three years,\nvery rarely.\"\n\n\"Sir, are you going to France, then?\"\n\n\"Coming from it, as it is.\"\n\n\"I wish you joy of the wine you had, sir. I say it with a free"
+   },
+   {
+    "ttft_s": 2.63940345402807,
+    "wall_s": 4.668757940875366,
+    "chunks": 64,
+    "text": "?\"\n\n\"Been abroad not often of late years; during the last two or three years,\nvery rarely.\"\n\n\"Sir, are you going to France, then?\"\n\n\"Coming from it, as it is.\"\n\n\"I wish you joy of the wine you had, sir. I say it with a free"
+   }
+  ],
+  "ttft_s": 2.63940345402807,
+  "prompt_tok_s": 3103.7316358353446
+ },
+ "long_32768": {
+  "prompt_tokens": 32768,
+  "reps": [
+   {
+    "ttft_s": 10.908902565017343,
+    "wall_s": 12.963956142077222,
+    "chunks": 64,
+    "text": ", in reality a\nvery slight one, not worth answering--a mere chance meeting in a public\nhouse? No. Were they not in the coach to Dover on the day? Yes. Where\ndid they get off? To look at the horse, if he remembered. Was it a\ngood horse? It"
+   },
+   {
+    "ttft_s": 10.906013862928376,
+    "wall_s": 12.961341989925131,
+    "chunks": 64,
+    "text": ", in reality a\nvery slight one, not worth answering--a mere chance meeting in a public\nhouse? No. Were they not in the coach to Dover on the day? Yes. Where\ndid they get off? To look at the horse, if he remembered. Was it a\ngood horse? It"
+   }
+  ],
+  "ttft_s": 10.906013862928376,
+  "prompt_tok_s": 3004.5808131039234
+ },
+ "long_131072": {
+  "prompt_tokens": 131072,
+  "reps": [
+   {
+    "ttft_s": 50.61386566492729,
+    "wall_s": 52.77856030105613,
+    "chunks": 64,
+    "text": ", and their\nhairy cheeks were stained with the blood of their victims, and they were\ndrenched in blood, and their aprons and their hands and their arms were\ndrenched in blood, and their garments were drenched in blood. Their eyes\nwere bloodshot, and they were glaring, fi"
+   }
+  ],
+  "ttft_s": 50.61386566492729,
+  "prompt_tok_s": 2589.646103455518
+ }
+}
