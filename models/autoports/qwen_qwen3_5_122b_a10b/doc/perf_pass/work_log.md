@@ -435,3 +435,23 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   23 passes for 48 tokens = 2.09 tokens per pass (acceptance histogram 0:10 1:7 2:1 3:2 4:3), greedy-equal up to token 8
   (then a near-tie divergence, text stays coherent). Eager host walls: greedy 5.9 s, MTP 8.6 s (untraced; the traced
   pass is the next step). GDN-only commit variant and code / json / chat prompts queued.
+- 12:02 GDN-only commit (restore snapshot, replay the 36 GDN layers on the saved 128-row inputs, valid_len = a + 1) gives
+  the IDENTICAL 48 tokens and passes as the v1 re-run commit on prose (2.09 tokens per pass); eager MTP wall 7.0 s vs
+  8.6 s (v1) vs 5.8 s plain eager greedy. Code prompt: 10 passes for 48 tokens = 4.80 tokens per pass, all 48 tokens equal
+  to greedy, eager wall 2.8 s vs 6.0 s greedy (already 2.1x faster untraced).
+- 12:24 json prompt (GDN-only commit): 13 passes for 48 tokens = 3.69 tokens per pass (histogram 0:2 1:2 2:1 4:8), 47 / 48
+  tokens equal to greedy (one near-tie at token 32), eager MTP wall 3.8 s vs 6.1 s greedy.
+- 12:34 chat prompt (GDN-only commit): 15 passes for 48 tokens = 3.20 tokens per pass (histogram 0:1 1:5 2:3 3:1 4:5),
+  48 / 48 tokens equal to greedy, eager MTP wall 4.4 s vs 5.9 s greedy. Summary of the v1 loop on the full model at k = 4:
+  prose 2.09 / code 4.80 / json 3.69 / chat 3.20 tokens per pass (offline acceptance predicted 2.89 / 4.86 / 3.98 / 3.03).
+- 12:35 traced step smoke (2-layer model): TT_FATAL "Cannot load new binaries during trace capture" at the first
+  `ttnn.copy` into a persistent buffer - the warm run had adopted its outputs as the buffers, so the copy programs were
+  first compiled inside the capture. Warm now runs the pass twice (second run compiles the copies). Rerun queued.
+- 12:57 traced step smoke (2-layer model, k = 4, N = 24): captures and replays; program walls pass 13.5 ms, commit 0.83,
+  draft 3.69, head rows 1.94 (host wall incl. read-back).
+- 13:07 traced step on the FULL model (prose, k = 4, N = 64): 27 passes = 2.37 tokens per pass (hist 0:9 1:8 2:3 3:3 4:4);
+  loop 132.9 ms per pass -> 17.8 tok/s, i.e. SLOWER than plain traced decode (30.6 tok/s). Program walls: pass 90.7 ms
+  (2.8 decode steps; the estimate was 1.9), commit 28.6 ms (36 GDN prefill-form replays, ~0.8 ms each), draft 3.76 ms x 4,
+  head rows 1.94 ms. Break-even needs pass + commit + drafts < 2.37 x 32.7 ms = 77 ms; today 134 ms. Next: per-op Tracy
+  profile of the pass on the 2-layer model (the pass is op-count bound like decode: the GDN prefill form and 8 per-row
+  K/V writes per attention layer add ops), then cut ops (single R-row K/V write, GDN glue), fewer GDN chunk rows.

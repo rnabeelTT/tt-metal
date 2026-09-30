@@ -34,7 +34,10 @@ def layer_forward_rows(layer, x, R, *, cos=None, sin=None, position_tensor=None,
     """x: decode-layout block [1, 1, BW, dim/TP] (rows 0..R-1 real). Returns the same layout. With `saved` (a list), a GDN
     layer appends its 128-row normed input instead of freeing it, for the GDN-only commit (`mtp_verify.commit_gdn`)."""
     BW = x.shape[2]
-    assert 1 <= R <= BW <= 32, (R, BW)
+    # R: the real row count (host int; the GDN kernels then build their masks with a host write) or a device-resident
+    # `PrefillLen` (bucket 128) staged by the caller: the traced pass needs the latter (no host write inside a capture)
+    R_int = R if isinstance(R, int) else BW
+    assert 1 <= R_int <= BW <= 32, (R, BW)
     if layer.is_full_attention:
         att = layer.attention
         att.rows_kv_write = True

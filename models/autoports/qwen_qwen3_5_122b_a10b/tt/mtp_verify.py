@@ -17,6 +17,7 @@ import torch
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import layer_forward_rows
+from models.tt_transformers.tt.common import Mode
 
 
 def copy_slot_into_scratch(prev_bindings, slot: int):
@@ -128,13 +129,60 @@ def greedy_accept(logits_rows: torch.Tensor, drafts: list[int]):
     return a, am[a]
 
 
+def prefill_with_head(gen, head, prompt_ids):
+    """Eager all-logits prefill of the prompt (the B = 1 generator's state) + the MTP head's own prompt rows
+    (row t + 1 = (token t + 1, the model's final-normed hidden t); row P takes the first sampled token).
+    Returns (tok0, hid_last [1,1,1,H] replicated = the hidden that produced tok0, P)."""
+    model = gen.model
+    mesh = model.mesh_device
+    dev = ttnn.DRAM_MEMORY_CONFIG
+    H = gen.args.dim
+    page_table = gen.page_table[:1]
+    captured = {}
+    orig_bucket_hidden = model._run_bucket_hidden
+
+    def capturing(bi, bucket, chunk_start):
+        x = orig_bucket_hidden(bi, bucket, chunk_start)
+        captured["x_all"] = ttnn.clone(x, memory_config=dev)
+        return x
+
+    model._run_bucket_hidden = capturing
+    try:
+        gen.reset()
+        P = len(prompt_ids)
+        logits0 = gen.prefill_forward(
+            torch.tensor(prompt_ids).reshape(1, -1), page_table=page_table, prompt_lens=[P], return_all_logits=True
+        )
+    finally:
+        model._run_bucket_hidden = orig_bucket_hidden
+    tok0 = int(torch.argmax(logits0[0, -1]).item())
+    x_all = captured.pop("x_all")
+    h_all = model.norm(x_all, mode=Mode.PREFILL)  # replicated [1,1,bucket,H]
+    ttnn.deallocate(x_all)
+    rows_tok = [prompt_ids[t + 1] if t + 1 < P else tok0 for t in range(P)]
+    for t in range(P):
+        hid = ttnn.slice(h_all, (0, 0, t, 0), (1, 1, t + 1, H))
+        tokens_tt, cur_pos_tt, rot_idxs, pt_tt = model.prepare_decode_inputs_host(
+            torch.tensor([rows_tok[t]]), t + 1, page_table
+        )
+        tokens_tt, cur_pos_tt, rot_idxs, pt_tt = (
+            ttnn.to_device(x, mesh, memory_config=dev) for x in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt)
+        )
+        lg, last = head.decode_step(tokens_tt, hid, cur_pos_tt, rot_idxs, pt_tt)
+        ttnn.deallocate(lg)
+        ttnn.deallocate(last)
+        ttnn.deallocate(hid)
+    hid_last = ttnn.clone(ttnn.slice(h_all, (0, 0, P - 1, 0), (1, 1, P, H)), memory_config=dev)  # produced tok0
+    ttnn.deallocate(h_all)
+    return tok0, hid_last, P
+
+
 def mtp_generate_eager(gen, head, prompt_ids, max_new_tokens, k, *, log=None, gdn_commit=False, draft_fn=None):
     """v1 MTP greedy loop (eager, host accept, exact): prefill (eager all-logits path, captures the bucket hidden for the
     head's own prefill), then per pass: draft k tokens with the head, run the verify pass over [t, d_1..d_k], accept the
     matching prefix a, commit the GDN state by re-running the pass on the accepted a+1 rows (exact but doubles the
     pass cost; a per-row prefix-state commit replaces this later), feed the head the accepted rows. Returns the tokens.
     """
-    from models.tt_transformers.tt.common import Mode
 
     model = gen.model
     mesh = model.mesh_device

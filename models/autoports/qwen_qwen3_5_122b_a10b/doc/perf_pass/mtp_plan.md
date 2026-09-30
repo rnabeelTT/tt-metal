@@ -110,6 +110,23 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   + ~15 ms commit = ~1.9 decode steps -> prose 1.5x, chat 1.6x, json 2.1x, code 2.6x single-user; the fused GDN rows
   kernel is the lever after that.
 
+## Plugin route (b) - what the vllm-tt-plugin allows today (read 2026-09-30 12:30, plugin at ~/vllm-tt-plugin)
+- The block-output path (`model_capabilities["output_tokens_per_step"] = K`, `TTScheduler`) is DiffusionGemma's fixed
+  256-token canvas: every step (prefill included) must return exactly K tokens per request (`model_runner.py:2314`,
+  `_coerce_output_block`, `scheduler.py:601`), one sequence only, sampling neutralized, `max_tokens` rounded to canvases.
+  No pad / valid-count convention exists -> unusable for a variable 1..k+1 tokens per step.
+- vLLM speculative decoding is asserted off (`platform.py:1482`).
+- Smallest workable change = "variable AR" (plugin-only): keep `output_tokens_per_step = 1`, add `max_output_tokens_per_step
+  = k+1`; the model returns `[B, k+1]` int32 padded with -1; relax the two width checks; `_apply_sampled_tokens_to_state`
+  writes `row[:n]` and advances by n (clip at max_model_len); `_build_runner_output` emits ragged lists (vLLM accepts them);
+  `TTScheduler._update_request_with_output` for AR must call `Scheduler._update_request_with_output` (upstream trims at EOS /
+  max_tokens inside a row) and subtract only the 1 reserved placeholder; set `num_lookahead_tokens = k` so the page table
+  covers the verify window (the pass writes K/V up to num_tokens-1+k); `_is_still_prefilling` must compare against k+1;
+  device sampling required (host sampling returns one token), logprobs / structured outputs rejected, sync scheduling.
+  The next decode input stays "last emitted token at num_tokens-1" (the model keeps its drafts' K/V itself).
+- Packaging: the bundle ships tt-metal paths only, so the plugin changes must live in the autoport as an import-time shim
+  (generator_vllm applies them when MTP is enabled) or go upstream to the plugin.
+
 ## Milestones and gates
 1. Host reference: torch MTP head forward on CPU vs the checkpoint (draft acceptance rate on the book/AIME prompts, k=1..4)
    -> expected tokens per step. 2. TT MTP layer PCC vs the reference (stage-1 style test). 3. Width-R verify + device accept
