@@ -624,13 +624,36 @@ class TPAttention:
             _kv_cfg = self._kv_shard_cfg(B)
             k_sh = ttnn.to_memory_config(k_p, _kv_cfg)
             v_sh = ttnn.to_memory_config(v_p, _kv_cfg)
-            ttnn.deallocate(k_p)
-            ttnn.deallocate(v_p)
+            _rows_mode = getattr(self, "rows_kv_write", False) and B > 1
+            if not _rows_mode:
+                ttnn.deallocate(k_p)
+                ttnn.deallocate(v_p)
             # paged_update_cache takes bf16/fp32 and casts to bf8 cache; decode K/V stay bf16 (prefill fill needs bf8)
-            ttnn.experimental.paged_update_cache(keys, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-            ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-            ttnn.deallocate(k_sh)
-            ttnn.deallocate(v_sh)
+            if getattr(self, "rows_kv_write", False) and B > 1:
+                # MTP verify "rows" mode: the B rows are consecutive positions of ONE user (same page-table row). The
+                # per-user update modifies one row inside a cache tile per core, so B rows in the same 32-position tile
+                # would race (last writer wins); write them one row at a time instead (B <= 8 small ops per K / V).
+                ttnn.deallocate(k_sh)
+                ttnn.deallocate(v_sh)
+                _cfg1 = self._kv_shard_cfg(1)
+                for b in range(B):
+                    pos_b = ttnn.slice(cur_pos_tt, (b,), (b + 1,))
+                    pt_b = ttnn.slice(page_table, (b, 0), (b + 1, page_table.shape[-1]))
+                    for cache, src in ((keys, k_p), (values, v_p)):
+                        row = ttnn.slice(src, (0, b, 0, 0), (1, b + 1, 32, HD), memory_config=_L1)
+                        row_sh = ttnn.to_memory_config(row, _cfg1)
+                        ttnn.deallocate(row)
+                        ttnn.experimental.paged_update_cache(cache, row_sh, update_idxs_tensor=pos_b, page_table=pt_b)
+                        ttnn.deallocate(row_sh)
+                    ttnn.deallocate(pos_b)
+                    ttnn.deallocate(pt_b)
+                ttnn.deallocate(k_p)
+                ttnn.deallocate(v_p)
+            else:
+                ttnn.experimental.paged_update_cache(keys, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+                ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+                ttnn.deallocate(k_sh)
+                ttnn.deallocate(v_sh)
             attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
                 keys,

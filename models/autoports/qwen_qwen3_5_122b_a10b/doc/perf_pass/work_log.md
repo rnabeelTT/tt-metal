@@ -378,3 +378,14 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   reference head's on 6 / 8 steps (' like', ' the', ' one', ' that', ' now', '.'; two near-ties differ), hidden RMS ~2.2;
   vs the model's own continuation (prose, 8 steps, k = 2): first-draft agreement 0.50, mean accepted 0.75 -> 1.75 tokens
   per pass. The head is functional end to end; full measurement (4 prompt kinds, k = 4, 64 tokens) queued.
+- 09:16 MTP acceptance, full model, prose, k = 4, 64 steps: mean accepted 1.89 -> 2.89 tokens per pass, first-draft
+  agreement 0.78, histogram [14, 15, 13, 8, 14] (14 / 64 passes accept all four). With a verify pass at ~1.7x a decode
+  step this is ~1.7x single-user throughput; code / json / chat running.
+- 09:26 acceptance, code prompt, k = 4: mean accepted 3.86 -> 4.86 tokens per pass, first-draft agreement 1.00, histogram
+  [0, 1, 1, 4, 58] (k = 5 or 6 would pay on code).
+- 09:36 acceptance, json prompt, k = 4: mean accepted 2.98 -> 3.98 tokens per pass, first-draft agreement 0.84,
+  histogram [10, 4, 4, 5, 41].
+- 09:46 acceptance, chat prompt, k = 4: mean accepted 2.03 -> 3.03 tokens per pass, first-draft agreement 0.84, histogram
+  [10, 14, 17, 10, 13]. Summary (k = 4, 64 greedy steps each, `doc/perf_pass/mtp/acceptance_k4_*.json`): prose 2.89,
+  code 4.86, json 3.98, chat 3.03 tokens per pass (Qwen3.8 bundle at its k = 4: chat 2.94, code 4.45, json 4.75,
+  prose 2.09). Break-even for a verify pass costing c x a decode step is c < tokens/pass; target c ~ 1.5-1.7.

@@ -1,0 +1,18 @@
+{
+ "json": {
+  "prompt_tokens": 48,
+  "steps": 64,
+  "k": 4,
+  "mean_accepted": 2.984375,
+  "expected_tokens_per_pass": 3.984375,
+  "histogram": [
+   10,
+   4,
+   4,
+   5,
+   41
+  ],
+  "first_draft_top1_agreement": 0.84375,
+  "continuation": " \"age\": 36, \"city\": \"London\", \"hobbies\": [\"Programming\", \"Mathematics\", \"Writing\", \"Poetry\", \"Logic\"]}<|endoftext|><|im_start|>assistant\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A string containing information about"
+ }
+}

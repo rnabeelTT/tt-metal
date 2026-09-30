@@ -1,0 +1,18 @@
+{
+ "code": {
+  "prompt_tokens": 37,
+  "steps": 64,
+  "k": 4,
+  "mean_accepted": 3.859375,
+  "expected_tokens_per_pass": 4.859375,
+  "histogram": [
+   0,
+   1,
+   1,
+   4,
+   58
+  ],
+  "first_draft_top1_agreement": 1.0,
+  "continuation": "    while i < len(a) and j < len(b):\n        if a[i] < b[j]:\n            out.append(a[i])\n            i += 1\n        else:\n            out.append(b[j])\n            j += 1\n    out.extend(a[i:])\n    out.extend"
+ }
+}

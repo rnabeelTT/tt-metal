@@ -1,0 +1,18 @@
+{
+ "chat": {
+  "prompt_tokens": 20,
+  "steps": 64,
+  "k": 4,
+  "mean_accepted": 2.03125,
+  "expected_tokens_per_pass": 3.03125,
+  "histogram": [
+   10,
+   14,
+   17,
+   10,
+   13
+  ],
+  "first_draft_top1_agreement": 0.84375,
+  "continuation": "<think>\n\n</think>\n\nSunlight appears white, but it is actually composed of all the colors of the visible spectrum, each traveling in waves of different lengths. When this light enters Earth's atmosphere, it collides with gas molecules and small particles that are smaller than the wavelength of visible light.\n\nThis interaction causes a phenomenon"
+ }
+}

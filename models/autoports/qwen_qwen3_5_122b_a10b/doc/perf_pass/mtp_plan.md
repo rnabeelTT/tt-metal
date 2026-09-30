@@ -55,6 +55,16 @@ trace/accept design), and a read of `vllm-tt-plugin` (no speculative-decoding su
   in prefill mode right after the main model's bucket program (+1/48 layer of prefill work, +1 attention layer of KV).
   Drafting from an empty MTP cache gives ~0 % acceptance.
 
+## Measured acceptance (2026-09-30, `tools/mtp_acceptance.py`, k = 4, 64 greedy steps, head with bfp8 attention)
+| prompt | tokens per pass | first-draft agreement | histogram (0..4 accepted) |
+|---|---|---|---|
+| prose | 2.89 | 0.78 | 14 / 15 / 13 / 8 / 14 |
+| code | 4.86 | 1.00 | 0 / 1 / 1 / 4 / 58 |
+| json | 3.98 | 0.84 | 10 / 4 / 4 / 5 / 41 |
+| chat | 3.03 | 0.84 | 10 / 14 / 17 / 10 / 13 |
+Expected single-user speed-up = tokens per pass / (verify-pass cost in decode steps); at ~1.6x decode per pass:
+prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
+
 ## Verify-pass design (decided 2026-09-30 after reading the GDN and KDA kernels)
 - The bucket prefill path is out (the 128-token bucket costs 191 ms per 48 layers: more than R decode steps). The verify
   pass is a "rows" mode per layer: GDN in prefill form on ONE 32-row chunk (R valid rows, recurrent + conv state carried
@@ -65,6 +75,16 @@ trace/accept design), and a read of `vllm-tt-plugin` (no speculative-decoding su
   (R*k pairs). Estimated pass cost ~1.3-1.5x a decode step at R = 5; the GDN rows part is the term to fuse later.
 - Accept on device (Qwen3.8 arithmetic), commit the GDN state lazily from the accepted count (per-row prefix states
   from the chunk scan, select slot a), KV rows overwritten by position.
+
+## GDN state carry for the verify rows (plumbing, from gdn/tp.py)
+- Batched decode buffers: `rec_state [B, Nv, Dk, Dv]` (slot = row), `conv_states[m] [1, B, qkv_dim_tp]` for the K = 4
+  shift-register taps. The B = 1 prefill form carries `rec_state`(scratch) + `conv_carry [1, K-1, qkv_dim_tp]`;
+  `assemble_batched_state` maps `conv_states[m][:, u] = conv_new[u][:, m-1]` (m = 1..K-1, tap 0 zeroed), so the reverse
+  for a verify pass of slot s is `conv_carry[:, m-1] = conv_states[m][:, s]` and `rec = rec_state[s]`; afterwards
+  `write_slot(s, rec_new, taps)` (existing) commits the R accepted rows' state (lazy commit: run the chunk on the accepted
+  prefix only, or keep per-row prefix states and select).
+- Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
+  paged update races within one 32-position tile), batched SDPA reads unchanged.
 
 ## Milestones and gates
 1. Host reference: torch MTP head forward on CPU vs the checkpoint (draft acceptance rate on the book/AIME prompts, k=1..4)

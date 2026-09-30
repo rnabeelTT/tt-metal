@@ -83,8 +83,10 @@ def test_attention_rows_mode(mesh_device, R, prefix):
     # prefix: one row per step (plain decode)
     for t in range(prefix):
         step(x_all[0, t : t + 1], [t])
-    # the verify rows: R positions in ONE call
+    # the verify rows: R positions in ONE call, K/V written one row at a time (rows_kv_write)
+    layer.attention.rows_kv_write = True
     y_rows = step(x_all[0, prefix : prefix + R], list(range(prefix, prefix + R)))
+    layer.attention.rows_kv_write = False
     pccs = []
     for j in range(R):
         _, pcc = comp_pcc(y_ref[0, prefix + j : prefix + j + 1], y_rows[j : j + 1], 0.99)
@@ -92,3 +94,43 @@ def test_attention_rows_mode(mesh_device, R, prefix):
         print(f"ROWS attn R={R} prefix={prefix} row {j} (pos {prefix + j}): PCC {pcc}")
     print(f"ROWS_ATTN R={R} prefix={prefix}: min PCC {min(pccs):.5f}")
     assert min(pccs) >= 0.99, pccs
+
+
+@pytest.mark.parametrize("mesh_device", [(1, 4)], indirect=True)
+@pytest.mark.parametrize(
+    "device_params", [{"fabric_config": ttnn.FabricConfig.FABRIC_1D, "l1_small_size": 24576}], indirect=True
+)
+def test_gdn_rows_cost(mesh_device):
+    """Cost of the GDN verify-rows candidates on one GDN layer (real weights): (a) one decode step (B = 1), (b) a prefill
+    chunk continuation of T = 32 rows (padded internally to the 128-row chunk), (c) T = 128; host wall with sync, 10 iters.
+    Decides whether the verify pass can afford the GDN prefill form per layer (36 GDN layers per pass)."""
+    import time as _time
+
+    from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_multichip_decoder import L0, _hidden, _mc
+
+    os.environ.setdefault("MESH_DEVICE", "P300x2")
+    hm = _mc(mesh_device, L0, batch=1, max_seq_len=8192, real=True, hf=False)
+    H = hm.H
+    # prefix so the recurrent state is non-trivial
+    hm.tt_prefill(_hidden(1, 256, H, seed=1))
+    results = {}
+    for name, T in (("prefill_T32", 32), ("prefill_T128", 128)):
+        start = 256
+        hidden = _hidden(1, T, H, seed=2)
+        hm.tt_prefill(hidden, start=start)  # compile
+        ttnn.synchronize_device(mesh_device)
+        t0 = _time.perf_counter()
+        for it in range(10):
+            hm.tt_prefill(hidden, start=start + (it + 1) * T)
+        ttnn.synchronize_device(mesh_device)
+        results[name] = 1e3 * (_time.perf_counter() - t0) / 10
+    x, kw = hm.decode_inputs(_hidden(1, 1, H, seed=3), torch.tensor([2000]))
+    hm.tt.decode_forward(x, **kw)
+    ttnn.synchronize_device(mesh_device)
+    t0 = _time.perf_counter()
+    for it in range(10):
+        out = hm.tt.decode_forward(x, **kw)
+        ttnn.deallocate(out)
+    ttnn.synchronize_device(mesh_device)
+    results["decode_B1"] = 1e3 * (_time.perf_counter() - t0) / 10
+    print("GDN_ROWS_COST " + " | ".join(f"{k} {v:.3f} ms" for k, v in results.items()))
