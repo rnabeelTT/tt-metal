@@ -49,6 +49,12 @@ trace/accept design), and a read of `vllm-tt-plugin` (no speculative-decoding su
   layers: 0.995); bfp8 attention weights (HiFi2) bring it to 0.99 (routed experts' dtype irrelevant) -> the head's layer
   is built with bfp8 attention projections (~20 MB per die).
 
+## Prefill requirement (found 2026-09-30 08:40)
+- The MTP layer keeps its own KV cache and must see every prompt position: during prefill it runs over the bucket with
+  rows (token t+1, final-normed hidden t) for t < P (the row at P takes the first sampled token), i.e. the head's layer
+  in prefill mode right after the main model's bucket program (+1/48 layer of prefill work, +1 attention layer of KV).
+  Drafting from an empty MTP cache gives ~0 % acceptance.
+
 ## Verify-pass design (decided 2026-09-30 after reading the GDN and KDA kernels)
 - The bucket prefill path is out (the 128-token bucket costs 191 ms per 48 layers: more than R decode steps). The verify
   pass is a "rows" mode per layer: GDN in prefill form on ONE 32-row chunk (R valid rows, recurrent + conv state carried

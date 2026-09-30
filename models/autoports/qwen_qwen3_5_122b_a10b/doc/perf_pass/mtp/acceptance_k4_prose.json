@@ -1,0 +1,18 @@
+{
+ "prose": {
+  "prompt_tokens": 22,
+  "steps": 64,
+  "k": 4,
+  "mean_accepted": 0.0,
+  "expected_tokens_per_pass": 1.0,
+  "histogram": [
+   64,
+   0,
+   0,
+   0,
+   0
+  ],
+  "first_draft_top1_agreement": 0.0,
+  "continuation": " a storm like the one that was now breaking over the coast. The waves crashed against the rocks with a fury that seemed almost human, as if the ocean itself were angry at something. He stood at the window of the lighthouse, his hands gripping the cold metal frame, watching the darkness swallow the horizon.\n\nThe"
+ }
+}

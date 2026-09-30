@@ -41,6 +41,12 @@ def main():
     ap.add_argument("--prompts", default="prose,code,json,chat")
     ap.add_argument("--out", default=None)
     ap.add_argument("--max-seq-len", type=int, default=4096)
+    ap.add_argument(
+        "--ref-check",
+        type=int,
+        default=0,
+        help="steps on which the torch reference head also drafts from the captured hidden",
+    )
     args = ap.parse_args()
 
     from transformers import AutoTokenizer
@@ -64,6 +70,14 @@ def main():
     assert kv_shape is not None, "main attention KV caches not bound"
     head.allocate_kv_cache(kv_shape)
     logger.info(f"MTP head ready (layer {head.layer_idx}); kv {kv_shape}")
+    reference = None
+    if args.ref_check:
+        from models.autoports.qwen_qwen3_5_122b_a10b.tests import reference as ref
+        from models.autoports.qwen_qwen3_5_122b_a10b.tests.reference_mtp import MtpReference
+
+        text = ref.text_config()[1]
+        reference = MtpReference(text, sd, embed_weight=sd["tok_embeddings.weight"], lm_head_weight=sd["output.weight"])
+        logger.info("torch reference head loaded for the cross-check")
 
     # capture the final-normed hidden of every decode step (the LM-head input) by wrapping the model's final norm
     captured = {}
@@ -75,6 +89,30 @@ def main():
         return h
 
     model._final_norm_decode = capturing_norm
+    orig_bucket_hidden = model._run_bucket_hidden
+
+    def capturing_bucket_hidden(bi, bucket, chunk_start):
+        x = orig_bucket_hidden(bi, bucket, chunk_start)
+        captured["x_all"] = ttnn.clone(x, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1,1,bucket,H/TP] pre final norm
+        return x
+
+    model._run_bucket_hidden = capturing_bucket_hidden
+    from models.tt_transformers.tt.common import Mode
+
+    def head_rows(tok_ids_list, hidden_rows, positions):
+        """Run the head on given (token, hidden row, position) triples, one decode row each (fills its KV cache)."""
+        last_h = None
+        for tk, hid_t, ps in zip(tok_ids_list, hidden_rows, positions):
+            tokens_tt, cur_pos_tt, rot_idxs, pt_tt = model.prepare_decode_inputs_host(
+                torch.tensor([tk]), ps, page_table
+            )
+            tokens_tt, cur_pos_tt, rot_idxs, pt_tt = (
+                ttnn.to_device(x, mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                for x in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt)
+            )
+            _, last_h = head.decode_step(tokens_tt, hid_t, cur_pos_tt, rot_idxs, pt_tt)
+        return last_h
+
     rep = ttnn.ReplicateTensorToMesh(mesh)
     H = gen.args.dim
     page_table = gen.page_table[:1]
@@ -84,55 +122,101 @@ def main():
         ids = tok(text, add_special_tokens=False)["input_ids"]
         P = len(ids)
         t0 = time.time()
-        # 1) the model's own greedy continuation, eager, host logits (also fills the KV / GDN state step by step)
-        preds = gen.generate(ids, args.new + args.k, enable_trace=False, on_device_sampling=False)
-        logger.info(f"[{name}] P={P} greedy {len(preds)} tokens in {time.time()-t0:.0f}s: {tok.decode(preds[:24])!r}")
-        # 2) replay the same continuation while drafting: reset, prefill, then decode step i feeds preds[i] (teacher
-        #    forcing on the model's own tokens) and drafts k from (preds[i+1]... ) -- the hidden captured at step i is the
-        #    state that produced preds[i+1]; the head extends token preds[i+1] with that hidden.
+        # ONE greedy pass (eager, host argmax): prefill -> pred0, then decode step i consumes preds[i] at pos and yields
+        # preds[i+1]; the hidden captured at step i is the model's state that produced preds[i+1], so the head drafts k
+        # tokens extending preds[i+1] at pos+1 from it. Drafts are scored afterwards against the model's own later tokens.
         gen.reset()
-        gen.prefill_forward(torch.tensor(ids).reshape(1, -1), page_table=page_table, prompt_lens=[P])
         head.allocate_kv_cache(kv_shape)  # fresh MTP KV per prompt
-        accepted = []
-        top1_agree = 0
+        # the all-logits prefill runs the bucket program eagerly (the plain prefill replays a captured trace, which
+        # bypasses the Python hook that captures the bucket hidden)
+        logits0 = gen.prefill_forward(
+            torch.tensor(ids).reshape(1, -1), page_table=page_table, prompt_lens=[P], return_all_logits=True
+        )
+        preds = [int(torch.argmax(logits0[0, -1]).item())]
+        # the MTP head's own prefill: its layer must hold K/V for positions 1..P (vLLM runs the MTP layer over the whole
+        # prompt): row t+1 = (token at t+1, the model's final-normed hidden at t); the token at position P is preds[0]
+        x_all = captured.pop("x_all")
+        h_all = model.norm(x_all, mode=Mode.PREFILL)  # replicated [1,1,bucket,H]
+        ttnn.deallocate(x_all)
+        rows_tok = [ids[t + 1] if t + 1 < P else preds[0] for t in range(P)]
+        rows_hid = [ttnn.slice(h_all, (0, 0, t, 0), (1, 1, t + 1, H)) for t in range(P)]
+        head_rows(rows_tok, rows_hid, [t + 1 for t in range(P)])
+        for r in rows_hid:
+            ttnn.deallocate(r)
+        h_all_keep = h_all
+        logger.info(f"[{name}] head prefilled over positions 1..{P} ({time.time()-t0:.0f}s)")
+        if reference is not None:
+            ref_cache = ref.DynamicCache()
+            h_all_t = (
+                ttnn.to_torch(ttnn.get_device_tensors(h_all_keep)[0]).float().reshape(-1, H)[:P].to(torch.bfloat16)
+            )
+            reference(
+                torch.tensor([rows_tok]),
+                h_all_t.reshape(1, P, H),
+                torch.arange(1, P + 1).reshape(1, P),
+                ref_cache,
+                attention_mask=ref.causal_mask(1, P),
+            )
+        drafts_at = []
         pos = P
-        for i in range(args.new):
-            tok_i = preds[i]
+        n_steps = args.new + args.k + 1
+        for i in range(n_steps):
             if i % 8 == 0:
-                logger.info(
-                    f"[{name}] replay step {i}/{args.new} pos {pos} accepted so far {sum(accepted)} ({time.time()-t0:.0f}s)"
-                )
-            gen.decode_forward(
-                torch.tensor([[tok_i]]),
+                logger.info(f"[{name}] step {i}/{n_steps} pos {pos} ({time.time()-t0:.0f}s)")
+            out = gen.decode_forward(
+                torch.tensor([[preds[i]]]),
                 torch.tensor([pos]),
                 enable_trace=False,
                 on_device_sampling=False,
-                reload_inputs=True,
+                reload_inputs=(i == 0),
             )
-            hidden = captured["h"]  # replicated [1,1,B,H] -> the model's state after consuming preds[i] at pos
-            # drafts extend preds[i+1] (the model's next token) at position pos+1
-            cur_tok, cur_hid, cur_pos = preds[i + 1], hidden, pos + 1
-            drafts = []
+            preds.append(int(torch.argmax(out[0]).item()))
+            hidden = captured.pop("h")
             if i == 0:
                 logger.info(
                     f"[{name}] first decode step done; hidden {tuple(hidden.shape)} {hidden.dtype}; drafting k={args.k}"
                 )
-            for j in range(args.k):
-                tokens_tt, cur_pos_tt, rot_idxs, pt_tt = model.prepare_decode_inputs_host(
-                    torch.tensor([cur_tok]), cur_pos, page_table
-                )
-                tokens_tt, cur_pos_tt, rot_idxs, pt_tt = (
-                    ttnn.to_device(x, mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                    for x in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt)
-                )
-                hid = cur_hid
-                if hid.shape[2] != 1:
-                    hid = ttnn.slice(hid, (0, 0, 0, 0), (1, 1, 1, H))
-                logits, h_next = head.decode_step(tokens_tt, hid, cur_pos_tt, rot_idxs, pt_tt)
-                lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
-                d = int(lg.reshape(-1, lg.shape[-1])[0, : gen.args.vocab_size].argmax().item())
-                drafts.append(d)
-                cur_tok, cur_hid, cur_pos = d, h_next, cur_pos + 1
+            if i < args.new:
+                cur_tok, cur_hid, cur_pos = preds[i + 1], hidden, pos + 1
+                drafts = []
+                for j in range(args.k):
+                    tokens_tt, cur_pos_tt, rot_idxs, pt_tt = model.prepare_decode_inputs_host(
+                        torch.tensor([cur_tok]), cur_pos, page_table
+                    )
+                    tokens_tt, cur_pos_tt, rot_idxs, pt_tt = (
+                        ttnn.to_device(x, mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                        for x in (tokens_tt, cur_pos_tt, rot_idxs, pt_tt)
+                    )
+                    hid = cur_hid
+                    if hid.shape[2] != 1:
+                        hid = ttnn.slice(hid, (0, 0, 0, 0), (1, 1, 1, H))
+                    lg, h_next = head.decode_step(tokens_tt, hid, cur_pos_tt, rot_idxs, pt_tt)
+                    lg = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
+                    d = int(lg.reshape(-1, lg.shape[-1])[0, : gen.args.vocab_size].argmax().item())
+                    drafts.append(d)
+                    cur_tok, cur_hid, cur_pos = d, h_next, cur_pos + 1
+                drafts_at.append(drafts)
+                if i == 0:
+                    logger.info(f"[{name}] first drafts {drafts} ({time.time()-t0:.0f}s)")
+                if reference is not None and i < args.ref_check:
+                    h_t = (
+                        ttnn.to_torch(ttnn.get_device_tensors(hidden)[0]).float().reshape(-1, H)[:1].to(torch.bfloat16)
+                    )
+                    r_logits, _ = reference(
+                        torch.tensor([[preds[i + 1]]]), h_t.reshape(1, 1, H), torch.tensor([[pos + 1]]), ref_cache
+                    )
+                    r_draft = int(r_logits[0, -1].argmax().item())
+                    logger.info(
+                        f"[{name}] step {i}: hidden rms {h_t.float().pow(2).mean().sqrt():.3f} | device draft0 {drafts[0]} "
+                        f"{tok.decode([drafts[0]])!r} | reference draft0 {r_draft} {tok.decode([r_draft])!r} | truth "
+                        f"{preds[i + 2] if i + 2 < len(preds) else None} {tok.decode([preds[i + 2]]) if i + 2 < len(preds) else ''!r}"
+                    )
+            ttnn.deallocate(hidden)
+            pos += 1
+        logger.info(f"[{name}] P={P} greedy {len(preds)} tokens in {time.time()-t0:.0f}s: {tok.decode(preds[:24])!r}")
+        accepted = []
+        top1_agree = 0
+        for i, drafts in enumerate(drafts_at):
             truth = preds[i + 2 : i + 2 + args.k]
             n_ok = 0
             for d, t in zip(drafts, truth):
@@ -141,8 +225,6 @@ def main():
                 n_ok += 1
             accepted.append(n_ok)
             top1_agree += int(len(truth) > 0 and drafts[0] == truth[0])
-            pos += 1
-            ttnn.deallocate(hidden)
         hist = [accepted.count(v) for v in range(args.k + 1)]
         mean_acc = sum(accepted) / len(accepted)
         results[name] = {

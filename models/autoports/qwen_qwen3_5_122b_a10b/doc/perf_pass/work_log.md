@@ -350,3 +350,31 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   healthy in 10.0 min, /v1/models 262144, chat, tool call, tt-model curl default / thinking on / off, non-aligned
   2381-token prompt, 32-request burst 160.2 tok/s (turn-5a image 155.3, turn 4 137), 131072-token prompt 51.0 s wall
   (54.5 / 72.6), 8192-token prompt 3.1 s (3.3 / 4.5). Turn 5b shipped.
+- 07:59 `tools/mtp_acceptance.py`: the first version (greedy pass, then reset + re-prefill + replay) stalled in the first
+  decode after the second prefill (both on the full and the 2-layer model; not investigated - the tool now drafts inline
+  during ONE greedy pass and scores afterwards); the 2-layer smoke runs the whole loop in ~1 s per prompt. Full 48-layer
+  run queued (k = 4, 64 new tokens, prose / code / json / chat). `tests/test_mtp_rows.py::test_attention_rows_mode`
+  (R rows of one user in one batched decode call vs the HF causal prefill) written and queued.
+- 08:30 the acceptance tool's SECOND prompt hangs the device in the first eager decode after `reset()` + prefill (main
+  thread in a futex wait, dispatch threads spinning), on the 2-layer model as well; a single generate-style pass per
+  process is fine. Not the vLLM path (the server never re-prefills a finished generator this way); worked around by one
+  prompt per process; to investigate when the MTP verify path needs repeated prefill + eager decode in one process.
+- 08:40 first full-model acceptance run: 0 / 64 first drafts agree (prose) -> not precision: the head drafted at position
+  P+1 against an EMPTY MTP KV cache; the MTP layer must process the whole prompt first (vLLM runs the MTP layer over all
+  prompt tokens: row t+1 = token t+1 with the model's final-normed hidden at t; the row at P uses the first generated
+  token). Tool fixed (head prefill from the bucket hidden captured in `_run_bucket_hidden` + `norm`), cross-check rerun.
+  Serving impact: the MTP layer runs in prefill mode over every bucket during prefill (1/48 extra layer of work) and its
+  KV cache is one more attention layer's worth.
+- 08:43 `test_attention_rows_mode` (R = 5 rows of one user in ONE batched decode call, fresh cache, positions 0..4 with
+  3 dummy rows at 5..7): PCC 0.76-0.88 on every row including row 0 (which only attends to itself) -> not a causality
+  problem; single-row control on the same layer queued to split harness vs batched-path.
+- 08:46 single-row control (`test_layer_decode_rows_harness[main3]`): layer 3 through the same decode harness PCC
+  0.994-0.997 (the shipped-policy figure) -> the batched R-rows call is the fault: B rows of ONE user that all fall into
+  the same 32-position KV tile are written by B per-user paged updates that race on the tile (last writer wins), so rows
+  read wiped K/V. Verify-pass consequence: write the R rows' K/V with one sequence-style (chunk) update, keep the batched
+  decode SDPA for the reads; alternatively attention chunk-prefill over a 32-row padded chunk at offset P (validated
+  path: "chunk prefill start=128 T=100" PCC 0.99996) if its cost at 32 rows is acceptable.
+- 09:06 acceptance cross-check with the head prefill and the eager all-logits prefill: device first drafts equal the torch
+  reference head's on 6 / 8 steps (' like', ' the', ' one', ' that', ' now', '.'; two near-ties differ), hidden RMS ~2.2;
+  vs the model's own continuation (prose, 8 steps, k = 2): first-draft agreement 0.50, mean accepted 0.75 -> 1.75 tokens
+  per pass. The head is functional end to end; full measurement (4 prompt kinds, k = 4, 64 tokens) queued.
