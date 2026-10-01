@@ -1,0 +1,3 @@
+# live readiness runner outputs (server.log, vllm_*.json/.log): scratch of each run; the committed evidence is the
+# per-stage snapshot under doc/<stage>/readiness_vllm_<tag>/
+readiness_vllm/
