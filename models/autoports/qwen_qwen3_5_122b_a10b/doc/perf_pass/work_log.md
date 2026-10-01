@@ -887,3 +887,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   request still holds the full 262144 context. Bundle manifest: QWEN35_VISION=1, QWEN35_VISION_MAX_IMAGES=4,
   `--limit-mm-per-prompt {"image": 4, "video": 0}`, card text. HANDOFF §5 rewritten (served vision). Item 10
   (readiness re-validation: serve / sampling / qualitative / benchmark, MTP + vision) launched (logs/10/vllm-48l-mtp-vision.log).
+- 13:40 item 10 (readiness re-validation) in progress: host-side checks re-run on the current tree - 06-full-model,
+  07-optimized-full-model, 11-tti-release all exit 0 (context contract 262144 supported; TTI artifacts name the
+  autoport). The served suite (serve / sampling full profile / qualitative / benchmark; MTP k=3 adaptive + vision on,
+  32 slots, 262144 ctx) is running (logs/10/vllm-48l-mtp-vision.log); 09 / 10 checks follow it. Item 11 bundle rebuild
+  (run 3: MTP default-on, vision on, resident MoE) building in the background (logs/11/package-run3.log). Hygiene:
+  readiness_vllm/ untracked (6a95e66978b), the Tracy env-gated patch committed (e2d56cd7328); p150x4 has no hardware
+  here (profile stays "same (1,4) mesh, untested on this host").
+- 13:46 readiness suite launch #1 died at startup: the API-server process exited 1 right after the image-processor
+  init with NO traceback in server.log (stderr is captured there), before spawning the EngineCore. The exact server
+  command relaunched by hand 12 min later went straight through to the engine init, so the failure was transient
+  (the previous server's teardown / reset had completed 2.5 min earlier; the port was free at the retry). Relaunched
+  the suite (10-serve.sh, same env: MTP k=3 adaptive, vision on, 32 slots, 262144 ctx).
+- 14:02 readiness relaunch #2 crashed at the MTP warm-up: `KeyError: 'mtp_sel'` - the model allocates the MTP bucket
+  inputs behind the RAW env `QWEN35_MTP` (default "0") while the adapter's default-on rule (k = 3) lived only in
+  `_mtp_k_env`; every earlier served run exported QWEN35_MTP=3 explicitly (scripts/14-serve-mtp.sh), the readiness
+  script and the BUNDLE do not -> the default-on server was broken at start. Fix (62c96f3ea1b): the adapter pins
+  `os.environ["QWEN35_MTP"] = str(k)` at import (one source of truth); test `test_adapter_import_pins_mtp_env`
+  (4 cases, subprocess import with a clean env) passes. The container build started at 13:35 had the unpinned tree:
+  killed and restarted (run 3b). Readiness suite relaunched (#3).

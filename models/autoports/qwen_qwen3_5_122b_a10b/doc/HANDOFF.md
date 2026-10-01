@@ -172,8 +172,8 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   path), masked (dense 256-expert glue) at 32 rows where 256 pair groups lose by 22-32 %.
 - Decode router: `QWEN35_ROUTER_DRAM_SHARDED=1` (default) runs the [32, 3072] x [3072, 256] router as a DRAM-sharded
   decode matmul (71 -> 25 us per layer at width 8; 0 restores the stock linear).
-- Multi-user MTP (built, measured negative at 2-4 users; opt-in via QWEN35_MTP with --max-num-seqs > 1) and the levers
-  that would flip it: `doc/perf_pass/mtp_plan.md`.
+- Batched multi-user MTP (built, measured negative at 2-4 users; `QWEN35_MTP_ADAPTIVE=0` selects it instead of the
+  default adaptive mode) and the levers that would flip it: `doc/perf_pass/mtp_plan.md`.
 - Next levers (not done): compact-layout decode MoE for 8-32 rows (gather / un-dispatch kernels; the same work as the
   prefill levers "row gather" + "untilize before un-dispatch"), one weight pass per expert in the grouped sparse
   matmul, a fused GDN decode step, MTP commit / draft overlap on the second command queue.
