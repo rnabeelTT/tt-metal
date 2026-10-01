@@ -1179,3 +1179,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   the driver attribute was set only on the standalone constructor path, not on the external-KV (vLLM) path that
   returns early. Fixed (`_init_batched_prefill` from both paths, attribute initialised first; 46ac95cbc02); the A/B is
   re-queued after the batched-prefill served A/B.
+- 22:58 VISION SIZE TEST, attempt 1: the nine-bucket warm-up compiled (2.3 s / 2.7 s for 2048 / 4096, ~13 s each from
+  6144 to 18432: 95 s total) but a 1080p image (8160 patches, bucket 10240) still compiled 9 programs: the tower sliced
+  the block output to the REAL length before the patch merger (`x[:, :, :unpadded_seq_len, :]`), so every merger
+  program was keyed on the exact patch count. Fix in the shared port (`qwen36/tt/vision/model.py`): the merger runs
+  on the padded sequence; the real rows (and the concat of several images) are taken on host and re-uploaded
+  hidden-fractured (the prefill splice reads the rows to host anyway). Retest queued after the batched tests.
+- 23:00 BATCHED ATTENTION TEST PASSED (attempt 2, with the fabric device params): B = 4 vs 4 single-user prefills at
+  T = 128 and 512, per-user PCC 1.000000, paged K/V identical. Model-level batched prefill test running.
