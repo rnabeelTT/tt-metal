@@ -98,6 +98,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         if tt_generator is not None:
             assert self._tt.model[0] is self.model, "tt_generator must wrap this generator's model"
         self.external_kv = bool(external_kv)
+        self.batched_prefill = None  # tt/prefill_batched.py driver, built by _init_batched_prefill once the KV is bound
         # Split-sampling token feedback: the sampler writes the sampled token straight into the persistent decode token
         # input. The force-argmax path (ttnn.argmax) accepts the [B,1] token input as its output tensor; the top-k
         # candidate path (ttnn.sampling) requires a rank-4 [1,1,1,B] output -> hand it a zero-copy view of the same buffer.
@@ -145,14 +146,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.mtp_head = Qwen35MtpHead(self.model, self.args.load_state_dict())
             self.mtp_head.allocate_kv_cache(self.kv_cache_shape, self.kv_dtype)
             logger.info(f"MTP head ready (layer {self.mtp_head.layer_idx}); kv {self.kv_cache_shape}")
-        # batched short-prompt prefill (tt/prefill_batched.py): groups of up to 4 final text prompts <= 512 tokens per
-        # prefill call run in one pass (QWEN35_BATCHED_PREFILL=1; default off until the served A/B lands)
-        self.batched_prefill = None
-        if self.max_batch_size >= 2 and os.environ.get("QWEN35_BATCHED_PREFILL", "0") == "1":
-            from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_batched import GDN_BATCH_CAP, BatchedPrefill
-
-            self.batched_prefill = BatchedPrefill(self.model, B=min(GDN_BATCH_CAP, self.max_batch_size))
-            logger.info(f"batched short-prompt prefill enabled (groups of {self.batched_prefill.B})")
+        self._init_batched_prefill()
         # ORDER MATTERS (qwen36 #48536 rule): every prefill program and every persistent prefill allocation (masked-bucket
         # programs, expert-sorted dispatch constants, GDN conv carry, fused out-proj buffers) must exist BEFORE the decode
         # trace is captured. A prefill that first runs after the capture allocates into the trace's freed scratch range;
@@ -400,6 +394,19 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             f"bound external KV cache {self.kv_cache_shape} {self.kv_dtype} ({len(kv_cache)} layers), scratch block "
             f"{self.kv_scratch_block}, page-table width {W}"
         )
+        self._init_batched_prefill()
+
+    def _init_batched_prefill(self):
+        """Batched short-prompt prefill (tt/prefill_batched.py): groups of up to 4 final text prompts <= 512 tokens per
+        prefill call run in one pass (QWEN35_BATCHED_PREFILL=1; default off until the served A/B lands). Built once the
+        KV cache / page table exist, before any warm-up (both the standalone and the external-KV constructors)."""
+        if self.batched_prefill is not None:
+            return
+        if self.max_batch_size >= 2 and os.environ.get("QWEN35_BATCHED_PREFILL", "0") == "1":
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_batched import GDN_BATCH_CAP, BatchedPrefill
+
+            self.batched_prefill = BatchedPrefill(self.model, B=min(GDN_BATCH_CAP, self.max_batch_size))
+            logger.info(f"batched short-prompt prefill enabled (groups of {self.batched_prefill.B})")
 
     def warm_programs(self):
         """Phase 1 of the serving warm-up (no trace live): every prefill program + persistent allocation, the eager decode
