@@ -206,8 +206,14 @@ starts with `QWEN35_VISION=1`. Text-only is still the default of the checkout (t
 
 Limits: images only (no video); an image prompt is prefilled whole (no chunked-prefill continuation of an image
 prompt — chunked prefill is opt-in and off with MTP anyway); at most `QWEN35_VISION_MAX_IMAGES` images per request
-(vLLM's `--limit-mm-per-prompt` must agree); the tower runs eagerly (not traced) per request, padded to 2048-patch
-multiples (448 px = 784 patches -> 2048; 896 px = 3136 -> 4096).
+(vLLM's `--limit-mm-per-prompt` must agree); the tower runs eagerly (not traced) per image, padded to 2048-patch
+multiples (448 px = 784 patches -> 2048; 896 px = 3136 -> 4096; 1920x1080 = 8160 -> 10240). Image resolution is capped
+at `QWEN35_VISION_MAX_PIXELS` (default 4194304 = 4 MP = 16384 patches = 4096 image tokens per image; the checkpoint's
+processor default is 16 MP) by `TT_Qwen3_5MoeProcessingInfo.get_hf_processor`, and `_warm_vision` compiles the tower for
+EVERY padded bucket up to the cap (2048 .. 18432, nine eager passes at start-up). Why: the tower's programs are keyed
+by the padded patch count, so an image in an unwarmed bucket compiles after the traces are parked and the program guard
+stops the engine - the served failure of 2026-10-01 (a photo of 47k patches against a warm-up of 2048 / 4096 only:
+`programs compiled after the trace captures (1894 -> 1923)`). Coverage test: `tests/test_vision_sizes.py`.
 
 Validation so far (2026-10-01): tower PCC above; reduced 2-layer server with `QWEN35_VISION=1` serves text, logprobs,
 penalty, min_p and a 448x448 image chat request (220 prompt tokens, 196 image tokens) with the program guard quiet;

@@ -169,6 +169,24 @@ _VISION_MAX_IMAGES = int(os.environ.get("QWEN35_VISION_MAX_IMAGES", "4") or 4)
 
 
 class TT_Qwen3_5MoeProcessingInfo(Qwen3_5MoeProcessingInfo):
+    def get_hf_processor(self, **kwargs: object):
+        """The checkpoint's processor with the served image-resolution cap (QWEN35_VISION_MAX_PIXELS, default 4 MP =
+        16384 patches = 4096 image tokens per image; the checkpoint default is 16 MP). The tower's programs are keyed by
+        the padded patch count and every bucket up to the cap is warmed at start-up; a larger image would compile after
+        the traces are parked (the program guard then stops the engine: served image failure of 2026-10-01). A smaller
+        client override (`--mm-processor-kwargs {"max_pixels": ...}`) is kept; a larger one is clamped."""
+        proc = super().get_hf_processor(**kwargs)
+        if _VISION:
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.vision import max_pixels
+
+            cap = max_pixels()
+            ip = getattr(proc, "image_processor", None)
+            size = dict(getattr(ip, "size", None) or {})
+            if ip is not None and int(size.get("longest_edge", cap)) > cap:
+                size["longest_edge"] = cap
+                ip.size = size
+        return proc
+
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
         if _VISION:
             return {"image": _VISION_MAX_IMAGES, "video": 0}
@@ -667,39 +685,38 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             pixel_values = torch.concat(pixel_values, dim=0)
             grid = torch.stack([g.to(dtype=torch.int64).reshape(-1) for g in grid], dim=0)
         grid = torch.as_tensor(grid).to(torch.int64).reshape(-1, 3)
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.vision import max_patches
+
+        per_image = [int(g.prod()) for g in grid]
+        if max(per_image) > max_patches():
+            # the processor cap (TT_Qwen3_5MoeProcessingInfo.get_hf_processor) keeps images under the warmed buckets; an
+            # image past it would compile tower programs after the traces are parked (program guard)
+            raise ValueError(
+                f"image of {max(per_image)} patches exceeds the served cap of {max_patches()} patches "
+                f"(QWEN35_VISION_MAX_PIXELS={max_patches() * 256}); the processor should have resized it"
+            )
         model = self._gen.model
         rows = model.get_image_features(pixel_values.float(), grid)  # stashes the grid for the M-RoPE table
         return rows, grid
 
     def _warm_vision(self):
-        """Compile the tower's programs for the common padded patch counts (the tower runs eagerly per request, padded
-        to 2048-patch multiples) and the image-splice staging of every bucket, before any trace is captured."""
-        import glob
-
-        from transformers import AutoImageProcessor
+        """Compile the tower's programs for EVERY padded patch bucket under the served resolution cap (the tower runs
+        eagerly per image, padded to 2048-patch multiples; its programs are keyed by the padded length) and the
+        image-splice staging, before any trace is captured."""
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.vision import max_pixels, warm_tower_sizes
 
         model = self._gen.model
-        snap = self._gen.args.CKPT_DIR
-        if not os.path.isdir(snap):
-            cands = glob.glob(
-                os.path.expanduser("~/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/*")
-            )
-            snap = cands[0] if cands else snap
-        proc = AutoImageProcessor.from_pretrained(snap)
-        from PIL import Image
-
-        for side in (448, 896):  # 784 / 3136 patches -> padded 2048 / 4096
-            t0 = time.perf_counter()
-            img = Image.fromarray((torch.rand(side, side, 3) * 255).to(torch.uint8).numpy())
-            inp = proc(images=img, return_tensors="pt")
-            logger.info(
-                f"vision warm-up {side} px: grid {inp['image_grid_thw'].tolist()} (processor {time.perf_counter() - t0:.1f}s)"
-            )
-            rows = model.get_image_features(inp["pixel_values"].float(), inp["image_grid_thw"].to(torch.int64))
-            ttnn.deallocate(rows)
-            ttnn.synchronize_device(self._gen.mesh_device)
-            logger.info(f"vision warm-up {side} px done in {time.perf_counter() - t0:.1f}s")
-        logger.info("vision tower warmed (448 / 896 px)")
+        vc = self._gen.args.hf_config.vision_config
+        patch_dim = int(vc.in_channels) * int(vc.temporal_patch_size) * int(vc.patch_size) ** 2
+        t0 = time.perf_counter()
+        done = warm_tower_sizes(
+            lambda pv, grid: model.get_image_features(pv, grid), patch_dim, log=lambda m: logger.info(m)
+        )
+        ttnn.synchronize_device(self._gen.mesh_device)
+        logger.info(
+            f"vision tower warmed for {len(done)} padded buckets {[d[0] for d in done]} (cap {max_pixels()} pixels = "
+            f"{max_pixels() // 256} patches per image) in {time.perf_counter() - t0:.1f}s"
+        )
 
     @staticmethod
     def _mtp_sampling(sp, row):

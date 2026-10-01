@@ -1161,3 +1161,21 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   rows (T = 1.0): 1 user 36.0 / 35.5 ms, 8 users 63.7 ms (== greedy), 32 users 129.7 / 131.5 ms vs 110.2 ms greedy
   -> the on-device sampler costs ~20 ms per step at 32 rows (new improvement item: sampler cost at full occupancy).
   `deployed_sweep.md` updated (pass-2 columns, pass-2 sampled table, reading notes). Multi-user MTP A/B running next.
+- 22:50 SERVED IMAGE FAILURE (user report, another p300x2, bundle 832a9834): an image + text request killed the engine
+  with `programs compiled after the trace captures (1894 -> 1923) (prefill_serving)` (29 programs); the MTP abort path
+  then crashed on `ttnn.deallocate(torch.Tensor)` (`_drop_hid_rows` on the host-harvested hidden rows), masking the
+  cause. Root cause: the tower pads each image to the next 2048-patch multiple and its programs are keyed by that
+  padded length; the warm-up compiled 2048 / 4096 only (448 / 896 px squares) while the checkpoint's processor allows
+  16 MP images (a 4032x3024 photo = 47,376 patches -> padded 49,152; even 1920x1080 = 8,160 -> 10,240). Fix:
+  (1) served resolution cap `QWEN35_VISION_MAX_PIXELS` (default 4 MP = 16,384 patches = 4,096 image tokens per image)
+  enforced in `TT_Qwen3_5MoeProcessingInfo.get_hf_processor` (clamps the image processor's `longest_edge`; a smaller
+  client `max_pixels` is kept); (2) `_warm_vision` compiles every padded bucket 2048 .. 18432 with synthetic patches
+  (`tt/vision.py: warm_tower_sizes`, nine eager passes); (3) `_vision_for_user` raises a clear error if an image still
+  exceeds the cap; (4) `_drop_hid_rows` / `end_prefill` skip `ttnn.deallocate` for host rows. tt-model.yaml carries the
+  knob; HANDOFF §5 updated. Test `tests/test_vision_sizes.py` (bfp8 tower: warm the buckets, then 1080p / 2048x2048 /
+  4032x3024 / two images through the capped processor must compile nothing and match the HF visual) queued before the
+  served A/B, whose extra check now sends those image sizes to the server (`scripts/22-image-sizes.py`).
+- 22:49 FAILED ATTEMPT (mine): the multi-user MTP A/B server died at warm-up with `AttributeError: batched_prefill` -
+  the driver attribute was set only on the standalone constructor path, not on the external-KV (vLLM) path that
+  returns early. Fixed (`_init_batched_prefill` from both paths, attribute initialised first; 46ac95cbc02); the A/B is
+  re-queued after the batched-prefill served A/B.

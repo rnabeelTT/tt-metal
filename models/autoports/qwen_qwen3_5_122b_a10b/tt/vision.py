@@ -76,3 +76,48 @@ def attach_vision(model, args, dtype=None, tt_ccl=None):
         model.vision_model = DropInVisionTransformer(visual, vargs, dtype=dtype, tt_ccl=tt_ccl)
         return model.vision_model
     return model.init_vision_model(reference_visual=visual, vision_args=vargs, dtype=dtype)
+
+
+# ---- served image sizes -------------------------------------------------------------------------------------------
+# The tower pads every image to the next 2048-patch multiple (DropInVisionTransformer.forward: `(n // 2048 + 1) * 2048`)
+# and its programs are keyed by that padded length, so a request whose image lands in an unwarmed bucket compiles after
+# the traces are parked (the program guard then stops the engine: served image failure of 2026-10-01, a photo of 47k
+# patches against a warm-up of 2048 / 4096). The server caps the image resolution at QWEN35_VISION_MAX_PIXELS (default
+# 4 MP = 16384 patches = 4096 image tokens per image; the checkpoint's processor default is 16 MP) and warms every padded
+# bucket up to that cap.
+PATCH_BLOCK = 2048
+DEFAULT_MAX_PIXELS = 16384 * 256  # 16 x 16 pixels per patch
+
+
+def max_pixels():
+    return int(os.environ.get("QWEN35_VISION_MAX_PIXELS", str(DEFAULT_MAX_PIXELS)) or DEFAULT_MAX_PIXELS)
+
+
+def max_patches(cap_pixels=None):
+    return (cap_pixels or max_pixels()) // 256
+
+
+def padded_patch_buckets(cap_pixels=None):
+    """Every padded sequence length the tower can see under the cap (the tower's formula is strictly above n)."""
+    n_max = max_patches(cap_pixels)
+    return [k * PATCH_BLOCK for k in range(1, n_max // PATCH_BLOCK + 2)]
+
+
+def warm_tower_sizes(run_tower, patch_dim, cap_pixels=None, log=None):
+    """Compile the tower's programs for every padded bucket under the cap with synthetic patches (one grid per bucket:
+    32 rows x n/32 columns, n inside the bucket). ``run_tower(pixel_values, grid_thw)`` runs the tower and returns a
+    device tensor (freed here). Returns the list of (padded length, seconds)."""
+    import time
+
+    out = []
+    for padded in padded_patch_buckets(cap_pixels):
+        n = padded - PATCH_BLOCK // 2  # lands in this bucket: (n // 2048 + 1) * 2048 == padded
+        grid = torch.tensor([[1, 32, n // 32]], dtype=torch.int64)
+        t0 = time.perf_counter()
+        rows = run_tower(torch.randn(n, patch_dim), grid)
+        ttnn.deallocate(rows)
+        dt = time.perf_counter() - t0
+        out.append((padded, dt))
+        if log is not None:
+            log(f"vision warm-up: {n} patches -> padded {padded} in {dt:.1f}s")
+    return out

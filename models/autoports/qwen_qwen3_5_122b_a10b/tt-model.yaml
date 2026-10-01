@@ -69,6 +69,10 @@ serve:
     # Set to "0" for a text-only server.
     QWEN35_VISION: "1"
     QWEN35_VISION_MAX_IMAGES: "4"
+    # Served image-resolution cap: 4 MP = 16384 patches = 4096 image tokens per image (the checkpoint's processor default
+    # is 16 MP). The tower's programs are keyed by the padded patch count; every bucket up to this cap is warmed at
+    # start-up, so no image request compiles a program after the traces are parked (2026-10-01 served image failure).
+    QWEN35_VISION_MAX_PIXELS: "4194304"
   # Thinking OFF by default: the configuration every release gate ran on (TTI release, 22 / 22 conformance tests, full-set
   # evals). The model's own default (thinking on) loops on constraint-heavy prompts under greedy / low-temperature decoding
   # (reproduced by the bf16 HF reference; doc/tti_release/RUN_NOTES.md run 7) and returns an empty `content` when the budget
