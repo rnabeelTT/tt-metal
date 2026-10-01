@@ -811,3 +811,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   bound by ~60 tiny ops (3-5 us each) and the head relayouts; the pairs MoE path and the padded top-k both lose, so
   the remaining single-user lever is a fused GDN decode kernel (conv taps + gates + recurrence + norm in one program),
   parked as kernel work. Moving on with item 7 (prefill MoE: resident weights, built; validation chain running).
+- 09:47 RESIDENT WEIGHTS A/B (Tracy MoE block, 2048 tokens, one GDN-layer MoE, host walls incl. sync per phase):
+  gate/up sparse matmul 2.365 -> 1.430 ms (-40 %), down 1.652 -> 1.202 (-27 %); gather / dispatch / swiglu /
+  un-dispatch unchanged (1.8 / 1.9 / 0.53 / 1.38) -> MoE block ~9.7 -> ~8.3 ms per layer at 2048 (-1.4 ms x 48
+  layers = ~68 ms per 2048-token segment, ~15 % of the prefill time). Unit tests 14 / 14 (sorted runs per-group PCC
+  >= 0.99996), layer PCC vs HF at 2048 unchanged (GDN 0.9985, attention 0.99998). Default on. The remaining prefill
+  MoE levers (row gather 1.8 ms, dispatch build 1.9, un-dispatch 1.4 incl. the 0.8 ms untilize) are TILE-aware
+  gather / scatter kernels; parked behind vision. Commit 6df93b62a7f (kernels) + this log.

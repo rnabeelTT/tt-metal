@@ -163,7 +163,8 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   and shares steps between prompts; it does not shorten running users' inter-token gap. `doc/perf_pass/chunked_prefill_plan.md`.
 - Grouped sparse matmul (prefill sorted dispatch, decode pairs path): RESIDENT weights - a core that owns consecutive
   groups of the same expert reads the expert's [K, N] block once (`TT_SPARSE_GROUPED_RESIDENT_IN1=0` opts out; the
-  factory streams K-blocks when the block does not fit the 1.3 MB per-core CB budget, e.g. bfp8 gate/up). Kernels:
+  factory streams K-blocks when the block does not fit the 1.3 MB per-core CB budget, e.g. bfp8 gate/up). Measured
+  at 2048 tokens: gate/up sparse matmul 2.37 -> 1.43 ms, down 1.65 -> 1.20 ms per layer (-1.4 ms of ~9.7). Kernels:
   `kernels/compute/bmm_grouped_resident_in1.cpp`, `reader_writer_bmm_tile_layout_in1_indexed.cpp` (RESIDENT_IN1),
   tests `tests/test_sparse_matmul_grouped.py::test_grouped_sorted_runs_match_torch`.
 - Decode MoE path by width: gather (<= 4 rows), PAIRS (one group per (token, expert) pair, grouped sparse matmul) up to
