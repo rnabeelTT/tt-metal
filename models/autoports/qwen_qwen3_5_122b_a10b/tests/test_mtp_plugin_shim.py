@@ -442,12 +442,31 @@ def test_multi_token_gap_without_shim_is_misclassified_as_prefill():
     assert model_input.prompt_lens is not None
 
 
-def test_gap_wider_than_max_width_stays_prefill(applied):
-    """A resume replay with more than one step's width outstanding is uncomputed history."""
+def test_gap_wider_than_max_width_stays_prefill_with_chunked_prefill(applied):
+    """With chunked prefill ON, more than one step's width outstanding past the prompt is uncomputed history."""
     batch, request = _batch_with_one_request(4, 6, 5)  # num_tokens 10, computed 5 -> gap 5 > MAX_WIDTH
-    model_input = _prepare(_fake_runner(batch, request), ("r", 5, 5, 6))
+    runner = _fake_runner(batch, request)
+    runner.scheduler_config = SimpleNamespace(chunked_prefill_enabled=True)
+    model_input = _prepare(runner, ("r", 5, 5, 6))
     assert model_input.prompt_lens is not None
     assert model_input.prompt_lens.tolist() == [10]
+
+
+def test_wide_gap_is_a_decode_row_without_chunked_prefill(applied):
+    """Chunked prefill OFF: a cached, non-resumed row past its prompt is a decode row whatever the outstanding gap
+    (async scheduling leaves up to 2k + 1 emitted tokens outstanding after two in-flight multi-token steps)."""
+    prompt_len, emitted = 4, 7  # gap 7 > MAX_WIDTH, computed past the prompt
+    batch, request = _batch_with_one_request(prompt_len, emitted, prompt_len)
+    model_input = _prepare(_fake_runner(batch, request), ("r", emitted, prompt_len, emitted))
+    assert model_input.prompt_lens is None
+    assert model_input.input_positions.tolist()[0] == prompt_len + emitted - 1
+
+
+def test_uncomputed_prompt_tokens_are_still_prefill(applied):
+    """The closure's first test is untouched: a resumed request (num_computed reset below its prompt) is prompt work."""
+    batch, request = _batch_with_one_request(8, 2, 3)  # computed 3 < prompt 8
+    model_input = _prepare(_fake_runner(batch, request), ("r", 7, 3, 2))
+    assert model_input.prompt_lens is not None
 
 
 def test_prepare_wrapper_restores_output_width(applied):

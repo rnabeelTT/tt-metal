@@ -132,7 +132,10 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   requests with penalties or logprobs stay on the plain path. Measured (8 slots, full model): c = 1 TPOT 18.7 ms =
   53.6 t/s/u (plain 29.9), TTFT p50 344 ms (plain 261: +~10 ms phase enter, + the head's prompt rows), concurrent
   texts identical to the plain server's; c = 8 TPOT 60.0 ms (plain 59.6). `QWEN35_MTP_ADAPTIVE=0` = the batched
-  multi-user step over every live slot (slower than plain at 2-4 users). Temperature 0 = greedy accept; temperature > 0 =
+  multi-user step over every live slot (slower than plain at 2-4 users). The plugin shim (`tt/mtp_plugin_shim.py`)
+  runs under vLLM's async scheduling: with chunked prefill off it never classifies a cached non-resumed row as prompt
+  work (two in-flight multi-token steps leave up to 2k + 1 tokens outstanding; the width bound misread that as a
+  chunked continuation and crashed the engine). Temperature 0 = greedy accept; temperature > 0 =
   EXACT speculative sampling (drafts sampled from the head, rejection-sampling accept with the request's temperature /
   top-k / top-p; a request with 0 < top_k <= 32 - the checkpoint's generation default is top_k 20 / top_p 0.95 - is
   served from device top-k candidates with no logits read-back; penalties are not applied in the MTP step). Knobs:
@@ -146,6 +149,11 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls; `--temperature/--top-k/--top-p` time the
   sampled loop), `tools/mtp_pass_check.py` (verify pass vs decode, row by row), `tools/mtp_generate_full.py` (eager
   loop), `tools/mtp_acceptance.py`, `tools/mtp_traced_multi_run.py` (multi-user traced step).
+- Host-sampled requests (logprobs, min_p, structured outputs, logit bias): their prefill arrives WITHOUT device
+  sampling params; the row is final unless the chunked-prefill shim's mask says otherwise (a heuristic that tied
+  "final" to the presence of sampling params broke every such request between the chunked-prefill turn and
+  2026-10-01 08:40 - zero logits in plain mode, an engine crash in MTP mode). Any change to the prefill contract must
+  be exercised with a logprobs request (`EXTRA=1` in `scripts/14-serve-mtp.sh`).
 - Chunked prefill (turn 7, opt-in): `QWEN35_CHUNKED_PREFILL=1` + vLLM `--enable-chunked-prefill --max-num-batched-tokens
   2048`; intermediate chunks run whole 2048-token segments from the request's own processed end with the GDN state
   carried per request (keyed by its first KV block), the final chunk samples; validated with the plugin's needle test

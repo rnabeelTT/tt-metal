@@ -40,11 +40,12 @@ Patched (plugin revision at /home/raahem/vllm-tt-plugin, ``src/vllm_tt_plugin``)
   would be dispatched as prompt work.  The closure cannot be patched directly, so the wrapper sets
   ``self._output_tokens_per_step = max_width`` for the duration of the call (that attribute is read nowhere else
   inside ``_prepare_model_inputs``): a row is a decode row when the outstanding gap past the prompt is at most one
-  step's maximum width, prefill (preemption-resume replay) only when it is larger.  Sync scheduling leaves a gap of
-  ``n <= max_width``; async scheduling a gap of ``n - 1`` (the runner's ``num_tokens`` lags by the same in-flight
-  step), so the bound holds in both modes.  A chunked replay whose last chunk is at most ``max_width`` tokens would
-  be misclassified, but this model disables chunked prefill (``supports_chunked_prefill = False``), so a resume
-  replay is always a single ``resumed_req_ids`` step.
+  step's maximum width, prefill (preemption-resume replay) only when it is larger - when chunked prefill is ON.
+  With chunked prefill OFF (this model's default) the outstanding-width test is disabled entirely: a cached,
+  non-resumed row is never prompt work (a preemption resume resets ``num_computed_tokens`` to 0, caught by the
+  closure's first test), and under async scheduling two in-flight multi-token steps leave up to ``2k + 1`` emitted
+  tokens outstanding - the max-width bound misread that as a chunked continuation and dispatched a mid-sequence
+  "prefill" of a running request (served crash 2026-10-01, ``NotImplementedError: chunked / cached-prefix``).
 * ``TTScheduler._update_request_with_output`` (scheduler.py:589): for width 1 it defers to
   ``AsyncScheduler._update_request_with_output``, which subtracts ``len(new_token_ids)`` from the single reserved
   placeholder and asserts ``>= 0``.  The shim calls the upstream base ``Scheduler._update_request_with_output``
@@ -68,6 +69,7 @@ original attribute; ``undo`` is safe to call twice.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Callable
 
 import numpy as np
@@ -306,6 +308,15 @@ def _shim_apply_sampled_tokens_to_state(self, sampled_token_ids, req_ids=None, s
         req_state.output_token_ids.extend(int(t) for t in block)
 
 
+_NO_OUTSTANDING_BOUND = 1 << 30  # "any number of emitted tokens outstanding is still a decode row"
+
+
+def _dbg(msg):
+    from loguru import logger as _l  # the served log carries loguru lines; stdlib loggers of this module are filtered
+
+    _l.info(msg)
+
+
 def _shim_prepare_model_inputs(self, scheduler_output, grammar_output):
     """Wrapper for ``TTModelRunner._prepare_model_inputs``: widen the nested ``_is_still_prefilling`` threshold.
 
@@ -314,7 +325,29 @@ def _shim_prepare_model_inputs(self, scheduler_output, grammar_output):
     maximum width for the duration of the call.  See the module docstring for why the bound holds.
     """
     saved = self._output_tokens_per_step
-    self._output_tokens_per_step = max_output_width()
+    # With chunked prefill OFF a cached, non-resumed row can never be prompt work (a preemption resume resets
+    # num_computed_tokens to 0 and is caught by the closure's first test), so the "outstanding width" test is
+    # disabled outright: under async scheduling two in-flight multi-token steps leave up to 2k+1 emitted tokens
+    # outstanding, which the max-width bound misread as a chunked continuation (a mid-sequence "prefill" of a
+    # running request). With chunked prefill ON the max-width bound stays (continuations are real there).
+    chunked = bool(getattr(getattr(self, "scheduler_config", None), "chunked_prefill_enabled", False))
+    self._output_tokens_per_step = max_output_width() if chunked else _NO_OUTSTANDING_BOUND
+    if os.environ.get("QWEN35_MTP_SHIM_DEBUG") == "1":
+        try:
+            ib = self.input_batch
+            cached = scheduler_output.scheduled_cached_reqs
+            rows = []
+            for rid, idx in ib.req_id_to_index.items():
+                rows.append(
+                    f"{rid[-8:]}: row {idx} computed {int(ib.num_computed_tokens_cpu[idx])} prompt "
+                    f"{int(ib.num_prompt_tokens[idx])} tokens {int(ib.num_tokens[idx])} "
+                    f"sched {scheduler_output.num_scheduled_tokens.get(rid)} "
+                    f"{'resumed' if rid in cached.resumed_req_ids else 'cached' if rid in cached.req_ids else 'new/other'}"
+                )
+            new_ids = [r.req_id[-8:] for r in scheduler_output.scheduled_new_reqs]
+            _dbg(f"MTP_SHIM_DEBUG prepare: new {new_ids}; rows {rows}")
+        except Exception as e:  # noqa: BLE001 - diagnostics only
+            _dbg(f"MTP_SHIM_DEBUG prepare: {e!r}")
     try:
         return _STATE["originals"]["runner._prepare_model_inputs"](self, scheduler_output, grammar_output)
     finally:

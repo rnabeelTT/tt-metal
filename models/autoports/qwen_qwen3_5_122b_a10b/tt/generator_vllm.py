@@ -137,7 +137,18 @@ if os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
     except Exception as _e:  # noqa: BLE001 - serving without the plugin (standalone tools) keeps working
         logger.warning(f"chunked prefill shim not applied: {_e}")
 
-_MTP_K = int(os.environ.get("QWEN35_MTP", "0") or 0)
+
+def _mtp_k_env() -> int:
+    """QWEN35_MTP: k drafts per speculative pass. Default 3 (on; adaptive in a multi-slot server) unless chunked
+    prefill is requested (QWEN35_CHUNKED_PREFILL=1: the two are not wired together, chunked prefill wins when MTP is
+    not set explicitly). 0 disables."""
+    v = os.environ.get("QWEN35_MTP")
+    if v is None or v == "":
+        return 0 if os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1" else 3
+    return int(v or 0)
+
+
+_MTP_K = _mtp_k_env()
 if _MTP_K > 0:
     # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin: import-time monkeypatches
     from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
@@ -231,7 +242,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # its KV follows the model's in allocate_kv_cache. Needs the plugin's variable-width output shim
         # (mtp_plugin_shim, applied at import when QWEN35_MTP is set) and --max-num-seqs 1.
         self._mtp = None
-        mtp_k = int(os.environ.get("QWEN35_MTP", "0") or 0)
+        mtp_k = _mtp_k_env()
         if mtp_k > 0:
             if B * (mtp_k + 1) > 32 and os.environ.get("QWEN35_MTP_ADAPTIVE", "1") != "1":
                 raise ValueError(
@@ -340,7 +351,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         B = int(max_num_seqs or 1)
         nonkv = float(c["non_kv_footprint_gib"]) + (B - 1) * cls._PER_SLOT_GIB
         kv_bytes_per_token = int(c["kv_bytes_per_token_per_device"])
-        if int(os.environ.get("QWEN35_MTP", "0") or 0) > 0:
+        if _mtp_k_env() > 0:
             # the MTP head: one more attention layer's paged K/V over the same blocks (13 instead of 12 KV layers) plus
             # its weights (~0.35 GiB per die) and the step's persistent buffers (~0.1 GiB); the first full-model MTP
             # server ran out of DRAM allocating the head's K/V after vLLM had taken the whole pool
@@ -456,12 +467,12 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if any(starts) and not self.model_capabilities["supports_chunked_prefill"]:
             raise NotImplementedError("chunked / cached-prefix prefill is not supported (model_capabilities)")
         # which rows end their prompt in this chunk: the plugin's intermediate mask (added to the kwargs by the chunked
-        # prefill shim), else the heuristic "device sampling params arrive only when every row is final"
+        # prefill shim when QWEN35_CHUNKED_PREFILL=1); without it every row is final - the plugin never chunks a prompt
+        # when chunked prefill is off. (A former heuristic "device sampling params present <=> final" marked every
+        # HOST-sampled prefill - logprobs, min_p, structured outputs - as an intermediate chunk: zero logits, and in
+        # MTP mode a NotImplementedError; served crash 2026-10-01.)
         mask = kwargs.get("intermediate_prefill_mask")
-        if mask is not None:
-            finals = [not bool(v) for v in torch.as_tensor(mask).reshape(-1).tolist()]
-        else:
-            finals = [kwargs.get("sampling_params") is not None] * N
+        finals = [not bool(v) for v in torch.as_tensor(mask).reshape(-1).tolist()] if mask is not None else [True] * N
         if self._has_visual(kwargs, "pixel_values") or self._has_visual(kwargs, "pixel_values_videos"):
             raise NotImplementedError("text-only serving: this bringup does not serve images or videos")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [tokens.shape[1]] * N
@@ -503,7 +514,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if self._mtp is not None:
             if chunked:
                 raise NotImplementedError(
-                    "MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL)"
+                    f"MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL); starts {starts} "
+                    f"finals {finals} prompt_lens {plens} slots {slots} live {sorted(self._live_slots)} "
+                    f"phase {getattr(self._mtp, '_phase_slot', None)} mask {kwargs.get('intermediate_prefill_mask')!r} "
+                    f"kwargs {sorted(k for k in kwargs if k != 'kv_cache')} tokens_shape {tuple(tokens.shape)}"
                 )
             if self._mtp.adaptive and self._mtp.in_phase:
                 self._mtp.suspend()  # unbind for the prefill; the next decode resumes / drops / leaves the phase

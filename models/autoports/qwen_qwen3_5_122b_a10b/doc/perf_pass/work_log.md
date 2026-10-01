@@ -742,3 +742,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   carry rebuilds), the deferred leave drops a finished request's phase for free (7 of 7 phases here), a write-back
   leave 16-30 ms. c = 8 (run 1): TPOT 60.0 ms with the head hooks vs 59.6 plain. Requests with penalties or logprobs
   stay on the plain decode (`_mtp_eligible`).
+- 08:10 served crash chasing (run 4b, full model): the request AFTER a finished MTP request died with
+  `NotImplementedError: chunked / cached-prefix prefill` - the plugin dispatched a mid-sequence "prefill" of a RUNNING
+  request. Mechanism: the plugin's `_is_still_prefilling` treats `num_computed + output_width < num_tokens` as a
+  chunked continuation; the shim widened `output_width` to k + 1, but under vLLM's async scheduling (on: the model
+  declares supports_async_decode) two in-flight multi-token steps leave up to 2k + 1 emitted tokens outstanding ->
+  misclassified -> start_pos > 0 -> our prefill refuses (chunked prefill off). Fix in the shim: with chunked prefill
+  OFF the outstanding-width test is disabled (a cached non-resumed row is never prompt work; a preemption resume
+  resets num_computed to 0 and trips the closure's first test), with it ON the k + 1 bound stays. 22 host tests.
+  Reduced-model runs queued: old shim + async (reproduction), sync scheduling, fixed shim + async.
+- 08:40 ROOT CAUSE of the logprobs crash (and a latent plain-mode bug since turn 7): `prefill_forward` derived the
+  per-row "final chunk" flag, when the chunked-prefill shim's mask is absent, from "device sampling params present" -
+  every HOST-sampled prefill (logprobs / min_p / structured outputs: the plugin sends no TTSamplingParams) was treated
+  as an intermediate chunk (zero logits in plain mode; in MTP mode the "MTP with chunked prefill" NotImplementedError
+  the shim debug finally pinned: the plugin's own mask was False, computed 0 / prompt 37 / tokens 37). Fix: without
+  the mask every row is final (the plugin never chunks when chunked prefill is off). Async scheduling was NOT the
+  cause (the sync run failed identically); the shim's outstanding-width change stays (correct by construction).
+- 08:41 reduced model with the fix: logprobs (32 logprob entries, host path), repetition penalty (plain decode; the
+  text changes as expected), min_p (host path) all served under MTP; the concurrent pair = the plain texts; single
+  requests = MTP texts. Full-model run 5 queued (extra + staggered + concurrent + c = 1 benchmark).
