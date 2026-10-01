@@ -653,3 +653,12 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   the step (documented). Reduced-model served run with temperature 0.7: works end to end; the first version spent
   ~60 ms per pass in padded read-backs + host softmaxes (72.5 ms per pass on the 2-layer model) -> unpadded rows, lazy
   target rows, inverse-CDF draws: host sampler 13.5 -> 1.7 ms per pass. Full-model check (T = 0 unchanged, T = 0.7) next.
+- 02:48 (MTP follow-up 2) the head's prompt rows now run INSIDE the prefill bucket program (`MtpServing._bucket_head`,
+  hooked into `_run_bucket_dev` after the layers; host staging of the first-draft one-hot and the zeroed previous hidden
+  per segment via `_mtp_stage_hook`): one extra layer per segment, row j = (token at cs + j, hidden of cs + j - 1) at the
+  bucket's own positions / page tables (the hidden rows shifted down by one through a ROW_MAJOR concat with the previous
+  segment's last hidden carried in `mtp_prev`), the prompt's last hidden picked by a one-hot into `hid_out`. With that,
+  the prefill bucket TRACES are captured again in MTP mode (the eager-bucket path cost ~60 ms of TTFT). Reduced model:
+  server starts (program guard quiet with the head inside the traces), 32-token requests 0.29 s (eager-bucket path:
+  0.38 s). `QWEN35_MTP_TRACED_PREFILL=0` keeps the eager path. A full-model run with the earlier edits half-imported was
+  invalid (queue not staged) - rerun queued with T = 0 / 0.7 and the c = 1 benchmark.

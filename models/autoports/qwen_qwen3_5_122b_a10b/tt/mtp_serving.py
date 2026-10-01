@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import os
 import time
 
 import torch
@@ -53,6 +54,11 @@ class MtpServing:
         self._cur_slot = 0
         self._hook_installed = False
         self._hid_ready = False
+        # QWEN35_MTP_TRACED_PREFILL=1 (default): the head's prompt rows run INSIDE the bucket program (one more layer per
+        # segment, captured with the bucket traces: the eager-bucket path cost ~60 ms of TTFT at 128 tokens); 0 = the
+        # eager-bucket path with the python hook and 32-row head groups
+        self.in_trace = os.environ.get("QWEN35_MTP_TRACED_PREFILL", "1") == "1"
+        self.hid_out = None  # [1,1,1,H] replicated: the hidden that produced the request's first token (in-trace mode)
         logger.info(
             f"MTP serving: k={self.k}, slots={self.B} ({'multi' if self.multi else 'single'}), head layer {self.head.layer_idx}"
         )
@@ -78,6 +84,17 @@ class MtpServing:
         )
         self.pr_tok, self.pr_pos, self.pr_rot, self.pr_pt = dev(tok), dev(pos), dev(rot), dev(ptt)
         self.pr_masks = dev(rows_pos_masks_host([0] * ROWS, ROWS))
+        if self.in_trace:
+            self.hid_out = ttnn.from_torch(
+                torch.zeros(1, 1, 1, self.H, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                memory_config=_DRAM,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+            )
+            m._mtp_bucket_hook = self._bucket_head  # device side, inside every bucket program (and its trace)
+            m._mtp_stage_hook = self._bucket_stage  # host side, after the bucket's inputs are staged
         for b in self.model._PREFILL_MASK_BUCKETS:
             self._sel[b] = ttnn.from_torch(
                 torch.zeros(1, 1, ROWS, b, dtype=torch.bfloat16),
@@ -208,11 +225,98 @@ class MtpServing:
             host = ttnn.from_torch(row.repeat(n, 1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT)
             ttnn.copy_host_to_device_tensor(host, buf)
 
+    # ---- in-trace head prefill (one extra layer per bucket segment) ----------------------------------------------
+    def _bucket_stage(self, bi, bucket, cs, actual_len):
+        """Host writes for the head's segment: the first-draft one-hot (row P-1 when it lies in this segment) and, at a
+        request's first segment, the zero 'previous hidden'. A queued request is taken at chunk_start 0."""
+        if cs == 0 and self._prefill_queue:
+            if self.multi and self._hid_ready and self._prompt is not None:
+                # several requests in one prefill call: harvest the previous request's first-draft hidden to host
+                # before its hid_out is overwritten (the read waits for the previous replays)
+                self._hid_rows[self._cur_slot] = (
+                    ttnn.to_torch(ttnn.get_device_tensors(self.hid_out)[0]).reshape(-1)[: self.H].clone()
+                )
+            self._cur_slot, self._prompt, row = self._prefill_queue.pop(0)
+            self._slot_rows[self._cur_slot] = row
+            self._hid_ready = False
+        P = len(self._prompt) if self._prompt is not None else 0
+        sel = torch.zeros(1, 1, 32, bucket, dtype=torch.bfloat16)
+        if P and cs <= P - 1 < cs + bucket:
+            sel[0, 0, 0, P - 1 - cs] = 1.0
+            self._hid_ready = True
+        ttnn.copy_host_to_device_tensor(
+            ttnn.from_torch(sel, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT), bi["mtp_sel"]
+        )
+        if cs == 0:
+            ttnn.copy_host_to_device_tensor(
+                ttnn.from_torch(
+                    torch.zeros(1, 1, 1, self.H, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT
+                ),
+                bi["mtp_prev"],
+            )
+
+    def _bucket_head(self, bi, bucket, cs, x):
+        """Device side (captured): the head over this segment's rows. Row j = (token at position cs + j, hidden of
+        position cs + j - 1) written at position cs + j: the same positions / page tables / rope as the main layers (row 0
+        of a request = token 0 with a zero previous hidden; the head's own rows start at position 1 as the eager path's).
+        Also hands the hidden of the prompt's last position to the first draft (hid_out) and carries this segment's last
+        hidden into the next segment's row 0."""
+        m, head = self.model, self.head
+        h = m.norm(ttnn.clone(x, memory_config=_DRAM), mode=Mode.PREFILL)  # replicated [1,1,bucket,H]
+        # first-draft hidden: one-hot row 0 picks hidden P-1 (zeros when P-1 is not in this segment)
+        picked = ttnn.matmul(bi["mtp_sel"], h, memory_config=_DRAM)  # [1,1,32,H]
+        one = ttnn.slice(picked, (0, 0, 0, 0), (1, 1, 1, self.H))
+        ttnn.copy(one, self.hid_out)
+        ttnn.deallocate(one)
+        ttnn.deallocate(picked)
+        # shifted hidden rows [prev, h[0 .. bucket-2]]: a tile-layout concat of 1 + (bucket-1) rows is not tile aligned,
+        # so shift in ROW_MAJOR and tilize the result
+        last = ttnn.slice(h, (0, 0, bucket - 1, 0), (1, 1, bucket, self.H))
+        h_rm = ttnn.to_layout(h, ttnn.ROW_MAJOR_LAYOUT)
+        ttnn.deallocate(h)
+        head_rows = ttnn.slice(h_rm, (0, 0, 0, 0), (1, 1, bucket - 1, self.H))
+        ttnn.deallocate(h_rm)
+        prev_rm = ttnn.to_layout(bi["mtp_prev"], ttnn.ROW_MAJOR_LAYOUT)
+        cat_rm = ttnn.concat([prev_rm, head_rows], dim=2, memory_config=_DRAM)  # [1,1,bucket,H]
+        h_shift = ttnn.to_layout(cat_rm, ttnn.TILE_LAYOUT)
+        ttnn.copy(last, bi["mtp_prev"])
+        for t in (head_rows, last, prev_rm, cat_rm):
+            ttnn.deallocate(t)
+        # mix: fc(cat(norm_e(embed(tok)), norm_h(hidden))) in prefill form -> the layer's fractured input
+        e = m.embd(bi["tok"])  # [1, bucket, H/TP]
+        e = ttnn.reshape(e, (1, 1, bucket, e.shape[-1]))
+        e = ttnn.to_memory_config(e, _DRAM)
+        e_n = head.pre_fc_norm_embedding(e, mode=Mode.PREFILL)  # replicated [1,1,bucket,H]
+        ttnn.deallocate(e)
+        h_n = head.pre_fc_norm_hidden(h_shift, mode=Mode.PREFILL)
+        ttnn.deallocate(h_shift)
+        xin = ttnn.concat([e_n, h_n], dim=-1, memory_config=_DRAM)  # [1,1,bucket,2H]
+        ttnn.deallocate(e_n)
+        ttnn.deallocate(h_n)
+        x_mix = ttnn.linear(xin, head.fc_weight, memory_config=_DRAM, dtype=ttnn.bfloat16)  # [1,1,bucket,H/TP]
+        ttnn.deallocate(xin)
+        out = head.layer.forward(
+            x_mix,
+            cos=bi["cos"],
+            sin=bi["sin"],
+            mode="prefill",
+            page_table=bi["full_pt"],
+            chunk_page_table=bi["chunk_pt"],
+            chunk_start_idx=cs,
+            chunk_start_idx_tensor=bi["csi"],
+            valid_len=bi["len"],
+        )
+        ttnn.deallocate(x_mix)
+        ttnn.deallocate(out)
+
     def begin_prefill(self, prompt_ids, page_table_row, slot: int = 0):
         """Register one request's prefill (slot, prompt, page-table row) and install the bucket-hidden hook; the served
         prefill runs the queued requests in order (one bucket call per segment, chunk_start 0 first for each) and
         `end_prefill` hands every slot's first token / hidden to the runner."""
         self._prefill_queue.append((int(slot), list(prompt_ids), torch.as_tensor(page_table_row).to(torch.int32)))
+        if self.in_trace:
+            self._hid_ready = False
+            return  # the bucket program carries the head rows; _bucket_stage takes the queue at chunk_start 0
         if self._hook_installed:
             return
         self._hid_ready = False
@@ -259,9 +363,11 @@ class MtpServing:
             self._hid_ready = True
 
     def abort_prefill(self):
-        self.model._run_bucket_hidden = self._orig_hook
+        if not self.in_trace:
+            self.model._run_bucket_hidden = self._orig_hook
         self._hook_installed = False
         self._prefill_queue = []
+        self._prompt = None
         self._drop_hid_rows()
 
     def _log_stats(self, why):
@@ -275,13 +381,22 @@ class MtpServing:
 
     def end_prefill(self, tok0, P, slots=None):
         """Single user: (tok0, P) scalars. Multi: lists per prefilled request with their slots."""
-        self.model._run_bucket_hidden = self._orig_hook
+        if not self.in_trace:
+            self.model._run_bucket_hidden = self._orig_hook
         self._hook_installed = False
         assert not self._prefill_queue, f"{len(self._prefill_queue)} queued request(s) were not prefilled"
         assert self._hid_ready, "the prefill hook did not see the last prompt position"
+        self._prompt = None
         if self.multi:
             for t0, p, slot in zip(tok0, P, slots):
                 slot = int(slot)
+                if self.in_trace:
+                    # the last request's hidden is still in hid_out; earlier ones were harvested by _bucket_stage
+                    row = self._hid_rows.pop(slot, None)
+                    if row is None:
+                        row = ttnn.to_torch(ttnn.get_device_tensors(self.hid_out)[0]).reshape(-1)[: self.H].clone()
+                    self.runner.set_slot(slot, int(t0), int(p), self._slot_rows[slot], row)
+                    continue
                 row = self._hid_rows.pop(slot)
                 self.runner.set_slot(slot, int(t0), int(p), self._slot_rows[slot], row)
                 ttnn.deallocate(row)
@@ -291,6 +406,8 @@ class MtpServing:
         self._log_stats("previous request")
         self._stats = {"passes": 0, "tokens": 0, "hist": [0] * (self.k + 1), "wall": 0.0}
         self._sampler = None  # the next request gets its own sampler / RNG
+        if self.in_trace:
+            ttnn.copy(self.hid_out, self.runner.d_hid)
         self._pos = int(P)
         self._tok = int(tok0)
 

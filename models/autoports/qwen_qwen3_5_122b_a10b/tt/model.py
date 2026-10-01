@@ -248,6 +248,31 @@ class Qwen35MoeModel(Qwen36Model):
                 device=dev,
                 mesh_mapper=rep,
             ),
+            # MTP (QWEN35_MTP): the head's prompt rows run inside the bucket program (tt/mtp_serving.py) - the one-hot that
+            # picks the hidden of the prompt's last position for the first draft, and the previous segment's last hidden
+            # (row 0 of the shifted hidden rows; zeroed by the host at a request's first segment)
+            **(
+                {
+                    "mtp_sel": ttnn.from_torch(
+                        torch.zeros(1, 1, 32, bucket, dtype=torch.bfloat16),
+                        dtype=ttnn.bfloat16,
+                        layout=ttnn.TILE_LAYOUT,
+                        device=dev,
+                        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                        mesh_mapper=rep,
+                    ),
+                    "mtp_prev": ttnn.from_torch(
+                        torch.zeros(1, 1, 1, self.args.dim, dtype=torch.bfloat16),
+                        dtype=ttnn.bfloat16,
+                        layout=ttnn.TILE_LAYOUT,
+                        device=dev,
+                        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                        mesh_mapper=rep,
+                    ),
+                }
+                if int(os.environ.get("QWEN35_MTP", "0") or 0) > 0
+                else {}
+            ),
             "cos": ttnn.from_torch(
                 torch.zeros(1, 1, bucket, rd, dtype=torch.bfloat16),
                 dtype=ttnn.bfloat16,
@@ -364,6 +389,9 @@ class Qwen35MoeModel(Qwen36Model):
         sample the prefill token on device with the programs the decode warm-up compiled (stage 9)."""
         x = self._run_bucket_hidden(bi, bucket, chunk_start)
         vlen = bi["len"]
+        mtp_hook = self.__dict__.get("_mtp_bucket_hook")
+        if mtp_hook is not None:
+            mtp_hook(bi, bucket, chunk_start, x)  # the MTP head's prompt rows over this segment (part of the trace)
         x_last = ttnn.matmul(vlen.logit_sel, x)  # [1,1,32,dim]: row 0 = hidden row actual_len-1, rows 1..31 zero
         ttnn.deallocate(x)
         x_last = ttnn.to_memory_config(x_last, ttnn.DRAM_MEMORY_CONFIG)
@@ -454,6 +482,9 @@ class Qwen35MoeModel(Qwen36Model):
             self._build_request_rope(token_ids[:, :actual_len], None)
         bi = self._bucket_inputs(bucket, max_blocks=pt.shape[-1])
         self._stage_bucket_inputs(bi, token_ids, pt, actual_len, chunk_start, bucket)
+        mtp_stage = self.__dict__.get("_mtp_stage_hook")
+        if mtp_stage is not None:
+            mtp_stage(bi, bucket, chunk_start, actual_len)  # host writes of the MTP head's segment inputs
         if getattr(self, "_vis_buf", None) is not None:
             self._set_vision_merge(token_ids[:, :actual_len], None, vis_row_offset)  # clears the mask
         tr = self.__dict__.get("_bucket_traces", {}).get(bucket)

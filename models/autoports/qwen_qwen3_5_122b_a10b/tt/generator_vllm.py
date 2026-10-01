@@ -426,9 +426,12 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             return
         if not self._warm_phase["traces"]:
             if self._mtp is not None:
-                # MTP: the four step traces only - no decode trace (the step replaces it) and no prefill bucket traces
-                # (the eager buckets expose every segment's hidden to the head through the _run_bucket_hidden hook)
+                # MTP: the step traces instead of the decode trace; the prefill bucket traces too when the head's prompt
+                # rows run inside the bucket program (in_trace), else eager buckets (the python hook needs them)
                 self._mtp.capture()
+                if self._mtp.in_trace:
+                    self._gen._program_cache_before_bucket_traces = self._gen.program_cache_entries()
+                    self._gen._warm_prefill_traces()
                 self._gen._program_cache_after_warmup = self._gen.program_cache_entries()
             else:
                 self._gen.capture_traces(widths=self._decode_widths)
