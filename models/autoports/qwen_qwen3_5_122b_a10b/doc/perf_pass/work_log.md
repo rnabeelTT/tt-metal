@@ -924,3 +924,23 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   (194119 tokens, the source text ends there) 79.6 s; IMAGE request (448 px, thinking off) 222 prompt tokens, 28
   completion tokens in 0.97 s, text == the HF CPU reference. Clean shutdown. Pushing the bundle (private) and then
   the deployed-model perf sweep (`scripts/17-sweep-chain.sh` serves the Hub bundle and runs `17-perf-sweep.py`).
+- 15:15 item 13 (deployed-model perf sweep, Hub bundle 668d1f0b, modelled on the gpt-oss-120b p150x4 sweep): pass 1
+  running (`artifacts/stage17/perf_sweep_hub.json`, 16 / 48 rows at 15:10). Harness defect found in the single-user
+  rows: the stream-chunk count undercounted MTP outputs (one chunk can carry several tokens: 47 of 128 counted ->
+  TPOT inflated 4x); multi-user rows (plain decode, one token per chunk) are exact (1024 / 1024). Fix:
+  `stream_options.include_usage` (exact completion count in the final chunk) + a `short_outputs` guard; the users=1
+  rows and the sampled rows re-run in a second pass (`17-sweep-b1-chain.sh`, queued behind the thinking-default chain).
+  Valid pass-1 rows so far: 128/128 at 2 / 4 / 8 / 16 / 32 users TPOT 37.0 / 44.5 / 63.7 / 102.7 / 115.9 ms, total
+  48 / 74 / 100 / 120 / 185 tok/s; 1024/256 at 32 users TTFT 13.9 s, 175 tok/s.
+- 17:18 OTHER-MACHINE SERVE FAILURE (user's log `serve-raahemnabeel--...-20261001-164257.log`, Hub bundle, profile
+  p300x2 on a 4 x p150 host): model loaded (8 min), then the first fused-norm all-gather of the prefill warm-up died
+  with `TT_FATAL fabric.cpp:174: Could not find any forwarding direction from src (M0, D0) to dst (M0, D3)`. The
+  fabric log shows the box is cabled as a LINE (intra-mesh degree histogram `{1:2, 2:2}`: two chips with one
+  ethernet neighbour) while the stock `ModelArgs.ccl_topology()` returns Ring for every P300_X2 / P150_X4 cluster,
+  so the ring's D0 -> D3 hop has no route. Our (1,4) p300x2 box is a true ring (every die degree 2), which is why
+  nothing here ever saw it. Fix: `Qwen35MoeModelArgs.ccl_topology()` (every collective of the model, the MTP head
+  and the vision tower reads it) asks `ttnn.get_usable_topology(probe, Ring)` once and demotes to Linear when the
+  mesh has no wraparound; `QWEN35_CCL_TOPOLOGY=ring|linear|auto` forces it. Validation queued: reduced-model served
+  smoke with Linear forced on this box (`scripts/16-linear-topology-smoke.sh`: text, logprobs, image) and the auto
+  rule logging Ring here. Also in that log: `--enable-auto-tool-choice` duplicated (tt-model adds it too; harmless),
+  tt_transformers' "Unknown model ... MAX_PREFILL_CHUNK_SIZE 4" (unused by this model's prefill path).
