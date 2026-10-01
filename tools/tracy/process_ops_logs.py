@@ -680,6 +680,10 @@ def _enrich_ops_from_perf_csv(
                     if cand_op_id == op_id:
                         candidates.extend(rows)
 
+            if not candidates and __import__("os").environ.get("TT_TRACY_SKIP_MISSING_DEVICE_DATA") == "1":
+                # local tooling escape hatch: drop host ops that have no device rows (e.g. ops issued while the device
+                # profiler buffers were not read) instead of aborting the whole report
+                continue
             assert candidates, (
                 f"Device data missing: Op {op_id} not present in {PROFILER_CPP_DEVICE_PERF_REPORT} "
                 f"for device {device_id} (trace_id={host_trace_id})"
