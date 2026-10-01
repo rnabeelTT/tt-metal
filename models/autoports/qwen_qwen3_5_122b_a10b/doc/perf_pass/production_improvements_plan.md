@@ -51,3 +51,27 @@ The plugin also disables chunked prefill for any model with `output_tokens_per_s
 6. **Plugin asks** (not shippable from this tree): scheduler prefill / decode alternation, chunked prefill with block
    output, automatic prefix caching (+ our GDN state snapshot at the prefix boundary).
 7. Width-1 router chain fusion; long-context decode at high occupancy (Tracy at 32 users x 32K first).
+
+## Design: batched short-prompt prefill (next implementation item)
+
+Facts: a served 128-token prefill is 238 ms, 193 of them the traced bucket (op-launch bound: ~3.7 ms per layer at any
+length <= 512); the plugin hands up to 31 waiting requests to one `prefill_forward` call; the batched GDN prefill form
+(`TPGatedDeltaNet.forward_prefill_batched`, used by the MTP verify pass) runs B users x T tokens in one pass but its
+chunk-scan kernel maps one (user, head) row per core, so B <= 4 at TP=4 (BH = B x Nv_tp <= 32).
+
+Plan: a `prefill_batched4` path for requests whose prompts all fit one short bucket (<= 512 tokens, the common
+chat-turn case): group the call's final-chunk requests in fours (same bucket), run ONE pass per group:
+- embedding over [4, T] (flatten to 4T rows), the GDN layers through `forward_prefill_batched(valid_lens=...)` writing
+  straight into the four slots' batched state (no scratch snapshot, no slot write: also removes the 29 ms GDN slot
+  write per request), the attention layers as a batch-4 prefill (SDPA over [4, heads, T, d] with per-user causal
+  masks; paged K/V fill per user from the per-user page-table rows), norms / MoE on 4T rows (the MoE already takes any
+  row count), the LM head on the 4 selected last rows (one-hot select [4, 4T]);
+- traced per (bucket, 4) like the single buckets (persistent inputs: tokens [4,T], page tables [4,W], valid lens,
+  rope tables per user), warmed before capture; MTP head rows for the four prompts (the head's bucket hook over 4T
+  rows with per-user position masks) or MTP disabled for batched admissions (adaptive MTP only matters at c = 1,
+  where no batching happens) -> start with the latter: batched path only when >= 2 requests arrive together.
+- expected: 32 x 128-token burst = 8 passes of ~250 ms instead of 32 x 238 ms (7.6 -> ~2.0 s TTFT at 32 users);
+  single-request admissions unchanged.
+Risks: the attention prefill program at batch 4 (new program configs), the per-user rope tables (M-RoPE for images
+excluded: image prompts stay single), trace memory for the extra buckets (5 buckets x 1 variant), and the GDN batched
+form's correctness against per-user prefill (the MTP verify pass already validates it at 32 rows).
