@@ -67,7 +67,9 @@ class OptimizationConfig:
     # of the step instead of the per-token gather loop / the serial masked path; 0 = off (QWEN35_MOE_PAIRS_MAX_TOKENS).
     # Layer-level traced decode per step (GDN / attention layer): w4 1.078 -> 0.985 / 0.968 -> 0.877 ms, w8 1.987 -> 1.430 /
     # 1.906 -> 1.282 ms; 48-layer traced step w4 50.8 -> 46.6 ms, w8 79.8 -> 67.8 ms; bit-reproducible at widths 2-8.
-    pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "8"))  # adopted (perf pass turn 2)
+    # perf pass turn 2 adopted 8; 2026-10-01 traced per-layer probe at width 16: pairs 1.843 / 2.078 ms (attn / GDN layer
+    # step) vs masked 2.212 / 2.288 -> 16; at width 32 the 256 pair groups lose (3.17 / 3.59 vs 2.60 / 2.73): masked stays
+    pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "16"))
     # routed-expert prefill: "masked" (per-group expert union, stage 1/2) or "sorted" (expert-sorted dispatch: every 32-row
     # group is one expert; see tt/moe_dispatch.py); geometry of the two compact sparse matmuls
     prefill_mode: str = "sorted"

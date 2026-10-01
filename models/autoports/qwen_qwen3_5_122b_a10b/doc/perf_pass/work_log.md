@@ -774,3 +774,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   rule, not MTP); c = 1 TPOT 20.1 ms = 49.6 t/s/u (18.6 at 8 slots: the step rewrites the 4096-block page tables
   every pass -> cache the row), TTFT p50 351 ms (plain 32-slot 258-274); c = 8 TPOT 62.6 ms (stage 13: 68.5), c = 32
   128.4 ms (130.1): the head hooks cost nothing measurable at 8-32 users. MTP default-on holds at production scale.
+- 09:21 (production list item 5, decode MoE at 16-32 rows) traced per-layer step time on the reduced model
+  (`scripts/16-pairs-width-probe.sh`, test_perf_traced_decode_batched): width 16 masked path attn 2.212 / GDN 2.288
+  ms vs PAIRS path (QWEN35_MOE_PAIRS_MAX_TOKENS=32) 1.843 / 2.078 (-17 % / -9 %; ~12 ms of a 48-layer step at 16
+  users); width 32 masked 2.597 / 2.726 vs pairs 3.171 / 3.592 (+22 % / +32 %: 256 one-row pair groups re-read shared
+  experts and pay 256 group launches). Default `pairs_max_tokens` 8 -> 16 (pairs at widths <= 16, masked at 32).
+  The structural compact layout for 32 rows stays parked (the 32-row dense glue is ~25 % of the attention-layer step
+  there; the sparse matmuls at ~110-220 active experts are the bandwidth floor).
