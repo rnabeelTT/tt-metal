@@ -31,14 +31,15 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 
 ## 2. Run it
 
-**One engine per box.** A second server started while another holds the four chips does not fail cleanly: tt-model's
-"host ready: tt devices" check passes, the new engine opens the same devices, its fabric auto-discovery sees a LINE
-(`intra-mesh degree histograms mesh0 {1:2, 2:2}` in its log) instead of this box's ring, and the first all-gather dies
-with `TT_FATAL ... Could not find any forwarding direction from src (M0, D0) to dst (M0, D3)` (seen 2026-10-01 when a
-`tt-model serve` overlapped the deployed-model sweep's container). Before serving: `docker ps` (no `tt-model-qwen3-5-*`
-container), `fuser /dev/tenstorrent/*` (no holders), then start. The model's collectives pick Ring / Linear from the
-fabric the process actually got (`QWEN35_CCL_TOPOLOGY`, §4), which turns that crash into a (slower) Linear run but is
-not a substitute for the rule.
+**The box must be a ring, or the model runs Linear.** A p300x2 is a ring of four dies only when BOTH board-to-board
+ethernet links are up; the engine's fabric discovery prints the check: `intra-mesh degree histograms mesh0 {2:4}` is
+a ring, `{1:2, 2:2}` is a line (one inter-board link missing or down - seen 2026-10-01 on another p300x2, firmware
+19.15.0, where the stock Ring choice died at the first all-gather with `TT_FATAL ... Could not find any forwarding
+direction from src (M0, D0) to dst (M0, D3)`). Since commit 0b48a2312d2 the model's collectives pick Ring / Linear
+from the fabric the process actually got (`ttnn.get_usable_topology`; `QWEN35_CCL_TOPOLOGY=ring|linear|auto`), so a
+line-cabled box serves (slower collectives) instead of crashing; restore the second link for ring performance. Also:
+one engine per box - tt-model's "host ready: tt devices" check does not detect a running engine (`docker ps`,
+`fuser /dev/tenstorrent/*` before `tt-model serve`).
 
 From the checkout (the readiness runner starts vLLM with the plugin):
 ```bash

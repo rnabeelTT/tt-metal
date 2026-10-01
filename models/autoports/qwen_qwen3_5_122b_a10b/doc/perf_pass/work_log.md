@@ -964,3 +964,14 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   not the fix for this incident - the fix is operational: one server per box (`docker ps`, `fuser
   /dev/tenstorrent/*` before `tt-model serve`), noted in HANDOFF. Linear-topology smoke stays queued (validates the
   demotion path).
+- 17:35 SECOND CORRECTION (the user clarified: the failing box is ANOTHER p300x2, not this one, and not a p150x4):
+  compare the fabric discovery lines - this box: `intra-mesh degree histograms mesh0 {2:4}` (every die has two
+  ethernet neighbours: the two dies of each p300 plus both board-to-board links = a ring); the other box: `{1:2, 2:2}`
+  (a LINE: one of the two board-to-board links is not up - unplugged, bad cable / QSFP, or a link that did not train;
+  it runs firmware bundle 19.15.0 vs 19.13.1 here, same B850M-C motherboard, same KMD 2.10.0). The stock
+  `ccl_topology()` returns Ring for every P300_X2 cluster, so the first all-gather asked the fabric for the D0 -> D3
+  wraparound that box does not have. Fix on our side (0b48a2312d2, to ship in the next bundle): the model asks
+  `ttnn.get_usable_topology` and runs Linear when the fabric has no wraparound (slower collectives, correct
+  results); the remedy for the box is to restore the second inter-board link (`{2:4}` in the discovery log is the
+  pass criterion). The concurrent-engine theory in the 17:25 entry was wrong for that machine (it would still apply
+  to a second engine on one box, which tt-model does not detect).
