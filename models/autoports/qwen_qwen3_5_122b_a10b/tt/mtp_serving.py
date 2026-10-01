@@ -290,11 +290,12 @@ class MtpServing:
             return
         self._log_stats("previous request")
         self._stats = {"passes": 0, "tokens": 0, "hist": [0] * (self.k + 1), "wall": 0.0}
+        self._sampler = None  # the next request gets its own sampler / RNG
         self._pos = int(P)
         self._tok = int(tok0)
 
     # ------------------------------------------------------------------ decode side
-    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False) -> list[int]:
+    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None) -> list[int]:
         """Single user. Returns the accepted drafts followed by the verified next token (1..k+1 ids). The model owns the
         continuation (its last emitted token / position and the head's hidden for it); the plugin's `tok` / `pos` are
         only checked when it flags the host inputs authoritative (`reload_inputs` / `reset_batch`: the first decode after
@@ -308,15 +309,24 @@ class MtpServing:
                 f"MTP step input (tok {tok}, pos {pos}) differs from the model's (tok {self._tok}, pos {self._pos})"
             )
         tok, pos = self._tok if self._tok is not None else tok, self._pos if self._pos is not None else pos
-        drafts = r.draft(tok, pos)
-        rows = [tok] + drafts
-        preds = r.verify(rows, pos)
-        a = 0
-        for d, p in zip(drafts, preds):
-            if d != p:
-                break
-            a += 1
-        nxt = preds[a]
+        # sampling = (temperature, top_k, top_p, seed) of the request: temperature > 0 -> exact speculative sampling
+        # (sampled drafts, rejection-sampling accept on the read-back logits rows); else greedy (argmax compare)
+        sampler = self._sampler_for(sampling)
+        if sampler is not None and not sampler.greedy:
+            drafts, qs = r.draft(tok, pos, sampler=sampler)
+            rows = [tok] + drafts
+            preds, lg = r.verify(rows, pos, want_logits=True)
+            a, nxt = sampler.accept(lg, drafts, qs)
+        else:
+            drafts = r.draft(tok, pos)
+            rows = [tok] + drafts
+            preds = r.verify(rows, pos)
+            a = 0
+            for d, p in zip(drafts, preds):
+                if d != p:
+                    break
+                a += 1
+            nxt = preds[a]
         if a < self.k:
             r.commit(a + 1)
         if a > 0:
@@ -334,6 +344,20 @@ class MtpServing:
             if st["passes"] % 32 == 0:
                 self._log_stats("running")
         return out
+
+    def _sampler_for(self, sampling):
+        """One SpecSampler per request (its RNG persists across the request's steps); None = greedy."""
+        if sampling is None:
+            return None
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_sampling import SpecSampler
+
+        key = tuple(sampling)
+        cur = getattr(self, "_sampler", None)
+        if cur is None or cur[0] != key:  # a new request (end_prefill clears it) or changed params: fresh RNG
+            t, k, p, seed = sampling
+            cur = (key, SpecSampler(t, k, p, seed))
+            self._sampler = cur
+        return cur[1]
 
     def step_multi(self, positions, page_table, slot_remap=None):
         """B slots. positions: the plugin's [B_pad] start positions (-1 = no request in that slot); page_table:

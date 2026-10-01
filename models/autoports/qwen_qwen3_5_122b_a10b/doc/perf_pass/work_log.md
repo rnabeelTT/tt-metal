@@ -645,3 +645,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   continuation path was warmed at start-up. Kept opt-in (`QWEN35_CHUNKED_PREFILL=1`): the plugin never runs a decode
   in a prefill step, so chunking bounds step length and lets prompts share steps rather than cutting the running
   users' gap; default-on needs a served TTFT A/B on long prompts (per-chunk overhead ~ a bucket call + a state clone).
+- 02:24 (MTP follow-up 1) exact speculative sampling in the single-user served step: drafts sampled from the head's
+  request-processed distribution (temperature / top-k / top-p, seeded RNG per request), the verify rows read back as
+  ROW_MAJOR logits (unpadded: 0.5 MB per row per mesh; the TILE tensor would have moved its 32-row padding, ~16 MB per
+  read), accept by rejection sampling with the residual draw (`tt/mtp_sampling.py`; host Monte Carlo test: first-token
+  KL(target || empirical) 0.001 over 40 000 trials). Temperature 0 keeps the argmax path. Penalties are not applied in
+  the step (documented). Reduced-model served run with temperature 0.7: works end to end; the first version spent
+  ~60 ms per pass in padded read-backs + host softmaxes (72.5 ms per pass on the 2-layer model) -> unpadded rows, lazy
+  target rows, inverse-CDF draws: host sampler 13.5 -> 1.7 ms per pass. Full-model check (T = 0 unchanged, T = 0.7) next.

@@ -108,10 +108,13 @@ class MtpTraced:
         self.traces = {}
         self.outs = {}
         self.timing = {"pass": [], "commit": [], "draft": [], "rows": []}
+        self._last_logits = None  # [B, V] host logits of the last pass / draft read back in sampling mode
 
     # ------------------------------------------------------------------------------------------------ programs
     def _argmax_max(self, logits):
-        """Per-shard argmax + max over the vocab dim of [1,1,B,V/TP] (read back by the host, combined across shards)."""
+        """Per-shard argmax + max over the vocab dim of [1,1,B,V/TP] (read back by the host, combined across shards).
+        Also returns the ROW_MAJOR logits (the sampling mode reads them back: unpadded rows, 0.5 MB per row per mesh,
+        where the TILE tensor would transfer its 32-row padding)."""
         # argmax on a TILE input is single-core (9.2 ms for 8 x 62080!); the ROW_MAJOR path is multi-core
         lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT)
         am = ttnn.argmax(lg_rm, dim=-1, keepdim=True)  # [1,1,B,1] uint32
@@ -120,8 +123,7 @@ class MtpTraced:
             mx = ttnn.gather(lg_rm, -1, am)  # [1,1,B,1] (gather takes UINT32 / UINT16 indices; argmax gives UINT32)
         else:
             mx = ttnn.max(logits, dim=-1, keepdim=True)  # [1,1,B,1]
-        ttnn.deallocate(lg_rm)
-        return am, mx
+        return am, mx, lg_rm
 
     def _pass_body(self):
         m = self.model
@@ -162,11 +164,11 @@ class MtpTraced:
         else:
             ttnn.copy(h, self.h_out)
             ttnn.deallocate(h)
-        am, mx = self._argmax_max(logits)
+        am, mx, lg_rm = self._argmax_max(logits)
         ttnn.deallocate(logits)
         for t in (cos, sin):
             ttnn.deallocate(t)
-        return am, mx
+        return am, mx, lg_rm  # the ROW_MAJOR logits stay an output: the speculative sampler reads the rows back
 
     def _commit_body(self):
         for dn, rec, taps in zip(self.dn_layers, self.snap_rec, self.snap_conv):
@@ -181,11 +183,11 @@ class MtpTraced:
 
     def _draft_body(self):
         lg, h_next = self.head.decode_step(self.d_tok, self.d_hid, self.d_pos, self.d_rot, self.d_pt)
-        am, mx = self._argmax_max(lg)
+        am, mx, lg_rm = self._argmax_max(lg)
         ttnn.deallocate(lg)
         ttnn.copy(h_next, self.d_hid)
         ttnn.deallocate(h_next)
-        return am, mx
+        return am, mx, lg_rm
 
     def _rows_body(self):
         att = self.head.layer.attention
@@ -256,7 +258,7 @@ class MtpTraced:
     # ------------------------------------------------------------------------------------------------ per-pass host side
     _BODIES = {"pass": "_pass_body", "commit": "_commit_body", "draft": "_draft_body", "rows": "_rows_body"}
 
-    def _run(self, name):
+    def _run(self, name, want_logits=False):
         t0 = time.perf_counter()
         eager = name not in self.traces
         if eager:
@@ -267,13 +269,16 @@ class MtpTraced:
             outs = self.outs[name]
         res = None
         if outs:
-            am, mx = outs
+            am, mx = outs[0], outs[1]
             comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
             am_h = ttnn.to_torch(am, mesh_composer=comp).reshape(len(self.mesh.get_device_ids()), -1)  # [TP, B]
             mx_h = ttnn.to_torch(mx, mesh_composer=comp).float().reshape(am_h.shape[0], -1)
             shard = mx_h.argmax(0)  # [B] winning shard per row
             width = self.V // am_h.shape[0]
             res = [int(am_h[shard[b], b].item()) + int(shard[b].item()) * width for b in range(am_h.shape[1])]
+            if want_logits and len(outs) > 2:
+                lg = ttnn.to_torch(outs[2], mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1))  # bf16 [1,1,B,V]
+                self._last_logits = lg.reshape(-1, lg.shape[-1])[:, : self.V]  # [B, V] bf16 (float per used row)
         else:
             ttnn.synchronize_device(self.mesh)
         if eager:
@@ -285,21 +290,27 @@ class MtpTraced:
     def _write(self, dev_t, host_t):
         ttnn.copy_host_to_device_tensor(host_t, dev_t)
 
-    def draft(self, tok: int, pos: int):
-        """k chained head steps from (tok, d_hid) at pos; returns the k drafts. d_hid must hold the hidden of `tok`."""
-        drafts = []
+    def draft(self, tok: int, pos: int, sampler=None):
+        """k chained head steps from (tok, d_hid) at pos; returns the k drafts (and, with a non-greedy `sampler`, the
+        draft distributions q_j the accept rule needs). d_hid must hold the hidden of `tok`."""
+        drafts, qs = [], []
+        sampling = sampler is not None and not sampler.greedy
         cur_tok, cur_pos = tok, pos
         S = self.d_tok.shape[-1]
         for _ in range(self.k):
             self._write(self.d_tok, _host_u32([cur_tok], (1, 1, 1, S)))
             self._write(self.d_pos, _host_i32([cur_pos], (1,)))
             self._write(self.d_rot, _host_u32([cur_pos], (1, 1)))
-            d = self._run("draft")[0]
+            d = self._run("draft", want_logits=sampling)[0]
+            if sampling:
+                q = sampler.probs(self._last_logits[0])
+                d = sampler.sample(q)
+                qs.append(q)
             drafts.append(d)
             cur_tok, cur_pos = d, cur_pos + 1
-        return drafts
+        return (drafts, qs) if sampling else drafts
 
-    def verify(self, rows, pos: int):
+    def verify(self, rows, pos: int, want_logits=False):
         """Pass over rows (R = len(rows) <= k + 1) at positions pos..; returns the per-row argmax (R values)."""
         R = len(rows)
         BW, S = self.BW, self.p_tok.shape[-1]
@@ -309,7 +320,8 @@ class MtpTraced:
         self._write(self.p_rot, _host_u32(positions, (1, BW)))
         self._write(self.p_masks, rows_pos_masks_host(positions, BW))
         self.plen.stage(R)
-        return self._run("pass")[:R]
+        preds = self._run("pass", want_logits=want_logits)[:R]
+        return (preds, self._last_logits[:R]) if want_logits else preds
 
     def commit(self, accepted_rows: int):
         self.plen_commit.stage(accepted_rows)

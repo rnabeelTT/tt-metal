@@ -583,6 +583,33 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             return tt_out
         return super().process_decode_output_host(tt_out, is_tokens=is_tokens)
 
+    @staticmethod
+    def _mtp_sampling(sp, row):
+        """(temperature, top_k, top_p, seed) of request `row` from the plugin's TTSamplingParams (lists or tensors);
+        None when absent. Penalties are not applied by the MTP step."""
+        if sp is None:
+            return None
+
+        def pick(v, default):
+            if v is None:
+                return default
+            if isinstance(v, (int, float)):
+                return v
+            try:
+                x = v[row]
+            except (IndexError, TypeError):
+                return default
+            if isinstance(x, torch.Tensor):
+                x = x.item()
+            return default if x is None else x
+
+        t = float(pick(getattr(sp, "temperature", None), 0.0))
+        k = int(pick(getattr(sp, "top_k", None), 0) or 0)
+        p = float(pick(getattr(sp, "top_p", None), 1.0))
+        seed = pick(getattr(sp, "seed", None), None)
+        seed = None if seed is None or int(seed) < 0 else int(seed)
+        return (t, k, p, seed)
+
     def _mtp_decode(self, args, kwargs):
         """MTP step: the plugin hands the last emitted token at position num_tokens - 1 (padding rows at -1); returns a
         host int32 [B_pad, k+1] row of the accepted drafts + the verified next token, -1 padded (the shim appends the
@@ -613,7 +640,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
                 row = pt[i]
             authoritative = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
-            ids = self._mtp.step(int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative)
+            sampling = self._mtp_sampling(kwargs.get("sampling_params", args[6] if len(args) > 6 else None), i)
+            ids = self._mtp.step(
+                int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative, sampling=sampling
+            )
             out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
         self._live_slots = set(live)
         self._decode_steps = getattr(self, "_decode_steps", 0) + 1
