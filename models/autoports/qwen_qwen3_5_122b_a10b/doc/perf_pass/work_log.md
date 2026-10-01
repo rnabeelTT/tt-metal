@@ -1203,3 +1203,13 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   cap to 16060 patches and a two-image request all compile 0 programs; tower PCC vs the HF visual 0.9875 (1080p) and
   0.9872 (two images). The served image failure is fixed in the tree (cap + full-bucket warm-up + padded merger +
   row-major rows); ships with the next bundle.
+- 23:44 MULTI-USER MTP A/B, run 2: both servers (sorted / pairs rows) came up and died at the FIRST request:
+  `TypeError: 'tuple' object does not support item assignment` in `prefill_serving` - the batched-prefill integration's
+  results dict `res` was shadowed by the per-request `res = self._prefill_single(...)` tuple (every served prefill from
+  this tree since c0baac21ffd; no unit test drives `prefill_serving`, the served checks do). Fixed (`outs_by_u`,
+  74ed98b4065) before the batched A/B server started (23:45:17 vs its launch); the MTP A/B is re-queued after the k
+  sweep. Lesson: a served smoke (one request) belongs in the test chain before any long served measurement.
+- 23:45 BATCHED MODEL-LEVEL TEST PASSED (attempt 5, `logs/18/batched-tests5.log`): eager groups [20, 57, 128, 100] and
+  [300, 129, 512] vs the per-user path - logits PCC >= 0.9994 (argmax equal 6 / 7, one inside the top-5), GDN slot
+  states match, users' K/V blocks identical; warm + 3 bucket traces, traced replay == eager, no program compiled after
+  the captures. Served A/B (32 slots, batching on, c = 32 / 8 / 1, greedy text check, large-image requests) running.
