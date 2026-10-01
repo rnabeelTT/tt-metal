@@ -374,3 +374,37 @@ def test_grouped_skip_padding_groups(device, G, gs, E, K, N, w_dtype):
     print(
         f"SKIPPAD_EQUIV {G}x{gs}x{K}x{N}: real groups identical with {n_pad} trailing + interleaved sentinel groups skipped"
     )
+
+
+@pytest.mark.parametrize("skip", [False, True], ids=["noskip", "skip"])
+def test_grouped_resident_sentinel_ids_without_skip(device, skip):
+    """The served MTP warm-up hang (2026-10-01): the resident-in1 path classified ids >= E as padding (run code 0) while
+    the plain in0 reader (skip_padding_groups=False) still pushed those groups' activations -> compute never popped
+    them, the reader blocked, the program never finished. The factory now runs the id-aware in0 reader whenever the
+    resident path is on. Layout = the T=128 dispatch at gs=32 (G=281): singleton expert groups, a few short runs,
+    sentinel groups (id E) at the end - with and without the config's skip flag the real groups must match torch."""
+    G, gs, E, K, N = 281, 32, 256, 3072, 512
+    torch.manual_seed(3)
+    real = torch.randint(0, E, (186,)).sort().values
+    ids = torch.cat([real, torch.full((G - real.numel(),), E)]).to(torch.int32)  # sentinel = E (the sorted dispatch)
+    x = torch.randn(1, G, gs, K, dtype=torch.bfloat16)
+    w = torch.randn(1, E, K, N, dtype=torch.bfloat16) * 0.05
+    x_t = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
+    w_t = ttnn.from_torch(w, dtype=ttnn.bfloat4_b, layout=ttnn.TILE_LAYOUT, device=device)
+    idx_t = ttnn.from_torch(ids.reshape(1, G), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    mask = torch.zeros(1, G, 1, E, dtype=torch.bfloat16)
+    mask[0, torch.arange(real.numel()), 0, real.long()] = 1.0
+    ones = ttnn.from_torch(mask, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    cfg = grouped_config(device, gs, K, N)
+    cfg.skip_padding_groups = skip
+    out = ttnn.to_torch(_run(device, x_t, w_t, idx_t, ones, cfg, CKC)).float()  # a hang here = the bug
+    w_q = ttnn.to_torch(w_t).float()
+    n_real = real.numel()
+    ref = torch.stack([x[0, g].float() @ w_q[0, ids[g]] for g in range(n_real)]).unsqueeze(0)
+    pcc = comp_pcc(ref, out[:, :n_real], 0.9995)
+    per_group = min(comp_pcc(ref[0, i], out[0, i], 0.999)[1] for i in range(n_real))
+    print(
+        f"GROUPED_SENTINEL skip={skip}: {n_real} real + {G - n_real} sentinel groups; PCC {pcc[1]} per-group min {per_group:.5f}"
+    )
+    assert pcc[0], pcc[1]
+    assert per_group >= 0.999, per_group

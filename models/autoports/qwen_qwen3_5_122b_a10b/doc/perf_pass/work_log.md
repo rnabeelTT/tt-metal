@@ -847,3 +847,30 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   `cu_window_seqlens=[0, real, padded]` built once per image in the wrapper and passed to every block's SDPA with an
   explicit is_causal=False. bf16 tower weights: the construction stalls for minutes inside the patch merger's
   as_tensor (cache files intact) - probe queued; the served default is bfp8 (`QWEN35_VISION_DTYPE`).
+- 11:58 bf16 tower probe (`scripts/16-vision-build-probe.py bf16`): the 27 blocks' cached tensors load in 0.5 s, then
+  the main thread sits at 100 % CPU (single thread, no device wait) with the bf16 patch-merger fc1 cache file open
+  (`visual.merger.linear_fc1_w_col ... BFLOAT16`, 42.5 MB = the expected [4608, 1152] x 4 dies, not truncated) for
+  > 3 min; the bfp8 variant of the same tensor loads in milliseconds. A host-side load path cost on the bf16 TILE
+  mesh tensor, not a device hang. Not pursued: bf16 bought 0.001 PCC over bfp8 (0.987 vs 0.986) and the tower is
+  bfp8 by default. Probe killed so the reduced-model served image smoke (`IMAGE=1`, layers 0,3) could take the device.
+- 13:10 SERVED WARM-UP HANG (found + fixed). Both reduced-model image smokes stalled after the MTP warm-up (EngineCore
+  at 100 % CPU for 10+ min = `synchronize_device` spinning on a device hang, not a host loop; the adapter now registers
+  `faulthandler` on SIGUSR1 so `kill -USR1 <EngineCore>` dumps the stacks into server.log). Standalone adapter repro
+  (`scripts/16-vision-warm-bisect.py`): tower-only, buffers-only and both all hang at the first MTP `warm_prefill_path`
+  bucket; `TT_SPARSE_GROUPED_RESIDENT_IN1=0` passes everything incl. the vision warm-up (448 px 15 s, 896 px 14 s,
+  first eager run) and the captures -> the resident-weights grouped sparse matmul (commit 6df93b62a7f, never through a
+  served warm-up: the prod32 run predates it). Isolated op repros with the layer's exact configs / mesh / id layouts
+  (`16-resident-repro{,2}.py`) all pass, so every `ttnn.sparse_matmul` of the MTP warm prefill was traced with a
+  device sync and its id list saved (`16-hang-trace.py`): the hanging call is the MTP HEAD's gate/up (in `_bucket_head`
+  -> head layer -> `_routed_sorted`), program config `skip_padding_groups=0` with sentinel padding ids 0xFFFF.
+  Root cause (two halves): (1) C++ - the resident in1 writer classifies id >= E as padding (run code 0, compute skips)
+  for ANY config, but without SKIP_PADDING_GROUPS the plain in0 reader still pushes those groups' activations ->
+  cb_in0 fills, reader blocks, program never ends. Fix: the factory runs the id-aware in0 reader (and its id CB /
+  defines) whenever the resident path is on (`skip_groups = skip_padding_groups || resident_in1`). (2) Python - the
+  head's block cached its grouped configs (`_grouped_configs`) BEFORE its dispatch existed, so `_skip_pad_groups` read
+  False while the dispatch padded with 0xFFFF; pre-resident this "worked" by reading out-of-range weight tiles for the
+  padding groups. Fix: one `_skip_pad_groups_rule()` for the dispatch and the configs. Unit test
+  `test_grouped_resident_sentinel_ids_without_skip[noskip|skip]` (the T=128 layout: 186 singleton-ish groups + 95
+  sentinel groups) + the 11 existing grouped tests: 13 / 13 pass after the rebuild (ninja 20 s). Also fixed: the
+  faulthandler must be registered with chain=False (chain=True ran SIGUSR1's default disposition and killed the
+  engine). Re-running the reduced warm-up (resident on) chained into the served image smoke.

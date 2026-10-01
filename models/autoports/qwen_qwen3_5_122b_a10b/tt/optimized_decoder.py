@@ -516,13 +516,9 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
         if getattr(self, "_dispatch", None) is None:
-            from .moe_dispatch import DISPATCH_MODE as _dmode
+            pass
 
-            skip = (
-                bool(getattr(opt, "skip_pad_groups", False))
-                and bool(getattr(opt, "sorted_grouped", False))
-                and _dmode == "kernel"
-            )
+            skip = self._skip_pad_groups_rule()
             self._dispatch = SortedDispatch(self.device, E, k, group=gs, pad_group_id=0xFFFF if skip else 0)
             self._skip_pad_groups = skip
             self._cfg_sorted_gu = sparse_matmul_program_config(
@@ -592,6 +588,20 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 ttnn.deallocate(m[key])
         return y
 
+    def _skip_pad_groups_rule(self):
+        """Whether the sorted dispatch marks its padding groups with the sentinel id 0xFFFF (>= E) and the grouped sparse
+        matmul skips them. One rule for the dispatch AND the program configs: the MTP head's block built its grouped
+        configs before its dispatch existed and cached skip_padding_groups=False against a sentinel-padded id list
+        (the resident-in1 path then deadlocked on those groups, served warm-up hang 2026-10-01)."""
+        from .moe_dispatch import DISPATCH_MODE as _dmode
+
+        opt = self.opt
+        return (
+            bool(getattr(opt, "skip_pad_groups", False))
+            and bool(getattr(opt, "sorted_grouped", False))
+            and _dmode == "kernel"
+        )
+
     def _grouped_configs(self, gs, H, Nl):
         """MatmulMultiCoreReuseProgramConfig pair (gate/up, down) for the group-parallel sparse matmul: whole groups per
         core (per_core_M = gs/32, per_core_N = all N tiles), K stepped in in0_block_w tiles, subblock 1 x w."""
@@ -637,7 +647,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                     out_subblock_w=sw,
                     per_core_M=gs // 32,
                     per_core_N=n_tiles,
-                    skip_padding_groups=bool(getattr(self, "_skip_pad_groups", False)),
+                    skip_padding_groups=self._skip_pad_groups_rule(),
                 )
 
             gu_tiles = -(-(2 * Nl) // self.tile_gu.tile_shape[1])

@@ -203,6 +203,7 @@ class MtpServing:
             for b in self.model._PREFILL_MASK_BUCKETS:
                 for n in (b, max(2, b - 1)):
                     ids = [1000 + (i % 977) for i in range(n)]
+                    logger.debug(f"MTP warm prefill path: bucket {b} len {n}")
                     self.begin_prefill(ids, pt[0], slot=0)
                     try:
                         if self.per_slot:

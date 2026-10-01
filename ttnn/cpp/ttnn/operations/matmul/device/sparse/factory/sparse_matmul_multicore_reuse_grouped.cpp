@@ -160,6 +160,11 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     const bool resident_in1 =
         resident_allowed && (in0_CB_size + in1_resident_CB_size + out_CB_size + interm0_CB_size <= kL1CBBudget);
     const uint32_t in1_CB_size = resident_in1 ? in1_resident_CB_size : in1_stream_CB_size;
+    // The resident in1 writer classifies every group by its id (id >= E: padding, run code 0, no weights read), so the
+    // in0 reader must skip exactly those groups too or the compute kernel (which skips them) leaves their in0 blocks
+    // in cb_in0 and the reader deadlocks on a full CB. Resident mode therefore always runs the id-aware in0 reader,
+    // whatever the program config's skip_padding_groups says (the sorted dispatch pads with sentinel ids >= E).
+    const bool skip_groups = skip_padding_groups || resident_in1;
     const uint32_t idx_page_size = idx_buffer->aligned_page_size();
 
     // ---- core split over whole groups
@@ -203,7 +208,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         Mt * Kt,     // MtKt: compact group stride in in0
     };
     tt::tt_metal::TensorAccessorArgs(*in0_buffer).append_to(reader_compile_time_args);
-    if (skip_padding_groups) {
+    if (skip_groups) {
         reader_compile_time_args.push_back(idx_page_size);
         reader_compile_time_args.push_back(E);
         tt::tt_metal::TensorAccessorArgs(*idx_buffer).append_to(reader_compile_time_args);
@@ -245,7 +250,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     const std::unordered_map<std::string, uint32_t> writer_named_args = {
         {"cb_in1", tt::CBIndex::c_1}, {"cb_out", tt::CBIndex::c_4}, {"cb_idx", tt::CBIndex::c_7}};
     std::map<std::string, std::string> dm_defines;
-    if (skip_padding_groups) {
+    if (skip_groups) {
         dm_defines["SKIP_PADDING_GROUPS"] = "1";
     }
     if (resident_in1) {
@@ -254,7 +259,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
 
     auto in0_reader_kernel = tt_metal::CreateKernel(
         program,
-        skip_padding_groups
+        skip_groups
             ? "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_grouped_skip.cpp"
             : "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0.cpp",
         all_cores,
@@ -375,7 +380,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         tt_metal::CircularBufferConfig(
             idx_page_size, {{tt::CBIndex::c_7, tt_metal::datatype_to_dataformat_converter(indices.dtype())}})
             .set_page_size(tt::CBIndex::c_7, idx_page_size));
-    if (skip_padding_groups) {  // the in0 reader's own copy of the id list
+    if (skip_groups) {  // the in0 reader's own copy of the id list
         tt_metal::CreateCircularBuffer(
             program,
             all_cores,

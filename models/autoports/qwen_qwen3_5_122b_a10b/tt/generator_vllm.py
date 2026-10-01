@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -260,6 +261,15 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
+        if os.environ.get("QWEN35_FAULTHANDLER", "1") == "1":
+            # `kill -USR1 <EngineCore pid>` dumps every thread's Python stack to the engine's stderr (the readiness
+            # runner's server.log): the only introspection available for a host-side stall under vLLM (no ptrace).
+            import faulthandler
+            import signal
+
+            faulthandler.register(
+                signal.SIGUSR1, all_threads=True, chain=False
+            )  # chain would run SIGUSR1's default: terminate
         self._vision = _VISION
         if self._vision:
             # the vision tower (weights + its CCL buffers) and the trace-safe splice buffers (one 2048-row set, sliced
@@ -674,11 +684,16 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         from PIL import Image
 
         for side in (448, 896):  # 784 / 3136 patches -> padded 2048 / 4096
+            t0 = time.perf_counter()
             img = Image.fromarray((torch.rand(side, side, 3) * 255).to(torch.uint8).numpy())
             inp = proc(images=img, return_tensors="pt")
+            logger.info(
+                f"vision warm-up {side} px: grid {inp['image_grid_thw'].tolist()} (processor {time.perf_counter() - t0:.1f}s)"
+            )
             rows = model.get_image_features(inp["pixel_values"].float(), inp["image_grid_thw"].to(torch.int64))
             ttnn.deallocate(rows)
-        ttnn.synchronize_device(self._gen.mesh_device)
+            ttnn.synchronize_device(self._gen.mesh_device)
+            logger.info(f"vision warm-up {side} px done in {time.perf_counter() - t0:.1f}s")
         logger.info("vision tower warmed (448 / 896 px)")
 
     @staticmethod
