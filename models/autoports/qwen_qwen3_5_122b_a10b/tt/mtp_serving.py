@@ -467,6 +467,12 @@ class MtpServing:
         request's prefill and (single user) step use; the multi-user runner keeps its own per-slot rows."""
         r = self.runner
         row = torch.as_tensor(row).to(torch.int32).reshape(1, -1)
+        # the plugin hands the row every step; at the full context it is 4096 blocks wide (4 buffers x BW rows of int32
+        # per write = ~1.5 ms per pass measured at 32 slots): write only when the row changed
+        last = getattr(self, "_last_pt_row", None)
+        if last is not None and last.shape == row.shape and bool(torch.equal(last, row)):
+            return
+        self._last_pt_row = row.clone()
         bufs = (self.pr_pt,) if self.multi else (r.p_pt, r.r_pt, self.pr_pt, r.d_pt)
         for buf in bufs:
             n = buf.shape[0]

@@ -768,3 +768,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   benchmark TPOT 18.6 ms = 53.7 t/s/u, TTFT p50 313 ms (344 before the deferred leave; plain 261). `QWEN35_MTP` now
   defaults to 3 (commit 961fab593a9); production-config run (32 slots, 262144 context, 768 MiB trace region, c = 1 /
   8 / 32 benchmarks) queued as the default-on gate.
+- 09:12 PRODUCTION-CONFIG GATE (32 slots, --max-model-len 262144, 768 MiB trace region, MTP default k = 3): server up
+  with the head's KV at full context; single requests = MTP texts (code 47.6 / prose 27.6 tok/s incl. TTFT);
+  logprobs / penalty / min_p served (7-8 tok/s: host sampling + the seeded-full-width rule at 32 slots - the stage-10
+  rule, not MTP); c = 1 TPOT 20.1 ms = 49.6 t/s/u (18.6 at 8 slots: the step rewrites the 4096-block page tables
+  every pass -> cache the row), TTFT p50 351 ms (plain 32-slot 258-274); c = 8 TPOT 62.6 ms (stage 13: 68.5), c = 32
+  128.4 ms (130.1): the head hooks cost nothing measurable at 8-32 users. MTP default-on holds at production scale.
