@@ -763,6 +763,129 @@ class TPAttention:
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
 
+    def forward_prefill_paged_batched(self, x, cos_tt, sin_tt, page_tables, chunk_page_tables=None, user_ids=None):
+        """Paged-KV prefill of B short prompts in ONE pass (batched short-prompt admission, Qwen3.5-122B perf work
+        2026-10-01): ``x`` [1, 1, B*T, dim(/tp)] holds the users' T-row blocks back to back (user u = rows u*T ..
+        (u+1)*T - 1, every user starts at position 0: ``cos_tt`` / ``sin_tt`` are the per-row tables over B*T rows,
+        positions repeating 0..T-1 per user); ``page_tables`` = B page-table tensors (one row each). The QKV
+        projection, head split, q/k norms, rope, head concat, gate and output projection run once over all B*T rows
+        (the launch-bound part); only the K/V cache fill and the causal SDPA run per user (chunk_start 0: nothing
+        before the prompt). Same numerics as B calls of :meth:`forward_prefill_paged`."""
+        assert (
+            self.use_paged and self.paged_k is not None
+        ), "forward_prefill_paged_batched requires a bound paged KV cache"
+        tw, NH, NKV, HD = self.tw, self.NH, self.NKV, self.HD
+        B = len(page_tables)
+        S = x.shape[-2]
+        assert S % B == 0, (S, B)
+        T = S // B
+        user_ids = user_ids if user_ids is not None else [0] * B
+        qg, kp, vp = self._qkv(x)
+        q, gate_flat, k, v = self._make_heads(qg, kp, vp, S)
+        q = ttnn.multiply(
+            ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+            tw["q_norm"],
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        k = ttnn.multiply(
+            ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+            tw["k_norm"],
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
+        k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
+        if self._sdpa_bf8:
+            _k8 = ttnn.typecast(k, ttnn.bfloat8_b)
+            ttnn.deallocate(k)
+            k = _k8
+            _v8 = ttnn.typecast(v, ttnn.bfloat8_b)
+            ttnn.deallocate(v)
+            v = _v8
+            q8 = ttnn.typecast(q, dtype=ttnn.bfloat8_b)
+            ttnn.deallocate(q)
+        else:
+            q8 = q
+        k_paged, v_paged = self.paged_k, self.paged_v
+        block_size = k_paged.shape[2]
+        qk_chunk = 128 if T >= 2048 else 64
+        sdpa_cfg = ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(),
+            exp_approx_mode=False,
+            q_chunk_size=qk_chunk,
+            k_chunk_size=qk_chunk,
+        )
+        outs = []
+        for u in range(B):
+            pt = page_tables[u]
+            fill_pt = chunk_page_tables[u] if chunk_page_tables is not None else pt
+            q_u = ttnn.slice(q8, (0, 0, u * T, 0), (1, NH, (u + 1) * T, HD))
+            k_u = ttnn.slice(k, (0, 0, u * T, 0), (1, NKV, (u + 1) * T, HD))
+            v_u = ttnn.slice(v, (0, 0, u * T, 0), (1, NKV, (u + 1) * T, HD))
+            page_len = fill_pt.shape[1] * block_size
+            if page_len < T:
+                k_fill = ttnn.slice(k_u, (0, 0, 0, 0), (1, NKV, page_len, HD))
+                v_fill = ttnn.slice(v_u, (0, 0, 0, 0), (1, NKV, page_len, HD))
+            else:
+                k_fill, v_fill = k_u, v_u
+            ttnn.experimental.paged_fill_cache(k_paged, k_fill, fill_pt, batch_idx=int(user_ids[u]))
+            ttnn.experimental.paged_fill_cache(v_paged, v_fill, fill_pt, batch_idx=int(user_ids[u]))
+            for t in (k_fill, v_fill):
+                if t is not k_u and t is not v_u:
+                    ttnn.deallocate(t)
+            ttnn.deallocate(k_u)
+            ttnn.deallocate(v_u)
+            # page table padded to a multiple of 32 blocks (stick size) and to cover the prompt
+            needed_blocks = (T + block_size - 1) // block_size
+            target_blocks = ((max(needed_blocks, pt.shape[-1]) + 31) // 32) * 32
+            sdpa_pt = pt
+            if pt.shape[-1] < target_blocks:
+                zeros_pad = ttnn.zeros(
+                    (pt.shape[0], target_blocks - pt.shape[-1]),
+                    dtype=ttnn.int32,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                )
+                sdpa_pt = ttnn.concat([pt, zeros_pad], dim=-1)
+                ttnn.deallocate(zeros_pad)
+            attn_u = ttnn.transformer.chunked_scaled_dot_product_attention(
+                input_tensor_q=q_u,
+                input_tensor_k=k_paged,
+                input_tensor_v=v_paged,
+                page_table_tensor=sdpa_pt,
+                chunk_start_idx=0,
+                compute_kernel_config=self.compute_cfg,
+                program_config=sdpa_cfg,
+            )
+            if sdpa_pt is not pt:
+                ttnn.deallocate(sdpa_pt)
+            ttnn.deallocate(q_u)
+            outs.append(attn_u)
+        ttnn.deallocate(q8)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
+        attn = ttnn.concat(outs, dim=2) if B > 1 else outs[0]
+        if B > 1:
+            for t in outs:
+                ttnn.deallocate(t)
+        attn = self._concat_heads(attn)
+        gated = ttnn.multiply(
+            attn, ttnn.sigmoid(gate_flat, memory_config=ttnn.L1_MEMORY_CONFIG), memory_config=ttnn.DRAM_MEMORY_CONFIG
+        )
+        ttnn.deallocate(attn)
+        ttnn.deallocate(gate_flat)
+        partial = self._wo_proj(gated, tw["wo"])
+        ttnn.deallocate(gated)
+        return tt_all_reduce(
+            partial,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+
     def forward_prefill_paged(
         self,
         x,
