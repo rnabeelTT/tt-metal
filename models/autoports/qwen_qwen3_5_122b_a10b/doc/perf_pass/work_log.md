@@ -1154,3 +1154,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   [300, 129, 512] (one idle row) vs the production per-user path - logits PCC / argmax, GDN slot states, paged K/V
   identical, the sharded row == the gathered row; then traced replay == eager and no program compiled after capture.
   Queued behind the attention test, conditional on it passing (`scripts/20b-batched-model-test.sh`).
+- 22:36 SWEEP PASS 2 DONE (Hub revision 832a9834 served from the Hub on a fresh device; `logs/17/sweep-b1-chain.log`,
+  `artifacts/stage17/perf_sweep_hub_b1.json`, 13 rows): single-user greedy TPOT 24.2-25.5 ms (39-41 tok/s/user) at
+  128 .. 65536 input tokens by the fixed harness (random-token prompts; the natural-text readiness benchmark gives
+  20.6 ms on the same bundle), 18.4 ms (54 tok/s) after the 130816-token prompt; TTFT within 1 % of pass 1. Sampled
+  rows (T = 1.0): 1 user 36.0 / 35.5 ms, 8 users 63.7 ms (== greedy), 32 users 129.7 / 131.5 ms vs 110.2 ms greedy
+  -> the on-device sampler costs ~20 ms per step at 32 rows (new improvement item: sampler cost at full occupancy).
+  `deployed_sweep.md` updated (pass-2 columns, pass-2 sampled table, reading notes). Multi-user MTP A/B running next.

@@ -5,21 +5,27 @@ prompts of exact input length to `/v1/completions`, closed-loop concurrent strea
 requests), 256 output tokens pinned with `ignore_eos` (128 for the 128-token row), one unrecorded warm-up per length,
 no other traffic. TTFT median; TPOT = (E2EL - TTFT) / (output - 1), median; decode tok/s/user = 1000 / TPOT; total
 out tok/s = all output tokens / row wall; E2EL median. Served configuration: 32 slots, 262144 ctx, MTP k=3 adaptive,
-vision resident, thinking off. The single-user TPOT / decode columns of pass 1 are INVALID (the harness counted
-stream chunks; the MTP step packs several tokens per chunk) and are re-measured in a later pass on the improved
-bundle; TTFT, prefill tok/s and E2EL are exact. Raw rows: `~/qwen35-122b-bringup/artifacts/stage17/perf_sweep_hub.json`.
+vision resident, thinking off. The single-user TPOT / decode columns come from pass 2 (22:22 - 22:35 UTC, Hub revision 832a9834, the shipped
+bundle; harness fixed to count tokens from `stream_options.include_usage` - pass 1 counted stream chunks, and the MTP
+step packs several tokens per chunk, so its single-user TPOT / decode columns were invalid and are not shown); TTFT,
+prefill tok/s and E2EL of the single-user table are pass 1 (identical within 1 % in pass 2: 313 / 504 / 1,315 / 5,014 /
+10,238 / 21,690 / 48,576 ms TTFT). Random-token prompts depress the MTP acceptance: the natural-text readiness
+benchmark (128 / 128) gives 20.6 ms TPOT = 48.4 tok/s at one user on the same bundle, this harness 24-25 ms. Raw
+rows: `~/qwen35-122b-bringup/artifacts/stage17/perf_sweep_hub.json` (pass 1) and `perf_sweep_hub_b1.json` (pass 2).
 
 | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
 |---|---|---|---|---|---|---|
-| 128 | 128 | 317 | 404 | (pass 2) | (pass 2) | 3.53 |
-| 1,024 | 256 | 516 | 1,985 | (pass 2) | (pass 2) | 6.99 |
-| 4,096 | 256 | 1,316 | 3,112 | (pass 2) | (pass 2) | 7.82 |
-| 16,384 | 256 | 5,019 | 3,264 | (pass 2) | (pass 2) | 10.16 |
-| 32,768 | 256 | 10,319 | 3,176 | (pass 2) | (pass 2) | 17.89 |
-| 65,536 | 256 | 21,761 | 3,012 | (pass 2) | (pass 2) | 26.08 |
-| 130,816 | 256 | 48,548 | 2,695 | (pass 2) | (pass 2) | 57.18 |
+| 128 | 128 | 317 | 404 | 25.1 | 39.9 | 3.53 |
+| 1,024 | 256 | 516 | 1,985 | 25.5 | 39.2 | 6.99 |
+| 4,096 | 256 | 1,316 | 3,112 | 24.2 | 41.3 | 7.82 |
+| 16,384 | 256 | 5,019 | 3,264 | 25.0 | 40.0 | 10.16 |
+| 32,768 | 256 | 10,319 | 3,176 | 24.3 | 41.2 | 17.89 |
+| 65,536 | 256 | 21,761 | 3,012 | 28.3 | 35.3 | 26.08 |
+| 130,816 | 256 | 48,548 | 2,695 | 18.4 | 54.4 | 57.18 |
 
-**Concurrency, greedy, output pinned (ignore_eos)**
+**Concurrency, greedy, output pinned (ignore_eos)** - pass 1, Hub revision 668d1f0b (before the expert-sorted decode
+path: 16 / 32 users are 95.3 / 110.2 ms TPOT on the shipped bundle by the readiness benchmark). The `Users = 1` rows'
+TPOT / decode columns are the invalid pass-1 chunk counts; the single-user table above has the pass-2 values.
 
 
 | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
@@ -67,7 +73,7 @@ bundle; TTFT, prefill tok/s and E2EL are exact. Raw rows: `~/qwen35-122b-bringup
 | 130,816 | 256 | 16 | 16 | 532,527 | 265.4 | 3.8 | 5 | 565.38 |
 | 130,816 | 256 | 32 | 32 | 952,933 | 512.1 | 2.0 | 5 | 1,130.85 |
 
-**Concurrency, sampled on device, temperature 1.0, top-k off**
+**Concurrency, sampled on device, temperature 1.0, top-k off - pass 1, Hub revision 668d1f0b**
 
 | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
 |---|---|---|---|---|---|---|---|---|
@@ -77,3 +83,21 @@ bundle; TTFT, prefill tok/s and E2EL are exact. Raw rows: `~/qwen35-122b-bringup
 | 1,024 | 256 | 1 | 4 | 524 | 86.5 | 11.6 | 11 | 9.19 |
 | 1,024 | 256 | 8 | 32 | 3,687 | 63.8 | 15.7 | 102 | 19.94 |
 | 1,024 | 256 | 32 | 128 | 13,934 | 131.8 | 7.6 | 172 | 47.48 |
+
+**Concurrency, sampled on device, temperature 1.0, top-k off - pass 2, Hub revision 832a9834 (shipped bundle)**
+
+| Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+|---|---|---|---|---|---|---|---|---|
+| 128 | 128 | 1 | 4 | 328 | 36.0 | 27.8 | 25 | 4.90 |
+| 128 | 128 | 8 | 32 | 2,157 | 63.7 | 15.7 | 100 | 10.26 |
+| 128 | 128 | 32 | 128 | 7,688 | 129.7 | 7.7 | 170 | 24.18 |
+| 1,024 | 256 | 1 | 4 | 520 | 35.5 | 28.2 | 27 | 9.56 |
+| 1,024 | 256 | 8 | 32 | 3,698 | 63.7 | 15.7 | 103 | 19.96 |
+| 1,024 | 256 | 32 | 128 | 13,956 | 131.5 | 7.6 | 172 | 47.47 |
+
+Reading the sampled rows: at 1 user the exact speculative sampling accepts fewer draft tokens at temperature 1.0 than
+greedy (36 vs 25 ms TPOT); at 8 users sampled == greedy (63.7 ms: the pairs decode path, sampler cost hidden); at 32
+users the sampled step is 129.7 ms against 110.2 ms greedy (readiness benchmark, same bundle): the on-device sampler
+(`ttnn.sampling`, 32 rows x 248320 vocab) costs ~20 ms per step at full occupancy where argmax costs ~0 -> queued as an
+improvement item (sampler cost at 32 users). Pass 1's sampled rows on revision 668d1f0b (131.6 / 131.8 ms at 32 users)
+are the same within noise: the sorted decode path's win at 32 users is eaten by the sampler in the sampled rows.
