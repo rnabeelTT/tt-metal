@@ -59,21 +59,24 @@ def test_vision_sizes_covered_by_warmup(mesh_device):
     proc = AutoImageProcessor.from_pretrained(snap, max_pixels=max_pixels())
     cases = {
         "1080p": [(1080, 1920)],
+        "1080p-again": [(1080, 1920)],  # a repeat must compile nothing even if the first did (diagnostic)
+        "1080p-ish": [(1088, 1920)],  # another real length in the same padded bucket
         "cap-max": [(2048, 2048)],
         "phone-photo": [(3024, 4032)],
         "two-images": [(768, 1024), (1080, 1920)],
     }
+    deltas = {}
     for name, hws in cases.items():
         imgs = [_image(h, w, seed=h + w) for (h, w) in hws]
         inputs = proc(images=imgs, return_tensors="pt")
         pv, grid = inputs["pixel_values"].float(), inputs["image_grid_thw"].to(torch.int64)
         per_image = [int(g.prod()) for g in grid]
         assert max(per_image) <= max_patches(), (name, per_image, max_patches())
+        before = mesh_device.num_program_cache_entries()
         tt_out = tower(pv, grid)
         ttnn.synchronize_device(mesh_device)
-        n_now = mesh_device.num_program_cache_entries()
-        print(f"VISION_SIZES {name}: grids {grid.tolist()} patches {per_image} -> programs {n_prog} -> {n_now}")
-        assert n_now == n_prog, f"{name}: {n_now - n_prog} program(s) compiled for an image size inside the cap"
+        deltas[name] = mesh_device.num_program_cache_entries() - before
+        print(f"VISION_SIZES {name}: grids {grid.tolist()} patches {per_image} -> {deltas[name]} program(s) compiled")
         if name in ("1080p", "two-images"):
             n_tokens = sum(per_image) // merge
             with torch.no_grad():
@@ -85,4 +88,5 @@ def test_vision_sizes_covered_by_warmup(mesh_device):
             print(f"VISION_SIZES {name}: {n_tokens} image tokens, PCC vs HF visual {pcc}")
             assert ok, (name, pcc)
         ttnn.deallocate(tt_out)
+    assert all(d == 0 for d in deltas.values()), f"programs compiled for image sizes inside the cap: {deltas}"
     print("VISION_SIZES all sizes under the cap served by the warmed programs")

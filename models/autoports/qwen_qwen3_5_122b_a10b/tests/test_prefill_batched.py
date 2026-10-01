@@ -111,8 +111,11 @@ def test_batched_prefill_matches_per_user(mesh_device):
                     dm = (conv_r[m][:, u] - conv_b[m][:, u]).abs().max().item()
                     assert dm <= 2e-2 * max(1.0, conv_r[m][:, u].abs().max().item()), ("conv", li, u, m, dm)
             print(f"BATCHED_PREFILL lens={lens} gdn layer {li}: slot states match ({n} slots)")
+        # the users' own blocks must be identical; the reserved scratch block (pad rows of both paths, an idle row's
+        # tokens in a short group) is never read and is not compared
+        blocks = gen.page_table[:n].reshape(-1).long()
         for (k_b, v_b), (k_r, v_r) in zip(kv_b, kv_r):
-            assert torch.equal(k_b, k_r) and torch.equal(v_b, v_r), "paged K/V differ between the paths"
+            assert torch.equal(k_b[blocks], k_r[blocks]) and torch.equal(v_b[blocks], v_r[blocks]), "paged K/V differ"
         print(f"BATCHED_PREFILL lens={lens}: min logits PCC {worst:.5f}, K/V identical")
     # traced replay (the served form): one trace per batched bucket, then the same groups through the traces must
     # reproduce the eager pass, compiling no program (compile-after-capture guard)

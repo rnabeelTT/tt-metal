@@ -337,11 +337,13 @@ class DropInVisionTransformer(torch.nn.Module):
             final_outputs.append(rows)
 
         # all images' real rows back on the mesh, hidden-fractured like the text embeddings: [1, 1, N, out_hidden]
+        # ROW_MAJOR: a plain host->device write for any row count (a tiled upload of a non-tile-multiple row count
+        # may tilize on device, i.e. a program keyed on the image's token count); the consumer reads the rows to host
         rows = torch.cat(final_outputs, dim=0).to(torch.bfloat16)
         tt_out = ttnn.from_torch(
             rows.reshape(1, 1, rows.shape[0], rows.shape[1]),
             dtype=ttnn.bfloat16,
-            layout=ttnn.TILE_LAYOUT,
+            layout=ttnn.ROW_MAJOR_LAYOUT,
             device=self.model_args.mesh_device,
             mesh_mapper=ttnn.ShardTensorToMesh(self.model_args.mesh_device, dim=-1),
         )
