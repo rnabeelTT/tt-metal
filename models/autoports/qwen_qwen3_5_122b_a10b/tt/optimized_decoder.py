@@ -391,7 +391,18 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             )
 
     # ---- routed experts, pairs dispatch (decode, few tokens) ---------------------------------------------------
+    def _decode_sorted(self, T):
+        """QWEN35_DECODE_SORTED_MIN_ROWS = N (default 0 = off): decode steps of N or more rows take the expert-sorted
+        path (dispatch kernel + grouped resident sparse matmuls + gather-add un-dispatch) instead of the pairs / masked
+        paths. Decode-width profile 2026-10-01: at 16 users the MoE is ~65 % of the layer step and reads one expert
+        block per (user, expert) PAIR (128 reads) through the pairs path's relayout glue; sorting reads each distinct
+        expert once. Measured A/B in doc/perf_pass/work_log.md."""
+        n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "0") or 0)
+        return 0 < n <= T and self.opt.prefill_mode == "sorted"
+
     def _routed_gather(self, x4, scores, ids, T):
+        if self._decode_sorted(T):
+            return self._routed_sorted(x4, scores, ids, T)
         if 0 < T <= int(self.opt.pairs_max_tokens):
             if getattr(self, "rows_sorted", False) and self.opt.prefill_mode == "sorted":
                 # MTP rows mode: the expert-sorted path (dispatch kernel, two grouped sparse matmuls with the padding
@@ -503,6 +514,10 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
 
     # ---- routed experts, sorted dispatch (prefill) ----------------------------------------------------------
     def _routed_masked(self, x4, scores, ids, T, chunk):
+        if chunk == TILE and T <= 32 and self._decode_sorted(T):
+            return self._routed_sorted(
+                x4, scores, ids, T
+            )  # decode step wider than the gather limit (see _decode_sorted)
         if chunk == TILE and 0 < T <= int(self.opt.pairs_max_tokens):
             if getattr(self, "rows_sorted", False) and self.opt.prefill_mode == "sorted":
                 return self._routed_sorted(x4, scores, ids, T)  # MTP rows mode (see _routed_gather)

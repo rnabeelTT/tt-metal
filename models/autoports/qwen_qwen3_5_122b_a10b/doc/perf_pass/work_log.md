@@ -994,3 +994,55 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   thinking stays available per request (`chat_template_kwargs: {"enable_thinking": true}`, card: general preset, large
   max_tokens). Shipping thinking on needs either a TTI harness that reads `reasoning` + `content` with a thinking-aware
   budget, or a reasoning-budget control the serving stack does not have (vLLM 0.26).
+- 18:45 improvement item 1 scoping (prefill scheduling): the plugin itself forbids chunked prefill for a model with
+  `output_tokens_per_step > 1` (`vllm_tt_plugin/platform.py::_apply_chunked_prefill_policy`, reason "block-output"), so
+  MTP (k+1 tokens per step) and chunked prefill are mutually exclusive at the PLUGIN level, not only in our wiring.
+  Interleaving prefill with decode under MTP therefore needs a plugin change (chunked output builder vs the
+  variable-width block output) or an adapter-side scheme. Second fact from the sweep server log: the plugin hands us
+  up to 31 requests in ONE prefill_forward call ("Prefilling 31 request(s)") and we run them one by one through the
+  B=1 bucket path (~0.23 s each at 128 tokens, p10 of the back-to-back interval) -> the burst TTFT is per-request
+  fixed cost x queue length. Measurements queued: Tracy of the 128-token bucket per layer kind + a host/device split
+  of a served 128-token prefill (reduced + full model).
+- 18:55 PREFILL FIXED COST, 128-token served prefill (`scripts/18-prefill-fixed-cost.py`, production adapter, MTP on,
+  20 reps): full model 238 ms per request = logits readback 193 ms (blocks on the traced bucket: ~17 ms embedding /
+  head rows / norm / LM head + all-gather (the 2-layer model's 24.8 ms minus its layers) + ~3.7 ms x 48 layers,
+  op-launch bound like width-1 decode) + GDN slot write 28.8 ms (36 layers' rec_state + conv taps copied scratch ->
+  slot, one small op per tensor) + snapshot 2.6 + two state resets 4 ms + staging 0.8 ms. Tracy of the eager
+  128-token layer: 12.1 ms (GDN) / 11.8 ms (attn) per layer eager vs ~3.7 ms traced -> the traced bucket is the
+  right baseline. Levers, cheapest first: (a) one fused write of the 36 GDN states into the slot (-29 ms, 12 %);
+  (b) a head-rows-free bucket trace variant for prefills admitted while other requests are live (adaptive MTP only
+  uses the head when exactly one request is live; the rows cost ~45 ms of the 193) -> 32-user burst TTFT -19 %;
+  (c) scheduling: the plugin admits every waiting prefill in one call (max_num_batched_tokens bumped to
+  max_model_len when chunked prefill is off) and a step is either prefill or decode, so 31 prefills block decode for
+  7.4 s - a per-step prefill admission cap (plugin knob) would interleave decode steps like gpt-oss's "8 decode steps
+  between chunks"; (d) batched short-prompt prefill (several 128-token prompts per bucket pass) = the batched GDN
+  chunk form the MTP verify pass already uses (B users x 32 rows) generalised to B x 128 + batched prefill attention:
+  the biggest win (~2.5x on short bursts) and the most work.
+- 19:00 plugin scheduler read (`vllm_tt_plugin/scheduler.py::TTScheduler`): default mode "prefer prefill whenever
+  prefill work is pending" and a step is prefill-only or decode-only, so waiting requests are admitted together (the
+  base token budget = max_model_len once chunked prefill is off) and decode starves until the last of them is
+  prefilled (the sweep: 31 prefills of 128 tokens = 7.4 s with no decode step). A gpt-oss-style "prefill step, then
+  D decode steps" alternation is a scheduler policy change in the PLUGIN (forced modes exist for the lane
+  coordinator, no public knob); the bundle pins the plugin revision, so a local plugin patch does not ship without
+  vendoring -> adapter-side levers first (fused GDN slot write, head-rows-free bucket variant, batched short-prompt
+  prefill), scheduler alternation raised with the plugin team.
+- 19:02 DECODE WIDTH PROFILE (reduced model, traced batched decode step per layer kind, `artifacts/stage15/tracy_decode_*-oct1`):
+  per-layer step wall GDN 1.35 / 2.16 / 2.75 ms and attention 1.22 / 1.94 / 2.63 ms at 8 / 16 / 32 users ->
+  36 x GDN + 12 x attn = 63 / 101 / 130 ms, which is the served TPOT (64 / 103 / 129): the step is all layer device
+  time, host overhead nil. Per-op (device 0): at 8 users the GDN layer is 61 ops / 934 us device (+0.4 ms of
+  op-to-op gaps): the two MoE sparse matmuls 338 us (36 %), 15 binary ops 154 us, tilize-with-padding 82 us; the
+  attention layer 85 ops / 1086 us: sparse matmuls 417 us (38 %), tilize 139 us (13 %), 10 binary ops 112 us. At 16
+  users (pairs path) the attention layer is 73 ops / 1676 us: sparse matmuls 795 us (47 %, "active=?/32768"
+  pair-groups), tilize 272 us (16 %), binary 185 us -> the MoE is ~65 % of the step and its weight traffic is one
+  expert read per (user, expert) PAIR (128 reads at 16 users) with ~50 % bandwidth efficiency; sorting rows by expert
+  (the grouped / resident path) would read each distinct expert once (~80 at 16 users) and drop the pairs path's
+  relayout glue (tilize + slices). The b32 Tracy windows are empty (profiler buffer limit at 32 rows, known); the
+  PERF wall numbers stand. NEXT (item 2): route decode rows >= N through `_routed_sorted` (the expert-sorted
+  dispatch + grouped resident matmuls the MTP rows mode and prefill use) behind a knob and A/B the per-width step
+  at 8 / 16 / 32 on the reduced model.
+- 19:11 ITEM 2 A/B (decode rows >= 8 through the expert-sorted grouped path, `QWEN35_DECODE_SORTED_MIN_ROWS=8`;
+  `logs/18/decode-sorted-ab.log`): SLOWER at every width - GDN layer step 2.26 / 2.51 / 2.91 ms vs 1.32 / 2.13 /
+  2.72 (pairs / masked) at 8 / 16 / 32 users, attention 2.12 / 2.39 / 2.68 vs 1.18 / 1.90 / 2.60; correct (B=16 /
+  32 per-user PCC vs HF >= 0.9998). The sorted path's fixed cost (dispatch kernel, row gather, un-dispatch, G ~ 257
+  mostly-padding groups) outweighs the saved expert re-reads at these row counts. Knob stays 0 (off); a Tracy of the
+  sorted path at 16 rows is queued to see which of its ops carry the fixed cost before deciding on a small-T variant.
