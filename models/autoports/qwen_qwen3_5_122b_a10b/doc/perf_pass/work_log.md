@@ -906,3 +906,21 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   `os.environ["QWEN35_MTP"] = str(k)` at import (one source of truth); test `test_adapter_import_pins_mtp_env`
   (4 cases, subprocess import with a clean env) passes. The container build started at 13:35 had the unpinned tree:
   killed and restarted (run 3b). Readiness suite relaunched (#3).
+- 14:15 item 11: container bundle run 3b packaged in 8 min on the pinned tree (62c96f3ea1b; docker layers cached,
+  image 2.0 GB as OCI blobs) -> `~/qwen35-122b-bringup/pkgbuild/build/qwen3-5-122b-a10b-blackholex4`. The bundle
+  verification (`scripts/11-serve-bundle-run3.sh`: fresh device, /v1/models, chat, tool call, tt-model curl,
+  non-aligned prompt, 32-request burst, 128K + 262080-token prompts, IMAGE request vs the HF text) is queued behind
+  the readiness suite on the device lock; the private push follows a manual review of its output.
+- 14:24 ITEM 10 DONE: readiness suite on the full model, MTP k=3 adaptive + vision on, 32 slots, 262144 ctx
+  (`doc/optimized_vllm/readiness_vllm_48l-mtp-vision/`): serve PASS, sampling full profile 73 passed / 4 skipped,
+  6 qualitative completions, benchmarks: single_user_decode TTFT 396 ms, TPOT 16.6 ms = 60.3 t/s/u (stage-10 final:
+  426 ms / 37.7 ms / 26.5); ci_serving_burst 100/100/32: TTFT p50 7.69 s (was 11.5), TPOT 128.9 ms (was 133.8),
+  158 tok/s aggregate. Checks 09-vllm and 10-optimized-vllm exit 0 (06 / 07 / 11 earlier). Bundle verification
+  (run 3b) now holds the device.
+- 14:41 ITEM 11 BUNDLE VERIFIED (run 3b, staged package, fresh device, profile p300x2; `logs/11/serve-bundle-run3-chain.log`):
+  healthy in 11.5 min; /v1/models max_model_len 262144; chat "The capital of France is Paris." (finish stop, no
+  reasoning leak); tool call `get_weather(city=Paris)` through qwen3_xml; tt-model curl OK; non-aligned 2381-token
+  prompt; 32-request burst 3200 tokens in 20.0 s = 160 tok/s; 131072-token prompt 48.8 s; the whole book as a prompt
+  (194119 tokens, the source text ends there) 79.6 s; IMAGE request (448 px, thinking off) 222 prompt tokens, 28
+  completion tokens in 0.97 s, text == the HF CPU reference. Clean shutdown. Pushing the bundle (private) and then
+  the deployed-model perf sweep (`scripts/17-sweep-chain.sh` serves the Hub bundle and runs `17-perf-sweep.py`).
