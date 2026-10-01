@@ -171,6 +171,28 @@ class Qwen35MoE:
 
         # ---- router: W_gate [E, H] -> [H, E] ----------------------------------------------------
         self.router_w = upload(state_dict["gate.weight"].T.contiguous(), self.prec.router, "gate.weight")
+        # Decode router as a DRAM-sharded matmul (turn 6): the stock linear ran the [32, 3072] x [3072, 256] router on
+        # 7-8 cores (one per N tile) at 71 us per layer at width 8 - the 1.5 MB bf16 weight streamed through 8 cores;
+        # the DRAM-sharded decode kernel splits K over the DRAM-bank cores like every other decode projection (~10 us).
+        self._router_sharded = (
+            self.num_devices > 1 and os.environ.get("QWEN35_ROUTER_DRAM_SHARDED", "1") == "1"
+        ) and getattr(args, "act_shard_hidden", None) is not None
+        if self._router_sharded:
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            ttnn.deallocate(self.router_w)
+            self.router_w = ttnn.as_tensor(
+                state_dict["gate.weight"].T.contiguous(),
+                dtype=self.prec.router,
+                layout=ttnn.TILE_LAYOUT,
+                device=mesh_device,
+                memory_config=tpc.create_dram_sharded_mem_config(self.hidden, self.num_experts),
+                mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+                cache_file_name=cache_name("gate.weight.dram_sharded"),
+            )
+            self.router_decode_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                TILE, self.hidden, self.num_experts
+            )
 
         # ---- routed experts (HF fused: gate_up [E, 2N, H] = [gate; up] rows, down [E, H, N]) -------
         gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
@@ -323,13 +345,27 @@ class Qwen35MoE:
         """Router: returns renormalized top-k scores [1,1,T,k] (bf16) and expert ids [1,1,T,k] (uint16)."""
         # decode rows (<= 32 tokens): keep the router chain L1-resident (perf pass, QWEN35_ROUTER_L1); prefill rows in DRAM
         r_mc = ttnn.L1_MEMORY_CONFIG if (ROUTER_L1 and x4.shape[-2] <= TILE) else ttnn.DRAM_MEMORY_CONFIG
-        logits = ttnn.linear(
-            x4,
-            self.router_w,
-            dtype=ttnn.bfloat16,
-            compute_kernel_config=self.router_ckc,
-            memory_config=r_mc,
-        )
+        if getattr(self, "_router_sharded", False):
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            logits = tpc.sharded_decode_matmul(
+                x4,
+                self.router_w,
+                self.router_ckc,
+                self.router_decode_progcfg,
+                self.args.act_shard_hidden,
+                tpc.create_prefill_matmul_program_config,
+                self.hidden,
+                decode_out_memory_config=r_mc,
+            )
+        else:
+            logits = ttnn.linear(
+                x4,
+                self.router_w,
+                dtype=ttnn.bfloat16,
+                compute_kernel_config=self.router_ckc,
+                memory_config=r_mc,
+            )
         if ROUTER_TOPK_FIRST:
             # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
             # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).

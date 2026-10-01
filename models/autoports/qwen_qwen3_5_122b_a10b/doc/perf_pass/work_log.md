@@ -604,3 +604,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   around its eager prefills (a batched model's [1, ...] state copy into the [B, ...] buffers failed otherwise). The
   serve script's concurrent block waited on the server process (a plain `wait`) - fixed to wait on the two curls.
   Multi-user MTP therefore serves end to end, but stays opt-in (the full-model measurements above).
+- 01:02 (turn 6, decode MoE at 8-32 rows) Tracy per layer at width 8 (reduced model, traced batched step): GDN layer
+  884 us device / 1.354 ms step (60 ops: ~35 % op-launch gaps), attention layer 1099 us / 1.226 ms. MoE share at B = 8:
+  sparse gate_up 189-223 + down 119-161 us (~35 %, ~64 distinct experts = 75 MB of bfp4 weights per layer: near the
+  bandwidth floor), pairs glue: tilize-with-padding 82-140 us (x_pairs + scores + acc), binary 15 ops ~155, reduce 37,
+  slices / reshapes ~55. FOUND: the ROUTER matmul [32 x 3072] x [3072 x 256] runs the stock linear on 7-8 cores at
+  HiFi4 bf16 and costs 71 us per layer at width 8 (also 71 us in the MTP rows pass) - 3.4 ms of a 48-layer step if
+  every layer pays it. Fix: DRAM-sharded decode matmul for the router (like the other decode projections),
+  `QWEN35_ROUTER_DRAM_SHARDED=1` default; numerics (batched decode B = 32 vs HF) + width-8 Tracy queued.
+  Width 16 (attention layer, 1856 us device): the MASKED path's dense E = 256 dimension is the waste - sparse gate_up
+  641 + down 318 us (~110 active experts, bandwidth-bound) but swiglu / weights-multiply / fast-reduce run over all
+  256 x 32 rows (unary 327 us, reduce 138 us): the compact (sorted) layout with cheap gather / un-dispatch kernels is
+  the structural fix (same work as the prefill levers "row gather kernel" + "untilize before un-dispatch"); parked.
+- 01:06 router as a DRAM-sharded decode matmul: batched decode B = 32 vs HF unchanged (per-user PCC min 0.99988 attention
+  layer, GDN layer passes), width-8 attention-layer router 71 -> 25 us, layer step 1.226 -> 1.186 ms (traced). Kept on
+  by default (`QWEN35_ROUTER_DRAM_SHARDED=1`). Item 1 closes here: the remaining 8-32-row MoE cost is the weight-bound
+  sparse matmuls plus the dense-E masked-path glue, whose fix is the compact layout with gather / un-dispatch kernels
+  (parked with the prefill levers). Moving to item 2 (chunked prefill): generator `prefill_serving(start_pos, final)`
+  with per-request carried GDN state keyed by the first KV block, adapter + plugin shim for the intermediate mask,
+  `QWEN35_CHUNKED_PREFILL=1` opt-in; equivalence test (4 chunking patterns) queued.
