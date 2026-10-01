@@ -1124,3 +1124,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   TPOT 110.2 ms, 201 tok/s. Against the stage-13 release numbers (37.7 / 93.1 / 125-131 ms) and this morning's
   (16.6-18.6 / 64 / 116-129): the 16-32-user win stands (-7 % / -14 %), 1 and 8 users unchanged within run-to-run
   noise of the MTP acceptance. Bundle run 6 packaging; verify + push next.
+- 22:08 BUNDLE RUN 6 VERIFIED (staged package from 769bf6fa1d6-era tree HEAD 4c757328bca docs; code = eb45675cccd +
+  f4920e34075 + d6d5337269c; fresh device, profile p300x2; `doc/tti_release/bundle_run6/verify.log`): healthy in
+  ~11 min; chat / tool call / tt-model curl OK; non-aligned 2381-token prompt; 32-request burst 3200 tokens in 17.0 s
+  = 188 tok/s (run 3b: 160); 131072-token prompt 45.0 s (48.8); 194119-token book 73.8 s (79.6); image request 0.92 s,
+  text == HF reference. Pushing (private).
+- 22:09 PUSHED: Hub revision 832a9834a5f0 (private; image e096e047ba10; tt-metal aa559ead231). Report republished
+  (v28) with the revision and the run-6 verification. Next: batched short-prompt prefill (design in
+  production_improvements_plan.md), then the deferred sweep rows on this bundle.
