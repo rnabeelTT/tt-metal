@@ -63,11 +63,17 @@ serve:
     HF_MODEL: Qwen/Qwen3.5-122B-A10B
     QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
     QWEN35_PROGRAM_GUARD: "1"
+    # Vision ON: image content parts are served (the checkpoint's ViT on the mesh, bfp8, up to 4 images per request);
+    # text requests are unaffected (the tower only runs for image prompts). KV pool in this configuration (MTP head +
+    # tower resident): 22725 blocks x 64 tokens = 1.45 M tokens (the stage-13 text-only, no-MTP server had 28472 blocks).
+    # Set to "0" for a text-only server.
+    QWEN35_VISION: "1"
+    QWEN35_VISION_MAX_IMAGES: "4"
   # Thinking OFF by default: the configuration every release gate ran on (TTI release, 22 / 22 conformance tests, full-set
   # evals). The model's own default (thinking on) loops on constraint-heavy prompts under greedy / low-temperature decoding
   # (reproduced by the bf16 HF reference; doc/tti_release/RUN_NOTES.md run 7) and returns an empty `content` when the budget
   # ends inside the think block. Clients opt in per request with "chat_template_kwargs": {"enable_thinking": true}.
-  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": false}']
+  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": false}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
 serve_profiles:  # one image, the two 4-die Blackhole targets; both are the (1,4) mesh
   - name: p300x2
@@ -86,9 +92,10 @@ verify:
 
 card:
   description: >
-    Qwen3.5-122B-A10B (256-expert MoE, 48 layers of Gated DeltaNet + gated attention) served text-only on four Blackhole
-    dies through vLLM and the Tenstorrent plugin: tensor-parallel mixers, experts sharded on the intermediate dimension,
-    on-device sampling, per-width decode traces, 262144-token context, up to 32 concurrent sequences.
+    Qwen3.5-122B-A10B (256-expert MoE, 48 layers of Gated DeltaNet + gated attention, vision tower) served on four
+    Blackhole dies through vLLM and the Tenstorrent plugin: text and image chat requests (up to 4 images per request),
+    tensor-parallel mixers, experts sharded on the intermediate dimension, on-device sampling, single-user
+    multi-token prediction (MTP) decode, per-width decode traces, 262144-token context, up to 32 concurrent sequences.
   quickstart: |
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model

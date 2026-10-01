@@ -178,26 +178,31 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   prefill levers "row gather" + "untilize before un-dispatch"), one weight pass per expert in the grouped sparse
   matmul, a fused GDN decode step, MTP commit / draft overlap on the second command queue.
 
-## 5. Vision enablement path (not done in this bring-up)
+## 5. Vision (images) — served behind `QWEN35_VISION=1`
 
-The checkpoint's vision tower (`model.visual.*`, 333 tensors, Qwen3-VL style ViT) is loadable:
-`tt/weights.py::StreamingStateDict.visual_keys()` / `visual_tensor()` expose it without loading the text weights. To serve
-images / videos:
-1. `tt/generator_vllm.py`: replace `TT_Qwen3_5MoeProcessingInfo.get_supported_mm_limits` (`{"image": 0, "video": 0}`) with
-   real limits, drop the `NotImplementedError` in `prefill_forward` for `pixel_values` / `pixel_values_videos`, and
-   implement `get_multimodal_embeddings` / `embed_input_ids` (the vLLM `Qwen3_5MoeForConditionalGeneration` interface).
-2. Vision encoder on device: reuse `models/demos/qwen3_vl/tt/` (the Qwen3-VL ViT port) with this checkpoint's
-   `vision_config` (hidden 1152, depth 27, 16 heads, patch 16, spatial merge 2, merger to hidden 3072;
-   `deepstack_visual_indexes` is empty in this checkpoint, so no per-layer deepstack residual add is needed: the merged
-   visual embeddings replace the image-placeholder token embeddings before layer 0).
-3. Position ids: the text path uses 1-D RoPE positions (`mrope_section [11, 11, 10]`, `mrope_interleaved`, reduces to 1-D for text). Images need
-   the 3-D m-RoPE index (t, h, w) per token: compute on host in the adapter (`get_rope_index` from HF) and pass a
-   `[3, T]` position tensor into the prefill rotary setup (`models/demos/blackhole/qwen36/tt/attention` rotary tables);
-   decode continues from the max text position as HF does.
-4. Memory: the ViT weights are ~0.9 GB bf16 (TP4: ~0.25 GB per die); the KV pool shrinks accordingly. Re-run the
-   context-contract numbers (`doc/context_contract.json`).
-5. Validation: HF `Qwen3_5MoeForConditionalGeneration` image reference (single image, 1-3K visual tokens), then the
-   readiness serving suite with `limit_mm_per_prompt` set; add an image request to the smoke.
+The checkpoint's vision tower (`model.visual.*`: Qwen3-VL-style ViT, depth 27, hidden 1152, patch 16, spatial merge 2,
+merger to the 3072-wide text hidden) runs on the mesh; image content parts of chat requests are served when the engine
+starts with `QWEN35_VISION=1`. Text-only is still the default of the checkout (the bundle sets the env, see §2).
+
+| piece | where | notes |
+|---|---|---|
+| tower | `tt/vision.py` + the in-tree port `models/demos/blackhole/qwen36/tt/vision/` | HF `Qwen3_5MoeVisionModel` built standalone from the 333 streamed `model.visual.*` tensors (never `from_pretrained` of the 250 GB checkpoint); `DropInVisionTransformer` keeps the patch embed + position interpolation on host, 27 blocks + merger on device, TP4 (hidden-fractured output); weights bfp8 (`QWEN35_VISION_DTYPE=bf16` builds too but its merger `as_tensor` takes minutes on this host; PCC gain 0.001) |
+| tower accuracy | `tests/test_vision_tower.py` | PCC vs the HF visual 0.9857 (448x448, 196 tokens) / 0.9868 (896x672, 588 tokens); sampled-row min 0.96. Required the SDPA windows fix in the shared port (`cu_window_seqlens=[0, real, padded]`, explicit `is_causal=False`): the padded patch sequence (2048 multiples) leaked into the real patches' non-causal attention (PCC 0.88 before) |
+| splice | `Qwen35MoeModel.prefill_masked_bucket` (persistent bucket path) | image rows placed at the placeholder positions on host, staged into fixed `[1,1,2048,H/TP]` + mask buffers (`_alloc_vision_merge_buffers` before the captures), the bucket body's `where(mask, vision, text)` selects them (identity for text segments) — the bucket traces stay valid; images whose placeholders span 2048-token segments use the per-segment row offset |
+| positions | `_build_request_rope(token_ids, vision_tokens)` staged once over the whole prompt (`rope_staged`); decode: per-slot M-RoPE delta vector (`set_slot_rope_delta`), used by `prepare_decode_inputs_host` and the MTP step's rot idxs | text requests keep delta 0 |
+| adapter | `tt/generator_vllm.py` | `get_supported_mm_limits` = {image: `QWEN35_VISION_MAX_IMAGES` (4), video: 0}; `prefill_forward` turns vLLM's per-user `pixel_values` / `image_grid_thw` into tower rows (`_vision_for_user`) and hands `vision=[...]` to `prefill_serving`; tower warm-up at 448 / 896 px before the captures; videos raise `NotImplementedError` |
+| MTP | unchanged | the MTP head reads the spliced hidden; adaptive single-user MTP serves image requests like text ones |
+
+Limits: images only (no video); an image prompt is prefilled whole (no chunked-prefill continuation of an image
+prompt — chunked prefill is opt-in and off with MTP anyway); at most `QWEN35_VISION_MAX_IMAGES` images per request
+(vLLM's `--limit-mm-per-prompt` must agree); the tower runs eagerly (not traced) per request, padded to 2048-patch
+multiples (448 px = 784 patches -> 2048; 896 px = 3136 -> 4096).
+
+Validation so far (2026-10-01): tower PCC above; reduced 2-layer server with `QWEN35_VISION=1` serves text, logprobs,
+penalty, min_p and a 448x448 image chat request (220 prompt tokens, 196 image tokens) with the program guard quiet;
+HF CPU reference for the same image prompt (`~/qwen35-122b-bringup/scripts/16-hf-image-ref.py`, greedy, thinking off):
+"The image features a red square in the upper left and a yellow circle in the lower right, both set against a solid
+blue background." The full-model served comparison is logged in `doc/perf_pass/work_log.md` (search `IMAGE_AGREEMENT`).
 
 ## 6. Where things are
 

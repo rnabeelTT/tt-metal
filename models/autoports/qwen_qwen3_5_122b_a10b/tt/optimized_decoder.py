@@ -516,8 +516,6 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
         if getattr(self, "_dispatch", None) is None:
-            pass
-
             skip = self._skip_pad_groups_rule()
             self._dispatch = SortedDispatch(self.device, E, k, group=gs, pad_group_id=0xFFFF if skip else 0)
             self._skip_pad_groups = skip

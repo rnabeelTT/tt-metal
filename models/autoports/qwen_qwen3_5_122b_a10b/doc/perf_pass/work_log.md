@@ -874,3 +874,16 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   sentinel groups) + the 11 existing grouped tests: 13 / 13 pass after the rebuild (ninja 20 s). Also fixed: the
   faulthandler must be registered with chain=False (chain=True ran SIGUSR1's default disposition and killed the
   engine). Re-running the reduced warm-up (resident on) chained into the served image smoke.
+- 13:31 VISION SERVED ON THE FULL MODEL (production config: 32 slots, 262144 ctx, 768 MiB traces, MTP k=3 adaptive,
+  QWEN35_VISION=1 bfp8 tower): healthy in 10 min (tower + splice buffers before the captures; vision warm-up 448 /
+  896 px 0.2 / 0.3 s with cached kernels); text requests unchanged (prose/code 64 tokens, logprobs / penalty / min_p
+  served). Image chat request (448x448 synthetic PNG: red square, yellow circle on blue; 222 prompt tokens incl. 196
+  image tokens, thinking off): MTP path 28 tokens in 0.99 s, text IDENTICAL to the HF bf16 CPU reference ("The image
+  features a red square in the upper left and a yellow circle in the lower right, both set against a solid blue
+  background."); the host-sampled plain path (logprobs request) gives the same facts in another order ("...a solid
+  blue background with a red square in the upper left and a yellow circle in the lower right") - a greedy near-tie at
+  token 5, so the free-running top-1 agreement (4/25) only measures the divergence point, not the tower. KV pool with
+  the MTP head + tower resident: 22725 blocks x 64 = 1.45 M tokens (stage-13 text-only server: 28472 = 1.82 M); one
+  request still holds the full 262144 context. Bundle manifest: QWEN35_VISION=1, QWEN35_VISION_MAX_IMAGES=4,
+  `--limit-mm-per-prompt {"image": 4, "video": 0}`, card text. HANDOFF §5 rewritten (served vision). Item 10
+  (readiness re-validation: serve / sampling / qualitative / benchmark, MTP + vision) launched (logs/10/vllm-48l-mtp-vision.log).

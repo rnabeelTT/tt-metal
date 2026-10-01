@@ -176,5 +176,13 @@
       }
     },
     "capacity_evidence": "MEMORY_REPORT lines in logs/08/teacher-forcing_aime24_*.log; doc/datatype_sweep/README.md section 6"
+  },
+  "production_2026_10_01_mtp_vision": {
+    "config": "max-num-seqs 32, max-model-len 262144, block 64, trace region 768 MiB, QWEN35_MTP=3 (adaptive), QWEN35_VISION=1 (bfp8 tower)",
+    "kv_blocks_vllm": 22725,
+    "kv_pool_tokens": 1454400,
+    "kv_pool_gib": 16.644,
+    "note": "vLLM block count printed by allocate_kv_cache with the MTP head, its scratch/traces and the vision tower resident; the stage-13 text-only server (no MTP, no tower) had 28472 blocks (1.82 M tokens). One request can still hold the full 262144 context (4096 blocks).",
+    "source": "~/qwen35-122b-bringup/logs/13/serve-vision-full.log + readiness_vllm/server.log 2026-10-01 13:28"
   }
 }
