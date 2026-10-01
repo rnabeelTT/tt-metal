@@ -75,3 +75,26 @@ chat-turn case): group the call's final-chunk requests in fours (same bucket), r
 Risks: the attention prefill program at batch 4 (new program configs), the per-user rope tables (M-RoPE for images
 excluded: image prompts stay single), trace memory for the extra buckets (5 buckets x 1 variant), and the GDN batched
 form's correctness against per-user prefill (the MTP verify pass already validates it at 32 rows).
+
+### Refinement after reading the code (22:15)
+
+- The batched GDN form (`forward_prefill_batched`) already has a trace-safe per-user length object: `mtp_multi.RowsLen`
+  (device-resident masks [B, T, 1] + conv selectors, staged by copy); use it with T = bucket (128 / 256 / 512) and B = 4.
+- It writes rec_state[u] / conv_states[*][u] for u = 0..B-1 of the BOUND buffers: the admission pass must run on a
+  dedicated B=4 GDN scratch (36 layers x 4 x ~1 MiB per die; bind like `_bind_gdn_prefill_scratch`), then
+  `write_slot` row u -> the request's slot (4 x 29 ms; the slot write stays the per-request fixed cost until item 3).
+- Attention layers: the rows machinery (`layer_forward_rows`) caps the block at 32 rows, so it does not apply; and
+  calling the single-user prefill 4 times per attention layer costs 12 x 4 x ~3.7 ms = 178 ms (launch-bound) and
+  halves the win. Needed: `TPAttention.forward_prefill_paged_batched(x [1,1,B*T,.], cos/sin [B*T], page_tables x B)` =
+  one QKV projection + rope over B*T rows, per-user `paged_fill_cache` + causal SDPA on the user's T rows, one output
+  projection over B*T rows (~80 lines reusing `_qkv`, `_make_heads`, the q/k norms and the SDPA call).
+- Norms / MoE / embedding / LM head work on B*T rows unchanged (MoE: sorted path at >= 128 rows); the logits select
+  becomes a one-hot [32, B*T] with B rows set; the adapter's sampler must sample row u (check `sampler(sh, u)`).
+- Estimate with the batched attention: one 4-request pass ~ 1.05 x a single 512-token bucket (~200 ms) + 4 slot
+  writes (116 ms) ~ 320 ms vs 4 x 238 = 952 ms today -> ~3x on short bursts (32 x 128-token TTFT 7.6 -> ~2.6 s).
+- MTP: requests admitted in a batch get no head rows -> mark their slots MTP-ineligible (plain decode even when they
+  end up alone); single admissions keep today's path. Image prompts stay single (M-RoPE per user).
+- Order of work: (1) `forward_prefill_paged_batched` + unit test vs 4 single-user prefills (reduced model);
+  (2) `Qwen35MoeModel.prefill_batched(tokens [B,T], pts, lens, slots)` eager + PCC vs per-user prefill (logits + slot
+  states); (3) persistent inputs + trace per (bucket, B=4) + warm-up; (4) `prefill_serving` grouping of final
+  short-prompt requests in fours; (5) served A/B on the 32-user 128-token burst + program guard; (6) bundle.
