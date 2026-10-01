@@ -15,10 +15,12 @@ from models.autoports.qwen_qwen3_5_122b_a10b.tests.test_multichip_decoder import
     _MeshHarness,
     _replicate,
     _shard,
+    mesh_tp,
 )
 from models.tt_transformers.tt.common import Mode
 
 
+@mesh_tp()
 @pytest.mark.parametrize("T", [128, 512], ids=["t128", "t512"])
 def test_attention_prefill_batched_matches_single(mesh_device, T):
     B = 4
