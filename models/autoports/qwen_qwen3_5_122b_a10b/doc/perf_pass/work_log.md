@@ -1112,3 +1112,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   MTP rows mode had chosen the pairs path deliberately: `QWEN35_MTP_MOE_ROWS=pairs`). Fix: the threshold rule
   applies to plain decode only; the MTP rows mode keeps its own choice. Bundle run 4 (packaged 21:04) carries the
   regression -> rebuild after the fix.
+- 21:32 c=1 still 26.4 ms after the MTP-rows guard -> MTP_STATS show the pass itself at 86-89 ms per device step
+  (71.5 this morning) with the same acceptance (2.7-2.9 tokens per pass). Cause: `_grouped_configs` set `untilize_out`
+  on the SHARED down-projection config, so the pairs path (the MTP pass's 32-row block and plain decode at 2-16 rows)
+  also produced row-major output and paid layout conversions afterwards. Fix: a separate config object
+  (`_cfg_grouped_dn_rm`) used only by `_routed_sorted`; the pairs path keeps TILE output. Served re-check at c = 1 /
+  8 / 32 launched; the MTP-rows guard stays. Bundle run 5 (21:22) carries this regression -> rebuild after the check.

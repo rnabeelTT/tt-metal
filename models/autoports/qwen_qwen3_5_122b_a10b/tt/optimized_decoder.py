@@ -570,6 +570,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             # indexed/gather mode: the id list drives the weight reads, `sparsity` is unused (kept for the op signature)
             sparse_kw = {"indices": m["group_ids"]}
             cfg_gu, cfg_dn = self._grouped_configs(gs, H, Nl)
+            if getattr(self, "_cfg_grouped_down_untilize", False):
+                cfg_dn = self._cfg_grouped_dn_rm  # row-major down projection straight into the gather-add un-dispatch
         else:
             sparse_kw = {"nnz": G}
             cfg_gu, cfg_dn = self._cfg_sorted_gu, self._cfg_sorted_dn
@@ -689,6 +691,10 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             tile_bytes = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088}
             cfg_gu, _ = cfg(H, gu_tiles, opt.grouped_gate_up_in0, tile_bytes.get(self.up_gate.dtype, 2048))
             cfg_dn, dn_resident = cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048))
+            # a SEPARATE config object for the expert-sorted path's down projection: the pairs path (decode widths
+            # 2-16 and the MTP pass) shares cfg_dn and must keep TILE output (served c=1 pass 71.5 -> 86 ms when the
+            # row-major flag leaked into it, 2026-10-01 21:30)
+            cfg_dn_rm, _ = cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048))
             # QWEN35_DOWN_UNTILIZE_OUT (default on): the down projection writes ROW_MAJOR rows (the compute kernel's
             # pack-untilize path) straight into the gather-add un-dispatch - no separate untilize op (0.74 ms per MoE
             # layer at 2048 tokens, 0.25 ms at 16 decode rows; 2026-10-01). Needs the skip-aware path (padding groups'
@@ -700,9 +706,10 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 and self._skip_pad_groups_rule()
                 and self.prec.act_dtype == ttnn.bfloat16
             ):
-                cfg_dn.untilize_out = True
+                cfg_dn_rm.untilize_out = True
             self._cfg_grouped = (cfg_gu, cfg_dn)
-            self._cfg_grouped_down_untilize = bool(cfg_dn.untilize_out)
+            self._cfg_grouped_dn_rm = cfg_dn_rm
+            self._cfg_grouped_down_untilize = bool(cfg_dn_rm.untilize_out)
         return self._cfg_grouped
 
     def _route(self, x4):
