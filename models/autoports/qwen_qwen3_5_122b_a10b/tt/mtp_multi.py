@@ -119,16 +119,17 @@ def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None, gdn_index=0):
     xb = ttnn.reshape(xb_flat, (B, GDN_T, H))
     rebuild_batched_conv_carry(dn)
     vl = valid_lens if isinstance(valid_lens, RowsLen) else list(valid_lens)
-    out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=vl, carry=True)
+    sink = None
     if saved is not None:
-        # the commit replays the layer on this block with the accepted lengths: appended (eager) or copied into the
-        # persistent buffer already at this index (traced pass)
+        # the commit re-runs only the conv FIR + chunk scan on this pass's scan inputs (commit_scan_batched): one dict
+        # per GDN layer; an existing dict's persistent buffers are copied into (traced pass), a missing one is appended
         if len(saved) > gdn_index:
-            ttnn.copy(xb_flat, saved[gdn_index])
-            ttnn.deallocate(xb_flat)
+            sink = saved[gdn_index]
         else:
-            saved.append(xb_flat)
-    elif xb_flat.is_allocated():
+            sink = {}
+            saved.append(sink)
+    out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=vl, carry=True, scan_sink=sink)
+    if xb_flat.is_allocated():
         ttnn.deallocate(xb_flat)
     # out: the users' T rows, reduce-scattered -> [B*T, dim/TP]; rows i < R of every user back into the block's rows
     Dtp = out.shape[-1]
@@ -147,24 +148,29 @@ def _gdn_rows_batched(layer, x, B, R, valid_lens, saved=None, gdn_index=0):
     return y
 
 
-def commit_multi(model, snap, saved_xb, accepted_lens):
-    """Exact per-user commit: restore the pre-pass batched GDN snapshot, then ONE batched replay of every GDN layer on
-    its saved input block with per-row valid lengths a_u + 1 (a user that accepted every draft replays to the state the
-    pass already produced)."""
+def commit_multi(model, snap, saved, accepted_lens):
+    """Exact per-user commit: restore the pre-pass batched GDN snapshot, then ONE batched scan-only replay per GDN
+    layer (conv FIR for the taps + chunk scan on the pass's saved q/k/v/beta/g) with per-row valid lengths a_u + 1 (a
+    user that accepted every draft replays to the state the pass already produced)."""
     from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_verify import restore_gdn_state
 
     restore_gdn_state(model, snap)
     gdn_layers = [layer for layer in model.layers if not layer.is_full_attention]
-    assert len(gdn_layers) == len(saved_xb)
-    B = accepted_lens.B if isinstance(accepted_lens, RowsLen) else len(accepted_lens)
-    for layer, xb_flat in zip(gdn_layers, saved_xb):
+    assert len(gdn_layers) == len(saved)
+    vl = accepted_lens if isinstance(accepted_lens, RowsLen) else list(accepted_lens)
+    for layer, sink in zip(gdn_layers, saved):
         dn = layer.attention
-        H = xb_flat.shape[-1]
-        xb = ttnn.reshape(xb_flat, (B, GDN_T, H))
         rebuild_batched_conv_carry(dn)
-        vl = accepted_lens if isinstance(accepted_lens, RowsLen) else list(accepted_lens)
-        out = dn.forward_prefill_batched(xb, chunk_size=int(layer.args.gdn_chunk_size), valid_lens=vl, carry=True)
-        ttnn.deallocate(out)
+        dn.commit_scan_batched(sink, vl)
+
+
+def free_saved_scan(saved):
+    """Free the device tensors of the per-layer scan sinks produced by a rows pass."""
+    for sink in saved:
+        for key, t in sink.items():
+            if key != "meta" and t.is_allocated():
+                ttnn.deallocate(t)
+        sink.clear()
 
 
 def head_step_multi(model, head, toks, hidden, positions, page_table_rows, *, rows_kv=False, masks_pos=None):
@@ -391,8 +397,7 @@ def mtp_generate_multi(gen, head, prompts, max_new_tokens, k, *, log=None, draft
             nxt.append(preds[a])
         if any(a < k for a in acc):
             commit_multi(model, snap, saved, [a + 1 for a in acc])
-        for t in saved:
-            ttnn.deallocate(t)
+        free_saved_scan(saved)
         free_gdn_snapshot(snap)
         # head K/V rows for the accepted tokens: row u*R+i (i = 1..a_u) = (token rows[u][i], hidden row u*R+i-1)
         row_ids, toks_rows, pos_rows = [], [], []

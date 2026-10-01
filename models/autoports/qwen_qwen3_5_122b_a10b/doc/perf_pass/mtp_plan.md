@@ -1,6 +1,6 @@
 # MTP (multi-token prediction) plan for Qwen3.5-122B-A10B on p300x2
 
-Status: planned (2026-09-30), to start after perf-pass turn 5 ships. Sources: the checkpoint's `mtp.*` keys (785 tensors in
+Status: served single-user (2026-09-30), follow-ups shipped 2026-10-01 (see the status sections below). Sources: the checkpoint's `mtp.*` keys (785 tensors in
 shards 37-39), vLLM 0.26's `qwen3_5_mtp.py` (reference math), the Qwen3.8 bundle study (`qwen38_bundle_study.md`,
 trace/accept design), and a read of `vllm-tt-plugin` (no speculative-decoding support today).
 
@@ -85,6 +85,21 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   prefix only, or keep per-row prefix states and select).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
+
+## Status (2026-10-01 03:30): follow-ups shipped (sampling, in-trace head prefill, scan-only batched commit)
+- Exact speculative sampling (`tt/mtp_sampling.py`): temperature > 0 requests get sampled drafts and a rejection-sampling
+  accept, exactly distributed as plain sampling of the request-processed target. Requests with 0 < top_k <= 32 (the
+  checkpoint's generation default top_k 20 / top_p 0.95 applies to every request that does not set them) are served
+  from device per-shard top-k candidates (`cands_pass` / `cands_draft` traces: pad to 65536, two 32768 halves, top-32
+  each) - no logits rows are read back; other requests read the ROW_MAJOR rows (0.5 MB per row per mesh, ~2.5 ms per
+  read). The first served version did the host top-p by sorting the whole 248K row (2-10 ms per row): sampled passes
+  cost 93-100 ms vs 58-68 greedy on the full model; fixed (survivor-only / nucleus-prefix top-p, candidates).
+- The head's prompt rows run inside the traced prefill bucket (`MtpServing._bucket_head`, `QWEN35_MTP_TRACED_PREFILL=1`
+  default): TTFT p50 329 -> 314 ms (plain 258-274) at c = 1, TPOT 18.6 ms = 53.8 t/s/u (51.5). Greedy texts unchanged.
+- Scan-only batched commit (`commit_scan_batched`): the multi-user commit re-runs only conv FIR + chunk scan on the
+  pass's saved inputs (0.59 ms per GDN layer-pass on the reduced model; ~11 ms for 36 layers vs 30-50 ms before).
+  Multi-user MTP stays opt-in: its pass is a width-8 / 16 decode step; re-measure after the compact decode MoE.
+- Default-on decision pending a served sampled A/B with the candidate path (queued: full model, T = 0.6 defaults).
 
 ## Status (2026-09-30 20:10): SERVED (single user, opt-in)
 - `QWEN35_MTP=3` + `--max-num-seqs 1` serves speculative decoding through vLLM (tt/mtp_plugin_shim.py, tt/mtp_serving.py,

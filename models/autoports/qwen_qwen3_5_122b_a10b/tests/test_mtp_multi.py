@@ -163,3 +163,82 @@ def test_multi_user_generate_forced_greedy(mesh_device):
         assert same >= N // 2, (u, greedy[u], mtp[u])
     print(f"MULTI_GENERATE B={B} k={k} N={N}: passes {passes} ({B * N / passes:.2f} tokens per pass over both users)")
     assert passes < N
+
+
+@pytest.mark.parametrize("mesh_device", [(1, 4)], indirect=True)
+@pytest.mark.parametrize(
+    "device_params",
+    [{"fabric_config": ttnn.FabricConfig.FABRIC_1D, "l1_small_size": 24576, "trace_region_size": 128 * 1024 * 1024}],
+    indirect=True,
+)
+def test_multi_user_scan_only_commit_matches_shorter_pass(mesh_device):
+    """The scan-only batched commit (conv FIR + chunk scan on the pass's saved q/k/v/beta/g with the accepted per-user
+    lengths) must leave every GDN layer in the state a full pass over only the accepted rows produces."""
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_multi import GDN_T, RowsLen, commit_multi, free_saved_scan
+
+    os.environ.setdefault("MESH_DEVICE", "P300x2")
+    B, R = 2, 4
+    gen = build_generator(
+        MODEL_DIR,
+        mesh_device,
+        max_batch_size=B,
+        max_seq_len=4096,
+        layer_indices=[0, 3],
+        warm_decode_trace=False,
+        warm_prefill_trace=False,
+    )
+    model = gen.model
+    prompts = [[1000 + 7 * i for i in range(20)], [3000 + 5 * i for i in range(25)]]
+    P = [len(p) for p in prompts]
+    T = max(P)
+    toks = torch.zeros(B, T, dtype=torch.int64)
+    for u in range(B):
+        toks[u, : P[u]] = torch.tensor(prompts[u])
+    gen.reset()
+    logits0 = gen.prefill_forward(toks, page_table=gen.page_table, prompt_lens=P)
+    rows = [[int(torch.argmax(logits0[u, -1]).item()) + i for i in range(R)] for u in range(B)]
+    positions = [[P[u] + i for i in range(R)] for u in range(B)]
+    dn_layers = [l.attention for l in model.layers if not l.is_full_attention]
+
+    def states():
+        out = []
+        for dn in dn_layers:
+            out.append(
+                [ttnn.to_torch(dn.rec_state, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()]
+                + [
+                    ttnn.to_torch(c, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
+                    for c in dn.conv_states
+                ]
+            )
+        return out
+
+    snap = snapshot_gdn_state(model)
+    for accepted in ([2, 1], [4, 3]):
+        # the full-width pass (both users R rows) with the scan sink, then the scan-only commit of `accepted` rows
+        saved = []
+        h, lg_tt, _ = verify_pass_multi(model, rows, positions, gen.page_table[:B], saved=saved)
+        ttnn.deallocate(lg_tt)
+        ttnn.deallocate(h)
+        assert len(saved) == len(dn_layers) and all(
+            set(s) >= {"qkv", "q", "k", "v", "beta", "g", "meta"} for s in saved
+        )
+        commit_multi(model, snap, saved, accepted)
+        free_saved_scan(saved)
+        got = states()
+        # reference: the same pass from the same snapshot with the accepted lengths as the device-resident row lengths
+        restore_gdn_state(model, snap)
+        rl = RowsLen(mesh_device, B, GDN_T, dn_layers[0].K)
+        rl.stage(accepted)
+        h, lg_tt, _ = verify_pass_multi(model, rows, positions, gen.page_table[:B], rows_len=rl)
+        ttnn.deallocate(lg_tt)
+        ttnn.deallocate(h)
+        ref = states()
+        restore_gdn_state(model, snap)
+        for li, (g_l, r_l) in enumerate(zip(got, ref)):
+            for ti, (g_t, r_t) in enumerate(zip(g_l, r_l)):
+                name = "rec_state" if ti == 0 else f"conv_states[{ti - 1}]"
+                _, pcc = comp_pcc(r_t, g_t, 0.999)
+                diff = (g_t - r_t).abs().max().item()
+                print(f"MULTI_COMMIT accepted={accepted} gdn layer {li} {name}: PCC {pcc:.6f} max|diff| {diff:.3e}")
+                assert pcc >= 0.999 and diff <= 2e-2 * max(1.0, r_t.abs().max().item()), (accepted, li, name, pcc, diff)
+    free_gdn_snapshot(snap)

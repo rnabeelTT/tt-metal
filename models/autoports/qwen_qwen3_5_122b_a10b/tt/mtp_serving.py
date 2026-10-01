@@ -432,8 +432,8 @@ class MtpServing:
         if sampler is not None and not sampler.greedy:
             drafts, qs = r.draft(tok, pos, sampler=sampler)
             rows = [tok] + drafts
-            preds, lg = r.verify(rows, pos, want_logits=True)
-            a, nxt = sampler.accept(lg, drafts, qs)
+            preds, target = r.verify(rows, pos, want_logits=True, sampler=sampler)
+            a, nxt = sampler.accept(target, drafts, qs)
         else:
             drafts = r.draft(tok, pos)
             rows = [tok] + drafts

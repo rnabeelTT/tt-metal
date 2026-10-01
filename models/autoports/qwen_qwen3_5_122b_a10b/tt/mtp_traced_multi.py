@@ -56,7 +56,9 @@ class MtpTracedMulti:
         self.rows_len.stage([R] * B)
         self.commit_len = RowsLen(self.mesh, B, GDN_T, K)
         self.commit_len.stage([R] * B)
-        self.saved = []  # per GDN layer: persistent [1,1,B*T,dim] input blocks (adopted at the first warm run)
+        # per GDN layer: persistent scan inputs (pre-conv qkv, q/k/v/beta/g) of the rows pass, filled at its first
+        # (eager warm) run and copied into by every later run / trace replay; the commit's scan-only replay reads them
+        self.saved = [{} for _ in self.dn_layers]
         self.snap_rec = [ttnn.clone(dn.rec_state) for dn in self.dn_layers]
         self.snap_conv = [[ttnn.clone(c) for c in dn.conv_states] for dn in self.dn_layers]
         self.h_out = None

@@ -27,21 +27,71 @@ class SpecSampler:
         else:
             self.gen.seed()
 
+    # the per-shard candidate count the device top-k delivers (tt/mtp_traced.py reads 2 x 32 per shard): a request
+    # whose top_k is at most this many is exactly reproducible from the candidates alone (its top_k survivors are
+    # inside every shard's top-32, hence inside the union)
+    SPARSE_TOP_K = 32
+
+    def sparse_ok(self) -> bool:
+        """True when the request's distribution is determined by the device top-k candidates (0 < top_k <= 32)."""
+        return 0 < self.top_k <= self.SPARSE_TOP_K
+
     def probs(self, logits: torch.Tensor) -> torch.Tensor:
-        """Request-processed distribution over the vocab from a logits row ([V], any float dtype)."""
+        """Request-processed distribution over the vocab from a logits row ([V], any float dtype). top_k keeps exactly
+        k survivors (ties at the k-th value broken by torch.topk, as the device top-k does; vLLM's host sampler keeps
+        the ties) - any fixed processing is a valid target for the accept rule as long as drafts and targets use it."""
         x = logits.float() * (1.0 / self.temperature)
-        if 0 < self.top_k < x.numel():
-            kth = torch.topk(x, self.top_k).values[-1]
-            x = torch.where(x < kth, torch.full_like(x, float("-inf")), x)
+        V = x.numel()
+        if 0 < self.top_k < V:
+            # top-k, then softmax / top-p over the k survivors only (the dense top-p sorted the whole 248K row: ~2 ms)
+            vals, idx = torch.topk(x, self.top_k)
+            return self._scatter(self._nucleus(torch.softmax(vals, dim=-1)), idx, V)
         p = torch.softmax(x, dim=-1)
         if self.top_p < 1.0:
+            # the nucleus is among the largest probabilities: try the top 1024, then 16384 (~1 ms); the full sort
+            # (~10 ms on 248K) only when those do not reach top_p
+            for n in (1024, 16384):
+                n = min(n, V)
+                vals, idx = torch.topk(p, n)
+                if n == V or float(vals.sum()) >= self.top_p:
+                    return self._scatter(self._nucleus_unnormalized(vals), idx, V)  # topk values come sorted desc.
             sp, idx = torch.sort(p, descending=True)
-            cum = torch.cumsum(sp, dim=-1)
-            keep = cum - sp <= self.top_p  # keep every token up to the one that crosses top_p
-            masked = torch.zeros_like(p)
-            masked[idx[keep]] = sp[keep]
-            p = masked / masked.sum()
+            return self._scatter(self._nucleus_unnormalized(sp), idx, V)
         return p
+
+    def probs_topk(self, vals: torch.Tensor, idx: torch.Tensor, V: int) -> torch.Tensor:
+        """The same distribution from candidate logits only: `vals` [n] (any float dtype) at vocab ids `idx` [n], a
+        superset of the row's top_k (requires sparse_ok()). Returns the dense [V] distribution."""
+        assert self.sparse_ok(), (self.top_k, self.SPARSE_TOP_K)
+        x = vals.float() * (1.0 / self.temperature)
+        k = min(self.top_k, x.numel())
+        v, i = torch.topk(x, k)
+        return self._scatter(self._nucleus(torch.softmax(v, dim=-1)), idx.long()[i], V)
+
+    def _nucleus(self, p_sorted_any: torch.Tensor) -> torch.Tensor:
+        """top-p over a (small) normalized distribution given in any order; returns it renormalized."""
+        if self.top_p >= 1.0:
+            return p_sorted_any
+        sp, order = torch.sort(p_sorted_any, descending=True)
+        cum = torch.cumsum(sp, dim=-1)
+        keep = cum - sp <= self.top_p  # keep every token up to the one that crosses top_p
+        out = torch.zeros_like(p_sorted_any)
+        out[order[keep]] = sp[keep]
+        return out / out.sum()
+
+    def _nucleus_unnormalized(self, sp: torch.Tensor) -> torch.Tensor:
+        """top-p over probabilities already sorted descending (a prefix of the full row: their cumulative sums are the
+        row's); returns the kept prefix renormalized, zeros elsewhere."""
+        cum = torch.cumsum(sp, dim=-1)
+        keep = cum - sp <= self.top_p
+        out = torch.where(keep, sp, torch.zeros_like(sp))
+        return out / out.sum()
+
+    @staticmethod
+    def _scatter(p_small: torch.Tensor, idx: torch.Tensor, V: int) -> torch.Tensor:
+        out = torch.zeros(V, dtype=torch.float32)
+        out[idx.long()] = p_small
+        return out
 
     def sample(self, p: torch.Tensor) -> int:
         # inverse-CDF draw with one uniform (torch.multinomial over a 248K vocab costs ~1 ms per draw)
@@ -50,16 +100,17 @@ class SpecSampler:
         i = int(torch.searchsorted(cdf, torch.tensor([u * float(cdf[-1])])).item())
         return min(i, p.numel() - 1)
 
-    def accept(self, p_rows: torch.Tensor, drafts: list[int], q_rows: list[torch.Tensor]):
-        """p_rows [R, V] target logits rows (row i = after token i of the candidate rows), drafts d_1..d_k with their draft
-        distributions q_rows. Returns (accepted count a, next token). Target rows are processed lazily: row i only when
-        the loop reaches it."""
+    def accept(self, p_rows, drafts: list[int], q_rows: list[torch.Tensor]):
+        """p_rows: [R, V] target logits rows (row i = after token i of the candidate rows) or a callable i -> the dense
+        target distribution of row i (the device top-k candidate path); drafts d_1..d_k with their draft distributions
+        q_rows. Returns (accepted count a, next token). Target rows are processed lazily: row i only when the loop
+        reaches it."""
         k = len(drafts)
         ps = [None] * (k + 1)
 
         def P(i):
             if ps[i] is None:
-                ps[i] = self.probs(p_rows[i])
+                ps[i] = p_rows(i) if callable(p_rows) else self.probs(p_rows[i])
             return ps[i]
 
         for i, d in enumerate(drafts):

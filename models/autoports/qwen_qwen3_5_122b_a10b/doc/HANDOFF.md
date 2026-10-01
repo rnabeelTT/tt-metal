@@ -124,15 +124,22 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
 - Building: the new ops are part of the `ttnn` target (`ninja -C build_Release ttnn`); the linked library is
   `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
   copy + atomic `mv` while device jobs run. Kernels compile on first use.
-- MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`): opt-in,
-  single user. Serve with `QWEN35_MTP=3` (k drafts per pass) and `--max-num-seqs 1`; greedy accept (temperature > 0
-  requests still get the model's own tokens: exact for greedy, approximate otherwise); `QWEN35_MTP_GDN_ROWS=32` (GDN
-  block rows of the verify pass; 128 = the prefill-form norm path), `QWEN35_MTP_MOE_ROWS=pairs` (`sorted` is slower),
-  `QWEN35_MTP_KV_ROWMASK=1`. The plugin runs with an import-time shim (`tt/mtp_plugin_shim.py`) for a variable number of
-  tokens per step; the KV pool shrinks by the head's K/V (13th KV layer + 1.5 GiB). Measured (full model, c = 1): TPOT
-  19.4 ms = 51.5 t/s/u vs 31.3 plain; code prompts 1.9x, prose ~1.06x; TTFT +60 ms (eager bucket prefill + head rows).
-  Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls), `tools/mtp_pass_check.py` (verify pass
-  vs decode, row by row), `tools/mtp_generate_full.py` (eager loop), `tools/mtp_acceptance.py`.
+- MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`): opt-in.
+  Serve with `QWEN35_MTP=3` (k drafts per pass) and `--max-num-seqs 1` (single user; `--max-num-seqs` 2-8 runs the
+  multi-user step, measured slower than plain decode at 2-4 users). Temperature 0 = greedy accept; temperature > 0 =
+  EXACT speculative sampling (drafts sampled from the head, rejection-sampling accept with the request's temperature /
+  top-k / top-p; a request with 0 < top_k <= 32 - the checkpoint's generation default is top_k 20 / top_p 0.95 - is
+  served from device top-k candidates with no logits read-back; penalties are not applied in the MTP step). Knobs:
+  `QWEN35_MTP_GDN_ROWS=32` (GDN block rows of the verify pass; 128 = the prefill-form norm path),
+  `QWEN35_MTP_MOE_ROWS=pairs` (`sorted` is slower), `QWEN35_MTP_KV_ROWMASK=1`, `QWEN35_MTP_TRACED_PREFILL=1` (the
+  head's prompt rows run inside the traced prefill bucket programs; 0 = eager bucket prefill + a separate head pass).
+  The plugin runs with an import-time shim (`tt/mtp_plugin_shim.py`) for a variable number of tokens per step; the KV
+  pool shrinks by the head's K/V (13th KV layer + 1.5 GiB). Measured (full model, c = 1, 2026-10-01): TPOT 18.6 ms =
+  53.8 t/s/u vs 31.3 plain; code prompts 1.8x, prose ~1.06x end to end; TTFT p50 314 ms (plain 258-274). Per-request
+  `MTP_STATS` lines in the server log give passes, tokens per pass, acceptance histogram and ms per pass.
+  Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls; `--temperature/--top-k/--top-p` time the
+  sampled loop), `tools/mtp_pass_check.py` (verify pass vs decode, row by row), `tools/mtp_generate_full.py` (eager
+  loop), `tools/mtp_acceptance.py`, `tools/mtp_traced_multi_run.py` (multi-user traced step).
 - Chunked prefill (turn 7, opt-in): `QWEN35_CHUNKED_PREFILL=1` + vLLM `--enable-chunked-prefill --max-num-batched-tokens
   2048`; intermediate chunks run whole 2048-token segments from the request's own processed end with the GDN state
   carried per request (keyed by its first KV block), the final chunk samples; validated with the plugin's needle test
@@ -143,8 +150,8 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
 - Multi-user MTP (built, measured negative at 2-4 users; opt-in via QWEN35_MTP with --max-num-seqs > 1) and the levers
   that would flip it: `doc/perf_pass/mtp_plan.md`.
 - Next levers (not done): compact-layout decode MoE for 8-32 rows (gather / un-dispatch kernels; the same work as the
-  prefill levers "row gather" + "untilize before un-dispatch"), scan-only batched MTP commit, speculative sampling,
-  one weight pass per expert in the grouped sparse matmul, a fused GDN decode step.
+  prefill levers "row gather" + "untilize before un-dispatch"), one weight pass per expert in the grouped sparse
+  matmul, a fused GDN decode step, MTP commit / draft overlap on the second command queue.
 
 ## 5. Vision enablement path (not done in this bring-up)
 

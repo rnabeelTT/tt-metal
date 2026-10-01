@@ -107,8 +107,18 @@ class MtpTraced:
         )
         self.traces = {}
         self.outs = {}
-        self.timing = {"pass": [], "commit": [], "draft": [], "rows": []}
+        self.timing = {
+            "pass": [],
+            "commit": [],
+            "draft": [],
+            "rows": [],
+            "ids_read": [],
+            "lg_read": [],
+            "cands_read": [],
+        }
         self._last_logits = None  # [B, V] host logits of the last pass / draft read back in sampling mode
+        self._last_cands = None  # (values, ids) [B, n] of the last candidate read (sparse sampling)
+        self._cand_half = None
 
     # ------------------------------------------------------------------------------------------------ programs
     def _argmax_max(self, logits):
@@ -165,10 +175,11 @@ class MtpTraced:
             ttnn.copy(h, self.h_out)
             ttnn.deallocate(h)
         am, mx, lg_rm = self._argmax_max(logits)
-        ttnn.deallocate(logits)
         for t in (cos, sin):
             ttnn.deallocate(t)
-        return am, mx, lg_rm  # the ROW_MAJOR logits stay an output: the speculative sampler reads the rows back
+        # outputs: the ROW_MAJOR logits (the speculative sampler's full-row fallback reads them back) and the TILE
+        # logits (input of the candidate trace: per-shard top-k for the sampled path with a top_k <= 32)
+        return am, mx, lg_rm, logits
 
     def _commit_body(self):
         for dn, rec, taps in zip(self.dn_layers, self.snap_rec, self.snap_conv):
@@ -184,10 +195,35 @@ class MtpTraced:
     def _draft_body(self):
         lg, h_next = self.head.decode_step(self.d_tok, self.d_hid, self.d_pos, self.d_rot, self.d_pt)
         am, mx, lg_rm = self._argmax_max(lg)
-        ttnn.deallocate(lg)
         ttnn.copy(h_next, self.d_hid)
         ttnn.deallocate(h_next)
-        return am, mx, lg_rm
+        return am, mx, lg_rm, lg
+
+    # per-shard candidate count of the device top-k (2 halves x 32): SpecSampler.SPARSE_TOP_K must not exceed 32
+    CAND_K = 32
+
+    def _cands_body(self, logits):
+        """Per-shard top-k candidates of TILE logits [1,1,B,W]: W padded to the next power of two and split in two
+        halves of <= 32768 (the multi-core top-k bound), top-32 of each -> (values, ids) x 2, ids local to the half.
+        Shared with models/common/modules/sampling/sampling_1d.py (same pad / split shape)."""
+        import sys
+
+        W = logits.shape[-1]
+        Wp = 1 << (W - 1).bit_length()
+        x = logits
+        if Wp != W:
+            x = ttnn.pad(logits, [(0, 0), (0, 0), (0, 0), (0, Wp - W)], value=-sys.float_info.max)
+        halves = ttnn.split(x, Wp // 2, dim=3) if Wp > 32768 else [x]
+        if x is not logits:
+            ttnn.deallocate(x)
+        outs = []
+        for h in halves:
+            v, i = ttnn.topk(h, k=self.CAND_K, dim=-1)
+            outs += [v, i]
+            if h is not logits:
+                ttnn.deallocate(h)
+        self._cand_half = Wp // 2 if Wp > 32768 else Wp
+        return tuple(outs)
 
     def _rows_body(self):
         att = self.head.layer.attention
@@ -227,6 +263,9 @@ class MtpTraced:
         )
         for name, body in bodies:
             outs = body()
+            if name in ("pass", "draft"):
+                for t in self._cands_body(outs[3]):
+                    ttnn.deallocate(t)
             for t in outs:
                 ttnn.deallocate(t)
             if flush:
@@ -248,6 +287,16 @@ class MtpTraced:
             self.outs[name] = outs
             if flush:
                 flush()
+        for name in ("pass", "draft"):
+            # the sampled path's candidates: a separate trace (greedy passes never pay for it) reading the TILE logits
+            # the main trace left in its persistent output
+            tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+            outs = self._cands_body(self.outs[name][3])
+            ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+            self.traces["cands_" + name] = tid
+            self.outs["cands_" + name] = outs
+            if flush:
+                flush()
         ttnn.synchronize_device(self.mesh)
 
     def release(self):
@@ -258,27 +307,43 @@ class MtpTraced:
     # ------------------------------------------------------------------------------------------------ per-pass host side
     _BODIES = {"pass": "_pass_body", "commit": "_commit_body", "draft": "_draft_body", "rows": "_rows_body"}
 
-    def _run(self, name, want_logits=False):
+    def _run(self, name, want_logits=False, want=None):
+        """Replay program `name`; returns the per-row argmax ids. `want` = "rows": also read the ROW_MAJOR logits rows
+        back into _last_logits; "cands": run the candidate trace and read the per-shard top-k into _last_cands (falls
+        back to "rows" while the programs run eagerly). `want_logits=True` is the "rows" spelling."""
         t0 = time.perf_counter()
+        want = "rows" if want_logits and want is None else want
         eager = name not in self.traces
         if eager:
             # no capture yet (the serving warm-up's dummy decode runs before the trace phase): run the program eagerly
             outs = getattr(self, self._BODIES[name])()
+            if want == "cands":
+                want = "rows"
         else:
             ttnn.execute_trace(self.mesh, self.traces[name], cq_id=0, blocking=False)
             outs = self.outs[name]
+            if want == "cands":
+                ttnn.execute_trace(self.mesh, self.traces["cands_" + name], cq_id=0, blocking=False)
         res = None
         if outs:
             am, mx = outs[0], outs[1]
             comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
+            t1 = time.perf_counter()
             am_h = ttnn.to_torch(am, mesh_composer=comp).reshape(len(self.mesh.get_device_ids()), -1)  # [TP, B]
             mx_h = ttnn.to_torch(mx, mesh_composer=comp).float().reshape(am_h.shape[0], -1)
+            self.timing["ids_read"].append(time.perf_counter() - t1)
             shard = mx_h.argmax(0)  # [B] winning shard per row
             width = self.V // am_h.shape[0]
             res = [int(am_h[shard[b], b].item()) + int(shard[b].item()) * width for b in range(am_h.shape[1])]
-            if want_logits and len(outs) > 2:
+            if want == "rows" and len(outs) > 2:
+                t1 = time.perf_counter()
                 lg = ttnn.to_torch(outs[2], mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1))  # bf16 [1,1,B,V]
                 self._last_logits = lg.reshape(-1, lg.shape[-1])[:, : self.V]  # [B, V] bf16 (float per used row)
+                self.timing["lg_read"].append(time.perf_counter() - t1)
+            elif want == "cands":
+                t1 = time.perf_counter()
+                self._last_cands = self._read_cands(self.outs["cands_" + name])
+                self.timing["cands_read"].append(time.perf_counter() - t1)
         else:
             ttnn.synchronize_device(self.mesh)
         if eager:
@@ -290,6 +355,35 @@ class MtpTraced:
     def _write(self, dev_t, host_t):
         ttnn.copy_host_to_device_tensor(host_t, dev_t)
 
+    def _read_cands(self, outs):
+        """(values [B, TP*2*32] float, ids [B, TP*2*32] long with global vocab ids) from the candidate trace outputs
+        (values / local ids per half, per shard)."""
+        comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
+        TP = len(self.mesh.get_device_ids())
+        width = self.V // TP
+        vals, ids = [], []
+        for hi in range(len(outs) // 2):
+            v = ttnn.to_torch(outs[2 * hi], mesh_composer=comp).float()  # [TP, 1, B, 32]
+            i = ttnn.to_torch(outs[2 * hi + 1], mesh_composer=comp).long()  # [TP, 1, B, 32] (uint16 / uint32 local)
+            i = i + hi * self._cand_half + torch.arange(TP).view(TP, 1, 1, 1) * width
+            vals.append(v)
+            ids.append(i)
+        v = torch.cat(vals, dim=-1)  # [TP, 1, B, n]
+        i = torch.cat(ids, dim=-1)
+        B = v.shape[2]
+        v = v.permute(2, 0, 1, 3).reshape(B, -1)  # [B, TP*n]
+        i = i.permute(2, 0, 1, 3).reshape(B, -1)
+        return v, i
+
+    def _target_fn(self, sampler, R):
+        """Dense target distribution of row i from the pass's candidates (sparse requests)."""
+        vals, ids = self._last_cands
+
+        def P(i):
+            return sampler.probs_topk(vals[i], ids[i], self.V)
+
+        return P
+
     def draft(self, tok: int, pos: int, sampler=None):
         """k chained head steps from (tok, d_hid) at pos; returns the k drafts (and, with a non-greedy `sampler`, the
         draft distributions q_j the accept rule needs). d_hid must hold the hidden of `tok`."""
@@ -297,21 +391,29 @@ class MtpTraced:
         sampling = sampler is not None and not sampler.greedy
         cur_tok, cur_pos = tok, pos
         S = self.d_tok.shape[-1]
+        sparse = sampling and sampler.sparse_ok()
         for _ in range(self.k):
             self._write(self.d_tok, _host_u32([cur_tok], (1, 1, 1, S)))
             self._write(self.d_pos, _host_i32([cur_pos], (1,)))
             self._write(self.d_rot, _host_u32([cur_pos], (1, 1)))
-            d = self._run("draft", want_logits=sampling)[0]
+            d = self._run("draft", want=("cands" if sparse else "rows") if sampling else None)[0]
             if sampling:
-                q = sampler.probs(self._last_logits[0])
+                if sparse and self._last_cands is not None:
+                    vals, ids = self._last_cands
+                    q = sampler.probs_topk(vals[0], ids[0], self.V)
+                    self._last_cands = None
+                else:
+                    q = sampler.probs(self._last_logits[0])
                 d = sampler.sample(q)
                 qs.append(q)
             drafts.append(d)
             cur_tok, cur_pos = d, cur_pos + 1
         return (drafts, qs) if sampling else drafts
 
-    def verify(self, rows, pos: int, want_logits=False):
-        """Pass over rows (R = len(rows) <= k + 1) at positions pos..; returns the per-row argmax (R values)."""
+    def verify(self, rows, pos: int, want_logits=False, sampler=None):
+        """Pass over rows (R = len(rows) <= k + 1) at positions pos..; returns the per-row argmax (R values). With
+        `want_logits` also the target for SpecSampler.accept: the [R, V] logits rows, or (sparse `sampler`) a callable
+        i -> dense target distribution built from the device top-k candidates."""
         R = len(rows)
         BW, S = self.BW, self.p_tok.shape[-1]
         positions = [pos + i for i in range(BW)]
@@ -320,8 +422,14 @@ class MtpTraced:
         self._write(self.p_rot, _host_u32(positions, (1, BW)))
         self._write(self.p_masks, rows_pos_masks_host(positions, BW))
         self.plen.stage(R)
-        preds = self._run("pass", want_logits=want_logits)[:R]
-        return (preds, self._last_logits[:R]) if want_logits else preds
+        sparse = want_logits and sampler is not None and sampler.sparse_ok()
+        self._last_cands = None
+        preds = self._run("pass", want=("cands" if sparse else "rows") if want_logits else None)[:R]
+        if not want_logits:
+            return preds
+        if sparse and self._last_cands is not None:
+            return preds, self._target_fn(sampler, R)
+        return preds, self._last_logits[:R]
 
     def commit(self, accepted_rows: int):
         self.plen_commit.stage(accepted_rows)

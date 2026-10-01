@@ -1117,7 +1117,75 @@ class TPGatedDeltaNet:
         for r in rows:
             ttnn.deallocate(r)
 
-    def forward_prefill_batched(self, x, chunk_size=128, valid_lens=None, carry=False):
+    def commit_scan_batched(self, saved, valid_lens):
+        """Multi-user MTP commit: recompute the batched recurrent state and decode conv taps for per-user SHORTER
+        lengths from a batched rows pass's saved inputs (`scan_sink` of forward_prefill_batched), continuing from the
+        current (restored) rec_state / _batched_conv_carry. Only the conv FIR (for the taps) and the chunk scan run
+        again - the projections, norm, gate and out-proj of the saved pass are not repeated."""
+        from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import (
+            chunk_gated_delta_rule_fused_adapter,
+            fused_chunk_enabled,
+        )
+
+        tw = self.tw
+        qkv = saved["qkv"]
+        B, D = qkv.shape[0], self.qkv_dim_tp
+        chunk_size, head_dims = saved["meta"]
+        conv_carry_in = self._batched_conv_carry
+        _conv, conv_new_state = _causal_conv1d_fir(
+            qkv,
+            None,
+            None,
+            self.K,
+            self.mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            conv_state=conv_carry_in,
+            weight_taps=tw["conv_taps"],
+            bias_dev=None,
+            valid_len=valid_lens,
+        )
+        ttnn.deallocate(_conv)
+        _use_fused = fused_chunk_enabled()
+        _delta_fn = chunk_gated_delta_rule_fused_adapter if _use_fused else chunk_gated_delta_rule_seq_adapter
+        _extra = {"const_tiles": self._fused_const_tiles} if _use_fused else {}
+        o, final_state = _delta_fn(
+            saved["q"],
+            saved["k"],
+            saved["v"],
+            saved["beta"],
+            saved["g"],
+            chunk_size=chunk_size,
+            scale=self.scale,
+            initial_state=self.rec_state,
+            device=self.mesh,
+            cached_masks=self.chunk_seq_masks,
+            valid_len=valid_lens,
+            qkv_head_dims=head_dims,
+            **_extra,
+        )
+        ttnn.deallocate(o)
+        rec_src = (
+            final_state
+            if final_state.dtype == self.rec_state.dtype
+            else ttnn.typecast(final_state, self.rec_state.dtype)
+        )
+        ttnn.copy(rec_src, self.rec_state)
+        if rec_src is not final_state:
+            ttnn.deallocate(rec_src)
+        ttnn.deallocate(final_state)
+        # same tap bookkeeping as forward_prefill_batched(carry=True)
+        if conv_carry_in is not None:
+            ttnn.deallocate(conv_carry_in)
+        self._batched_conv_carry = conv_new_state  # [B, K-1, D]
+        _z0 = getattr(self, "_zero_conv0", None)
+        assert _z0 is not None and tuple(_z0.shape) == (1, B, D), "commit_scan_batched needs the persistent zero tap"
+        ttnn.copy(_z0, self.conv_states[0])
+        for m in range(1, self.K):
+            cs = ttnn.reshape(ttnn.slice(conv_new_state, (0, m - 1, 0), (B, m, D)), (1, B, D))
+            ttnn.copy(cs, self.conv_states[m])
+            ttnn.deallocate(cs)
+
+    def forward_prefill_batched(self, x, chunk_size=128, valid_lens=None, carry=False, scan_sink=None):
         """Batched prefill: all B users in one pass (no per-user Python loop).
 
         The chunk-seq GDN kernel scans a leading BH = B*H batch dim, each (user, head) row an
@@ -1173,6 +1241,8 @@ class TPGatedDeltaNet:
                 mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
             )
         conv_carry_in = self._batched_conv_carry if carry else None
+        if scan_sink is not None:
+            _sink_put(scan_sink, "qkv", qkv)  # pre-conv rows for commit_scan_batched (MTP multi-user commit)
         conv, conv_new_state = _causal_conv1d_fir(
             qkv,
             None,
@@ -1199,6 +1269,10 @@ class TPGatedDeltaNet:
         ttnn.deallocate(b)
         g = ttnn.reshape(ttnn.multiply(tw["neg_exp_A"], _softplus_add(a, tw["dt_bias"])), (B, T, Nv))
         ttnn.deallocate(a)
+        if scan_sink is not None:
+            for _n, _t in (("q", q), ("k", k), ("v", v), ("beta", beta), ("g", g)):
+                _sink_put(scan_sink, _n, _t)
+            scan_sink["meta"] = (chunk_size, (Nk, Dk, Nv, Dv))
 
         # Chunk-parallel recurrence over the BH = B*Nv batch (each row an independent scan). Fused
         # chunk_gated_delta_rule (same op as single-user prefill); per-row valid_lens mask each user.

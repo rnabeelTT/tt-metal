@@ -25,6 +25,11 @@ def main():
     ap.add_argument("--new", type=int, default=64)
     ap.add_argument("--layers", default=None)
     ap.add_argument("--profile", type=int, default=0, help="Tracy mode: replay each program N times between signposts")
+    ap.add_argument(
+        "--temperature", type=float, default=0.0, help="> 0: also time a sampled loop (exact speculative sampling)"
+    )
+    ap.add_argument("--top-k", type=int, default=20, help="sampled loop top_k (checkpoint generation default 20)")
+    ap.add_argument("--top-p", type=float, default=0.95, help="sampled loop top_p (checkpoint generation default 0.95)")
     args = ap.parse_args()
     from transformers import AutoTokenizer
 
@@ -112,7 +117,7 @@ def main():
     agree = sum(int(a == b) for a, b in zip(greedy, mtp))
     first_diff = next((i for i, (a, b) in enumerate(zip(greedy, mtp)) if a != b), None)
     tm = runner.timing_summary()
-    per_pass_ms = sum(n * ms for n, ms in tm.values()) / passes
+    per_pass_ms = sum(n * ms for key, (n, ms) in tm.items() if key in ("pass", "commit", "draft", "rows")) / passes
     print(
         f"MTP_TRACED {args.prompt}: k={args.k} N={args.new} passes {passes} -> {args.new / passes:.2f} tokens per pass "
         f"(hist {hist}); equal to greedy {agree}/{args.new} (first difference {first_diff}); "
@@ -121,6 +126,41 @@ def main():
         flush=True,
     )
     print(f"  greedy: {tok.decode(greedy)!r}\n  mtp   : {tok.decode(mtp)!r}", flush=True)
+    if args.temperature > 0:
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_sampling import SpecSampler
+
+        sampler = SpecSampler(args.temperature, args.top_k, args.top_p, 7)
+        tok0, hid_last, P = prefill_with_head(gen, head, ids)
+        ttnn.copy(hid_last, runner.d_hid)
+        ttnn.deallocate(hid_last)
+        for v in runner.timing.values():
+            v.clear()
+        out, pos, passes_s, hist_s = [tok0], P, 0, [0] * (args.k + 1)
+        t0 = time.time()
+        while len(out) < args.new:
+            drafts, qs = runner.draft(out[-1], pos, sampler=sampler)
+            rows = [out[-1]] + drafts
+            preds, target = runner.verify(rows, pos, want_logits=True, sampler=sampler)
+            a, nxt = sampler.accept(target, drafts, qs)
+            if a < args.k:
+                runner.commit(a + 1)
+            if a > 0:
+                runner.head_rows(rows[1 : a + 1], pos)
+            runner._select_hidden(a)
+            out.extend(rows[1 : a + 1])
+            out.append(nxt)
+            pos += a + 1
+            passes_s += 1
+            hist_s[a] += 1
+        t_s = time.time() - t0
+        tm = runner.timing_summary()
+        print(
+            f"MTP_TRACED_SAMPLED {args.prompt}: T={args.temperature} top_k={args.top_k} top_p={args.top_p} "
+            f"(sparse {sampler.sparse_ok()}) k={args.k} N={args.new} passes {passes_s} -> "
+            f"{len(out) / passes_s:.2f} tokens per pass (hist {hist_s}); loop wall {t_s:.2f}s = "
+            f"{t_s / passes_s * 1e3:.1f} ms per pass; program walls (count, ms): {tm}; text {tok.decode(out[:args.new])!r}",
+            flush=True,
+        )
     runner.release()
     ttnn.close_mesh_device(mesh)
 

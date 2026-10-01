@@ -662,3 +662,38 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   server starts (program guard quiet with the head inside the traces), 32-token requests 0.29 s (eager-bucket path:
   0.38 s). `QWEN35_MTP_TRACED_PREFILL=0` keeps the eager path. A full-model run with the earlier edits half-imported was
   invalid (queue not staged) - rerun queued with T = 0 / 0.7 and the c = 1 benchmark.
+- 03:03 (MTP follow-up 2, full model) SERVED with the head's prompt rows inside the traced prefill bucket: temperature 0
+  texts identical to the earlier served greedy MTP (prose " a storm like this. The waves crashed against the rocks...",
+  code the merge loop); temperature 0.7 coherent (prose 22.1 / code 37.6 tok/s incl. TTFT; greedy 29.5 / 52.9).
+  Benchmark c = 1: TTFT p50 314 ms (eager-bucket MTP prefill 329; plain 258-274), TPOT 18.6 ms = 53.8 t/s/u (51.5),
+  ITL p50 57.3. Per-request MTP_STATS: greedy 58-68 ms per pass, SAMPLED 93-100 ms per pass (same acceptance
+  histograms) - the sampling path costs ~33 ms per pass on the full model, far more than the host sampler (probs 0.12,
+  sample 0.27, accept 0.64 ms on 248 320-wide rows, timed on the host): the suspect is the four logits read-backs per
+  pass (3 draft rows + the pass rows; to_layout already unpads, so 0.5 MB per row per mesh). Instrumented the runner
+  (`timing["ids_read"]` / `timing["lg_read"]`) and the traced tool (`--temperature`: a sampled loop with the same step
+  as serving) - reduced-model timing run queued. Default-on MTP wants the sampled path at the greedy cost.
+- 03:07 (MTP follow-up 3) scan-only BATCHED commit for multi-user MTP: `forward_prefill_batched(scan_sink=...)` saves
+  the pre-conv qkv rows and q/k/v/beta/g of the rows pass per GDN layer; `commit_scan_batched(saved, valid_lens)`
+  re-runs only the conv FIR (taps) + the fused chunk scan from the restored snapshot and rewrites rec_state / taps /
+  the batched conv carry; `commit_multi` uses it (the whole-layer batched replay is gone). Device test
+  `test_multi_user_scan_only_commit_matches_shorter_pass` (2 layers, B = 2, accepted [2, 1] and [4, 3]): rec_state and
+  all 4 conv taps PCC 1.000000, max |diff| 0 vs a full pass over only the accepted rows; forced-greedy loop still
+  3.43 tokens per pass. Traced multi-user run (reduced model) queued to confirm the commit trace captures with it.
+- 03:14 traced multi-user step with the scan-only batched commit (reduced model, B = 2, k = 3, N = 24): traced tokens
+  equal to the eager loop 48 / 48, commit 0.59 ms per pass (one GDN layer; the full model's 36 layers put the commit at
+  ~11 ms instead of the 30-50 ms whole-layer replay measured 2026-09-30). Multi-user MTP stays opt-in (its pass cost
+  is the width-8 / 16 decode step); the lever is in and validated, re-measure served when the compact decode MoE lands.
+- 03:14 sampled-path diagnosis (reduced model, `--temperature 0.7`, no top-k / top-p): per read-back 'ids_read' (argmax
+  + max, 2 small tensors) 1.67 ms, 'lg_read' (the ROW_MAJOR logits rows, 0.5 MB per draft row / 2 MB per pass) 2.45 ms
+  -> ~10 ms of reads per sampled pass on top of greedy. The served run's extra 33 ms came from the host sampler after
+  all: vLLM applied the checkpoint's generation_config (temperature 0.6, top_k 20, top_p 0.95; the request only set
+  the temperature), and SpecSampler.probs did the top-p by SORTING THE WHOLE 248K ROW (2.2 ms per row with top_k set,
+  ~10 ms without) for 3 draft rows + 1-2 target rows per pass; my host timing had used top_p = 1.0.
+  Fixes: (1) top-p over the top_k survivors only (top_k set: 0.24 ms per row), nucleus from the top 1024 / 16384 when
+  only top_p is set (full sort only if they do not reach top_p); (2) device per-shard top-k CANDIDATES: separate
+  'cands_pass' / 'cands_draft' traces (pad 62080 -> 65536, split in two 32768 halves, ttnn.topk k = 32 each, as the
+  shared 1D sampler does) over the persistent TILE logits of the pass / draft traces, read back as 4 x 2 x 32 values +
+  ids per row (a few KB) instead of the rows; a request with 0 < top_k <= 32 is exactly reproducible from them
+  (`SpecSampler.probs_topk`, host tests vs the dense processing); greedy passes never run them. top_k > 32 or unset
+  keeps the full-row read. Ties at the k-th value: exactly k survivors (as the device top-k; vLLM's host sampler keeps
+  ties) - documented, any fixed processing is a valid target. Reduced-model run with top_k 20 / top_p 0.95 queued.
