@@ -1132,3 +1132,25 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
 - 22:09 PUSHED: Hub revision 832a9834a5f0 (private; image e096e047ba10; tt-metal aa559ead231). Report republished
   (v28) with the revision and the run-6 verification. Next: batched short-prompt prefill (design in
   production_improvements_plan.md), then the deferred sweep rows on this bundle.
+- 22:18 BATCHED SHORT-PROMPT PREFILL, step 1 committed (c8b026f34f9): `TPAttention.forward_prefill_paged_batched`
+  (qwen36 attention/tp.py; one QKV / q-k norm / rope / head concat / gate / output projection over B*T rows, per-user
+  `paged_fill_cache` + causal chunked SDPA against the user's own page-table row) + `tests/test_batched_prefill_attention.py`
+  (B = 4 vs 4 single-user prefills, T = 128 / 512, paged K/V identical). Queued on the device behind the measurement
+  chain (`scripts/20-batched-attn-test.sh`).
+- 22:45 Step 2-4 written while the device measures (no device run yet): `tt/prefill_batched.py` = `BatchedPrefill`
+  (persistent per-bucket inputs for B = 4: tokens [B, T], rope tables over B*T rows, B one-row page tables + chunk
+  tables, `RowsLen`, one-hot logits selector [32, B*T], hidden-rows buffer; a dedicated B-row GDN scratch bound like the
+  B = 1 prefill scratch with its own zero sources; GDN layers through `forward_prefill_batched(carry=True)` after
+  `rebuild_batched_conv_carry` (device-only, trace-safe), attention layers through the batched attention, norms / MoE
+  on B*T rows, LM head on the B selected rows; `write_slots` = scratch row u -> decode slot; `warm` / `capture_traces`
+  (one trace per bucket 128 / 256 / 512) / `release_traces`). Serving: `Qwen35MoeGenerator(QWEN35_BATCHED_PREFILL=1)`
+  builds the driver before the warm-up, warms it with the other prefill programs (before the decode capture) and
+  captures its traces after the bucket traces; `prefill_serving` groups the call's final text requests <= 512 tokens by
+  bucket in fours (`_batched_groups`), runs each group first, samples row i of the group's sharded logits
+  (`sampler(sh, u, row=i)`), then runs the rest per request as before. MTP: `MtpServing.note_batched` takes the request
+  out of the prefill queue, uses the pass's final-normed last-position row as the slot's first-draft hidden and marks
+  the slot head-less (`no_head_slots`: no MTP phase until a new request takes the slot; follows slot remaps).
+  Test `tests/test_prefill_batched.py` (reduced 2-layer generator, B = 4 slots): groups [20, 57, 128, 100] and
+  [300, 129, 512] (one idle row) vs the production per-user path - logits PCC / argmax, GDN slot states, paged K/V
+  identical, the sharded row == the gathered row; then traced replay == eager and no program compiled after capture.
+  Queued behind the attention test, conditional on it passing (`scripts/20b-batched-model-test.sh`).
