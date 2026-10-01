@@ -1198,3 +1198,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   compares the users' blocks only. All remaining device work now runs from ONE sequential chain
   (`scripts/23-master-chain.sh`: vision test -> batched test -> served A/B (if passed) -> multi-user MTP A/B); the
   per-step waiters raced each other and twice started the MTP A/B early.
+- 23:09 VISION SIZE TEST PASSED (attempt 3, `logs/18/vision-sizes-test3.log`): the nine-bucket warm-up takes 4.9 s;
+  1080p (8160 patches, twice, plus 1088 px), 2048x2048 (16384 patches = the cap), a 4032x3024 photo resized by the
+  cap to 16060 patches and a two-image request all compile 0 programs; tower PCC vs the HF visual 0.9875 (1080p) and
+  0.9872 (two images). The served image failure is fixed in the tree (cap + full-bucket warm-up + padded merger +
+  row-major rows); ships with the next bundle.
