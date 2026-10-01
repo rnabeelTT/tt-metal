@@ -163,7 +163,10 @@ class VisionTransformer(LightweightModule):
         # directly (its first op is a DistributedLayerNorm that all-gathers
         # internally) and produces a fractured-along-dim=3 output. No
         # pre-merger all-gather is needed.
-        x = x[:, :, :unpadded_seq_len, :]
+        # The merger runs on the PADDED sequence (zero rows merge to discarded rows): slicing to the real length here
+        # keyed every merger program on the image's exact patch count, so any image size not seen at warm-up compiled
+        # after the traces were parked (served image failure, Qwen3.5-122B 2026-10-01). The caller drops the padding
+        # rows on host (DropInVisionTransformer.forward).
         x = self.patch_merger(x)
         return x
 
@@ -309,38 +312,37 @@ class DropInVisionTransformer(torch.nn.Module):
             ttnn.deallocate(rot_mats[0])
             ttnn.deallocate(rot_mats[1])
 
-            # --- Postprocessing ---
-            # 1. Extract the relevant output part and adjust shape (matching test logic).
-            # The merger output is fractured along dim=3, so each device owns
-            # out_hidden_size/TP channels.
-            out_hidden_size = (
-                self.model_args.hf_config.vision_config.out_hidden_size // self.model_args.cluster_shape[1]
-            )
-            # Output shape from TT is [1, B=1, S, H_out_padded], slice H and squeeze B, batch dims.
-            # The slice/reshape args are GLOBAL shapes; the tensor is already
-            # fractured along dim=3 and ttnn handles the per-device extents internally.
-            final_output = ttnn.reshape(tt_out[:, 0:1, :, :out_hidden_size], (-1, out_hidden_size))
-            # ttnn.deallocate(tt_out)
+            # --- Postprocessing (host) ---
+            # The merger output is [1, 1, S_padded / merge^2, H_out(/TP)]: fractured along the hidden dim on a mesh
+            # (each device owns out_hidden_size / TP channels, possibly padded). The device graph above depends only on
+            # the padded length, so every image size maps to one of the warmed buckets; the real rows are taken HERE on
+            # host (the consumer, the prefill splice, reads the rows to host anyway) and the images are concatenated on
+            # host too (a device concat / slice would compile per image-size combination).
+            merge2 = self.model_args.hf_config.vision_config.spatial_merge_size**2
+            n_tokens = unpadded_seq_len // merge2
+            tp = self.model_args.cluster_shape[1]
+            out_hidden_size = self.model_args.hf_config.vision_config.out_hidden_size // tp
+            per_dev = [
+                ttnn.to_torch(t)[0, 0, :n_tokens, :out_hidden_size] for t in ttnn.get_device_tensors(tt_out)
+            ]  # TP x [n_tokens, out_hidden / TP]
+            ttnn.deallocate(tt_out)
+            rows = torch.cat(per_dev, dim=-1)  # [n_tokens, out_hidden]
 
             if self.debug:
                 logger.info(f"DropInVisionTransformer: Debug enabled, running reference model...")
                 reference_output = self.reference_model.forward(pixel_values, grid_thw)
-                _, pcc = comp_pcc(reference_output, final_output)
+                _, pcc = comp_pcc(reference_output, rows)
                 logger.info(f"DropInVisionTransformer: PCC to reference model: {pcc}")
 
-            # 2. The merger already produces a tensor fractured along the hidden
-            # dim (dim=3 in 4D / dim=1 in the 2D-reshaped view), which is the
-            # desired output sharding.
-            # final_output_sharded = final_output
+            final_outputs.append(rows)
 
-            # 3. Aggregate in batched users list
-            final_outputs.append(tt_out)
-
-        # concatenate all the outputs. With a single image, ttnn.concat aliases
-        # its lone input, so deallocating the sources would free the return.
-        if len(final_outputs) == 1:
-            return final_outputs[0]
-        tt_out = ttnn.concat(final_outputs, dim=1)
-        for t in final_outputs:
-            ttnn.deallocate(t)
+        # all images' real rows back on the mesh, hidden-fractured like the text embeddings: [1, 1, N, out_hidden]
+        rows = torch.cat(final_outputs, dim=0).to(torch.bfloat16)
+        tt_out = ttnn.from_torch(
+            rows.reshape(1, 1, rows.shape[0], rows.shape[1]),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.model_args.mesh_device,
+            mesh_mapper=ttnn.ShardTensorToMesh(self.model_args.mesh_device, dim=-1),
+        )
         return tt_out
