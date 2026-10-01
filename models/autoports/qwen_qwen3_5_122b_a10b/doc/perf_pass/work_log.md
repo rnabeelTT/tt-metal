@@ -1073,3 +1073,14 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   T=16, 1.507 -> 1.022 ms at T=2048 (device op time from the Tracy below). Note the `ninja ttnn` build does not
   refresh `ttnn/ttnn/_ttnn.so` (the nanobind module; stale since 04:56 - the C++ op library resolves to
   build_Release via rpath, which is why the resident fix was live but the new binding was not): copied both .so.
+- 20:24 GATHER KERNEL RESULTS: (a) prefill MoE block at 2048 tokens (`12-tracy-moe.sh`, phase host walls incl. sync,
+  `artifacts/stage12/tracy_moe_gather_kernel`): gather_rows 1.80 -> 1.27 ms (the rest unchanged: dispatch 1.85,
+  sparse matmuls 1.43 + 1.20, swiglu 0.53, un-dispatch 1.38) -> MoE ~8.3 -> ~7.7 ms per layer (-0.6 ms x 48 =
+  -29 ms per 2048-token segment, ~-6 % of prefill). The gather now moves 124 MB of real rows in + out (near
+  bandwidth) plus the input untilize; the remaining un-dispatch cost is its 0.74 ms untilize. (b) decode, expert-
+  sorted path with the kernel: per-layer step 1.98 / 2.24 / 2.63 ms (GDN) and 1.85 / 2.11 / 2.40 (attn) at 8 / 16 /
+  32 rows vs the shipped pairs / masked 1.32 / 2.13 / 2.72 and 1.18 / 1.90 / 2.60 -> wins at 32 rows (-3 % GDN, -8 %
+  attn), loses at 8 / 16. Knob `QWEN35_DECODE_SORTED_MIN_ROWS` stays off pending the next step. NEXT: the down
+  projection's output untilize (0.74 ms at 2048 tokens, 0.25 ms at 16 rows, ahead of the multi-core gather-add) ->
+  have the grouped sparse matmul factory emit ROW_MAJOR output (`untilize_out`, the bmm compute kernel's
+  pack-untilize path) so the un-dispatch reads it directly.
