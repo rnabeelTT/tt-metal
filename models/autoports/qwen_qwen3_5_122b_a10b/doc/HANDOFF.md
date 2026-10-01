@@ -221,7 +221,22 @@ HF CPU reference for the same image prompt (`~/qwen35-122b-bringup/scripts/16-hf
 "The image features a red square in the upper left and a yellow circle in the lower right, both set against a solid
 blue background." The full-model served comparison is logged in `doc/perf_pass/work_log.md` (search `IMAGE_AGREEMENT`).
 
-## 6. Where things are
+## 6. Future scope (capped 2026-10-01 23:15)
+
+The model is production-ready at bundle run 7 (image-size fix). What remains is optimization, documented here with the
+evidence gathered so far; none of it blocks serving.
+
+| item | evidence | next step |
+|---|---|---|
+| Sampler cost at full occupancy | temperature-1 decode at 32 users 129.7 ms per step vs 110.2 ms greedy (`doc/perf_pass/deployed_sweep.md`, pass 2) | Tracy of one sampled step at 32 rows; top-k pre-selection on the vocab-sharded logits before the gather |
+| Batched short-prompt prefill default | driver + tests in the tree (`tt/prefill_batched.py`, `tests/test_prefill_batched.py`, `tests/test_batched_prefill_attention.py`), served A/B `~/qwen35-122b-bringup/logs/18/serve-batched-ab.log` | see the A/B row in `doc/perf_pass/work_log.md`; flip `QWEN35_BATCHED_PREFILL` in `tt-model.yaml` once a served conformance run (`readiness_check` sampling stage) passes with it on |
+| GDN slot write per admission | 29 ms of the 238 ms fixed cost per 128-token prefill (`doc/perf_pass/work_log.md` 2026-10-01 prefill cost) | write the B=1 scratch straight into the slot inside the bucket trace (one-hot row select) |
+| Width-1 plain decode | 29.9 ms per token, ~90 small ops per layer; MTP hides most of it | router chain fusion (~5 ms), then a fused GDN decode kernel |
+| Long-context decode at high occupancy | 32 users x 32K: 425 ms per token (sweep pass 1) | Tracy at that point first (paged-attention reads vs prefill interleaving) |
+| Multi-user MTP | batched MTP at 2-4 users measured slower than plain decode before the cheaper 16-32-row MoE; re-measurement script kept (`~/qwen35-122b-bringup/scripts/19-mtp-multi-ab.full.sh`) | run it; adopt only if TPOT at 2-4 users beats 37 / 44 ms |
+| Plugin asks (not in this tree) | chunked prefill is disabled for any model emitting more than one token per step; no prefill / decode alternation; prefix caching off | vllm-tt-plugin changes; the GDN carried-state primitive (`_pending_prefill`) is ready for prefix-boundary snapshots |
+
+## 7. Where things are
 
 | item | location |
 |---|---|
