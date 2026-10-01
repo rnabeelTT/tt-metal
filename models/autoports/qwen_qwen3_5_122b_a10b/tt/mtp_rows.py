@@ -74,6 +74,7 @@ def layer_forward_rows(
     BW = x.shape[2]
     # QWEN35_MTP_MOE_ROWS=sorted: routed experts through the expert-sorted path (see Qwen35MoEOptimized._routed_gather)
     layer.feed_forward.rows_sorted = os.environ.get("QWEN35_MTP_MOE_ROWS", "pairs") == "sorted"
+    layer.feed_forward.mtp_rows_mode = True  # the plain-decode row-count rule (QWEN35_DECODE_SORTED_MIN_ROWS) stays out
     try:
         return _layer_forward_rows(
             layer,
@@ -90,6 +91,7 @@ def layer_forward_rows(
         )
     finally:
         layer.feed_forward.rows_sorted = False
+        layer.feed_forward.mtp_rows_mode = False
 
 
 def _layer_forward_rows(layer, x, R, BW, *, cos, sin, position_tensor, page_table, saved, rows_pos_masks, gdn_index):

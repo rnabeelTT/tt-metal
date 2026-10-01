@@ -399,6 +399,11 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         expert once. Measured 2026-10-01 with the multi-core gather kernel + the row-major down projection: per-layer step
         at 16 rows 1.99 / 1.87 ms (GDN / attn) vs 2.13 / 1.90 pairs-masked, at 32 rows 2.38 / 2.16 vs 2.72 / 2.60; at 8
         rows the sorted path still loses (1.74 vs 1.32), hence the threshold."""
+        if getattr(self, "mtp_rows_mode", False):
+            # the MTP verify pass / head rows run on a 32-row block with a few real rows: their path is chosen by
+            # QWEN35_MTP_MOE_ROWS (pairs), not by the row count (served c=1 TPOT 18.6 -> 26.5 ms when this rule took
+            # the padded block to the sorted path, 2026-10-01 21:14)
+            return False
         n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "16") or 0)
         return 0 < n <= T and self.opt.prefill_mode == "sorted"
 

@@ -1103,3 +1103,12 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   -7 % at 16 users, -13 / -17 % at 32, still +32 % at 8. DECISION: `QWEN35_DECODE_SORTED_MIN_ROWS` defaults to 16
   (projected served TPOT 16 users 103 -> ~94 ms, 32 users 130 -> ~112 ms). Full-model served check (production
   config, EXTRA + IMAGE + benchmark c=16 / 32) launched; then bundle rebuild / verify / push.
+- 21:14 SERVED CHECK, production config, sorted decode from 16 rows + both kernels (`logs/13/serve-sorted16-prod.log`,
+  readiness streaming benchmark 128/128, 4 x c requests): c=16 TPOT 95.3 ms (was 103; 133.6 tok/s aggregate), c=32
+  TPOT 110.2 ms (was 115.9 in the sweep / 128.9 in the readiness burst; 201 tok/s aggregate vs 184 / 158), TTFT
+  c=32 6.36 s (was 7.75). Image request: MTP and plain texts now both identical to the HF reference (28 / 28 top-1).
+  REGRESSION at c=1: TPOT 26.5 ms (was 18.6-20.1 with this benchmark): the MTP verify pass runs its MoE on a 32-row
+  block (4 real candidate rows padded to the GDN block), and the new `rows >= 16 -> sorted` rule intercepted it (the
+  MTP rows mode had chosen the pairs path deliberately: `QWEN35_MTP_MOE_ROWS=pairs`). Fix: the threshold rule
+  applies to plain decode only; the MTP rows mode keeps its own choice. Bundle run 4 (packaged 21:04) carries the
+  regression -> rebuild after the fix.
