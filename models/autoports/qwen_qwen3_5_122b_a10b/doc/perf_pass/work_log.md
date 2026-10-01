@@ -761,3 +761,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
 - 08:41 reduced model with the fix: logprobs (32 logprob entries, host path), repetition penalty (plain decode; the
   text changes as expected), min_p (host path) all served under MTP; the concurrent pair = the plain texts; single
   requests = MTP texts. Full-model run 5 queued (extra + staggered + concurrent + c = 1 benchmark).
+- 08:55 ADAPTIVE MTP, full model run 5 (8 slots) - CLEAN: single requests = the single-user MTP texts (code 52.1 /
+  prose 29.4 tok/s incl. TTFT); logprobs (96 entries), repetition penalty and min_p requests served through the plain
+  / host paths (12-15 tok/s: host sampling, and seeded requests run at the full bucket width - the stage-10 rule);
+  concurrent pair IDENTICAL to the plain 8-slot server's texts; staggered pair MTP-exact until the admission; c = 1
+  benchmark TPOT 18.6 ms = 53.7 t/s/u, TTFT p50 313 ms (344 before the deferred leave; plain 261). `QWEN35_MTP` now
+  defaults to 3 (commit 961fab593a9); production-config run (32 slots, 262144 context, 768 MiB trace region, c = 1 /
+  8 / 32 benchmarks) queued as the default-on gate.

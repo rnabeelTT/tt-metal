@@ -125,7 +125,9 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
   copy + atomic `mv` while device jobs run. Kernels compile on first use.
 - MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`,
-  `doc/perf_pass/adaptive_mtp_plan.md`): opt-in via `QWEN35_MTP=3` (k drafts per pass) at ANY `--max-num-seqs`.
+  `doc/perf_pass/adaptive_mtp_plan.md`): ON BY DEFAULT since 2026-10-01 (`QWEN35_MTP` = k drafts per pass, default 3;
+  `QWEN35_MTP=0` disables; `QWEN35_CHUNKED_PREFILL=1` without an explicit `QWEN35_MTP` turns it off) at ANY
+  `--max-num-seqs`.
   ADAPTIVE (default with > 1 slot): the single-user MTP step runs whenever exactly one request is live, the plain
   batched decode otherwise, the request's state handed over at every switch (GDN state into a persistent B = 1 MTP
   scratch, head hidden rows and head K/V kept by two small hooks inside every plain decode step: +0.4 ms at 8 users);

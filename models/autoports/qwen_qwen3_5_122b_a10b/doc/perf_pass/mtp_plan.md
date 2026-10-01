@@ -93,8 +93,12 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   identical to the plain 8-slot server's, c = 8 TPOT 60.0 (plain 59.6), TTFT p50 344 ms (plain 261). Phase enter ~10 ms
   (36 GDN slot copies + conv-carry rebuilds), a finished request's phase is dropped for free, a write-back leave 16-30
   ms. Requests with penalties / logprobs / host sampling take the plain path; the plugin shim delegates those steps'
-  read-back to the stock code. Remaining before default-on: a full-model served check of a logprobs request and a
-  penalty request in MTP mode, then `QWEN35_MTP` defaults to 3 (KV pool -9% for the head's K/V, TTFT +~80 ms at c = 1).
+  read-back to the stock code. Logprobs / penalty / min_p requests validated served on the full model (run 5; this
+  also fixed a latent plain-mode bug: host-sampled prefills were treated as intermediate chunks since the
+  chunked-prefill turn). `QWEN35_MTP` DEFAULTS TO 3 since commit 961fab593a9 (`QWEN35_MTP=0` disables; chunked prefill
+  requested without an explicit QWEN35_MTP turns it off): KV pool -9% for the head's K/V, TTFT +~50 ms at c = 1
+  (313 vs 261), TPOT 18.6 vs 29.9 ms at one user, +0.4 ms per step at 8 users. Production-config gate (32 slots,
+  262144 context) running.
 
 ## Status (2026-10-01 03:30): follow-ups shipped (sampling, in-trace head prefill, scan-only batched commit)
 - Exact speculative sampling (`tt/mtp_sampling.py`): temperature > 0 requests get sampled drafts and a rejection-sampling
