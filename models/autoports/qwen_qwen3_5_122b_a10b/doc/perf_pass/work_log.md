@@ -1187,3 +1187,14 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   hidden-fractured (the prefill splice reads the rows to host anyway). Retest queued after the batched tests.
 - 23:00 BATCHED ATTENTION TEST PASSED (attempt 2, with the fabric device params): B = 4 vs 4 single-user prefills at
   T = 128 and 512, per-user PCC 1.000000, paged K/V identical. Model-level batched prefill test running.
+- 23:03 VISION SIZE TEST, attempt 2 (merger on the padded sequence): warm-up 17.6 s for the nine buckets (was 95 s:
+  the merger at the real length was the slow part), the 1080p image compiled 1 program (was 9). Remaining candidate:
+  the tiled host->device upload of the real rows (a non-tile-multiple row count may tilize on device) -> the rows now
+  go up ROW_MAJOR (the splice reads them to host anyway); the test now reports per-size program deltas (1080p twice,
+  another length in the same bucket, cap-max, phone photo, two images) and asserts at the end.
+- 23:05 BATCHED MODEL-LEVEL TEST, attempt 3: logits PCC 0.9994-1.0 (argmax equal for 6 of 7 users, the seventh inside
+  the reference top-5), GDN slot states match, K/V identical for the full group; the 3-request group differed only in
+  the reserved KV scratch block (the idle 4th row's pad tokens vs the single path's pad rows: never read) -> the test
+  compares the users' blocks only. All remaining device work now runs from ONE sequential chain
+  (`scripts/23-master-chain.sh`: vision test -> batched test -> served A/B (if passed) -> multi-user MTP A/B); the
+  per-step waiters raced each other and twice started the MTP A/B early.
