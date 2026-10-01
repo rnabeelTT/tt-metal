@@ -781,3 +781,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   experts and pay 256 group launches). Default `pairs_max_tokens` 8 -> 16 (pairs at widths <= 16, masked at 32).
   The structural compact layout for 32 rows stays parked (the 32-row dense glue is ~25 % of the attention-layer step
   there; the sparse matmuls at ~110-220 active experts are the bandwidth floor).
+- 09:25 width-16 batched decode vs HF on the pairs path (test_mc_batched_decode_b32[gdn_b16 / attn_b16], 16 users
+  prefilled one at a time then one batched step): GDN layer PCC 0.99957 (per-user min 0.99896), attention layer
+  0.99990 (per-user min 0.99988) - the same band as the width-32 masked path. Item 5 quick win closed: pairs up to 16.
+  The 32-row compact layout and the prefill MoE levers share one kernel design (below); next: item 6 (width-1 op
+  count) from a width-1 Tracy profile, then item 7 (weights once per expert in the grouped sparse matmul).
