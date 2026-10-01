@@ -975,3 +975,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   results); the remedy for the box is to restore the second inter-board link (`{2:4}` in the discovery log is the
   pass criterion). The concurrent-engine theory in the 17:25 entry was wrong for that machine (it would still apply
   to a second engine on one box, which tt-model does not detect).
+- 18:02 user decision: the other box's missing-link failure is resolved on their side; the Linear-topology served
+  smoke is dropped from the queue (not worth device time). The cabling-aware topology rule (0b48a2312d2) stays in the
+  tree as a robustness measure but its Linear branch is UNTESTED here (this box is a ring: the rule logs Ring). Device
+  queue now: thinking-default chain (running) -> sweep pass 2 -> decode-width Tracy (improvement item 2 measurement);
+  bundle rebuild + push after the thinking verdict.
+- 18:35 THINKING-DEFAULT DECISION TEST (production server with the model's template default = thinking on;
+  `logs/11/think-default-chain.log`, `artifacts/stage11/think_probe_default_final.json`,
+  tt-inference-server report 2026-10-01_18-29-35): (a) short budgets with the server-default sampling (T 0.6 /
+  top_p 0.95 / top_k 20): max_tokens 256 -> empty `content` for all three simple prompts ("Say hello in one sentence"
+  thinks for 1 657 tokens); 1024 -> 2 of 3 answer; 4096 -> 3 of 3. (b) thinking decode 39.8 tok/s at 1 user (MTP).
+  (c) 24-prompt probe (16 IFEval + 4 GPQA + hello, 16K budget): 20 / 24 finish (stage 11 under the same preset:
+  16 / 24), finished median 2 708 tokens, no degenerate repetition, every finished answer has content; 4 run to the
+  16 384 cap (2 constraint-heavy IFEval, 2 GPQA; 36 min each). (d) TTI spec_tests: Acceptance FAIL, 11 / 22 tests
+  fail (coherence_verbatim_echo: `content` None -> TypeError in the harness; non_uniform_seeding; 8 / 9 penalties;
+  1 / 2 stop) - every failure is the think block consuming the test's small budget so `content` is empty; the same
+  suite is 22 / 22 with thinking off (run 4). DECISION: the bundle keeps thinking OFF by default (the release gate);
+  thinking stays available per request (`chat_template_kwargs: {"enable_thinking": true}`, card: general preset, large
+  max_tokens). Shipping thinking on needs either a TTI harness that reads `reasoning` + `content` with a thinking-aware
+  budget, or a reasoning-budget control the serving stack does not have (vLLM 0.26).
