@@ -135,7 +135,7 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   head's prompt rows run inside the traced prefill bucket programs; 0 = eager bucket prefill + a separate head pass).
   The plugin runs with an import-time shim (`tt/mtp_plugin_shim.py`) for a variable number of tokens per step; the KV
   pool shrinks by the head's K/V (13th KV layer + 1.5 GiB). Measured (full model, c = 1, 2026-10-01): TPOT 18.6 ms =
-  53.8 t/s/u vs 31.3 plain; code prompts 1.8x, prose ~1.06x end to end; TTFT p50 314 ms (plain 258-274). Per-request
+  53.7 t/s/u vs 31.3 plain; code prompts 1.8x, prose ~1.06x end to end (sampled T = 0.7: 51.6 / 28.2 tok/s); TTFT p50 306 ms (plain 258-274). Per-request
   `MTP_STATS` lines in the server log give passes, tokens per pass, acceptance histogram and ms per pass.
   Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls; `--temperature/--top-k/--top-p` time the
   sampled loop), `tools/mtp_pass_check.py` (verify pass vs decode, row by row), `tools/mtp_generate_full.py` (eager

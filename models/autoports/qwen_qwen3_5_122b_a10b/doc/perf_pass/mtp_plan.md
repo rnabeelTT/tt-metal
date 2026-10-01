@@ -99,7 +99,10 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Scan-only batched commit (`commit_scan_batched`): the multi-user commit re-runs only conv FIR + chunk scan on the
   pass's saved inputs (0.59 ms per GDN layer-pass on the reduced model; ~11 ms for 36 layers vs 30-50 ms before).
   Multi-user MTP stays opt-in: its pass is a width-8 / 16 decode step; re-measure after the compact decode MoE.
-- Default-on decision pending a served sampled A/B with the candidate path (queued: full model, T = 0.6 defaults).
+- Served A/B of the candidate path (full model, 2026-10-01 03:48): sampled passes 65.6-77.2 ms vs greedy 58.8-67.9
+  (+7-9 ms; before the fix +33); T = 0.7 end to end prose 28.2 / code 51.6 tok/s (greedy 29.5 / 52.5). Sampled and
+  greedy single-user MTP both beat plain decode -> default-on is now a question of the multi-user server: next item is
+  ADAPTIVE MTP (the MTP step when exactly one request is live, plain batched decode otherwise).
 
 ## Status (2026-09-30 20:10): SERVED (single user, opt-in)
 - `QWEN35_MTP=3` + `--max-num-seqs 1` serves speculative decoding through vLLM (tt/mtp_plugin_shim.py, tt/mtp_serving.py,

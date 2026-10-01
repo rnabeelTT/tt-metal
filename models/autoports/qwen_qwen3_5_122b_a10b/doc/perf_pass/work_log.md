@@ -697,3 +697,10 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   (`SpecSampler.probs_topk`, host tests vs the dense processing); greedy passes never run them. top_k > 32 or unset
   keeps the full-row read. Ties at the k-th value: exactly k survivors (as the device top-k; vLLM's host sampler keeps
   ties) - documented, any fixed processing is a valid target. Reduced-model run with top_k 20 / top_p 0.95 queued.
+- 03:48 SERVED, full model, sampled path from device top-k candidates (requests at T = 0.7 with the checkpoint's
+  top_k 20 / top_p 0.95 defaults): per-request MTP_STATS prose 77.2 ms per pass (was 100.1; greedy 67.9), code 65.6
+  (was 93.2; greedy 58.8) - the sampled pass now costs +7-9 ms over greedy (two candidate traces + a 0.4 ms read per
+  step) instead of +33. End to end: T = 0.7 prose 28.2 tok/s (was 22.1; greedy 29.5), code 51.6 (was 37.6; greedy
+  52.5). Greedy texts unchanged; sampled texts coherent. Benchmark c = 1: TTFT p50 306 ms, TPOT 18.6 ms = 53.7 t/s/u,
+  ITL p50 57.5. Commit 2210fe18163 (+ this log). MTP follow-ups closed; next: adaptive default-on (item 1 of the
+  production list in mtp_plan.md).
