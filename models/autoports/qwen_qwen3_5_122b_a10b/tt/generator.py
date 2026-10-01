@@ -793,6 +793,10 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 if mtp is not None:
                     mtp.note_batched(slots[u], hid[i], pt[u])
             self._batched_admissions = getattr(self, "_batched_admissions", 0) + len(g)
+            logger.info(
+                f"batched prefill: {len(g)} requests (lens {g_lens}) into slots {g_slots} in one pass "
+                f"(total batched admissions {self._batched_admissions})"
+            )
         for u in range(N):
             if u in res:
                 continue
