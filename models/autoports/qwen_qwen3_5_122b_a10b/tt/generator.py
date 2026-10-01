@@ -784,7 +784,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self._pending_prefill = {}  # first block id -> (processed end, GDN state clones) of half-prefilled requests
         A = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         V = int(self.args.vocab_size)
-        res = {}
+        outs_by_u = {}
         # batched short-prompt admissions first: one pass per group of 2..4 same-bucket final text prompts; their GDN
         # state is written from the B-row scratch, their MTP head rows are skipped (MtpServing.note_batched marks the
         # slot: plain decode even when it ends up alone)
@@ -796,7 +796,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             )
             for i, u in enumerate(g):
                 self.model.set_slot_rope_delta(slots[u], 0)
-                res[u] = torch.tensor([[sampler(sh, u, row=i)]], dtype=torch.int64) if sampler else lg[i : i + 1]
+                outs_by_u[u] = torch.tensor([[sampler(sh, u, row=i)]], dtype=torch.int64) if sampler else lg[i : i + 1]
                 if mtp is not None:
                     mtp.note_batched(slots[u], hid[i], pt[u])
             self._batched_admissions = getattr(self, "_batched_admissions", 0) + len(g)
@@ -805,7 +805,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 f"(total batched admissions {self._batched_admissions})"
             )
         for u in range(N):
-            if u in res:
+            if u in outs_by_u:
                 continue
             # per request: prefill on the bound B = 1 scratch (B > 1) or the B = 1 buffers, snapshot the scratch ON
             # DEVICE (clones) and write it into the request's slot on device before any further trace replay (stage 10).
@@ -848,12 +848,12 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                     assert E > s0, f"request {u}: final chunk with nothing to run (s0 {s0}, end {E})"
                     # decode rope positions of this slot: KV position + the request's M-RoPE delta (0 for text)
                     self.model.set_slot_rope_delta(slots[u], self.model.rope.rope_delta if vis_u is not None else 0)
-                    res[u] = torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg
+                    outs_by_u[u] = torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg
                     if pending is not None:
                         self._pending_free(self._pending_prefill.pop(key))
                     snap = self.model._snapshot_gdn_scratch_device() if batched else None
                 else:
-                    res[u] = torch.zeros(1, 1, V) if sampler is None else torch.zeros(1, 1, dtype=torch.int64)
+                    outs_by_u[u] = torch.zeros(1, 1, V) if sampler is None else torch.zeros(1, 1, dtype=torch.int64)
                     if E > s0 or pending is None:
                         self._pending_save(key, max(E, s0))
             finally:
@@ -869,7 +869,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         if not hasattr(self._tt, "_slots_prefilled_since_decode"):
             self._tt._slots_prefilled_since_decode = set()
         self._tt._slots_prefilled_since_decode.update(slots)
-        return torch.cat([res[u] for u in range(N)], dim=0)
+        return torch.cat([outs_by_u[u] for u in range(N)], dim=0)
 
     def decode_forward(
         self,
