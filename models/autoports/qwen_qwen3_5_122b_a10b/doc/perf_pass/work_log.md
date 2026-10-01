@@ -786,3 +786,28 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   0.99990 (per-user min 0.99988) - the same band as the width-32 masked path. Item 5 quick win closed: pairs up to 16.
   The 32-row compact layout and the prefill MoE levers share one kernel design (below); next: item 6 (width-1 op
   count) from a width-1 Tracy profile, then item 7 (weights once per expert in the grouped sparse matmul).
+- 09:33 (item 6, width-1 decode) Tracy per op at width 1 (reduced model, traced): GDN layer 0.669 ms per step, ~90 ops,
+  DEVICE time ~530 us (80 %: not launch-bound as assumed) - sparse matmuls 98 us (8 experts through the gather path:
+  12.6 MB of bfp4 at ~130 GB/s), binary glue 62 (15 ops), data-moving reshapes 41 (10: the [B,1,Nv,Dk] <-> [B,Nv,1,Dk]
+  head relayouts around the recurrence), router top-k 40 (single-core below a 1024-wide input), slices 18, qkv matmul
+  46, reduce-scatter 32, norms 23; attention layer 0.598 ms / 85 ops / 505 us (sparse 99, qkv 42, top-k 40, binary
+  38, 15 slices 21, FillPad 14). Variants probed at width 1: the pairs MoE path is SLOWER (GDN 0.876 vs 0.634 ms:
+  the gather path stays for <= 4 rows); padded multi-core top-k pending. The head relayouts and the ~60 tiny ops are
+  the fused-GDN-kernel territory (parked); the actionable width-1 items are the top-k and the 1-token sparse matmul.
+- 09:40 (item 7, prefill MoE lever "weights once per expert") implemented in the grouped sparse matmul factory:
+  RESIDENT in1 - cb_in1 holds an expert's WHOLE [K, N] block; the indexed in1 reader finds runs of consecutive
+  same-expert groups on its core (the sorted dispatch lays a token's groups of one expert side by side: ~2.3 groups
+  per active expert at 2048 tokens) and reads the block once per run, signalling the run position through the BRISC
+  mailbox (0 skip / 1 single / 2 first / 3 middle / 4 last); a dedicated compute kernel
+  (`bmm_grouped_resident_in1.cpp`, derived from the shared bmm kernel) indexes the K-blocks inside the resident set
+  and pops it after the run's last group; the factory falls back to the streamed double buffer when the block does
+  not fit the 1.3 MB per-core CB budget (bfp8 gate/up blocks do), `TT_SPARSE_GROUPED_RESIDENT_IN1=0` opts out; the
+  layer's program config shrinks the K block so the resident block fits (gate/up ib 48, down ib 4). Cost: the next
+  expert's read cannot start until the compute kernel releases the current block (reads dominate: ~3 %). Tests:
+  sorted-run cases added to tests/test_sparse_matmul_grouped.py. Build + device tests + Tracy MoE 2048 A/B next.
+- 09:37 width-1 top-k probe: padding the router logits to 1024 columns for the multi-core ttnn.topk is a LOSS (GDN layer
+  step 0.634 -> 1.554 ms, attention 0.542 -> 0.562): the pad + wide top-k cost more than the single-core [32, 256]
+  top-k. Knob `QWEN35_ROUTER_TOPK_PAD` kept at 0 (rejected). Item 6 conclusion: at width 1 the GDN layer is device-
+  bound by ~60 tiny ops (3-5 us each) and the head relayouts; the pairs MoE path and the padded top-k both lose, so
+  the remaining single-user lever is a fused GDN decode kernel (conv taps + gates + recurrence + norm in one program),
+  parked as kernel work. Moving on with item 7 (prefill MoE: resident weights, built; validation chain running).

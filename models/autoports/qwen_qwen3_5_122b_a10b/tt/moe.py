@@ -38,6 +38,7 @@ import ttnn
 TILE = 32
 # functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
 ROUTER_TOPK_FIRST = os.environ.get("QWEN35_ROUTER_TOPK_FIRST", "1") == "1"  # default since the perf pass (2026-09-29)
+ROUTER_TOPK_PAD = int(os.environ.get("QWEN35_ROUTER_TOPK_PAD", "0") or 0)  # probe knob; 1024 measured SLOWER (rejected)
 ROUTER_L1 = (
     os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
 )  # L1-resident router intermediates for decode rows (experiment)
@@ -369,6 +370,18 @@ class Qwen35MoE:
         if ROUTER_TOPK_FIRST:
             # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
             # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).
+            if ROUTER_TOPK_PAD > logits.shape[-1]:
+                # ttnn.topk runs single-core below a 1024-wide input (40 us on [32, 256] at width 1 - the costliest op of
+                # the width-1 GDN layer after the sparse matmuls); padded to 1024 with -inf it takes the multi-core path
+                padded = ttnn.pad(
+                    logits,
+                    [(0, 0), (0, 0), (0, 0), (0, ROUTER_TOPK_PAD - logits.shape[-1])],
+                    value=-1e9,
+                    memory_config=r_mc,
+                )
+                if padded is not logits:
+                    ttnn.deallocate(logits)
+                logits = padded
             values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True, memory_config=r_mc)
             ttnn.deallocate(logits)
             scores = ttnn.softmax(values, dim=-1, numeric_stable=True, memory_config=r_mc)
