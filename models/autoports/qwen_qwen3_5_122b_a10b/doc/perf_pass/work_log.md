@@ -1118,3 +1118,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   also produced row-major output and paid layout conversions afterwards. Fix: a separate config object
   (`_cfg_grouped_dn_rm`) used only by `_routed_sorted`; the pairs path keeps TILE output. Served re-check at c = 1 /
   8 / 32 launched; the MTP-rows guard stays. Bundle run 5 (21:22) carries this regression -> rebuild after the check.
+- 21:47 SERVED RE-CHECK with the separated configs (`logs/13/serve-sorted16-cfgfix.log`, production config, readiness
+  streaming benchmark 128 / 128): c=1 TTFT 320 ms, TPOT 20.6 ms = 48.4 t/s/u (MTP pass back to 67-71 ms per device
+  step, 2.7-2.9 tokens per pass); c=8 TTFT 1.83 s, TPOT 63.9 ms (unchanged: pairs path), 103 tok/s; c=32 TTFT 6.34 s,
+  TPOT 110.2 ms, 201 tok/s. Against the stage-13 release numbers (37.7 / 93.1 / 125-131 ms) and this morning's
+  (16.6-18.6 / 64 / 116-129): the 16-32-user win stands (-7 % / -14 %), 1 and 8 users unchanged within run-to-run
+  noise of the MTP acceptance. Bundle run 6 packaging; verify + push next.

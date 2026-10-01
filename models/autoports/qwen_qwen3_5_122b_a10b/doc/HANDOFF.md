@@ -21,7 +21,7 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 
 | workload | result |
 |---|---|
-| SHIPPED configuration (MTP k=3 adaptive on, vision on; readiness re-validation 2026-10-01, `doc/optimized_vllm/readiness_vllm_48l-mtp-vision/`) | 1 user 128 / 128: TTFT 396 ms, TPOT 16.6 ms = 60.3 t/s/u; 100 / 100 / 32 burst: TTFT p50 7.7 s, TPOT 129 ms, 158 tok/s; bundle verify on a reset device: 32-request burst 160 tok/s, 131072-token prompt 48.8 s, image request 0.97 s. Full sweep of the deployed bundle (input 128 .. 130816 x 1 .. 32 users): `doc/perf_pass/deployed_sweep.md` |
+| SHIPPED configuration (MTP k=3 adaptive on, vision on, expert-sorted decode MoE from 16 rows; served 2026-10-01 21:47, `logs/13/serve-sorted16-cfgfix.log`) | readiness streaming benchmark 128 / 128: 1 user TTFT 320 ms, TPOT 20.6 ms = 48.4 t/s/u (MTP; the readiness suite's own single-user run earlier the same day: 16.6 ms, acceptance-dependent); 8 users TPOT 63.9 ms, 103 tok/s; 32 users TTFT 6.3 s, TPOT 110.2 ms, 201 tok/s (release: 37.7 / 93.1 / 125-131 ms). Full sweep of the deployed bundle (input 128 .. 130816 x 1 .. 32 users): `doc/perf_pass/deployed_sweep.md` |
 | 1 user, 128 / 128 tokens | TTFT 408 ms (p50), TPOT 32.7 ms (30.6 t/s/u) on the width-1 trace (perf pass, `doc/perf_pass/`); stage 10/11: 394-426 ms, 37.7 ms on the width-2 trace |
 | 32 users, 128 / 128 tokens | TPOT 125-131 ms, 288 total tok/s (release report), CI burst 129 tok/s (unchanged by the perf pass: weight-bandwidth bound) |
 | per-width TPOT 1 / 2 / 4 / 8 / 16 / 32 users | 32.7 / 38.1 / 46.7 / 67.7 / 107.0 / 125.2 ms (perf pass; stage 10: 37.7 / 39.4 / 51.8 / 93.1 / 107.6 / 125.1) |
