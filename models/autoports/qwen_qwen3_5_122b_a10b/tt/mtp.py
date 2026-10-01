@@ -136,6 +136,26 @@ class Qwen35MtpHead:
         ttnn.deallocate(x)
         return out  # [1,1,B,H/TP]
 
+    def kv_rows(self, tokens, hidden, cur_pos, cos, sin, page_table):
+        """Head K/V rows only, for B decode rows: row b = (token tokens[b], hidden[b]) written at cur_pos[b] of
+        page_table[b] (rows at position -1 are skipped by the paged update). Runs inside the plain decode step of the
+        adaptive MTP server so every slot's head KV stays complete; mixer + attention norm + QKV projection + RoPE +
+        paged update, no SDPA / out-proj / MoE."""
+        layer = self.layer
+        x = self.mix(tokens, hidden)
+        n = layer._decode_norm(layer.attention_norm, x, Mode.DECODE, self.args.get_norm_config("attn", Mode.DECODE))
+        if x.is_allocated() and x is not n:
+            ttnn.deallocate(x)
+        att = layer.attention
+        att.kv_only = True
+        try:
+            out = att.forward_decode(n, cur_pos, cos, sin, page_table=page_table)
+        finally:
+            att.kv_only = False
+        assert out is None
+        if n.is_allocated():
+            ttnn.deallocate(n)
+
     def decode_step(self, tokens, hidden, cur_pos, rot_idxs, page_table):
         """One MTP row per user (decode layout): returns (vocab-sharded logits [1,1,B,V/TP], normed MTP hidden [1,1,B,H])."""
         m = self.model

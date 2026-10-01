@@ -672,6 +672,12 @@ class TPAttention:
                 ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
                 ttnn.deallocate(k_sh)
                 ttnn.deallocate(v_sh)
+            if getattr(self, "kv_only", False):
+                # MTP head bookkeeping inside a plain decode step: only the K/V rows of this step's (token, hidden) pairs
+                # are needed (the head's SDPA / output projection / MoE run in the MTP step itself)
+                ttnn.deallocate(q)
+                ttnn.deallocate(gate)
+                return None
             attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
                 keys,

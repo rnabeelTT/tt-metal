@@ -398,7 +398,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         self._program_cache_before_captures = self.program_cache_entries()
         logger.info(f"serving warm-up phase 1 done: {self._program_cache_before_captures} programs compiled")
 
-    def capture_traces(self, warm_host_trace=True, widths=None):
+    def capture_traces(self, warm_host_trace=True, widths=None, prefill_traces=True):
         """Phase 2 of the serving warm-up: the decode trace(s) (model + sampler) THEN the prefill bucket traces (last, so
         their intermediates only alias freed scratch), then the program-cache guard baseline. ``widths`` (stage 10 decode
         bucketing): one decode trace per width, each in its own trace store of the shared Generator (``decode_buckets``);
@@ -416,6 +416,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             logger.info(
                 f"decode traces captured for widths {widths} (host-logits variant at width {self.max_batch_size})"
             )
+        if not prefill_traces:
+            return  # adaptive MTP: the MTP step traces come next, the prefill bucket traces last (caller)
         self._program_cache_before_bucket_traces = self.program_cache_entries()
         self._warm_prefill_traces()
         self._program_cache_after_warmup = self.program_cache_entries()

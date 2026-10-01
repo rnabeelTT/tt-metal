@@ -233,7 +233,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         self._mtp = None
         mtp_k = int(os.environ.get("QWEN35_MTP", "0") or 0)
         if mtp_k > 0:
-            if B * (mtp_k + 1) > 32:
+            if B * (mtp_k + 1) > 32 and os.environ.get("QWEN35_MTP_ADAPTIVE", "1") != "1":
                 raise ValueError(
                     f"QWEN35_MTP={mtp_k}: {B} slots x {mtp_k + 1} rows exceed one 32-row pass (max-num-seqs <= {32 // (mtp_k + 1)})"
                 )
@@ -426,8 +426,15 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             return
         if not self._warm_phase["traces"]:
             if self._mtp is not None:
-                # MTP: the step traces instead of the decode trace; the prefill bucket traces too when the head's prompt
-                # rows run inside the bucket program (in_trace), else eager buckets (the python hook needs them)
+                # MTP: the step traces instead of the decode trace (adaptive: the plain decode traces too, with the head
+                # bookkeeping hooks inside); the prefill bucket traces too when the head's prompt rows run inside the
+                # bucket program (in_trace), else eager buckets (the python hook needs them)
+                if self._mtp.adaptive:
+                    self._mtp_bypass = True
+                    try:
+                        self._gen.capture_traces(widths=self._decode_widths, prefill_traces=False)
+                    finally:
+                        self._mtp_bypass = False
                 self._mtp.capture()
                 if self._mtp.in_trace:
                     self._gen._program_cache_before_bucket_traces = self._gen.program_cache_entries()
@@ -498,6 +505,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 raise NotImplementedError(
                     "MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL)"
                 )
+            if self._mtp.adaptive and self._mtp.in_phase:
+                self._mtp.suspend()  # unbind for the prefill; the next decode resumes / drops / leaves the phase
             for u in range(N):
                 self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
@@ -506,7 +515,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._mtp.abort_prefill()
                 raise
             tok0 = [int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)]
-            if self._mtp.multi:
+            if self._mtp.multi or self._mtp.adaptive:
                 self._mtp.end_prefill(tok0, plens, slots)
             else:
                 self._mtp.end_prefill(tok0[0], plens[0])
@@ -556,10 +565,13 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._contract_v1_reloads = getattr(self, "_contract_v1_reloads", 0) + 1
         if self._mtp is not None and not getattr(self, "_mtp_bypass", False):
             return self._mtp_decode(args, kwargs)
+        return self._plain_decode(args, kwargs)
+
+    def _plain_decode(self, args, kwargs, remap_done=False):
         slot_remap = kwargs.get("slot_remap")
         if slot_remap is None and len(args) > 10:
             slot_remap = args[10]
-        if slot_remap is not None:
+        if slot_remap is not None and not remap_done:
             self.model[0]._remap_gdn_slots(slot_remap)
         start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
         if start_pos is not None:
@@ -624,6 +636,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         out = torch.full((tokens.numel(), self._mtp.k + 1), -1, dtype=torch.int32)
         live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
         page_table = kwargs.get("page_table", args[2] if len(args) > 2 else None)
+        if self._mtp.adaptive:
+            return self._adaptive_decode(args, kwargs, tokens, pos, live, page_table, out)
         if self._mtp.multi:
             slot_remap = kwargs.get("slot_remap", args[10] if len(args) > 10 else None)
             if slot_remap is not None:
@@ -651,6 +665,122 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         self._live_slots = set(live)
         self._decode_steps = getattr(self, "_decode_steps", 0) + 1
         return out
+
+    def _adaptive_decode(self, args, kwargs, tokens, pos, live, page_table, out):
+        """Adaptive MTP (doc/perf_pass/adaptive_mtp_plan.md): exactly one live row -> the single-user MTP step for that
+        slot (entering its phase if needed), otherwise the plain batched decode (leaving the phase first)."""
+        mtp = self._mtp
+        last = None  # (slot, (token, position)) of a phase left in this step: the plain step takes these for the slot
+        if mtp.in_phase and mtp.suspended:
+            # a prefill ran since the phase's last step: its request finished (drop), is still alone (resume) or has
+            # company now (write its state back and go plain)
+            s0 = mtp._phase_slot
+            if s0 not in live or int(pos[s0]) < int(mtp._pos) - 1:
+                mtp.drop()  # the phase's request finished (or its slot carries a new request: lower position)
+            elif live == [s0]:
+                mtp.resume()
+            else:
+                last = (s0, mtp.leave())
+                self._mtp_leaves = getattr(self, "_mtp_leaves", 0) + 1
+        slot_remap = kwargs.get("slot_remap", args[10] if len(args) > 10 else None)
+        if slot_remap is not None:
+            if mtp.in_phase:
+                mtp.leave()
+            self.model[0]._remap_gdn_slots(slot_remap)
+            mtp.remap(slot_remap)
+        sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
+        if len(live) == 1 and self._mtp_eligible(sp, live[0]):
+            s = live[0]
+            pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+            row = pt[s]
+            if mtp.in_phase and mtp._phase_slot != s:
+                mtp.leave()
+            if not mtp.in_phase:
+                tok, p = self._authoritative(s, int(tokens[s]), int(pos[s]))
+                mtp.enter(s, tok, p, row)
+                self._mtp_enters = getattr(self, "_mtp_enters", 0) + 1
+                row = None  # set by enter
+            sampling = self._mtp_sampling(kwargs.get("sampling_params", args[6] if len(args) > 6 else None), s)
+            ids = mtp.step(int(tokens[s]), int(pos[s]), page_table_row=row, sampling=sampling)
+            out[s, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
+            self._live_slots = set(live)
+            self._decode_steps = getattr(self, "_decode_steps", 0) + 1
+            return out
+        if mtp.in_phase:
+            s_prev = mtp._phase_slot
+            last = (s_prev, mtp.leave())
+            self._mtp_leaves = getattr(self, "_mtp_leaves", 0) + 1
+        if mtp.consume_force_reload():
+            # the device decode inputs are stale for the phase's slot and the host view may lag it by a step: force a
+            # host-authoritative step with the model's own last token / position for that slot
+            args = list(args)
+            if last is not None and last[1] is not None and last[1][0] is not None:
+                s_prev, (t_last, p_last) = last
+                tk = torch.as_tensor(kwargs.get("tokens", args[0] if args else None)).clone()
+                sp = torch.as_tensor(kwargs.get("start_pos", args[1] if len(args) > 1 else None)).clone()
+                if s_prev < tk.numel() and int(sp.reshape(-1)[s_prev]) >= 0:
+                    tk.reshape(-1)[s_prev] = int(t_last)
+                    sp.reshape(-1)[s_prev] = int(p_last)
+                if "tokens" in kwargs:
+                    kwargs["tokens"] = tk
+                else:
+                    args[0] = tk
+                if "start_pos" in kwargs:
+                    kwargs["start_pos"] = sp
+                else:
+                    args[1] = sp
+                pre = getattr(self._gen._tt, "_slots_prefilled_since_decode", None)
+                if pre is not None:
+                    pre.add(s_prev)
+            if "reset_batch" in kwargs or len(args) <= 7:
+                kwargs["reset_batch"] = True
+            else:
+                args[7] = True
+            kwargs["reload_inputs"] = True
+        out_plain = self._plain_decode(args, kwargs, remap_done=slot_remap is not None)
+        return out_plain
+
+    @staticmethod
+    def _mtp_eligible(sp, row):
+        """A lone request takes the MTP step unless it needs what the step does not apply: penalties (presence /
+        frequency / repetition) or logprobs. Such a request runs the plain decode (host-logits path when the plugin
+        asks for it)."""
+        if sp is None:
+            return False  # host-logits step (host sampling, structured outputs): the plain path returns logits
+
+        def val(name, default):
+            v = getattr(sp, name, None)
+            if v is None:
+                return default
+            if isinstance(v, (int, float)):
+                return v
+            try:
+                x = v[row]
+            except (IndexError, TypeError):
+                return default
+            return x.item() if isinstance(x, torch.Tensor) else (default if x is None else x)
+
+        if abs(float(val("presence_penalty", 0.0))) > 1e-6 or abs(float(val("frequency_penalty", 0.0))) > 1e-6:
+            return False
+        if abs(float(val("repetition_penalty", 1.0)) - 1.0) > 1e-6:
+            return False
+        nl = val("num_logprobs", -2)
+        if nl is not None and int(nl) >= 0:
+            return False
+        return True
+
+    def _authoritative(self, s, host_tok, host_pos):
+        """The token / position of slot `s` to enter an MTP phase with: the device decode inputs when the device is one
+        step ahead of the host view (async scheduling feeds the sampled token back on device), else the host's."""
+        try:
+            trace_in = self._gen._tt.trace_inputs_decode[True][0]
+            dev_tok = int(ttnn.to_torch(ttnn.get_device_tensors(trace_in[0])[0]).reshape(-1)[s])
+            dev_pos = int(ttnn.to_torch(ttnn.get_device_tensors(trace_in[1])[0]).reshape(-1)[s])
+        except Exception:  # noqa: BLE001 - no decode trace inputs yet (first decode after the warm-up)
+            return host_tok, host_pos
+        if dev_pos == host_pos + 1:
+            return dev_tok, dev_pos
+        return host_tok, host_pos
 
     def _select_decode_bucket(self, args, kwargs, start_pos, slot_remap):
         """Decode bucketing: pick the smallest captured width >= the plugin's front-packed active prefix, bind that

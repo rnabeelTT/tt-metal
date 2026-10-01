@@ -25,7 +25,7 @@ from loguru import logger
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp import Qwen35MtpHead
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rows_pos_masks_host
+from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rebuild_conv_carry, rows_pos_masks_host
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_traced import MtpTraced, _host_i32, _host_u32
 from models.tt_transformers.tt.common import Mode
 
@@ -37,7 +37,19 @@ class MtpServing:
     def __init__(self, gen, k: int):
         self.gen, self.k = gen, int(k)
         self.B = int(gen.max_batch_size)
-        self.multi = self.B > 1
+        # B > 1 slots: ADAPTIVE (default) = the single-user step whenever exactly one request is live, the plain batched
+        # decode otherwise, state handed over at every switch (doc/perf_pass/adaptive_mtp_plan.md); QWEN35_MTP_ADAPTIVE=0
+        # = the batched multi-user step over every live slot (measured slower than plain decode at 2-4 users)
+        self.adaptive = self.B > 1 and os.environ.get("QWEN35_MTP_ADAPTIVE", "1") == "1"
+        self.multi = self.B > 1 and not self.adaptive
+        self.per_slot = self.B > 1  # prefill bookkeeping per slot (several requests per prefill call)
+        self._phase_slot = None  # adaptive: the slot whose GDN state lives in the MTP scratch (None = plain decode)
+        self._scratch_prev = None
+        self._suspended = False  # adaptive: phase kept (scratch content) but unbound across a prefill
+        self._force_reload = False  # adaptive: the first plain step after a phase must be host-authoritative
+        self.hid_prev = None  # adaptive: [1,1,B,H] final hidden of every slot's last decoded token (device, in-trace)
+        self._place = {}  # adaptive: width -> one-hot [1,1,B,w] (rows [0,w) into the B-row buffer)
+        self._keep = {}  # adaptive: width -> [1,1,B,1] mask (1 for rows >= w)
         self.model = gen.model
         self.mesh = self.model.mesh_device
         self.H = int(gen.args.dim)
@@ -60,7 +72,9 @@ class MtpServing:
         self.in_trace = os.environ.get("QWEN35_MTP_TRACED_PREFILL", "1") == "1"
         self.hid_out = None  # [1,1,1,H] replicated: the hidden that produced the request's first token (in-trace mode)
         logger.info(
-            f"MTP serving: k={self.k}, slots={self.B} ({'multi' if self.multi else 'single'}), head layer {self.head.layer_idx}"
+            f"MTP serving: k={self.k}, slots={self.B} "
+            f"({'adaptive single-user' if self.adaptive else 'multi' if self.multi else 'single'}), "
+            f"head layer {self.head.layer_idx}"
         )
 
     # ------------------------------------------------------------------ allocation / warm-up
@@ -74,9 +88,36 @@ class MtpServing:
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_traced_multi import MtpTracedMulti
 
             self.runner = MtpTracedMulti(self.gen, self.head, self.k, self.B)
+        elif self.adaptive:
+            # the single-user runner's state snapshots / scan sinks are shaped by the bound GDN state: build it on the
+            # B = 1 MTP scratch (bound again for warm-up, capture and every phase)
+            prev = self.model._bind_gdn_mtp_scratch()
+            try:
+                self.runner = MtpTraced(self.gen, self.head, self.k)
+            finally:
+                self.model._unbind_gdn_mtp_scratch(prev)
         else:
             self.runner = MtpTraced(self.gen, self.head, self.k)
         m = self.model
+        if self.adaptive:
+            z = lambda shape: ttnn.from_torch(
+                torch.zeros(*shape, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                memory_config=_DRAM,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+            )
+            self.hid_prev = z((1, 1, self.B, self.H))
+            self._e = z((1, 1, self.B, 1))  # one-hot column of the slot being written
+            self._ne = z((1, 1, self.B, 1))  # its complement
+            self._pick = z((1, 1, 1, self.B))  # one-hot row of the slot being read
+            self._perm = z((1, 1, self.B, self.B))  # slot permutation (batch condense)
+            self._rowbuf = z((1, 1, 1, self.H))  # host hidden rows land here (no request-time allocation)
+            if (
+                os.environ.get("QWEN35_MTP_HOOKS", "1") == "1"
+            ):  # diagnostic knob: 0 = no head bookkeeping in plain steps
+                m._mtp_decode_hook = self._decode_hook  # inside every plain decode step (and its traces)
         dev = lambda t: ttnn.to_device(t, self.mesh, memory_config=_DRAM)
         pt = self.gen.page_table[:1]
         tok, pos, rot, ptt = m.prepare_decode_inputs_host(
@@ -105,10 +146,30 @@ class MtpServing:
                 mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
             )
 
+    def _bound(self):
+        """Context: the MTP scratch bound onto the GDN layers (adaptive), a no-op otherwise."""
+        import contextlib
+
+        if not self.adaptive:
+            return contextlib.nullcontext()
+
+        @contextlib.contextmanager
+        def _cm():
+            prev = self.model._bind_gdn_mtp_scratch()
+            try:
+                yield
+            finally:
+                self.model._unbind_gdn_mtp_scratch(prev)
+
+        return _cm()
+
     def warm(self):
         """Compile every MTP program (the step programs + the head prompt rows for every bucket)."""
         self._ensure_runner()
-        self.runner.warm()
+        with self._bound():
+            self.runner.warm()
+        if self.adaptive:
+            self.warm_adaptive()
         for b in self.model._PREFILL_MASK_BUCKETS:
             h = ttnn.from_torch(
                 torch.zeros(1, 1, b, self.H, dtype=torch.bfloat16),
@@ -137,14 +198,14 @@ class MtpServing:
         pt = self.gen.page_table[:1]
         # a batched model prefills on the B = 1 GDN scratch (prefill_serving binds it per request); the eager single-user
         # prefill on the batched [B, ...] buffers would copy a [1, ...] state into them (shape mismatch)
-        prev = self.model._bind_gdn_prefill_scratch() if self.multi else None
+        prev = self.model._bind_gdn_prefill_scratch() if self.per_slot else None
         try:
             for b in self.model._PREFILL_MASK_BUCKETS:
                 for n in (b, max(2, b - 1)):
                     ids = [1000 + (i % 977) for i in range(n)]
                     self.begin_prefill(ids, pt[0], slot=0)
                     try:
-                        if self.multi:
+                        if self.per_slot:
                             self.model._reset_gdn_state_for_new_sequence()
                         lg, sh = self.gen._prefill_single(
                             torch.tensor(ids, dtype=torch.int32).reshape(1, -1), pt, want_sharded=True
@@ -154,14 +215,201 @@ class MtpServing:
         finally:
             if prev is not None:
                 self.model._unbind_gdn_prefill_scratch(prev)
-        if not self.multi:
+        if not self.per_slot:
             self.model._reset_gdn_state_for_new_sequence()
         ttnn.synchronize_device(self.mesh)
 
     def capture(self):
         self._ensure_runner()
-        self.runner.capture()
+        with self._bound():
+            self.runner.capture()
         logger.info("MTP traces captured (pass, commit, draft, head rows)")
+
+    # ------------------------------------------------------------------ adaptive: hooks, enter / leave
+    def _decode_hook(self, stage, *a):
+        """Inside the plain decode step (captured in its traces). "pre": the head's K/V rows of (this step's tokens,
+        hid_prev) at the step's positions / page tables; "post": hid_prev rows [0, w) <- this step's final hidden."""
+        if stage == "pre":
+            tok_view, cur_pos, page_table, cos, sin = a
+            w = int(cur_pos.shape[-1])
+            hid = self.hid_prev if w == self.B else ttnn.slice(self.hid_prev, (0, 0, 0, 0), (1, 1, w, self.H))
+            self.head.kv_rows(tok_view, hid, cur_pos, cos, sin, page_table)
+            if hid is not self.hid_prev:
+                ttnn.deallocate(hid)
+            return
+        (x,) = a  # [1,1,w,H] replicated final-normed hidden (the LM head's input; not consumed here)
+        w = int(x.shape[2])
+        # a DRAM copy (ttnn.to_memory_config can hand back a new handle on the SAME buffer: freeing it freed x)
+        xd = ttnn.clone(x, memory_config=_DRAM)
+        if w == self.B:
+            ttnn.copy(xd, self.hid_prev)
+        else:
+            if w not in self._place:
+                pl = torch.zeros(1, 1, self.B, w, dtype=torch.bfloat16)
+                kp = torch.ones(1, 1, self.B, 1, dtype=torch.bfloat16)
+                for i in range(w):
+                    pl[0, 0, i, i] = 1.0
+                    kp[0, 0, i, 0] = 0.0
+                dev = lambda t: ttnn.from_torch(
+                    t,
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=self.mesh,
+                    memory_config=_DRAM,
+                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+                )
+                self._place[w], self._keep[w] = dev(pl), dev(kp)
+            ph = ttnn.matmul(self._place[w], xd, memory_config=_DRAM)  # [1,1,B,H], rows >= w zero
+            kept = ttnn.multiply(self.hid_prev, self._keep[w], memory_config=_DRAM)
+            new = ttnn.add(kept, ph, memory_config=_DRAM)
+            ttnn.copy(new, self.hid_prev)
+            for t in (ph, kept, new):
+                ttnn.deallocate(t)
+        ttnn.deallocate(xd)
+
+    def _put_row(self, slot, row):
+        """hid_prev[slot] <- row (device [1,1,1,H] or host torch [H])."""
+        if isinstance(row, torch.Tensor):
+            ttnn.copy_host_to_device_tensor(
+                ttnn.from_torch(
+                    row.reshape(1, 1, 1, self.H).to(torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT
+                ),
+                self._rowbuf,
+            )
+            row = self._rowbuf
+        e = torch.zeros(1, 1, self.B, 1, dtype=torch.bfloat16)
+        e[0, 0, slot, 0] = 1.0
+        host = lambda t: ttnn.from_torch(t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+        ttnn.copy_host_to_device_tensor(host(e), self._e)
+        ttnn.copy_host_to_device_tensor(host(1.0 - e), self._ne)
+        placed = ttnn.matmul(self._e, row, memory_config=_DRAM)  # [1,1,B,H]: the row at slot, zeros elsewhere
+        kept = ttnn.multiply(self.hid_prev, self._ne, memory_config=_DRAM)
+        new = ttnn.add(kept, placed, memory_config=_DRAM)
+        ttnn.copy(new, self.hid_prev)
+        for t in (placed, kept, new):
+            ttnn.deallocate(t)
+
+    def _pick_row(self, slot):
+        """runner.d_hid <- hid_prev[slot]."""
+        sel = torch.zeros(1, 1, 1, self.B, dtype=torch.bfloat16)
+        sel[0, 0, 0, slot] = 1.0
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(sel, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT), self._pick)
+        picked = ttnn.matmul(self._pick, self.hid_prev, memory_config=_DRAM)  # [1,1,1,H]
+        ttnn.copy(picked, self.runner.d_hid)
+        ttnn.deallocate(picked)
+
+    def remap(self, remap):
+        """Batch condense: hid_prev row i <- old row remap[i] (the GDN slots are remapped by the caller)."""
+        idx = [int(remap[i]) for i in range(self.B)]
+        if all(idx[i] == i for i in range(self.B)):
+            return
+        assert self._phase_slot is None, "leave the MTP phase before a slot remap"
+        P = torch.zeros(1, 1, self.B, self.B, dtype=torch.bfloat16)
+        for i, j in enumerate(idx):
+            P[0, 0, i, j] = 1.0
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(P, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT), self._perm)
+        new = ttnn.matmul(self._perm, self.hid_prev, memory_config=_DRAM)
+        ttnn.copy(new, self.hid_prev)
+        ttnn.deallocate(new)
+
+    @property
+    def in_phase(self):
+        return self._phase_slot is not None
+
+    def enter(self, slot, tok, pos, page_table_row):
+        """Plain decode -> MTP phase for `slot`: its GDN state into the MTP scratch (bound), the head hidden of its last
+        token into the runner, the runner's token / position from the caller (authoritative)."""
+        assert self.adaptive and self._phase_slot is None
+        t0 = time.perf_counter()
+        m = self.model
+        self._scratch_prev = m._bind_gdn_mtp_scratch()
+        for (dn, rec, conv, _carry, _z), (_dn, _Bb, rec_b, conv_b, *_rest) in zip(
+            m._gdn_mtp_scratch, self._scratch_prev
+        ):
+            src = dn._slice_along(rec_b, 0, slot, slot + 1)
+            ttnn.copy(src, rec)
+            ttnn.deallocate(src)
+            for j in range(dn.K):
+                src = dn._slice_along(conv_b[j], 1, slot, slot + 1)
+                ttnn.copy(src, conv[j])
+                ttnn.deallocate(src)
+            rebuild_conv_carry(dn)
+        self._phase_slot = int(slot)
+        self.set_page_table(page_table_row)
+        self._pick_row(slot)
+        self._tok, self._pos = int(tok), int(pos)
+        self._sampler = None
+        self._log_stats("previous phase")
+        self._stats = {"passes": 0, "tokens": 0, "hist": [0] * (self.k + 1), "wall": 0.0}
+        self._phase_t0 = time.perf_counter()
+        logger.info(f"MTP phase enter slot {slot} at pos {pos}: {(time.perf_counter() - t0) * 1e3:.1f} ms")
+
+    def suspend(self):
+        """Keep the phase but unbind the scratch (a prefill is about to run; the next decode decides: resume / drop /
+        leave with the write-back)."""
+        if self._phase_slot is None or self._suspended:
+            return
+        self.model._unbind_gdn_mtp_scratch(self._scratch_prev)
+        self._scratch_prev = None
+        self._suspended = True
+
+    def resume(self):
+        assert self._phase_slot is not None and self._suspended
+        self._scratch_prev = self.model._bind_gdn_mtp_scratch()
+        self._suspended = False
+
+    def drop(self):
+        """End the phase without writing the state back (the phase's request finished)."""
+        if self._phase_slot is None:
+            return
+        if not self._suspended:
+            self.model._unbind_gdn_mtp_scratch(self._scratch_prev)
+            self._scratch_prev = None
+        self._suspended = False
+        self._phase_slot = None
+        self._tok = self._pos = None
+        self._log_stats("phase end (request finished)")
+
+    def leave(self):
+        """MTP phase -> plain decode: the runner's hidden back into hid_prev[slot], the scratch state back into the
+        slot's row of the batched GDN buffers; the next plain step must take the host token / position for the slot."""
+        slot = self._phase_slot
+        if slot is None:
+            return None
+        t0 = time.perf_counter()
+        m = self.model
+        self._put_row(slot, self.runner.d_hid)
+        if not self._suspended:
+            m._unbind_gdn_mtp_scratch(self._scratch_prev)
+            self._scratch_prev = None
+        self._suspended = False
+        for dn, rec, conv, _carry, _z in m._gdn_mtp_scratch:
+            dn.write_slot(slot, ttnn.clone(rec), [ttnn.clone(c) for c in conv])
+        self._phase_slot = None
+        self._force_reload = True
+        last = (self._tok, self._pos)
+        self._tok = self._pos = None
+        self._log_stats("phase end")
+        logger.info(f"MTP phase leave slot {slot} at pos {last[1]}: {(time.perf_counter() - t0) * 1e3:.1f} ms")
+        return last
+
+    def consume_force_reload(self):
+        f = self._force_reload
+        self._force_reload = False
+        return f
+
+    def warm_adaptive(self):
+        """Compile the enter / leave programs for every slot (slot slices, slot writes, row picks / puts) before any
+        capture; the state content is copied out and back, so nothing changes."""
+        pt = self.gen.page_table[:1]
+        for slot in range(self.B):
+            self.enter(slot, 0, 0, pt[0])
+            self.leave()
+        self._force_reload = False
+        self._stats = None
+        self.remap([(i + 1) % self.B for i in range(self.B)])
+        self.remap([(i - 1) % self.B for i in range(self.B)])
+        ttnn.synchronize_device(self.mesh)
 
     # ------------------------------------------------------------------ prefill side
     def _select_rows(self, h, bucket, j0):
@@ -205,7 +453,7 @@ class MtpServing:
         )
         rows_h = ttnn.matmul(self._sel[bucket], h, memory_config=_DRAM)  # row 0 = h[j]
         one = ttnn.slice(rows_h, (0, 0, 0, 0), (1, 1, 1, self.H))
-        if self.multi:
+        if self.per_slot:
             if self._cur_slot in self._hid_rows:
                 ttnn.deallocate(self._hid_rows[self._cur_slot])
             self._hid_rows[self._cur_slot] = ttnn.clone(one, memory_config=_DRAM)
@@ -230,7 +478,7 @@ class MtpServing:
         """Host writes for the head's segment: the first-draft one-hot (row P-1 when it lies in this segment) and, at a
         request's first segment, the zero 'previous hidden'. A queued request is taken at chunk_start 0."""
         if cs == 0 and self._prefill_queue:
-            if self.multi and self._hid_ready and self._prompt is not None:
+            if self.per_slot and self._hid_ready and self._prompt is not None:
                 # several requests in one prefill call: harvest the previous request's first-draft hidden to host
                 # before its hid_out is overwritten (the read waits for the previous replays)
                 self._hid_rows[self._cur_slot] = (
@@ -387,6 +635,25 @@ class MtpServing:
         assert not self._prefill_queue, f"{len(self._prefill_queue)} queued request(s) were not prefilled"
         assert self._hid_ready, "the prefill hook did not see the last prompt position"
         self._prompt = None
+        if self.adaptive:
+            # per slot: the hidden that produced the first token goes to hid_prev[slot] (the plain decode's head rows
+            # and a later enter() read it there); token / position come from the plugin at the slot's first decode
+            assert not self.in_phase or self._suspended, "a prefill ran inside a bound MTP phase (suspend() first)"
+            if self._phase_slot is not None and self._phase_slot in [int(x) for x in slots]:
+                # vLLM reused the phase's slot for a new request: the phase's request is gone (no write-back)
+                self.drop()
+            for slot in slots:
+                slot = int(slot)
+                if self.in_trace:
+                    row = self._hid_rows.pop(slot, None)
+                    if row is None:
+                        row = ttnn.to_torch(ttnn.get_device_tensors(self.hid_out)[0]).reshape(-1)[: self.H].clone()
+                    self._put_row(slot, row)
+                else:
+                    row = self._hid_rows.pop(slot)
+                    self._put_row(slot, row)
+                    ttnn.deallocate(row)
+            return
         if self.multi:
             for t0, p, slot in zip(tok0, P, slots):
                 slot = int(slot)
@@ -412,6 +679,10 @@ class MtpServing:
         self._tok = int(tok0)
 
     # ------------------------------------------------------------------ decode side
+    @property
+    def suspended(self):
+        return self._suspended
+
     def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None) -> list[int]:
         """Single user. Returns the accepted drafts followed by the verified next token (1..k+1 ids). The model owns the
         continuation (its last emitted token / position and the head's hidden for it); the plugin's `tok` / `pos` are
@@ -419,6 +690,7 @@ class MtpServing:
         a prefill) - on the steady async path its host token can lag the device by a step."""
         t0 = time.perf_counter()
         r = self.runner
+        assert not self.adaptive or (self.in_phase and not self._suspended), "adaptive MTP: step() outside a phase"
         if page_table_row is not None:
             self.set_page_table(page_table_row)  # vLLM may have grown the request's block list
         if host_authoritative and self._pos is not None and (pos != self._pos or tok != self._tok):

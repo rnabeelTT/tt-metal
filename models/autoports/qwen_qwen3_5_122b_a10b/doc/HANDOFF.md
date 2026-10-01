@@ -124,9 +124,15 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
 - Building: the new ops are part of the `ttnn` target (`ninja -C build_Release ttnn`); the linked library is
   `build_Release/ttnn/_ttnn.so` (not `build_Release/lib/`), and Python loads `ttnn/ttnn/_ttnn.so`: replace it with
   copy + atomic `mv` while device jobs run. Kernels compile on first use.
-- MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`): opt-in.
-  Serve with `QWEN35_MTP=3` (k drafts per pass) and `--max-num-seqs 1` (single user; `--max-num-seqs` 2-8 runs the
-  multi-user step, measured slower than plain decode at 2-4 users). Temperature 0 = greedy accept; temperature > 0 =
+- MTP (speculative decoding with the checkpoint's multi-token-prediction head; `doc/perf_pass/mtp_plan.md`,
+  `doc/perf_pass/adaptive_mtp_plan.md`): opt-in via `QWEN35_MTP=3` (k drafts per pass) at ANY `--max-num-seqs`.
+  ADAPTIVE (default with > 1 slot): the single-user MTP step runs whenever exactly one request is live, the plain
+  batched decode otherwise, the request's state handed over at every switch (GDN state into a persistent B = 1 MTP
+  scratch, head hidden rows and head K/V kept by two small hooks inside every plain decode step: +0.4 ms at 8 users);
+  requests with penalties or logprobs stay on the plain path. Measured (8 slots, full model): c = 1 TPOT 18.7 ms =
+  53.6 t/s/u (plain 29.9), TTFT p50 344 ms (plain 261: +~10 ms phase enter, + the head's prompt rows), concurrent
+  texts identical to the plain server's; c = 8 TPOT 60.0 ms (plain 59.6). `QWEN35_MTP_ADAPTIVE=0` = the batched
+  multi-user step over every live slot (slower than plain at 2-4 users). Temperature 0 = greedy accept; temperature > 0 =
   EXACT speculative sampling (drafts sampled from the head, rejection-sampling accept with the request's temperature /
   top-k / top-p; a request with 0 < top_k <= 32 - the checkpoint's generation default is top_k 20 / top_p 0.95 - is
   served from device top-k candidates with no logits read-back; penalties are not applied in the MTP step). Knobs:

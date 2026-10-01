@@ -398,7 +398,7 @@ def test_get_output_tokens_keeps_padded_width(applied):
     assert logprobs == [None]
 
 
-def test_get_output_tokens_rejects_unsupported_paths(expect_error, applied):
+def test_get_output_tokens_contract_and_delegations(expect_error, applied):
     runner = SimpleNamespace(_output_tokens_per_step=1, _is_block_output_model=False, tt_per_lane_max_num_seqs=4)
     tt_out = torch.full((4, MAX_WIDTH), -1, dtype=torch.int32)
     tt_out[:, 0] = 5
@@ -406,16 +406,21 @@ def test_get_output_tokens_rejects_unsupported_paths(expect_error, applied):
         TTModelRunner._get_output_tokens(
             runner, **_device_readback_args(torch.zeros((4, MAX_WIDTH + 1), dtype=torch.int32))
         )
-    with expect_error(RuntimeError, "logprobs"):
-        TTModelRunner._get_output_tokens(
-            runner, **_device_readback_args(tt_out, enable_log_probs=torch.tensor([True, False, False, False]))
-        )
-    with expect_error(RuntimeError, "structured outputs"):
-        TTModelRunner._get_output_tokens(runner, **_device_readback_args(tt_out, grammar=torch.zeros(1, 2)))
-    host = _device_readback_args(tt_out)
-    host["perform_device_sampling"] = False
-    with expect_error(RuntimeError, "host sampling"):
-        TTModelRunner._get_output_tokens(runner, **host)
+    # logprobs / structured outputs / host sampling on a decode step: the model ran the plain one-token decode for
+    # such requests (adaptive MTP never takes the step for them), so the shim hands the read-back to the original
+    calls = []
+    saved = shim._STATE["originals"]["runner._get_output_tokens"]
+    shim._STATE["originals"]["runner._get_output_tokens"] = lambda self_, *a: calls.append(a) or ("orig", None)
+    try:
+        for kw in (
+            _device_readback_args(tt_out, enable_log_probs=torch.tensor([True, False, False, False])),
+            _device_readback_args(tt_out, grammar=torch.zeros(1, 2)),
+            dict(_device_readback_args(tt_out), perform_device_sampling=False),
+        ):
+            assert TTModelRunner._get_output_tokens(runner, **kw) == ("orig", None)
+    finally:
+        shim._STATE["originals"]["runner._get_output_tokens"] = saved
+    assert len(calls) == 3 and all(a[-1] is True for a in calls)  # is_decode=True on every delegation
 
 
 def test_multi_token_gap_is_a_decode_step(applied):

@@ -86,6 +86,16 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
 - Attention rows: `TPAttention.rows_kv_write` (added 2026-09-30) writes the R rows' K/V one row at a time (the per-user
   paged update races within one 32-position tile), batched SDPA reads unchanged.
 
+## Status (2026-10-01 06:40): ADAPTIVE MTP validated (production list item 1)
+- `tt/mtp_serving.py` adaptive mode (`doc/perf_pass/adaptive_mtp_plan.md`): with `--max-num-seqs` > 1 the single-user
+  MTP step runs whenever exactly one request is live, the plain batched decode otherwise. Full model, 8 slots: single
+  requests = the single-user MTP texts and speed (c = 1 TPOT 18.7 ms = 53.6 t/s/u), the concurrent pair's texts
+  identical to the plain 8-slot server's, c = 8 TPOT 60.0 (plain 59.6), TTFT p50 344 ms (plain 261). Phase enter ~10 ms
+  (36 GDN slot copies + conv-carry rebuilds), a finished request's phase is dropped for free, a write-back leave 16-30
+  ms. Requests with penalties / logprobs / host sampling take the plain path; the plugin shim delegates those steps'
+  read-back to the stock code. Remaining before default-on: a full-model served check of a logprobs request and a
+  penalty request in MTP mode, then `QWEN35_MTP` defaults to 3 (KV pool -9% for the head's K/V, TTFT +~80 ms at c = 1).
+
 ## Status (2026-10-01 03:30): follow-ups shipped (sampling, in-trace head prefill, scan-only batched commit)
 - Exact speculative sampling (`tt/mtp_sampling.py`): temperature > 0 requests get sampled drafts and a rejection-sampling
   accept, exactly distributed as plain sampling of the request-processed target. Requests with 0 < top_k <= 32 (the

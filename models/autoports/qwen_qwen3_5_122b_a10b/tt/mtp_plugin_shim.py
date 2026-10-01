@@ -25,8 +25,9 @@ Patched (plugin revision at /home/raahem/vllm-tt-plugin, ``src/vllm_tt_plugin``)
 * ``TTModelRunner._get_output_tokens`` (model_runner.py:2118; the device-sampling branch at :2313-2319 raises unless
   ``shape[1] == output_tokens_per_step``): for a device-sampled decode step the read-back is reshaped to
   ``[sz, W]`` per DP rank, ``1 <= W <= max_width`` is enforced, pads must be trailing and every row must carry at
-  least one token.  Logprobs and grammar bitmasks (structured outputs) raise clearly; a decode step that fell back to
-  host sampling raises clearly.  Prefill steps (device- or host-sampled) are delegated to the original unchanged.
+  least one token.  Logprobs, grammar bitmasks (structured outputs) and host-sampled decode steps are delegated to
+  the original read-back: the adaptive MTP server never takes the MTP step for such requests (they run the plain
+  one-token decode), so the stock contract holds for those steps.  Prefill steps are delegated unchanged.
 * ``TTModelRunner._apply_sampled_tokens_to_state`` (model_runner.py:2427): writes only the ``n_i`` non-pad tokens of
   each row into ``token_ids_cpu`` / the request's ``output_token_ids`` and advances ``num_tokens`` by ``n_i``;
   a row that would cross ``max_model_len`` is clipped (with a warning) instead of raising, the scheduler's
@@ -55,9 +56,10 @@ Patched (plugin revision at /home/raahem/vllm-tt-plugin, ``src/vllm_tt_plugin``)
   Upstream clamps ``num_tokens_need_slot`` at ``max_model_len`` (kv_cache_manager.py:430), so a pass whose verify
   window would cross ``max_model_len`` has no allocated slots for those positions; the model must not write them.
 
-Unsupported under the shim (clear errors): host sampling on a decode step, logprobs, structured outputs (grammar
-bitmasks), block-output models (``output_tokens_per_step > 1`` keeps the original behaviour), lane mode
-(``TTLaneInputBatch.extract_output`` is not patched).
+Unsupported under the shim (clear errors): block-output models (``output_tokens_per_step > 1`` keeps the original
+behaviour), lane mode (``TTLaneInputBatch.extract_output`` is not patched). Host sampling, logprobs and structured
+outputs on a decode step are delegated to the original read-back (the model must have run the plain one-token decode
+for that step - the adaptive MTP server guarantees it).
 
 ``apply(max_output_tokens_per_step)`` is idempotent for the same width and returns ``undo()``, which restores every
 original attribute; ``undo`` is safe to call twice.
@@ -153,6 +155,15 @@ def _shim_coerce_output_block(sampled_token_ids: torch.Tensor, num_reqs: int, wi
     return sampled_token_ids
 
 
+def _delegate_original_decode(
+    self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling
+):
+    """The stock one-token-per-row decode read-back (the model took the plain path for this step)."""
+    return _STATE["originals"]["runner._get_output_tokens"](
+        self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling, True
+    )
+
+
 def _shim_get_output_tokens(
     self,
     tt_out,
@@ -177,10 +188,11 @@ def _shim_get_output_tokens(
             is_decode,
         )
     if not perform_device_sampling:
-        raise RuntimeError(
-            "MTP shim: a decode step fell back to host sampling (logprobs, structured outputs or a host-only "
-            "sampling parameter such as min_p / bad_words / logit_bias / allowed_token_ids / min_tokens). Host "
-            "sampling cannot consume a multi-token verify pass; reject these requests at the frontend."
+        # a host-sampled decode step (logprobs, structured outputs, min_p / bad_words / logit_bias / allowed_token_ids /
+        # min_tokens): the model ran the PLAIN decode and returned logits (the adaptive MTP step is never taken for
+        # host-logits steps, generator_vllm._mtp_eligible), so the original one-token read-back applies
+        return _delegate_original_decode(
+            self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling
         )
     max_width = max_output_width()
     sampled_token_ids_per_dp: list[torch.Tensor] = []
@@ -194,12 +206,14 @@ def _shim_get_output_tokens(
             start += self.tt_per_lane_max_num_seqs  # fixed stride segments per DP rank for decode
             continue
         grammar_bitmask = model_input.grammar_bitmask[dp_rank] if model_input.grammar_bitmask is not None else None
-        if grammar_bitmask is not None:
-            raise RuntimeError(
-                "MTP shim: structured outputs (grammar bitmask) are unsupported with a multi-token verify pass"
+        if grammar_bitmask is not None or (
+            isinstance(enable_lp, torch.Tensor) and bool(enable_lp[start : start + sz].any())
+        ):
+            # structured outputs / logprobs: such requests run the plain one-token decode (never the MTP step), so
+            # the original read-back (which applies the bitmask and gathers the logprobs) handles the whole batch
+            return _delegate_original_decode(
+                self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling
             )
-        if isinstance(enable_lp, torch.Tensor) and bool(enable_lp[start : start + sz].any()):
-            raise RuntimeError("MTP shim: logprobs are unsupported with a multi-token verify pass")
         rows = torch.as_tensor(tt_out)[start : start + sz]
         next_token_ids = rows.reshape(sz, -1).to(torch.int32)
         width = next_token_ids.shape[1]

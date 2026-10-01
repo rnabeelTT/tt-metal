@@ -704,3 +704,41 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   52.5). Greedy texts unchanged; sampled texts coherent. Benchmark c = 1: TTFT p50 306 ms, TPOT 18.6 ms = 53.7 t/s/u,
   ITL p50 57.5. Commit 2210fe18163 (+ this log). MTP follow-ups closed; next: adaptive default-on (item 1 of the
   production list in mtp_plan.md).
+- 04:46 (production list item 1) ADAPTIVE MTP built (`doc/perf_pass/adaptive_mtp_plan.md`): with `--max-num-seqs` > 1 the
+  server runs the single-user MTP step whenever exactly one request is live and the plain batched traced decode
+  otherwise. State handed over at every switch: the slot's GDN state copied into a dedicated persistent B = 1 "MTP
+  scratch" (bound onto the GDN layers for the phase; `write_slot` back on leave), the head hidden of every slot's last
+  token kept on device in `hid_prev` [1,1,B,H] (written INSIDE every plain decode step by a post-norm hook, read by
+  `enter`, written by `leave`), the head's paged K/V rows of every plain step written by a pre-layer hook (mixer + norm +
+  QKV + RoPE + paged update, `TPAttention.kv_only`), the first plain step after a phase forced host-authoritative with
+  the model's own last token / position for that slot. Reduced model (2 layers, 4 slots): server up, phases entered
+  and left across single / staggered (code admitted 0.12 s into prose: phase end 31 passes -> plain -> survivor phase
+  10 passes) / concurrent requests, no program compiled after the captures, single-request texts identical to the
+  single-user served MTP; the pair texts differ from the single ones only where the 2-layer model's bf16 near-ties
+  flip across decode widths (the same alternates the earlier plain width-2 runs produced). One failed attempt first:
+  `ttnn.to_memory_config` handed back a new handle on the LM head's input buffer and the hook freed it -> clone.
+  Full-model run queued (8 slots: texts, c = 1 MTP benchmark, c = 8 plain + hooks benchmark vs 68.5 ms TPOT).
+- 05:50 adaptive MTP, full model (8 slots, first run): single requests = the single-user MTP texts and numbers (c = 1
+  TPOT 18.7 ms = 53.6 t/s/u; TTFT p50 376 ms vs 306 in the 1-slot server: the enter / leave state copies around every
+  request), c = 8 TPOT 60.0 ms (plain 8-slot baseline run right after: 59.6 ms; c = 1 plain 29.9 ms / TTFT 261 ms).
+  The seeded pair requests ran at full width 8 in both servers (DECODE_BUCKETS: 783 width-8 steps) and the adaptive
+  server's plain width-8 texts differ from the plain server's (prose from token 4, code '<=' vs '<'), while on the
+  reduced model the adaptive and plain pair texts are identical at full width -> the hooks are not the cause there;
+  full-model diagnosis queued (hooks off vs plain8; the new deferred-leave code). Deferred leave: a prefill only
+  SUSPENDS the phase (unbind, keep the scratch), the next decode drops it (request finished, no write-back), resumes
+  it (still alone) or leaves (write-back). One failed attempt: my own end_prefill assertion still demanded "no
+  phase" during a prefill (now: no BOUND phase).
+- 06:22 deferred-leave runs (hooks off / on): the SECOND single request decoded the first request's continuation -
+  vLLM reused the finished request's slot for the new one, the suspended phase saw "its" slot still live at the next
+  decode and RESUMED the old scratch state for the new request. Fix: `end_prefill` drops a suspended phase whose slot
+  is among the freshly prefilled slots; the decode-side resume also requires the host position to continue the phase
+  (a lower position = a new request). The pair texts of those two runs are void (polluted). Run 3 queued.
+- 06:36 ADAPTIVE MTP VALIDATED on the full model (run 3, 8 slots): single requests = the single-user MTP texts and
+  speed (code 51.6 tok/s incl. TTFT, prose 29.1); the concurrent pair's texts IDENTICAL to the plain 8-slot server's
+  pair (both at the seeded full width 8) -> the plain path under adaptive MTP is exact, the earlier divergence was the
+  leave-at-prefill flow; the staggered pair is MTP-exact up to the admission and continues on the plain path (its text
+  diverges from the MTP continuation there, as the plain width-8 numerics do). c = 1 benchmark: TPOT 18.7 ms = 53.6
+  t/s/u (plain 29.9), TTFT p50 344 ms (plain 261; 1-slot MTP 306): enter costs ~10 ms (36 slot slices + copies +
+  carry rebuilds), the deferred leave drops a finished request's phase for free (7 of 7 phases here), a write-back
+  leave 16-30 ms. c = 8 (run 1): TPOT 60.0 ms with the head hooks vs 59.6 plain. Requests with penalties or logprobs
+  stay on the plain decode (`_mtp_eligible`).

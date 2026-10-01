@@ -186,6 +186,64 @@ class Qwen35MoeModel(Qwen36Model):
         )
         return ttnn.reshape(cos, (1, B, 1, cos.shape[-1])), ttnn.reshape(sin, (1, B, 1, sin.shape[-1]))
 
+    def _forward_decode(self, token_ids_buf, cos, sin, cur_pos_tensor, page_table, sharded_lm_head=False):
+        """The base decode body with the adaptive-MTP hooks (`_mtp_decode_hook`, set by MtpServing): before the layers
+        the head's K/V rows of (this step's tokens, the previous step's final hidden), after the final norm the hidden
+        rows for the next step. Both run inside the decode traces; no-ops without MTP."""
+        hook = self.__dict__.get("_mtp_decode_hook")
+        x = self.embd(token_ids_buf)
+        if self.num_devices > 1:
+            x = ttnn.reshape(x, (1, 1, x.shape[0] * x.shape[1], x.shape[-1]))
+        if hook is not None:
+            hook("pre", token_ids_buf, cur_pos_tensor, page_table, cos, sin)
+        for layer in self.layers:
+            if layer.is_full_attention:
+                x = layer.forward(x, cos, sin, position_tensor=cur_pos_tensor, page_table=page_table, mode="decode")
+            else:
+                x = layer.forward(x, mode="decode")
+        x = self._final_norm_decode(x)
+        if hook is not None:
+            hook("post", x)
+        if sharded_lm_head or self._ondev_argmax:
+            logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
+        else:
+            logits = self._lm_head(x)
+        ttnn.deallocate(x)
+        return logits
+
+    # ---- adaptive MTP: a second persistent B=1 GDN state set (the live request's state during an MTP phase) --------
+    def _ensure_gdn_mtp_scratch(self):
+        if getattr(self, "_gdn_mtp_scratch", None) is not None:
+            return
+        scratch = []
+        for layer in self.layers:
+            if layer.is_full_attention:
+                continue
+            dn = layer.attention
+            saved = (dn.B, dn.rec_state, dn.conv_states, dn.conv_carry, dn._zero_conv0, dn._stable_state)
+            dn.B = 1
+            dn.reset_state()
+            scratch.append((dn, dn.rec_state, dn.conv_states, dn.conv_carry, dn._zero_conv0))
+            dn.B, dn.rec_state, dn.conv_states, dn.conv_carry, dn._zero_conv0, dn._stable_state = saved
+        self._gdn_mtp_scratch = scratch
+
+    def _bind_gdn_mtp_scratch(self):
+        """Bind the MTP scratch onto every GDN layer (like _bind_gdn_prefill_scratch, a different buffer set)."""
+        self._ensure_gdn_mtp_scratch()
+        prev = []
+        for dn, rec, conv, carry, zero0 in self._gdn_mtp_scratch:
+            prev.append((dn, dn.B, dn.rec_state, dn.conv_states, dn.conv_carry, dn._zero_conv0, dn._stable_state))
+            dn.B = 1
+            dn.rec_state = rec
+            dn.conv_states = conv
+            dn.conv_carry = carry
+            dn._zero_conv0 = zero0
+            dn._stable_state = True
+        return prev
+
+    def _unbind_gdn_mtp_scratch(self, prev):
+        self._unbind_gdn_prefill_scratch(prev)
+
     def ttnn_decode_forward(
         self, tokens, current_pos, rot_mat_idxs=None, page_table=None, kv_cache=None, on_device_logits=False, **kwargs
     ):
