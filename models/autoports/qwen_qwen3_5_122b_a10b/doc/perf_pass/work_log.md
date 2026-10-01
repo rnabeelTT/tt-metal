@@ -1046,3 +1046,30 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   32 per-user PCC vs HF >= 0.9998). The sorted path's fixed cost (dispatch kernel, row gather, un-dispatch, G ~ 257
   mostly-padding groups) outweighs the saved expert re-reads at these row counts. Knob stays 0 (off); a Tracy of the
   sorted path at 16 rows is queued to see which of its ops carry the fixed cost before deciding on a small-T variant.
+- 19:23 MTP PREFILL TAX measured (same 128-token split, MTP off, full model): 231 ms vs 238 with MTP on -> the head
+  rows + hooks cost ~7 ms (3 %); the ~45 ms TTFT difference seen between served configurations is phase entry and
+  harness, not the bucket. Plan item 2 closed (not worth work). The bucket is 187 ms without MTP: ~3.5 ms per layer
+  of op launches for 128 tokens - the lever is fewer ops per layer or several prompts per pass, not MTP.
+- 19:23 SORTED PATH AT 16 ROWS, Tracy (`artifacts/stage15/tracy_decode_attn-b16-sorted8`): 74 ops / 2044 us device.
+  The grouped resident sparse matmuls are FASTER than the pairs path's (381 + 224 = 605 us vs 795: each distinct
+  expert read once), but the path pays 601 us (29 %) in the row gather (`gather_rows` = the embedding op over the
+  dispatched rows: 4 128 mostly-padding rows x 3072 bf16 = 25 MB at ~42 GB/s, effectively single-core) and 248 us
+  (12 %) in the un-dispatch's untilize (`UntilizeCodegen`) before the multi-core gather-add kernel (34 us). Same
+  glue the prefill MoE pays (this morning: gather 1.8 ms, un-dispatch 1.4 ms incl. 0.8 ms untilize of ~8.3 ms per
+  layer at 2048 tokens). ONE kernel pair fixes both: a multi-core TILE-layout row gather (like moe_gather_add_rows,
+  skipping padding groups) and a tile-aware gather-add (no untilize). Projected: sorted path at 16 rows ~1.25 ms vs
+  pairs 1.68 (-25 % on the attention layer step; 16-user TPOT ~103 -> ~85 ms), prefill MoE per layer -2.5 ms at
+  2048 tokens (-30 %). This becomes plan item 1.
+- 19:29 NEW OP `ttnn.moe_gather_rows` (ttnn/cpp/ttnn/operations/experimental/moe_gather_rows, sibling of
+  moe_gather_add_rows): work item = (group, column block) over all cores; the reader gathers a REAL group's 32 source
+  rows (src_tok stick) straight into a row-major L1 block, the compute kernel tilizes it, the writer stores the tiles
+  at the group's offset; a padding group (group_ids[g] >= E) costs a zero block and no DRAM traffic (flag CB reader
+  -> writer, tiles dropped). Replaces the embedding-op gather over every dispatched row (`gather_rows`, now routed
+  to the kernel behind `QWEN35_GATHER_KERNEL`, default on, when the grouped skip-aware matmul consumes the output).
+  Built (ninja 33 s); validation chain running: unit tests (bit-exact vs torch and vs the embedding gather, perf
+  vs embedding) gate the layer PCC tests, the sorted-decode A/B at 8 / 16 / 32 and the 2048-token prefill Tracy.
+- 19:35 moe_gather_rows unit tests 5 / 5: bit-exact vs torch and vs the embedding gather at T=16 (G=129, 98 real
+  groups), T=2048 (G=761, 631 real), T=37 (G=281, both core groups); host wall incl. sync: 0.527 -> 0.392 ms at
+  T=16, 1.507 -> 1.022 ms at T=2048 (device op time from the Tracy below). Note the `ninja ttnn` build does not
+  refresh `ttnn/ttnn/_ttnn.so` (the nanobind module; stale since 04:56 - the C++ op library resolves to
+  build_Release via rpath, which is why the resident fix was live but the new binding was not): copied both .so.

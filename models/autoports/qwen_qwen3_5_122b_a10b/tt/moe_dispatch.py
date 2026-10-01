@@ -496,10 +496,23 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
 SortedDispatch._build_kernel = _kernel_dispatch
 
 
-def gather_rows(x4, src_tok_rm, Rd: int, group: int = TILE):
-    """X_disp [1, G, group, H] tiled bf16 from x4 [1,1,T,H] tiled bf16 and the uint32 row index [1, Rd]."""
+GATHER_KERNEL = os.environ.get("QWEN35_GATHER_KERNEL", "1") == "1" and hasattr(ttnn, "moe_gather_rows")
+
+
+def gather_rows(x4, src_tok_rm, Rd: int, group: int = TILE, group_ids=None, num_experts: int = 0):
+    """X_disp [1, G, group, H] tiled bf16 from x4 [1,1,T,H] tiled bf16 and the uint32 row index [1, Rd].
+
+    With ``group_ids`` (uint16 ROW_MAJOR [1, G], the dispatch's expert per group; >= num_experts = padding) and the
+    kernel enabled (``QWEN35_GATHER_KERNEL``, default on), the multi-core ``ttnn.moe_gather_rows`` gathers each REAL
+    group's 32 rows straight into tiles and skips the padding groups (their tiles are never read: the grouped sparse
+    matmul skips them too). The embedding-op gather it replaces moved every dispatched row (97 % padding at 16
+    decode rows: 601 us for 25 MB) - decode-width profile 2026-10-01."""
     T, H = x4.shape[2], x4.shape[3]
     x_rm = ttnn.to_layout(ttnn.reshape(x4, (T, H)), ttnn.ROW_MAJOR_LAYOUT)
+    if GATHER_KERNEL and group_ids is not None and group == TILE and num_experts > 0:
+        rows = ttnn.moe_gather_rows(x_rm, src_tok_rm, group_ids, int(num_experts), memory_config=DRAM)  # [1,G,32,H]
+        ttnn.deallocate(x_rm)
+        return rows
     rows = ttnn.embedding(src_tok_rm, x_rm, layout=ttnn.TILE_LAYOUT, memory_config=DRAM)  # [1, Rd, H]
     ttnn.deallocate(x_rm)
     return ttnn.reshape(rows, (1, Rd // group, group, H))

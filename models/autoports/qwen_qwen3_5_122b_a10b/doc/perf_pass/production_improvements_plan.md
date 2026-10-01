@@ -32,22 +32,23 @@ prefill_forward call and we run them one by one; a step is prefill-only or decod
 prefers prefill while any is pending (`vllm_tt_plugin/scheduler.py`), so 31 short prompts block decode for 7.4 s.
 The plugin also disables chunked prefill for any model with `output_tokens_per_step > 1` (MTP).
 
-## Plan (ordered)
+## Plan (ordered, revised 19:25)
 
-1. **Decode MoE at 8-32 rows -> expert-sorted grouped path** (`QWEN35_DECODE_SORTED_MIN_ROWS`, knob added
-   2026-10-01 19:02). A/B: `scripts/18-decode-sorted-ab.sh` (per-width step time + PCC). Target: 16-user TPOT
-   103 -> ~80 ms, 32-user 130 -> ~110 ms; unblocks multi-user MTP re-measurement. Result (19:11): REJECTED as is - slower at every width (GDN 2.26 / 2.51 / 2.91 ms vs 1.32 / 2.13 / 2.72 at 8 / 16 / 32 users); the sorted dispatch's fixed cost dominates at <= 32 rows. Next: Tracy of the sorted path at 16 rows, then either a small-T variant (one-kernel dispatch + grouped matmul without the gather / un-dispatch round trips) or the pairs path's glue (tilize 16 %, slices) trimmed instead.
-2. **MTP prefill tax**: the head's prompt rows run inside every bucket trace (they need the main model's hidden at
-   every prompt position, which is not kept, so they cannot be deferred to MTP entry). Measure the tax exactly
-   (`18-prefill-cost-mtpoff.sh`: the same 128-token split with MTP off) and, if it is more than the head layer's
-   ~4 ms, trim the glue (norm clone, select matmul, layout changes, concat) or move the K/V write off the bucket.
-3. **GDN slot write**: conv-tap writes through fewer ops (indexed row fill / stacked taps). Target: 28.8 -> ~10 ms per
-   prefill (-8 % of the 128-token request).
-4. **Batched short-prompt prefill**: several short prompts per bucket pass through the batched GDN chunk form (the
-   MTP verify pass already runs B users x 32 rows) + batched prefill attention. Target: ~2.5x on short-prompt bursts.
-   Largest change; after 1-3.
-5. **Plugin asks**: prefill / decode alternation in `TTScheduler` (gpt-oss-style "prefill step, then D decode steps"),
-   chunked prefill with block output (MTP), automatic prefix caching (our GDN carried-state primitive can snapshot
-   the state at the prefix boundary). Not shippable from this tree (the bundle pins the plugin revision).
-6. **Width-1 router chain fusion** (~5 ms of the 32 ms plain step); fused GDN decode kernel later.
-7. **Long-context decode at high occupancy** (32768 x 32 users 425 ms): Tracy at 32 users x 32K first.
+1. **Multi-core TILE row-gather kernel + tile-aware gather-add un-dispatch** (shared by the prefill MoE and the
+   expert-sorted decode path). Measured: at 16 decode rows the sorted path's grouped matmuls already beat the pairs
+   path (605 vs 795 us) but the embedding-op row gather (601 us, 25 MB of mostly padding at ~42 GB/s) and the
+   un-dispatch untilize (248 us) make it lose (2.04 vs 1.68 ms per attention-layer step). At 2048-token prefill the
+   same glue is ~2.6 of ~8.3 ms per MoE layer. Targets: 16-user TPOT 103 -> ~85 ms, 32-user 130 -> ~110, prefill
+   MoE -30 % per layer (2048 tokens: ~701 -> ~600 ms per 48 layers); then re-run the decode A/B with
+   `QWEN35_DECODE_SORTED_MIN_ROWS=8` and re-measure multi-user MTP.
+2. ~~MTP prefill tax~~ measured at 7 ms of 238 (closed).
+3. **GDN slot write**: conv-tap writes through fewer ops. Target 28.8 -> ~10 ms per prefill.
+4. **Per-layer op count of the 128-token bucket** (~3.5 ms x 48 = 170 of 231 ms): the prefill form of the GDN layer
+   and the attention layer at bucket 128 have the decode problem (tens of tiny ops); fused norm+matmul and the
+   router chain apply to prefill too. Measure with Tracy of the traced bucket 128 (the eager Tracy today was
+   12 ms per layer and not representative).
+5. **Batched short-prompt prefill** (several prompts per bucket pass; batched GDN chunk form + batched prefill
+   attention). ~2.5x on short bursts; largest change.
+6. **Plugin asks** (not shippable from this tree): scheduler prefill / decode alternation, chunked prefill with block
+   output, automatic prefix caching (+ our GDN state snapshot at the prefix boundary).
+7. Width-1 router chain fusion; long-context decode at high occupancy (Tracy at 32 users x 32K first).

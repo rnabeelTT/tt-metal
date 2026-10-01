@@ -547,10 +547,18 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             )
         m = self._dispatch.build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
-        x_disp = gather_rows(x4, m["src_tok"], Rd, gs)  # [1,G,gs,H]
+        grouped = bool(getattr(opt, "sorted_grouped", False))
+        # the kernel gather needs the skip-aware grouped matmul (padding groups' tiles are not written)
+        x_disp = gather_rows(
+            x4,
+            m["src_tok"],
+            Rd,
+            gs,
+            group_ids=m["group_ids"] if (grouped and self._skip_pad_groups_rule()) else None,
+            num_experts=E,
+        )  # [1,G,gs,H]
         ttnn.deallocate(m["src_tok"])
         narrow = self.tile_gu.tile_shape[1] != 32
-        grouped = bool(getattr(opt, "sorted_grouped", False))
         if grouped:
             # indexed/gather mode: the id list drives the weight reads, `sparsity` is unused (kept for the op signature)
             sparse_kw = {"indices": m["group_ids"]}
