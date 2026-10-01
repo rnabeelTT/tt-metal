@@ -97,8 +97,11 @@ prose 1.8x, chat 1.9x, json 2.5x, code 3x (k = 5-6 pays on code / json).
   also fixed a latent plain-mode bug: host-sampled prefills were treated as intermediate chunks since the
   chunked-prefill turn). `QWEN35_MTP` DEFAULTS TO 3 since commit 961fab593a9 (`QWEN35_MTP=0` disables; chunked prefill
   requested without an explicit QWEN35_MTP turns it off): KV pool -9% for the head's K/V, TTFT +~50 ms at c = 1
-  (313 vs 261), TPOT 18.6 vs 29.9 ms at one user, +0.4 ms per step at 8 users. Production-config gate (32 slots,
-  262144 context) running.
+  (313 vs 261), TPOT 18.6 vs 29.9 ms at one user, +0.4 ms per step at 8 users. Production-config gate PASSED
+  (32 slots, 262144 context, 768 MiB trace region): c = 1 TPOT 20.1 ms (page-table rewrite per pass, since cached),
+  TTFT 351 ms, c = 8 62.6 ms (68.5 before MTP), c = 32 128.4 ms (130.1); logprobs / penalty / min_p served.
+  Open TTFT lever at one user (~90 ms over plain at 32 slots): the head's prompt rows inside the bucket traces and
+  the phase enter (~11 ms); measure the bucket-trace delta with QWEN35_MTP=0 before touching it.
 
 ## Status (2026-10-01 03:30): follow-ups shipped (sampling, in-trace head prefill, scan-only batched commit)
 - Exact speculative sampling (`tt/mtp_sampling.py`): temperature > 0 requests get sampled drafts and a rejection-sampling
