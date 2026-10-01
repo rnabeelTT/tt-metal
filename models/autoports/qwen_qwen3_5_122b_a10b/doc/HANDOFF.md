@@ -21,6 +21,7 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 
 | workload | result |
 |---|---|
+| SHIPPED configuration (MTP k=3 adaptive on, vision on; readiness re-validation 2026-10-01, `doc/optimized_vllm/readiness_vllm_48l-mtp-vision/`) | 1 user 128 / 128: TTFT 396 ms, TPOT 16.6 ms = 60.3 t/s/u; 100 / 100 / 32 burst: TTFT p50 7.7 s, TPOT 129 ms, 158 tok/s; bundle verify on a reset device: 32-request burst 160 tok/s, 131072-token prompt 48.8 s, image request 0.97 s. Full sweep of the deployed bundle (input 128 .. 130816 x 1 .. 32 users): `doc/perf_pass/deployed_sweep.md` |
 | 1 user, 128 / 128 tokens | TTFT 408 ms (p50), TPOT 32.7 ms (30.6 t/s/u) on the width-1 trace (perf pass, `doc/perf_pass/`); stage 10/11: 394-426 ms, 37.7 ms on the width-2 trace |
 | 32 users, 128 / 128 tokens | TPOT 125-131 ms, 288 total tok/s (release report), CI burst 129 tok/s (unchanged by the perf pass: weight-bandwidth bound) |
 | per-width TPOT 1 / 2 / 4 / 8 / 16 / 32 users | 32.7 / 38.1 / 46.7 / 67.7 / 107.0 / 125.2 ms (perf pass; stage 10: 37.7 / 39.4 / 51.8 / 93.1 / 107.6 / 125.1) |
@@ -29,6 +30,15 @@ Measured on this host (stage 10, `doc/optimized_vllm/README.md`; stage 11 releas
 | accuracy (TTI ci-nightly subsets, non-thinking greedy, graded vs the bf16 HF checkpoint in the same setting) | ifeval 92.66 vs HF 89.91 (published 93.4 is thinking mode); gpqa_diamond 77.5 vs HF 80.0 (a pass by one item under TTI's sample-count rule, both budget-cut at 4096 tokens; published 86.6 is thinking mode): stage-11 status `release-readiness-ci-subset-pass`; full sets non-thinking 87.99 / 68.69 (`doc/tti_release/RUN_NOTES.md`) |
 
 ## 2. Run it
+
+**One engine per box.** A second server started while another holds the four chips does not fail cleanly: tt-model's
+"host ready: tt devices" check passes, the new engine opens the same devices, its fabric auto-discovery sees a LINE
+(`intra-mesh degree histograms mesh0 {1:2, 2:2}` in its log) instead of this box's ring, and the first all-gather dies
+with `TT_FATAL ... Could not find any forwarding direction from src (M0, D0) to dst (M0, D3)` (seen 2026-10-01 when a
+`tt-model serve` overlapped the deployed-model sweep's container). Before serving: `docker ps` (no `tt-model-qwen3-5-*`
+container), `fuser /dev/tenstorrent/*` (no holders), then start. The model's collectives pick Ring / Linear from the
+fabric the process actually got (`QWEN35_CCL_TOPOLOGY`, §4), which turns that crash into a (slower) Linear run but is
+not a substitute for the rule.
 
 From the checkout (the readiness runner starts vLLM with the plugin):
 ```bash

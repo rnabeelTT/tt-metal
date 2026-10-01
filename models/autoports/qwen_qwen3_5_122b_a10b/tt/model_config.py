@@ -51,11 +51,14 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
         """CCL topology for every collective of this model (the layers, the norms, the MTP head and the vision tower
         all read it from here). ``QWEN35_CCL_TOPOLOGY`` = ``auto`` (default) | ``ring`` | ``linear``.
 
-        ``auto``: the stock rule returns Ring for every P300x2 / P150x4 cluster, but not every 4-chip Blackhole box is
-        cabled as a ring - a P150x4 host whose chips form a LINE (fabric adjacency ``{1:2, 2:2}``: two chips with one
-        ethernet neighbour) died at the first fused-norm all-gather with ``TT_FATAL: Could not find any forwarding
-        direction from (M0, D0) to (M0, D3)`` (2026-10-01, another machine). ``ttnn.get_usable_topology`` demotes the
-        Ring request to Linear when the mesh devices have no wraparound, so the decision follows the real cabling."""
+        ``auto``: the stock rule returns Ring for every P300x2 / P150x4 cluster; ``ttnn.get_usable_topology`` demotes
+        the Ring request to Linear when the fabric graph the process discovered has no wraparound over the mesh, so the
+        decision follows what the fabric can actually route (a 4-chip box cabled as a line, or - the case seen on
+        2026-10-01 - a second engine started on this box while another server held the chips: its auto-discovered
+        adjacency came out as a LINE ``{1:2, 2:2}`` and the first fused-norm all-gather died with ``TT_FATAL: Could not
+        find any forwarding direction from (M0, D0) to (M0, D3)``). Two engines on one device set are never supported
+        (tt-model's host-ready check does not detect a live engine); this rule only turns the crash into a Linear run.
+        """
         cached = self.__dict__.get("_ccl_topology_cache")
         if cached is not None:
             return cached

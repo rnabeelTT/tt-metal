@@ -944,3 +944,23 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   smoke with Linear forced on this box (`scripts/16-linear-topology-smoke.sh`: text, logprobs, image) and the auto
   rule logging Ring here. Also in that log: `--enable-auto-tool-choice` duplicated (tt-model adds it too; harmless),
   tt_transformers' "Unknown model ... MAX_PREFILL_CHUNK_SIZE 4" (unused by this model's prefill path).
+- 17:20 deployed-model sweep PASS 1 complete (48 rows, 14:53 -> 17:14, `artifacts/stage17/perf_sweep_hub.json`;
+  single-user TPOT column invalid - pass 2 pending). Shape of the results: prefill is serialised (no chunked prefill
+  in the shipped config), so TTFT grows linearly with the closed-loop queue (4096 tokens: 1.3 s at 1 user, 39.7 s
+  at 32 users; 130816 tokens: 48.5 s at 1 user = 2 700 tok/s). Decode at 2 / 4 / 8 / 16 / 32 users: 37 / 44 / 64 /
+  103 / 116-131 ms TPOT for short contexts (matches the per-width traces); total output 184 tok/s at 32 users /
+  128-token prompts, 175 at 1024, 112 at 4096. Long contexts at high occupancy are the weak spot: 32768 x 32 users
+  425 ms TPOT, 65536 x 16 375 ms, 130816 x 8 / 16 / 32 178 / 265 / 512 ms (paged-attention reads over long K/V plus
+  the serialised prefills interleaving with decode); total output falls to 5 tok/s at 130816 whatever the user count
+  because the row is prefill-bound (32 prompts x 48 s).
+- 17:25 CORRECTION to the 17:18 entry: the failing log is from THIS box, not another machine. Timeline: the user's
+  `tt-model serve` started at 16:42:57 while the deployed-model sweep's Hub container (started 14:43, port 20000) was
+  live and prefilling 130816-token prompts (its server log: prefills at 16:42:54, 16:44:30, ... 16:53:07 - it kept
+  working). The second engine opened the same four chips, ran fabric auto-discovery while the first fabric owned
+  the ethernet links, got a LINE adjacency `{1:2, 2:2}` instead of this box's ring, and died at the first all-gather
+  (`no forwarding direction D0 -> D3`). Root cause: two engines on one device set; tt-model's "host ready: tt devices"
+  check does not detect a running engine (docker hides the host's /dev/tenstorrent holders from the container).
+  The cabling-aware topology rule (0b48a2312d2) stays as a robustness measure (harmless on a ring: logs Ring) but is
+  not the fix for this incident - the fix is operational: one server per box (`docker ps`, `fuser
+  /dev/tenstorrent/*` before `tt-model serve`), noted in HANDOFF. Linear-topology smoke stays queued (validates the
+  demotion path).
