@@ -127,7 +127,13 @@ class Qwen35MoeModel(Qwen36Model):
             assert pos_vec.shape[0] == B, f"current_pos length {pos_vec.shape[0]} != batch {B}"
         else:
             pos_vec = torch.full((B,), int(current_pos), dtype=torch.int32)
-        rope_pos = (pos_vec + self.rope.rope_delta).clamp(min=0).to(torch.int32)
+        # multimodal requests decode at rope position = KV position + their M-RoPE delta; a multi-slot server keeps one
+        # delta per slot (set after each request's prefill, `set_slot_rope_delta`), text requests have delta 0
+        slot_delta = self.__dict__.get("_slot_rope_delta")
+        if slot_delta is not None and B <= slot_delta.numel():
+            rope_pos = (pos_vec + slot_delta[:B]).clamp(min=0).to(torch.int32)
+        else:
+            rope_pos = (pos_vec + self.rope.rope_delta).clamp(min=0).to(torch.int32)
         cur_pos_tt = ttnn.from_torch(pos_vec, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT)
         rot_idxs = ttnn.from_torch(rope_pos.reshape(1, B), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT)
         page_table_tt = (
@@ -136,6 +142,18 @@ class Qwen35MoeModel(Qwen36Model):
             else None
         )
         return tokens_tt, cur_pos_tt, rot_idxs, page_table_tt
+
+    def set_slot_rope_delta(self, slot, delta):
+        """Record decode slot ``slot``'s M-RoPE position delta (0 for text requests)."""
+        vec = self.__dict__.get("_slot_rope_delta")
+        if vec is None:
+            vec = torch.zeros(int(self.args.max_batch_size), dtype=torch.int32)
+            self._slot_rope_delta = vec
+        vec[int(slot)] = int(delta)
+
+    def slot_rope_delta(self, slot):
+        vec = self.__dict__.get("_slot_rope_delta")
+        return int(vec[int(slot)]) if vec is not None else 0
 
     def _token_buffer_rows(self):
         """Rows of the persistent decode token buffer = the sampler's padded batch (32), else the model batch."""
@@ -509,13 +527,18 @@ class Qwen35MoeModel(Qwen36Model):
         vision_tokens=None,
         vis_row_offset=0,
         return_sharded=False,
+        rope_staged=False,
     ):
         """Masked fixed-bucket prefill on persistent device inputs; replays the bucket's trace when one was captured
         (:meth:`capture_prefill_bucket_traces`). Falls back to the stock path for multimodal segments or when no KV
         scratch block is reserved (``_kv_scratch_block``). Returns the replicated next-token logits [1, 1, vocab];
         with ``return_sharded`` the pair ``(logits, logits_sharded [1,1,32,vocab/TP])`` (see :meth:`_run_bucket_dev`).
         """
-        if vision_tokens is not None or getattr(self, "_kv_scratch_block", None) is None or not flex_sdpa:
+        # multimodal segments run on the persistent-input path too once the trace-safe splice buffers exist
+        # (`_alloc_vision_merge_buffers`, before the captures): the bucket body's where(mask, vision, text) selects the
+        # staged image rows; without the buffers (text-only build) they fall back to the stock path
+        vision_needs_stock = vision_tokens is not None and getattr(self, "_vis_buf", None) is None
+        if vision_needs_stock or getattr(self, "_kv_scratch_block", None) is None or not flex_sdpa:
             if return_sharded:
                 raise NotImplementedError(
                     "sharded prefill logits need the persistent-input bucket path (KV scratch block)"
@@ -537,14 +560,16 @@ class Qwen35MoeModel(Qwen36Model):
         pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
         if chunk_start == 0:
             self._reset_gdn_state_for_new_sequence()
-            self._build_request_rope(token_ids[:, :actual_len], None)
+            if not rope_staged:  # a multimodal request staged its M-RoPE table over the WHOLE prompt (generator)
+                self._build_request_rope(token_ids[:, :actual_len], None)
         bi = self._bucket_inputs(bucket, max_blocks=pt.shape[-1])
         self._stage_bucket_inputs(bi, token_ids, pt, actual_len, chunk_start, bucket)
         mtp_stage = self.__dict__.get("_mtp_stage_hook")
         if mtp_stage is not None:
             mtp_stage(bi, bucket, chunk_start, actual_len)  # host writes of the MTP head's segment inputs
         if getattr(self, "_vis_buf", None) is not None:
-            self._set_vision_merge(token_ids[:, :actual_len], None, vis_row_offset)  # clears the mask
+            # image rows of this segment into the splice buffers (vision_tokens None clears the mask: text segment)
+            self._set_vision_merge(token_ids[:, :actual_len], vision_tokens, vis_row_offset)
         tr = self.__dict__.get("_bucket_traces", {}).get(bucket)
         if tr is not None:
             ttnn.execute_trace(self.device, tr[0], cq_id=0, blocking=False)

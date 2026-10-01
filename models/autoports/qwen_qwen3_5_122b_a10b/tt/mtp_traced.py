@@ -118,6 +118,7 @@ class MtpTraced:
         }
         self._last_logits = None  # [B, V] host logits of the last pass / draft read back in sampling mode
         self._last_cands = None  # (values, ids) [B, n] of the last candidate read (sparse sampling)
+        self.rope_delta = 0  # the request's M-RoPE position delta (image prompts): rope position = KV position + delta
         self._cand_half = None
 
     # ------------------------------------------------------------------------------------------------ programs
@@ -395,7 +396,7 @@ class MtpTraced:
         for _ in range(self.k):
             self._write(self.d_tok, _host_u32([cur_tok], (1, 1, 1, S)))
             self._write(self.d_pos, _host_i32([cur_pos], (1,)))
-            self._write(self.d_rot, _host_u32([cur_pos], (1, 1)))
+            self._write(self.d_rot, _host_u32([cur_pos + self.rope_delta], (1, 1)))
             d = self._run("draft", want=("cands" if sparse else "rows") if sampling else None)[0]
             if sampling:
                 if sparse and self._last_cands is not None:
@@ -419,7 +420,7 @@ class MtpTraced:
         positions = [pos + i for i in range(BW)]
         self._write(self.p_tok, _host_u32(list(rows) + [0] * (BW - R), (1, 1, 1, S)))
         self._write(self.p_pos, _host_i32(positions, (BW,)))
-        self._write(self.p_rot, _host_u32(positions, (1, BW)))
+        self._write(self.p_rot, _host_u32([p + self.rope_delta for p in positions], (1, BW)))
         self._write(self.p_masks, rows_pos_masks_host(positions, BW))
         self.plen.stage(R)
         sparse = want_logits and sampler is not None and sampler.sparse_ok()
@@ -441,7 +442,7 @@ class MtpTraced:
         positions = [pos + 1 + j for j in range(BW)]
         self._write(self.r_tok, _host_u32(list(tokens) + [0] * (BW - len(tokens)), (1, 1, 1, S)))
         self._write(self.r_pos, _host_i32(positions, (BW,)))
-        self._write(self.r_rot, _host_u32(positions, (1, BW)))
+        self._write(self.r_rot, _host_u32([p + self.rope_delta for p in positions], (1, BW)))
         self._run("rows")
 
     def generate(self, tok0: int, pos: int, max_new_tokens: int, *, log=None):

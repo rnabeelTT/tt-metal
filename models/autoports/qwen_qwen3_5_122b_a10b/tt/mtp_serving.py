@@ -335,6 +335,7 @@ class MtpServing:
                 ttnn.deallocate(src)
             rebuild_conv_carry(dn)
         self._phase_slot = int(slot)
+        self.runner.rope_delta = self.model.slot_rope_delta(slot)  # image prompts decode at pos + M-RoPE delta
         self.set_page_table(page_table_row)
         self._pick_row(slot)
         self._tok, self._pos = int(tok), int(pos)
@@ -681,6 +682,7 @@ class MtpServing:
         self._sampler = None  # the next request gets its own sampler / RNG
         if self.in_trace:
             ttnn.copy(self.hid_out, self.runner.d_hid)
+        self.runner.rope_delta = self.model.slot_rope_delta(0)
         self._pos = int(P)
         self._tok = int(tok0)
 

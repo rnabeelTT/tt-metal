@@ -42,6 +42,7 @@ class VisionAttention(LightweightModule):
         page_table=None,
         chunk_page_table=None,
         chunk_start_idx=None,
+        cu_window_seqlens=None,
     ):
         return self.forward_prefill(
             x,
@@ -50,6 +51,7 @@ class VisionAttention(LightweightModule):
             page_table=page_table,
             chunk_page_table=chunk_page_table,
             chunk_start_idx=chunk_start_idx,
+            cu_window_seqlens=cu_window_seqlens,
             kv_cache=None,
         )
 
@@ -286,6 +288,7 @@ class VisionAttention(LightweightModule):
         user_id: int = 0,
         page_table=None,
         chunk_page_table=None,
+        cu_window_seqlens=None,
         chunk_start_idx=None,
         kv_cache=None,
     ):
@@ -374,14 +377,19 @@ class VisionAttention(LightweightModule):
         ttnn.deallocate(v_heads_1VSD)
 
         # ---- SDPA (purely local; each device runs its own n_local_heads) ----------
+        # cu_window_seqlens (block-diagonal windows built on device): the real patches attend only among themselves and
+        # the zero padding among itself (and per-image windows when several images share one sequence)
+        _window = {"is_causal": False}
+        if cu_window_seqlens is not None:
+            _window["cu_window_seqlens"] = cu_window_seqlens  # the op demands an explicit is_causal=False with windows
         attn_output_84SD = ttnn.transformer.scaled_dot_product_attention(
             q_heads_1QSD_8b,
             k_heads_1KSD_8b,
             v_heads_1VSD_8b,
-            is_causal=False,
             scale=self.scale,
             compute_kernel_config=self.sdpa_prefill_compute_kernel_cfg,
             program_config=self.configuration.get_attn_sdpa_program_config(Mode.PREFILL, seq_len, None, None),
+            **_window,
         )
 
         ttnn.deallocate(q_heads_1QSD_8b)

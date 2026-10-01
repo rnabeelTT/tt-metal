@@ -818,3 +818,32 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   >= 0.99996), layer PCC vs HF at 2048 unchanged (GDN 0.9985, attention 0.99998). Default on. The remaining prefill
   MoE levers (row gather 1.8 ms, dispatch build 1.9, un-dispatch 1.4 incl. the 0.8 ms untilize) are TILE-aware
   gather / scatter kernels; parked behind vision. Commit 6df93b62a7f (kernels) + this log.
+- 09:58 (item 9, VISION) groundwork + V1-V4 code: the in-tree qwen36 vision path (tower port, trace-safe splice,
+  M-RoPE) is the port source (the qwen3.8 bundle's vision code, extracted to the references dir, is tied to Qwen3.8
+  and its own server). New `tt/vision.py`: the HF `Qwen3_5MoeVisionModel` built standalone from the 333 streamed
+  `model.visual.*` tensors (no 250 GB from_pretrained), vision args over our args class (the stock VisionModelArgs
+  died on the MoE text config), `attach_vision`. Model: multimodal segments now run on the persistent bucket path
+  (the splice where-select is in the bucket traces; buffers allocated before capture), per-slot decode rope deltas
+  (`set_slot_rope_delta`, used by prepare_decode_inputs_host and the MTP step's rot idxs), `rope_staged` so the
+  M-RoPE table built over the whole prompt survives the segment loop. Generator: `prefill_serving(vision=[(rows,
+  grid) | None])`. Adapter: `QWEN35_VISION=1` (limits image <= 4, tower attached + splice buffers + 448/896 px tower
+  warm-up before the captures, per-user image rows from the prefill kwargs). Tower unit test
+  (`tests/test_vision_tower.py`, 448x448 and 896x672 images vs the HF visual) running.
+- 10:35 vision tower vs HF: bfp8 AND bf16 weights both give PCC 0.88 (448 px, rows aligned: sampled-row min 0.79), so
+  not weight precision. Read the port: `prepare_input` zero-pads the patch sequence to a 2048 multiple and the blocks'
+  SDPA is non-causal WITHOUT a mask -> every real patch attends to the padding keys (bias-only K/V; 62 % of the keys
+  at 784 patches; the in-tree Qwen3.6 test tolerates 0.91 at 12 % padding). Fix in the shared qwen36 vision port:
+  `cu_window_seqlens` (the SDPA op's on-device block-diagonal windows) = [0, real, padded] plumbed wrapper -> block ->
+  attention; the HF semantics (block-diagonal per image) fall out for multi-image sequences too. Depth-1 / depth-4
+  comparisons and the windowed full-depth test queued.
+- 11:20 windowed SDPA probe (one device, [1,16,2048,96], real length 784, padding keys biased): unmasked PCC 0.983 vs
+  torch, `cu_window_seqlens=[0,784,2048]` 0.99980 (exact boundary, no tile alignment needed, no hang), tile-aligned
+  [0,800,2048] 0.99981, explicit [1,1,S,S] attn_mask 0.99980. The op needs an explicit `is_causal=False` with windows
+  (its default is causal: the first tower chain died on that TT_FATAL inside pytest and sat until the timeout).
+  Windowed tower comparison re-queued (depth 1, full depth bf16 / bfp8, 896x672).
+- 11:54 VISION TOWER FIXED: with the SDPA windows (real patches attend only among themselves) the bfp8 tower matches
+  the HF visual at PCC 0.9857 (448x448, 196 tokens) and 0.9868 (896x672, 588 tokens), sampled-row min 0.96 (was 0.88
+  / 0.79 with the padding leak). Shared-port change (`qwen36/tt/vision/{model,vision_block,vision_attention}.py`):
+  `cu_window_seqlens=[0, real, padded]` built once per image in the wrapper and passed to every block's SDPA with an
+  explicit is_causal=False. bf16 tower weights: the construction stalls for minutes inside the patch merger's
+  as_tensor (cache files intact) - probe queued; the served default is bfp8 (`QWEN35_VISION_DTYPE`).

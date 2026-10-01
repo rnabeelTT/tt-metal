@@ -640,7 +640,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         t = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh_device, dim=0))
         return t.float().reshape(-1, self.args.vocab_size)[:1].reshape(1, 1, -1)
 
-    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False, start=0):
+    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False, start=0, vision=None):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
@@ -651,16 +651,31 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         # `start` (chunked prefill continuation): ``tokens`` are positions start .. start+T-1 of the request; the GDN
         # state is reset by the bucket only at chunk_start 0, so a continuation runs on the state restored by the caller
         assert start % segment == 0, f"chunk start {start} must be a multiple of the {segment}-token segment"
+        # multimodal request: ``vision`` = (packed image rows on device [n, H/TP], image_grid_thw). The M-RoPE table is
+        # staged once over the WHOLE prompt (the segments slice it by position) and every segment splices its own
+        # image rows (row offset = placeholders before the segment). Chunked continuations of image prompts are not
+        # supported (the whole prompt must be in this call).
+        vision_tokens, vkw = None, {}
+        if vision is not None:
+            assert start == 0, "an image prompt must be prefilled whole (no chunked continuation)"
+            vision_tokens, grid = vision
+            self.model._req_image_grid_thw = grid
+            self.model._req_video_grid_thw = None
+            self.model._build_request_rope(tokens, vision_tokens)
+            vkw = {"rope_staged": True}
         logits, sh = None, None
         for cs in range(start, start + T, segment):
             seg = tokens[:, cs - start : min(cs - start + segment, T)]
             last = cs + segment >= start + T
+            if vision_tokens is not None:
+                vkw["vision_tokens"] = vision_tokens
+                vkw["vis_row_offset"] = self.model._vis_row_offset_for(tokens, cs)
             if want_sharded and last:
                 lg, sh = self.model.prefill_masked_bucket(
-                    seg, page_table, actual_len=seg.shape[1], chunk_start=cs, return_sharded=True
+                    seg, page_table, actual_len=seg.shape[1], chunk_start=cs, return_sharded=True, **vkw
                 )
             else:
-                lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs)
+                lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs, **vkw)
             logits = self._host_logits(lg)
         return (logits, sh) if want_sharded else logits
 
@@ -701,7 +716,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             for t in taps:
                 ttnn.deallocate(t)
 
-    def prefill_serving(self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None):
+    def prefill_serving(
+        self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None, vision=None
+    ):
         """vLLM prefill: ``tokens`` [N, max_T] host ids (row u valid up to ``prompt_lens[u]``), ``page_table`` [N, width]
         (row u = request u's blocks), ``slots`` = the decode slot of each request. Runs each request through the warmed
         masked-bucket path against its own page-table row and writes its GDN state into its slot (live slots untouched:
@@ -749,13 +766,20 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                     self._pending_restore(key)
                 elif batched:
                     self.model._reset_gdn_state_for_new_sequence()
+                vis_u = vision[u] if vision is not None else None
                 if E > s0:
                     res = self._prefill_single(
-                        tokens[u : u + 1, s0:E].to(torch.int32), pt[u : u + 1], want_sharded=finals[u], start=s0
+                        tokens[u : u + 1, s0:E].to(torch.int32),
+                        pt[u : u + 1],
+                        want_sharded=finals[u],
+                        start=s0,
+                        vision=vis_u,
                     )
                     lg, sh = res if finals[u] else (res, None)
                 if finals[u]:
                     assert E > s0, f"request {u}: final chunk with nothing to run (s0 {s0}, end {E})"
+                    # decode rope positions of this slot: KV position + the request's M-RoPE delta (0 for text)
+                    self.model.set_slot_rope_delta(slots[u], self.model.rope.rope_delta if vis_u is not None else 0)
                     outs.append(torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg)
                     if pending is not None:
                         self._pending_free(self._pending_prefill.pop(key))

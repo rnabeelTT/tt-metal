@@ -136,11 +136,28 @@ class VisionTransformer(LightweightModule):
             ttnn.Tensor: Output tensor, fractured along dim=3 (each device owns
                 out_hidden_size/TP), matching the LLM lm_head contract.
         """
+        # Padded patches must not take part in the real patches' attention: the sequence is zero-padded to a 2048
+        # multiple (prepare_input) and the blocks' SDPA is non-causal, so without a window the real queries attend to
+        # the padding keys (bias-only K/V) - 62 % of the keys for a 448 px image, PCC 0.88 vs HF at any weight dtype.
+        # The SDPA op's on-device block-diagonal windows keep real and padding tokens apart.
+        cu_window = None
+        seq_len = int(x.shape[2])
+        if unpadded_seq_len is not None and int(unpadded_seq_len) < seq_len:
+            cu_window = ttnn.from_torch(
+                torch.tensor([0, int(unpadded_seq_len), seq_len], dtype=torch.int32),
+                dtype=ttnn.int32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.args.mesh_device,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.args.mesh_device),
+            )
         for i, block in enumerate(self.blocks):
             x = block(
                 x,
                 rot_mats=rot_mats,
+                cu_window_seqlens=cu_window,
             )
+        if cu_window is not None:
+            ttnn.deallocate(cu_window)
 
         # The PatchMerger consumes the block output fractured along dim=3
         # directly (its first op is a DistributedLayerNorm that all-gathers

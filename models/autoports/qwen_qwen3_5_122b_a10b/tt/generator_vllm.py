@@ -156,8 +156,17 @@ if _MTP_K > 0:
     mtp_plugin_shim.apply(_MTP_K + 1)
 
 
+# QWEN35_VISION=1: serve image content parts (the checkpoint's ViT on the mesh through tt/vision.py; images are spliced
+# into the prompt embedding inside the traced prefill buckets, M-RoPE per request, per-slot decode deltas). Off: text
+# only (the processor advertises no image / video support, so vLLM rejects multimodal requests at the frontend).
+_VISION = os.environ.get("QWEN35_VISION", "0") == "1"
+_VISION_MAX_IMAGES = int(os.environ.get("QWEN35_VISION_MAX_IMAGES", "4") or 4)
+
+
 class TT_Qwen3_5MoeProcessingInfo(Qwen3_5MoeProcessingInfo):
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
+        if _VISION:
+            return {"image": _VISION_MAX_IMAGES, "video": 0}
         # text-only scope of this bringup: the architecture is multimodal, the served model takes no images / videos
         return {"image": 0, "video": 0}
 
@@ -251,6 +260,15 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
+        self._vision = _VISION
+        if self._vision:
+            # the vision tower (weights + its CCL buffers) and the trace-safe splice buffers (one 2048-row set, sliced
+            # per bucket) exist BEFORE any warm-up / capture; the bucket bodies then carry the where-select in their traces
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.vision import attach_vision
+
+            attach_vision(model, self._gen.args)
+            model._alloc_vision_merge_buffers(mesh_device, int(getattr(model, "PREFILL_SEGMENT", 2048)))
+            logger.info(f"VISION on: up to {_VISION_MAX_IMAGES} images per request, tower dtype bfp8")
         self._live_slots = set()  # slots with a running request as of the last decode (start_pos >= 0) or prefill
         logger.info(
             f"{cls.__name__}: B={B} max_model_len={max_seq_len} layers={len(model.layers)} policy="
@@ -407,6 +425,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 if self._mtp is not None:
                     self._mtp.warm()  # the MTP step programs + the head prompt-rows programs, before any capture
                     self._mtp.warm_prefill_path()  # the eager served prefill with the hook, every bucket
+                if self._vision:
+                    self._warm_vision()
                 self._warm_phase["prefill_programs"] = True
             return
         # phase 2 for prefill is folded into warmup_model_decode(enable_trace=True): the bucket traces are captured AFTER
@@ -473,8 +493,13 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # MTP mode a NotImplementedError; served crash 2026-10-01.)
         mask = kwargs.get("intermediate_prefill_mask")
         finals = [not bool(v) for v in torch.as_tensor(mask).reshape(-1).tolist()] if mask is not None else [True] * N
-        if self._has_visual(kwargs, "pixel_values") or self._has_visual(kwargs, "pixel_values_videos"):
-            raise NotImplementedError("text-only serving: this bringup does not serve images or videos")
+        vision = None
+        if self._has_visual(kwargs, "pixel_values_videos"):
+            raise NotImplementedError("video input is not served (QWEN35_VISION covers images)")
+        if self._has_visual(kwargs, "pixel_values"):
+            if not self._vision:
+                raise NotImplementedError("text-only serving: start with QWEN35_VISION=1 to serve images")
+            vision = [self._vision_for_user(kwargs, u) for u in range(N)]
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [tokens.shape[1]] * N
         slots = kwargs.get("empty_slots")
         slots = list(range(N)) if slots is None else [int(s) for s in slots]
@@ -524,7 +549,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             for u in range(N):
                 self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
-                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
+                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision)
             except Exception:
                 self._mtp.abort_prefill()
                 raise
@@ -535,7 +560,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._mtp.end_prefill(tok0[0], plens[0])
             self._live_slots |= set(slots)
             return out, torch.zeros(N, dtype=torch.long)
-        out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, **chunked)
+        if vision is not None and chunked:
+            raise NotImplementedError("image prompts are prefilled whole (no chunked prefill)")
+        out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, **chunked)
         self._live_slots |= set(slots)
         self._log_program_cache(
             f"after prefill of {N} request(s) into slots {slots} (decode steps so far: {getattr(self, '_decode_steps', 0)})"
@@ -611,6 +638,48 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if isinstance(tt_out, torch.Tensor):
             return tt_out
         return super().process_decode_output_host(tt_out, is_tokens=is_tokens)
+
+    def _vision_for_user(self, kwargs, u):
+        """Request ``u``'s image rows for the prefill: (packed [n, H/TP] device rows from the tower, image_grid_thw) or
+        None for a text row. vLLM hands per-user lists (several images: a list of pixel tensors / grids)."""
+        pv = kwargs.get("pixel_values")
+        if pv is None or u >= len(pv) or pv[u] is None:
+            return None
+        pixel_values, grid = pv[u], kwargs["image_grid_thw"][u]
+        if isinstance(pixel_values, list):
+            if len(pixel_values) == 0:
+                return None
+            pixel_values = torch.concat(pixel_values, dim=0)
+            grid = torch.stack([g.to(dtype=torch.int64).reshape(-1) for g in grid], dim=0)
+        grid = torch.as_tensor(grid).to(torch.int64).reshape(-1, 3)
+        model = self._gen.model
+        rows = model.get_image_features(pixel_values.float(), grid)  # stashes the grid for the M-RoPE table
+        return rows, grid
+
+    def _warm_vision(self):
+        """Compile the tower's programs for the common padded patch counts (the tower runs eagerly per request, padded
+        to 2048-patch multiples) and the image-splice staging of every bucket, before any trace is captured."""
+        import glob
+
+        from transformers import AutoImageProcessor
+
+        model = self._gen.model
+        snap = self._gen.args.CKPT_DIR
+        if not os.path.isdir(snap):
+            cands = glob.glob(
+                os.path.expanduser("~/.cache/huggingface/hub/models--Qwen--Qwen3.5-122B-A10B/snapshots/*")
+            )
+            snap = cands[0] if cands else snap
+        proc = AutoImageProcessor.from_pretrained(snap)
+        from PIL import Image
+
+        for side in (448, 896):  # 784 / 3136 patches -> padded 2048 / 4096
+            img = Image.fromarray((torch.rand(side, side, 3) * 255).to(torch.uint8).numpy())
+            inp = proc(images=img, return_tensors="pt")
+            rows = model.get_image_features(inp["pixel_values"].float(), inp["image_grid_thw"].to(torch.int64))
+            ttnn.deallocate(rows)
+        ttnn.synchronize_device(self._gen.mesh_device)
+        logger.info("vision tower warmed (448 / 896 px)")
 
     @staticmethod
     def _mtp_sampling(sp, row):
