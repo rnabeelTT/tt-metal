@@ -161,6 +161,9 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   carried per request (keyed by its first KV block), the final chunk samples; validated with the plugin's needle test
   (4 concurrent, ragged boundaries). The plugin never mixes prefill and decode in one step, so this bounds step length
   and shares steps between prompts; it does not shorten running users' inter-token gap. `doc/perf_pass/chunked_prefill_plan.md`.
+- Decode MoE path by width: gather (<= 4 rows), PAIRS (one group per (token, expert) pair, grouped sparse matmul) up to
+  `QWEN35_MOE_PAIRS_MAX_TOKENS` = 16 (2026-10-01: -17 % / -9 % attention / GDN layer step at width 16 vs the masked
+  path), masked (dense 256-expert glue) at 32 rows where 256 pair groups lose by 22-32 %.
 - Decode router: `QWEN35_ROUTER_DRAM_SHARDED=1` (default) runs the [32, 3072] x [3072, 256] router as a DRAM-sharded
   decode matmul (71 -> 25 us per layer at width 8; 0 restores the stock linear).
 - Multi-user MTP (built, measured negative at 2-4 users; opt-in via QWEN35_MTP with --max-num-seqs > 1) and the levers

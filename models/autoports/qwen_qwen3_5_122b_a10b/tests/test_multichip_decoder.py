@@ -668,7 +668,11 @@ def test_mc_nonaligned_decode_then_continuation(mesh_device, layer_idx):
 
 
 @mesh_tp()
-@pytest.mark.parametrize(("layer_idx", "batch"), [(L0, 32), (L3, 32)], ids=["gdn_b32", "attn_b32"])
+@pytest.mark.parametrize(
+    ("layer_idx", "batch"),
+    [(L0, 32), (L3, 32), (L0, 16), (L3, 16)],
+    ids=["gdn_b32", "attn_b32", "gdn_b16", "attn_b16"],  # b16: the decode MoE pairs path (pairs_max_tokens = 16)
+)
 def test_mc_batched_decode_b32(mesh_device, layer_idx, batch):
     """32 users prefilled one at a time (37 tokens each; GDN per-user state written into its slot via write_slot,
     attention into its page-table row), then ONE batched decode step vs HF."""
