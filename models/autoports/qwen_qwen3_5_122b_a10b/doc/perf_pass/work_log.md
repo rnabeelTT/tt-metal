@@ -623,3 +623,9 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   (parked with the prefill levers). Moving to item 2 (chunked prefill): generator `prefill_serving(start_pos, final)`
   with per-request carried GDN state keyed by the first KV block, adapter + plugin shim for the intermediate mask,
   `QWEN35_CHUNKED_PREFILL=1` opt-in; equivalence test (4 chunking patterns) queued.
+- 01:11 (turn 7) chunked serving prefill equivalence on the 2-layer generator (2 slots, bound-scratch path): four
+  chunking patterns of a 2500-token prompt ([2048, 2500], [1500, 2500], [2100, 2500], [700, 2200, 2500]) give logits
+  PCC 1.000000 and a decode-slot GDN state (rec + conv taps) PCC 1.000000 vs the whole-prompt prefill; intermediate
+  chunks run only whole 2048-token segments from the request's own processed end and return zero logits; the carried
+  state is keyed by the request's first KV block. Next: the same with another request's prefill interleaved between the
+  chunks (the conv left-context is rebuilt from the taps on restore), then the plugin's needle test on the full model.

@@ -107,6 +107,36 @@ def _memoize_sampling_params(sampling_module):
     sampling_module._qwen35_params_memo = state
 
 
+if os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
+    # chunked prefill shim: the plugin computes which prefill rows are intermediate (model_runner.py:1222) but does not
+    # pass it to the model; add it to the prefill kwargs so the model runs intermediate chunks to a segment boundary
+    try:
+        from vllm_tt_plugin import model_runner as _tt_model_runner
+
+        _orig_submit_prefill = _tt_model_runner.TTModelRunner.submit_prefill
+
+        def _submit_prefill_with_mask(self, model_input, batch_size_per_dp):
+            mask = getattr(model_input, "intermediate_prefill_mask", None)
+            model = self.model
+            orig_prefill = model.prefill_forward
+
+            def prefill_forward(*args, **kwargs):
+                if mask is not None and "intermediate_prefill_mask" not in kwargs:
+                    kwargs["intermediate_prefill_mask"] = mask
+                return orig_prefill(*args, **kwargs)
+
+            model.prefill_forward = prefill_forward
+            try:
+                return _orig_submit_prefill(self, model_input, batch_size_per_dp)
+            finally:
+                model.prefill_forward = orig_prefill
+
+        if not getattr(_tt_model_runner.TTModelRunner.submit_prefill, "_qwen35_chunked_shim", False):
+            _submit_prefill_with_mask._qwen35_chunked_shim = True
+            _tt_model_runner.TTModelRunner.submit_prefill = _submit_prefill_with_mask
+    except Exception as _e:  # noqa: BLE001 - serving without the plugin (standalone tools) keeps working
+        logger.warning(f"chunked prefill shim not applied: {_e}")
+
 _MTP_K = int(os.environ.get("QWEN35_MTP", "0") or 0)
 if _MTP_K > 0:
     # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin: import-time monkeypatches
@@ -144,7 +174,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # skill's capability vocabulary; stage 10 proved the overlapped path with per-stream controls (doc/optimized_vllm).
         "supports_async_decode_overlap": True,
         "supports_sample_on_device": True,
-        "supports_chunked_prefill": False,
+        # QWEN35_CHUNKED_PREFILL=1 (turn 7): prompts prefilled in scheduler chunks (whole 2048-token segments per step,
+        # GDN state carried per request; doc/perf_pass/chunked_prefill_plan.md); off until validated
+        "supports_chunked_prefill": os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1",
         **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
@@ -410,8 +442,16 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         """
         N = tokens.shape[0]
         start_pos = kwargs.get("start_pos")
-        if start_pos is not None and int(torch.as_tensor(start_pos).max()) != 0:
+        starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
+        if any(starts) and not self.model_capabilities["supports_chunked_prefill"]:
             raise NotImplementedError("chunked / cached-prefix prefill is not supported (model_capabilities)")
+        # which rows end their prompt in this chunk: the plugin's intermediate mask (added to the kwargs by the chunked
+        # prefill shim), else the heuristic "device sampling params arrive only when every row is final"
+        mask = kwargs.get("intermediate_prefill_mask")
+        if mask is not None:
+            finals = [not bool(v) for v in torch.as_tensor(mask).reshape(-1).tolist()]
+        else:
+            finals = [kwargs.get("sampling_params") is not None] * N
         if self._has_visual(kwargs, "pixel_values") or self._has_visual(kwargs, "pixel_values_videos"):
             raise NotImplementedError("text-only serving: this bringup does not serve images or videos")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [tokens.shape[1]] * N
@@ -446,8 +486,15 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 tt_tokens, _ = sampling_module.sample(logits_sh, enable_trace=False)
                 return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[0])
 
-        logger.info(f"Prefilling {N} request(s) into slots {slots} (lengths {plens})")
+        logger.info(
+            f"Prefilling {N} request(s) into slots {slots} (chunk ends {plens}, starts {starts}, final {finals})"
+        )
+        chunked = dict(start_pos=starts, final=finals) if (any(starts) or not all(finals)) else {}
         if self._mtp is not None:
+            if chunked:
+                raise NotImplementedError(
+                    "MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL)"
+                )
             for u in range(N):
                 self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
@@ -462,7 +509,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._mtp.end_prefill(tok0[0], plens[0])
             self._live_slots |= set(slots)
             return out, torch.zeros(N, dtype=torch.long)
-        out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler)
+        out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, **chunked)
         self._live_slots |= set(slots)
         self._log_program_cache(
             f"after prefill of {N} request(s) into slots {slots} (decode steps so far: {getattr(self, '_decode_steps', 0)})"

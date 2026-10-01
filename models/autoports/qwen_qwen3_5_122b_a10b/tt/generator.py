@@ -622,7 +622,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         t = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh_device, dim=0))
         return t.float().reshape(-1, self.args.vocab_size)[:1].reshape(1, 1, -1)
 
-    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False):
+    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False, start=0):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
@@ -630,10 +630,13 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         vocab-sharded logits [1,1,32,vocab/TP] of the last segment)`` for on-device sampling (row 0)."""
         segment = segment or int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         T = tokens.shape[1]
+        # `start` (chunked prefill continuation): ``tokens`` are positions start .. start+T-1 of the request; the GDN
+        # state is reset by the bucket only at chunk_start 0, so a continuation runs on the state restored by the caller
+        assert start % segment == 0, f"chunk start {start} must be a multiple of the {segment}-token segment"
         logits, sh = None, None
-        for cs in range(0, T, segment):
-            seg = tokens[:, cs : min(cs + segment, T)]
-            last = cs + segment >= T
+        for cs in range(start, start + T, segment):
+            seg = tokens[:, cs - start : min(cs - start + segment, T)]
+            last = cs + segment >= start + T
             if want_sharded and last:
                 lg, sh = self.model.prefill_masked_bucket(
                     seg, page_table, actual_len=seg.shape[1], chunk_start=cs, return_sharded=True
@@ -643,7 +646,44 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             logits = self._host_logits(lg)
         return (logits, sh) if want_sharded else logits
 
-    def prefill_serving(self, tokens, page_table, prompt_lens, slots, sampler=None):
+    # ------------------------------------------------------------------ chunked prefill (turn 7)
+    def _pending_key(self, pt_row):
+        return int(
+            torch.as_tensor(pt_row).reshape(-1)[0]
+        )  # a request's first KV block: unique and stable across chunks
+
+    def _pending_restore(self, key):
+        """Copy a half-prefilled request's carried GDN state (device clones) into the bound B = 1 scratch / buffers."""
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rebuild_conv_carry
+
+        end, recs, convs = self._pending_prefill[key]
+        dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+        for dn, rec, taps in zip(dn_layers, recs, convs):
+            ttnn.copy(rec, dn.rec_state)
+            for t, c in zip(taps, dn.conv_states):
+                ttnn.copy(t, c)
+            # the chunk-outer conv left-context (conv_carry) is not part of the snapshot and other requests' prefills
+            # overwrite the scratch's between this request's chunks: rebuild it from the K-1 taps
+            rebuild_conv_carry(dn)
+        return end
+
+    def _pending_save(self, key, end):
+        recs, convs = self.model._snapshot_gdn_scratch_device()
+        old = self._pending_prefill.pop(key, None)
+        if old is not None:
+            self._pending_free(old)
+        self._pending_prefill[key] = (int(end), recs, convs)
+
+    @staticmethod
+    def _pending_free(entry):
+        _, recs, convs = entry
+        for r in recs:
+            ttnn.deallocate(r)
+        for taps in convs:
+            for t in taps:
+                ttnn.deallocate(t)
+
+    def prefill_serving(self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None):
         """vLLM prefill: ``tokens`` [N, max_T] host ids (row u valid up to ``prompt_lens[u]``), ``page_table`` [N, width]
         (row u = request u's blocks), ``slots`` = the decode slot of each request. Runs each request through the warmed
         masked-bucket path against its own page-table row and writes its GDN state into its slot (live slots untouched:
@@ -652,35 +692,63 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         the bucket output is still live); without it returns the host logits ``[N, 1, vocab]``.
         Returns ``[N, 1]`` int64 tokens (sampler) or ``[N, 1, vocab]`` float logits."""
         N = tokens.shape[0]
-        lens = [int(prompt_lens[u]) for u in range(N)]
+        lens = [int(prompt_lens[u]) for u in range(N)]  # chunked prefill: this chunk's END per request
+        starts = [int(start_pos[u]) for u in range(N)] if start_pos is not None else [0] * N
+        finals = [bool(final[u]) for u in range(N)] if final is not None else [True] * N
         slots = [int(s) for s in slots]
         assert len(slots) == N and all(0 <= s < self.max_batch_size for s in slots), (slots, self.max_batch_size)
         pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
+        if not hasattr(self, "_pending_prefill"):
+            self._pending_prefill = {}  # first block id -> (processed end, GDN state clones) of half-prefilled requests
+        A = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
+        V = int(self.args.vocab_size)
         outs = []
-        if self.max_batch_size == 1:
-            assert N == 1 and slots == [0]
-            lg, sh = self._prefill_single(tokens[:1, : lens[0]].to(torch.int32), pt[:1], want_sharded=True)
-            outs.append(torch.tensor([[sampler(sh, 0)]], dtype=torch.int64) if sampler else lg)
-        else:
-            # per request: prefill on the bound B=1 scratch, snapshot the scratch ON DEVICE (clones), rebind the batched
-            # buffers and write the snapshot into the request's slot on device, BEFORE any further trace replay (a clone
-            # held across the next replay would alias the trace's baked intermediates - qwen36 model.py note). Stage 10:
-            # no host round trip (stage 9 read every GDN layer's state to host and uploaded it: ~120 ms of TTFT per
-            # admission at 32 slots).
-            for u in range(N):
-                prev = self.model._bind_gdn_prefill_scratch()
-                try:
+        for u in range(N):
+            # per request: prefill on the bound B = 1 scratch (B > 1) or the B = 1 buffers, snapshot the scratch ON
+            # DEVICE (clones) and write it into the request's slot on device before any further trace replay (stage 10).
+            # Chunked prefill: an intermediate chunk [s, e) runs only its whole 2048-token segments [s0, E) from the
+            # request's own processed end s0 (the plugin's s may lie inside a segment: its tokens are resent with the next
+            # chunk), carries the GDN state in device clones keyed by the request's first block, and returns zero logits;
+            # the final chunk runs to e, samples and writes the decode slot as a whole prefill does.
+            key = self._pending_key(pt[u])
+            pending = self._pending_prefill.get(key)
+            s0 = pending[0] if pending is not None else 0
+            if pending is None:
+                assert (
+                    starts[u] == 0 or starts[u] % A == 0
+                ), f"request {u}: chunk start {starts[u]} without carried state"
+                s0 = 0 if starts[u] == 0 else starts[u]
+            E = lens[u] if finals[u] else (lens[u] // A) * A
+            batched = self.max_batch_size > 1
+            prev = self.model._bind_gdn_prefill_scratch() if batched else None
+            try:
+                if pending is not None:
+                    self._pending_restore(key)
+                elif batched:
                     self.model._reset_gdn_state_for_new_sequence()
-                    lg, sh = self._prefill_single(
-                        tokens[u : u + 1, : lens[u]].to(torch.int32), pt[u : u + 1], want_sharded=True
+                if E > s0:
+                    res = self._prefill_single(
+                        tokens[u : u + 1, s0:E].to(torch.int32), pt[u : u + 1], want_sharded=finals[u], start=s0
                     )
+                    lg, sh = res if finals[u] else (res, None)
+                if finals[u]:
+                    assert E > s0, f"request {u}: final chunk with nothing to run (s0 {s0}, end {E})"
                     outs.append(torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg)
-                    snap = self.model._snapshot_gdn_scratch_device()
-                finally:
+                    if pending is not None:
+                        self._pending_free(self._pending_prefill.pop(key))
+                    snap = self.model._snapshot_gdn_scratch_device() if batched else None
+                else:
+                    outs.append(torch.zeros(1, 1, V) if sampler is None else torch.zeros(1, 1, dtype=torch.int64))
+                    if E > s0 or pending is None:
+                        self._pending_save(key, max(E, s0))
+            finally:
+                if prev is not None:
                     self.model._unbind_gdn_prefill_scratch(prev)
+            if finals[u] and batched:
                 self.model._write_gdn_slot_device(slots[u], *snap)
         for u in range(N):
-            self.positions[slots[u]] = lens[u]
+            if finals[u]:
+                self.positions[slots[u]] = lens[u]
         if getattr(self, "_program_guard", False):
             self.assert_no_new_programs("(prefill_serving)")
         if not hasattr(self._tt, "_slots_prefilled_since_decode"):
