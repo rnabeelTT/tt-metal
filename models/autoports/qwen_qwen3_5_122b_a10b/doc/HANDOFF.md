@@ -8,7 +8,7 @@ Blackhole mesh (p300x2 = 2 x p300c, or p150x4). Served through vLLM 0.26.0 and t
 
 | item | value |
 |---|---|
-| architecture name | `Qwen3_5MoeForConditionalGeneration` (text path; image / video limits 0) |
+| architecture name | `Qwen3_5MoeForConditionalGeneration` (text + images; image limit `QWEN35_VISION_MAX_IMAGES` = 4 per request, video 0; §5) |
 | adapter | `tt/generator_vllm.py::Qwen35MoeForConditionalGeneration` (subclass of the qwen36 `Qwen36ForCausalLM`) |
 | mesh | (1,4), `MESH_DEVICE=P300x2` or `P150x4`, `fabric_config FABRIC_1D`, `l1_small_size 24576`, trace region 768 MiB |
 | parallelism | TP4 mixers (KV heads replicated per device pair), routed experts TP on the intermediate dim (all 256 experts per die at width 256), vocab-sharded LM head, on-device sampling |
