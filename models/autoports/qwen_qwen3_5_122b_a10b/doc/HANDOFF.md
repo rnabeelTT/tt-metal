@@ -161,6 +161,11 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   carried per request (keyed by its first KV block), the final chunk samples; validated with the plugin's needle test
   (4 concurrent, ragged boundaries). The plugin never mixes prefill and decode in one step, so this bounds step length
   and shares steps between prompts; it does not shorten running users' inter-token gap. `doc/perf_pass/chunked_prefill_plan.md`.
+- Grouped sparse matmul (prefill sorted dispatch, decode pairs path): RESIDENT weights - a core that owns consecutive
+  groups of the same expert reads the expert's [K, N] block once (`TT_SPARSE_GROUPED_RESIDENT_IN1=0` opts out; the
+  factory streams K-blocks when the block does not fit the 1.3 MB per-core CB budget, e.g. bfp8 gate/up). Kernels:
+  `kernels/compute/bmm_grouped_resident_in1.cpp`, `reader_writer_bmm_tile_layout_in1_indexed.cpp` (RESIDENT_IN1),
+  tests `tests/test_sparse_matmul_grouped.py::test_grouped_sorted_runs_match_torch`.
 - Decode MoE path by width: gather (<= 4 rows), PAIRS (one group per (token, expert) pair, grouped sparse matmul) up to
   `QWEN35_MOE_PAIRS_MAX_TOKENS` = 16 (2026-10-01: -17 % / -9 % attention / GDN layer step at width 16 vs the masked
   path), masked (dense 256-expert glue) at 32 rows where 256 pair groups lose by 22-32 %.

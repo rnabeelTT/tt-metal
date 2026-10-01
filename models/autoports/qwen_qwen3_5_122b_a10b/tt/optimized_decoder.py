@@ -604,13 +604,23 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 ib = max(1, min(int(in0_cap), k_tiles))
                 while k_tiles % ib:
                     ib -= 1
-                # L1 budget of the grouped factory per core: double-buffered in0 [M, ib] + in1 [ib, N] blocks and one
-                # bf16 output block. Shrink the K block until it fits (a too-large block is a program-build TT_THROW).
+                # L1 budget of the grouped factory per core (its own 1.3 MB CB cap): double-buffered in0 [M, ib] blocks,
+                # in1 either RESIDENT (the whole [K, N] expert block: weights read once per run of same-expert groups,
+                # TT_SPARSE_GROUPED_RESIDENT_IN1, default on) or two streamed [ib, N] blocks, one bf16 output block and
+                # the fp32 partials block. Shrink the K block until it fits (a too-large block is a program-build
+                # TT_THROW; a resident block that does not fit makes the factory fall back to streaming).
                 m_tiles = gs // 32
-                while (
-                    ib > 1
-                    and 2 * m_tiles * ib * 2048 + 2 * n_tiles * ib * w_tile_bytes + m_tiles * n_tiles * 2048 > 1_300_000
-                ):
+                budget = 1_300_000
+                fixed = m_tiles * n_tiles * (2048 + 2048)  # bf16 output block + bf16 partials block
+                resident = os.environ.get("TT_SPARSE_GROUPED_RESIDENT_IN1", "1") != "0"
+                # the resident block must fit with the smallest in0 double buffer, else the factory streams in1
+                resident = resident and 2 * m_tiles * 2048 + k_tiles * n_tiles * w_tile_bytes + fixed <= budget
+                in1_bytes = (
+                    (lambda ib_: k_tiles * n_tiles * w_tile_bytes)
+                    if resident
+                    else (lambda ib_: 2 * n_tiles * ib_ * w_tile_bytes)
+                )
+                while ib > 1 and 2 * m_tiles * ib * 2048 + in1_bytes(ib) + fixed > budget:
                     ib -= 1
                     while k_tiles % ib:
                         ib -= 1

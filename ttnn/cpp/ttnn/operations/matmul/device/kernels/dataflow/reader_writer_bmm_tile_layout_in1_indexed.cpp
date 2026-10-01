@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 #include "api/dataflow/dataflow_api.h"
-#ifdef SKIP_PADDING_GROUPS
+#if defined(SKIP_PADDING_GROUPS) || defined(RESIDENT_IN1)
 #include "ckernel.h"
 #include "ckernel_defs.h"
 #endif
@@ -90,7 +90,50 @@ void kernel_main() {
         const uint32_t gb = start_batch + b;
         ASSERT(gb < num_groups_total);
         const uint32_t group_id = ids[gb];
-#ifdef SKIP_PADDING_GROUPS
+#ifdef RESIDENT_IN1
+        // weights once per expert: consecutive groups of this core that share the expert form a RUN; the whole [K, N]
+        // block is read into cb_in1 (sized for it) at the run's first group and stays resident until the compute
+        // kernel pops it after the run's last group (run code through the BRISC mailbox: 0 skip, 1 single, 2 first,
+        // 3 middle, 4 last). The id list is this forward's routing (device-resident), so runs are found at run time.
+        const bool group_valid = group_id < num_experts;
+        const bool prev_same = group_valid && b > 0 && ids[gb - 1] == group_id;
+        const bool next_same = group_valid && (b + 1 < batch) && ids[gb + 1] == group_id;
+        const uint32_t run_code = !group_valid ? 0u : (prev_same ? (next_same ? 3u : 4u) : (next_same ? 2u : 1u));
+        ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, run_code);
+        ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, run_code);
+        ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, run_code);
+        if (!group_valid) {
+            out_tensor_start_tile_id += MtNt;
+            continue;
+        }
+        if (!prev_same) {
+            // the run's first group: read every K-block of the expert into the resident CB region in one reservation
+            constexpr uint32_t resident_tiles = num_blocks * in1_block_num_tiles;
+            dfb_in1.reserve_back(resident_tiles);
+            uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt;
+            uint32_t in1_write_offset = 0;
+            for (uint32_t block = 0; block < num_blocks; ++block) {
+                uint32_t in1_tensor_row_start_tile_id = in1_tensor_current_block_start_tile_id;
+                for (uint32_t h = 0; h < in1_block_h; ++h) {
+                    uint32_t in1_tensor_tile_id = in1_tensor_row_start_tile_id;
+                    for (uint32_t w = 0; w < in1_block_w; ++w) {
+                        noc.async_read(
+                            s1,
+                            dfb_in1,
+                            in1_single_tile_size_bytes,
+                            {.page_id = in1_tensor_tile_id},
+                            {.offset_bytes = in1_write_offset});
+                        in1_write_offset += in1_aligned_tile_size_bytes;
+                        in1_tensor_tile_id += in1_tensor_stride_w;
+                    }
+                    in1_tensor_row_start_tile_id += in1_tensor_stride_h;
+                }
+                in1_tensor_current_block_start_tile_id += in1_tensor_next_block_stride;
+            }
+            noc.async_read_barrier();
+            dfb_in1.push_back(resident_tiles);
+        }
+#elif defined(SKIP_PADDING_GROUPS)
         // padding groups (id >= num_experts) are skipped by all three kernels: the compute kernel learns it through
         // the BRISC mailbox (get_batch_from_reader), the in0 reader reads the same id list
         const bool group_valid = group_id < num_experts;
@@ -104,6 +147,7 @@ void kernel_main() {
 #else
         ASSERT(group_id < num_experts);
 #endif
+#ifndef RESIDENT_IN1
         uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt;
         for (uint32_t block = 0; block < num_blocks; ++block) {
             dfb_in1.reserve_back(in1_block_num_tiles);
@@ -127,6 +171,7 @@ void kernel_main() {
             noc.async_read_barrier();
             dfb_in1.push_back(in1_block_num_tiles);
         }
+#endif  // !RESIDENT_IN1
 
         uint32_t out_tensor_sbh_start_tile_id = out_tensor_start_tile_id;
         for (uint32_t sbh = 0; sbh < out_num_subblocks_h; ++sbh) {

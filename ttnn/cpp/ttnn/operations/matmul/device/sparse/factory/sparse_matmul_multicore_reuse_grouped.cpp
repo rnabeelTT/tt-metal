@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#include <cstdlib>
+#include <string>
 #include "ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.hpp"
 
 #include <tt-metalium/hal.hpp>
@@ -143,10 +145,21 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     const uint32_t in0_block_num_tiles = per_core_M * in0_block_w;
     const uint32_t in0_CB_size = 2 * in0_block_num_tiles * in0_aligned_tile_size;
     const uint32_t in1_block_num_tiles = per_core_N * in0_block_w;
-    const uint32_t in1_CB_size = 2 * in1_block_num_tiles * in1_aligned_tile_size;
     const uint32_t out_block_tiles = per_core_M * per_core_N;
     const uint32_t out_CB_size = out_block_tiles * output_single_tile_size;
     const uint32_t interm0_CB_size = out_block_tiles * interm0_single_tile_size;
+    // RESIDENT in1 (weights once per expert): cb_in1 holds the WHOLE [K, N] block of an expert so consecutive groups of
+    // a core that share the expert read it once (the sorted dispatch puts a token's groups of one expert side by
+    // side: ~2.3 groups per active expert at 2048 tokens). Falls back to the double-buffered K-block stream when the
+    // block does not fit the per-core L1 budget. Opt out with TT_SPARSE_GROUPED_RESIDENT_IN1=0.
+    const uint32_t in1_resident_CB_size = num_blocks * in1_block_num_tiles * in1_aligned_tile_size;
+    const uint32_t in1_stream_CB_size = 2 * in1_block_num_tiles * in1_aligned_tile_size;
+    const char* resident_env = std::getenv("TT_SPARSE_GROUPED_RESIDENT_IN1");
+    const bool resident_allowed = resident_env == nullptr || std::string(resident_env) != "0";
+    constexpr uint32_t kL1CBBudget = 1'300'000;  // bytes of CBs per core (kernels / stacks take the rest of 1.5 MB)
+    const bool resident_in1 =
+        resident_allowed && (in0_CB_size + in1_resident_CB_size + out_CB_size + interm0_CB_size <= kL1CBBudget);
+    const uint32_t in1_CB_size = resident_in1 ? in1_resident_CB_size : in1_stream_CB_size;
     const uint32_t idx_page_size = idx_buffer->aligned_page_size();
 
     // ---- core split over whole groups
@@ -235,6 +248,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     if (skip_padding_groups) {
         dm_defines["SKIP_PADDING_GROUPS"] = "1";
     }
+    if (resident_in1) {
+        dm_defines["RESIDENT_IN1"] = "1";
+    }
 
     auto in0_reader_kernel = tt_metal::CreateKernel(
         program,
@@ -296,9 +312,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             out_subblock_num_tiles,
             groups_per_core,  // batch
             out_block_tiles,
-            0u,                             // untilize_out
-            skip_padding_groups ? 1u : 0u,  // get_batch_from_reader: group validity through the BRISC mailbox
-            0u,                             // in0_transpose_tile
+            0u,                                               // untilize_out
+            (skip_padding_groups || resident_in1) ? 1u : 0u,  // get_batch_from_reader: group validity (mailbox)
+            0u,                                               // in0_transpose_tile
         };
     };
     const std::unordered_map<std::string, uint32_t> compute_named_args = {
@@ -311,7 +327,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     };
     tt_metal::CreateKernel(
         program,
-        "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp",
+        resident_in1
+            ? "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_grouped_resident_in1.cpp"
+            : "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp",
         core_group_1,
         tt_metal::ComputeConfig{
             .math_fidelity = math_fidelity,
@@ -324,7 +342,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     if (core_group_2.num_cores() > 0) {
         tt_metal::CreateKernel(
             program,
-            "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp",
+            resident_in1
+                ? "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_grouped_resident_in1.cpp"
+                : "ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp",
             core_group_2,
             tt_metal::ComputeConfig{
                 .math_fidelity = math_fidelity,

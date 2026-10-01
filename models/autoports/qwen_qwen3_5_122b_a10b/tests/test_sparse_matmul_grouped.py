@@ -55,11 +55,15 @@ def mcast_config(gs, N, K, target_cores=64, in0_block_w_cap=32, tile_w=TILE):
     )
 
 
-def _make(device, G, gs, E, K, N, w_dtype, seed=0, mesh=False):
+def _make(device, G, gs, E, K, N, w_dtype, seed=0, mesh=False, sorted_ids=False, active=None):
+    """sorted_ids: ids ascending with repeats (the sorted dispatch's layout: same-expert groups adjacent -> the grouped
+    factory's resident-weights runs); active: draw the ids from this many experts (dense repeats)."""
     torch.manual_seed(seed)
     x = torch.randn(1, G, gs, K, dtype=torch.bfloat16)
     w = torch.randn(1, E, K, N, dtype=torch.bfloat16) * 0.05
-    ids = torch.randint(0, E, (G,), dtype=torch.int32)
+    ids = torch.randint(0, active or E, (G,), dtype=torch.int32)
+    if sorted_ids:
+        ids = torch.sort(ids).values
     mm = dict(mesh_mapper=ttnn.ReplicateTensorToMesh(device)) if mesh else {}
     x_t = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device, **mm)
     w_t = ttnn.from_torch(w, dtype=w_dtype, layout=ttnn.TILE_LAYOUT, device=device, **mm)
@@ -152,6 +156,34 @@ def test_grouped_matches_mcast_and_torch(device, G, gs, E, K, N, w_dtype):
     assert pcc_m[0], pcc_m[1]
     assert pcc_ref[1] >= pcc_m_ref[1] - 5e-5, (pcc_ref[1], pcc_m_ref[1])
     assert diff <= 0.1 * scale + 1e-3, (diff, scale)
+
+
+@pytest.mark.parametrize(
+    "G,gs,E,K,N,w_dtype,active",
+    [
+        (512, 32, 256, 3072, 1024, ttnn.bfloat4_b, 200),  # gate/up at ~2048 tokens: runs of ~2.5 groups per expert
+        (512, 32, 256, 512, 3072, ttnn.bfloat4_b, 200),  # down projection (resident when the block fits L1)
+        (96, 32, 256, 3072, 1024, ttnn.bfloat4_b, 8),  # long runs (12 groups per expert), spanning cores
+        (37, 32, 256, 3072, 1024, ttnn.bfloat8_b, 5),  # odd group count, bfp8 (resident block 1.7 MB: streams)
+    ],
+    ids=["gu512_sorted", "dn512_sorted", "gu96_runs", "gu37_bfp8_runs"],
+)
+def test_grouped_sorted_runs_match_torch(device, G, gs, E, K, N, w_dtype, active):
+    """Sorted ids (adjacent same-expert groups): the resident-weights path reads an expert's block once per run and
+    must reproduce the per-group reference exactly as the unsorted layout does."""
+    x_t, w_t, idx_t, ones, ids, ref = _make(device, G, gs, E, K, N, w_dtype, sorted_ids=True, active=active)
+    cfg_g = grouped_config(device, gs, K, N)
+    out_g = _run(device, x_t, w_t, idx_t, ones, cfg_g, CKC)
+    g = ttnn.to_torch(out_g).float()
+    assert g.shape == (1, G, gs, N), g.shape
+    pcc = comp_pcc(ref, g, 0.9995)
+    runs = int((ids[1:] != ids[:-1]).sum().item()) + 1
+    print(f"GROUPED_RUNS {G}x{gs}x{K}x{N} {w_dtype}: {runs} runs over {G} groups; grouped vs torch {pcc[1]}")
+    assert pcc[0], pcc[1]
+    # every group individually (a wrong resident block offset would corrupt single groups, not the average)
+    per_group = min(comp_pcc(ref[0, i], g[0, i], 0.999)[1] for i in range(G))
+    print(f"GROUPED_RUNS per-group PCC min {per_group:.5f}")
+    assert per_group >= 0.999, per_group
 
 
 @pytest.mark.parametrize("G,gs,E,K,N", [(512, 32, 256, 3072, 1024), (512, 32, 256, 512, 3072)], ids=["gu", "dn"])
