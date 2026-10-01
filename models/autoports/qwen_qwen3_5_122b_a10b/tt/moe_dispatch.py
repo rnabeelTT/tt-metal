@@ -526,6 +526,13 @@ def undispatch_rows(y_disp4, weights, undispatch_u32, T: int, k: int, H: int, un
     Rd = y_disp4.shape[1] * y_disp4.shape[2]
     if undispatch_rm is not None:
         assert weights is None
+        if y_disp4.layout == ttnn.ROW_MAJOR_LAYOUT:
+            # the down projection wrote row-major rows (grouped factory `untilize_out`): no untilize op
+            y_rm = ttnn.reshape(y_disp4, (Rd, H))
+            out = ttnn.moe_gather_add_rows(y_rm, undispatch_rm, T, k, memory_config=DRAM)
+            if y_rm is not y_disp4:
+                ttnn.deallocate(y_rm)
+            return out
         y_rm = ttnn.to_layout(ttnn.reshape(y_disp4, (Rd, H)), ttnn.ROW_MAJOR_LAYOUT)
         out = ttnn.moe_gather_add_rows(y_rm, undispatch_rm, T, k, memory_config=DRAM)
         ttnn.deallocate(y_rm)

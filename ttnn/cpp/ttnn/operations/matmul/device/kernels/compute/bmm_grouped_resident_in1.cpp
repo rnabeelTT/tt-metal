@@ -605,6 +605,45 @@ void kernel_main() {
                     PACK((llk_pack_reconfig_l1_acc(0)));
 #endif
 #endif  // FUSE_BIAS
+#ifdef UNTILIZE_CHUNK_W
+                    // The pack-untilize path is exact up to 16 tiles of row width (2026-10-01: 24+ tiles came out wrong
+                    // on Blackhole), so a wide output block is untilized in chunks of UNTILIZE_CHUNK_W tiles, each
+                    // pushed as its own row-major [32, chunk] piece; the writer stores them as partial sticks.
+                    constexpr uint32_t untilize_chunk_w = UNTILIZE_CHUNK_W;
+                    constexpr uint32_t subblocks_per_chunk = untilize_chunk_w / out_subblock_w;
+                    constexpr uint32_t n_chunks = out_block_w / untilize_chunk_w;
+                    static_assert(untilize_chunk_w % out_subblock_w == 0 && out_block_w % untilize_chunk_w == 0);
+                    pack_untilize_dest_init<out_subblock_w, untilize_chunk_w>(out_dfb_id);
+                    copy_init(mm_partials_dfb_id);
+                    for (uint32_t in0_subblock_i = 0; in0_subblock_i < in0_num_subblocks; ++in0_subblock_i) {
+                        DataflowBuffer interm_dfb(mm_partials_dfb_id);
+                        DataflowBuffer out_dfb_u(out_dfb_id);
+                        const uint32_t row_tiles = out_subblock_num_tiles * in1_num_subblocks;
+                        interm_dfb.wait_front(row_tiles);
+                        for (uint32_t c = 0; c < n_chunks; ++c) {
+                            for (uint32_t h = 0; h < out_subblock_h; ++h) {
+                                out_dfb_u.reserve_back(untilize_chunk_w);
+                                for (uint32_t n = 0; n < subblocks_per_chunk; ++n) {
+                                    const uint32_t sb = c * subblocks_per_chunk + n;
+                                    tile_regs_acquire();
+                                    for (uint32_t w = 0; w < out_subblock_w; ++w) {
+                                        copy_tile(
+                                            mm_partials_dfb_id,
+                                            sb * out_subblock_num_tiles + h * out_subblock_w + w,
+                                            w);
+                                    }
+                                    tile_regs_commit();
+                                    tile_regs_wait();
+                                    pack_untilize_dest<out_subblock_w, untilize_chunk_w>(out_dfb_id, 1, n);
+                                    tile_regs_release();
+                                }
+                                out_dfb_u.push_back(untilize_chunk_w);
+                            }
+                        }
+                        interm_dfb.pop_front(row_tiles);
+                    }
+                    pack_untilize_uninit(mm_partials_dfb_id);
+#else
                     pack_untilize_dest_init<out_subblock_w, out_block_w>(out_dfb_id);
                     copy_init(mm_partials_dfb_id);
                     for (uint32_t in0_subblock_i = 0; in0_subblock_i < in0_num_subblocks; ++in0_subblock_i) {
@@ -612,6 +651,7 @@ void kernel_main() {
                             in1_num_subblocks, out_subblock_num_tiles, out_subblock_h, mm_partials_dfb_id, out_dfb_id);
                     }
                     pack_untilize_uninit(mm_partials_dfb_id);
+#endif
                 }
                 if constexpr (batch > 1 || num_blocks_w_dim > 1 || num_blocks_h_dim > 1) {
 #ifdef FUSE_BIAS

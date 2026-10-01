@@ -53,6 +53,15 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     const uint32_t per_core_M = pc->per_core_M;
     const uint32_t per_core_N = pc->per_core_N;
     const bool skip_padding_groups = pc->skip_padding_groups;
+    const bool untilize_out = pc->untilize_out;  // ROW_MAJOR output through the compute kernel's pack-untilize path
+    TT_FATAL(
+        !untilize_out || (output_tensor.layout() == Layout::ROW_MAJOR),
+        "sparse_matmul (grouped): untilize_out needs a ROW_MAJOR output tensor, got {}",
+        output_tensor.layout());
+    TT_FATAL(
+        !untilize_out || (output_tensor.dtype() == DataType::BFLOAT16),
+        "sparse_matmul (grouped): untilize_out writes bfloat16 rows, output dtype {}",
+        output_tensor.dtype());
 
     // ---- shapes
     const auto& ashape = get_matmul_tensor_padded_shape(a, /*transpose=*/false);
@@ -256,6 +265,27 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     if (resident_in1) {
         dm_defines["RESIDENT_IN1"] = "1";
     }
+    // untilize_out: pack-untilize is exact up to 16 tiles of row width -> chunk the [32, N] block (chunk = the largest
+    // multiple of the subblock width that divides N and is <= 16 tiles); the resident compute kernel carries the path
+    uint32_t untilize_chunk_w = 0;
+    if (untilize_out) {
+        TT_FATAL(
+            resident_in1,
+            "sparse_matmul (grouped): untilize_out needs the resident-in1 compute kernel (block fits L1)");
+        for (uint32_t c = 16; c >= out_subblock_w; c -= out_subblock_w) {
+            if (c % out_subblock_w == 0 && per_core_N % c == 0) {
+                untilize_chunk_w = c;
+                break;
+            }
+        }
+        TT_FATAL(
+            untilize_chunk_w > 0,
+            "sparse_matmul (grouped): no untilize chunk width for per_core_N {} / subblock {}",
+            per_core_N,
+            out_subblock_w);
+        dm_defines["UNTILIZE_OUT"] = "1";  // the in1 writer stores 32 row-major sticks per group, chunk by chunk
+        dm_defines["UNTILIZE_CHUNK_W"] = std::to_string(untilize_chunk_w);
+    }
 
     auto in0_reader_kernel = tt_metal::CreateKernel(
         program,
@@ -282,6 +312,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
 
     std::map<std::string, std::string> mm_kernel_defines;
     mm_kernel_defines["FUSE_ACTIVATION"] = "0";
+    if (untilize_out) {
+        mm_kernel_defines["UNTILIZE_CHUNK_W"] = std::to_string(untilize_chunk_w);
+    }
     if (packer_l1_acc_en) {
         mm_kernel_defines["PACKER_L1_ACC"] = "1";
     }
@@ -317,7 +350,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             out_subblock_num_tiles,
             groups_per_core,  // batch
             out_block_tiles,
-            0u,                                               // untilize_out
+            untilize_out ? 1u : 0u,                           // untilize_out (pack-untilize into cb_out)
             (skip_padding_groups || resident_in1) ? 1u : 0u,  // get_batch_from_reader: group validity (mailbox)
             0u,                                               // in0_transpose_tile
         };

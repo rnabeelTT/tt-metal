@@ -173,6 +173,34 @@ void kernel_main() {
         }
 #endif  // !RESIDENT_IN1
 
+#ifdef UNTILIZE_OUT
+        // ROW_MAJOR output: the compute kernel pack-untilized this group's whole [32, N] block (per_core_M = 1 tile
+        // row, per_core_N = all N tiles) into cb_out as 32 contiguous rows of N elements; store them as the group's 32
+        // sticks (stick id = compact group * 32 + r). The tile-geometry runtime args are unused in this mode.
+        {
+            // the compute kernel pushes the [32, N] block in chunks of UNTILIZE_CHUNK_W tiles (row width limit of the
+            // pack-untilize path); every chunk is 32 partial sticks of chunk_w * 32 elements at column offset c * chunk
+            constexpr uint32_t chunk_w = UNTILIZE_CHUNK_W;
+            constexpr uint32_t chunk_bytes = chunk_w * 32 * 2;
+            constexpr uint32_t n_chunks = (out_subblock_w * out_num_subblocks_w) / chunk_w;
+            const uint32_t stick0 = gb * 32;
+            for (uint32_t c = 0; c < n_chunks; ++c) {
+                dfb_out.wait_front(chunk_w);
+                for (uint32_t r = 0; r < 32; ++r) {
+                    noc.async_write(
+                        dfb_out,
+                        s_out,
+                        chunk_bytes,
+                        {.offset_bytes = r * chunk_bytes},
+                        {.page_id = stick0 + r, .offset_bytes = c * chunk_bytes});
+                }
+                noc.async_write_barrier();
+                dfb_out.pop_front(chunk_w);
+            }
+            out_tensor_start_tile_id += MtNt;
+            continue;
+        }
+#endif
         uint32_t out_tensor_sbh_start_tile_id = out_tensor_start_tile_id;
         for (uint32_t sbh = 0; sbh < out_num_subblocks_h; ++sbh) {
             uint32_t out_tensor_sbw_start_tile_id = out_tensor_sbh_start_tile_id;

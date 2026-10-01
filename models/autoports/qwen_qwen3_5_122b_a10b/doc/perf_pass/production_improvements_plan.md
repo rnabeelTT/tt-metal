@@ -34,13 +34,12 @@ The plugin also disables chunked prefill for any model with `output_tokens_per_s
 
 ## Plan (ordered, revised 19:25)
 
-1. **Multi-core TILE row-gather kernel** - DONE 2026-10-01 (`ttnn.moe_gather_rows`, commit 1dc31fd3d68): prefill
-   MoE gather 1.80 -> 1.27 ms per layer at 2048 tokens (MoE ~8.3 -> ~7.7 ms, -29 ms per segment); the expert-sorted
-   decode path -0.28 ms per layer step, now ahead of the pairs / masked path at 32 rows (-3 / -8 %), still behind at
-   8 / 16. **Next half**: the down projection's output untilize (0.74 ms at 2048 tokens, 0.25 ms at 16 rows) ->
-   `untilize_out` in the grouped sparse matmul factory (row-major output straight into the gather-add kernel).
-   Targets after both: 16-user TPOT ~103 -> ~90 ms, 32-user 130 -> ~115, prefill MoE -1.3 ms per layer; then
-   re-A/B `QWEN35_DECODE_SORTED_MIN_ROWS` (16 or 32) and re-measure multi-user MTP.
+1. **Decode MoE at 16-32 rows + prefill MoE glue** - DONE 2026-10-01: (a) `ttnn.moe_gather_rows` (multi-core tile
+   gather, padding groups skipped); (b) `untilize_out` in the grouped sparse matmul factory (row-major down projection
+   straight into the gather-add; pack-untilize chunked at 16 tiles of row width). Prefill MoE 8.3 -> 6.9 ms per layer
+   at 2048 tokens (-67 ms per segment); the expert-sorted path is now the decode path from 16 rows
+   (`QWEN35_DECODE_SORTED_MIN_ROWS=16`): per-layer step -7 % at 16 users, -13 / -17 % at 32 (GDN / attn). Served
+   numbers: see the work log (production-config run after 20:56). Multi-user MTP re-measurement now possible.
 2. ~~MTP prefill tax~~ measured at 7 ms of 238 (closed).
 3. **GDN slot write**: conv-tap writes through fewer ops. Target 28.8 -> ~10 ms per prefill.
 4. **Per-layer op count of the 128-token bucket** (~3.5 ms x 48 = 170 of 231 ms): the prefill form of the GDN layer

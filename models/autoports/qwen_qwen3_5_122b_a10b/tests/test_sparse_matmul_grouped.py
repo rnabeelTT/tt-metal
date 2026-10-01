@@ -408,3 +408,56 @@ def test_grouped_resident_sentinel_ids_without_skip(device, skip):
     )
     assert pcc[0], pcc[1]
     assert per_group >= 0.999, per_group
+
+
+@pytest.mark.parametrize(
+    "G,gs,E,K,N,w_dtype",
+    [
+        (281, 32, 256, 256, 3072, ttnn.bfloat4_b),
+        (129, 32, 256, 3072, 512, ttnn.bfloat4_b),
+        (129, 32, 256, 256, 1024, ttnn.bfloat4_b),
+        (129, 32, 256, 256, 2048, ttnn.bfloat4_b),
+        (129, 32, 256, 256, 768, ttnn.bfloat4_b),
+        (129, 32, 256, 256, 512, ttnn.bfloat4_b),
+    ],
+    # (K=3072 with N >= 768 bfp4 is NOT a case: the expert block exceeds the resident L1 budget, the factory streams
+    # in1 and refuses untilize_out with a TT_FATAL - the layer only asks for it on the down projection)
+    ids=["down_t128", "gate_up_t16", "n1024", "n2048", "n768", "k256_n512"],
+)
+def test_grouped_untilize_out_matches(device, G, gs, E, K, N, w_dtype):
+    """`untilize_out` on the grouped factory: the down projection writes its output ROW_MAJOR (the compute kernel's
+    pack-untilize path, 32 sticks per group) so the gather-add un-dispatch reads it without the separate untilize op
+    (0.74 ms per MoE layer at 2048 tokens, 0.25 ms at 16 decode rows). Real groups must match the TILE output
+    bit for bit; padding groups (sentinel ids) are skipped in both."""
+    torch.manual_seed(5)
+    n_real = int(G * 0.7)
+    real = torch.randint(0, E, (n_real,)).sort().values
+    ids = torch.cat([real, torch.full((G - n_real,), E)]).to(torch.int32)
+    x = torch.randn(1, G, gs, K, dtype=torch.bfloat16)
+    w = torch.randn(1, E, K, N, dtype=torch.bfloat16) * 0.05
+    x_t = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
+    w_t = ttnn.from_torch(w, dtype=w_dtype, layout=ttnn.TILE_LAYOUT, device=device)
+    idx_t = ttnn.from_torch(ids.reshape(1, G), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    mask = torch.zeros(1, G, 1, E, dtype=torch.bfloat16)
+    mask[0, torch.arange(n_real), 0, real.long()] = 1.0
+    ones = ttnn.from_torch(mask, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+    cfg = grouped_config(device, gs, K, N)
+    cfg.skip_padding_groups = True
+    out_tile = ttnn.to_torch(_run(device, x_t, w_t, idx_t, ones, cfg, CKC)).float()
+    cfg_rm = grouped_config(device, gs, K, N)
+    cfg_rm.skip_padding_groups = True
+    cfg_rm.untilize_out = True
+    out_rm_t = _run(device, x_t, w_t, idx_t, ones, cfg_rm, CKC)
+    assert out_rm_t.layout == ttnn.ROW_MAJOR_LAYOUT, out_rm_t.layout
+    assert tuple(out_rm_t.shape) == (1, G, gs, N), out_rm_t.shape
+    out_rm = ttnn.to_torch(out_rm_t).float()
+    assert torch.equal(out_tile[:, :n_real], out_rm[:, :n_real]), (
+        (out_tile[:, :n_real] - out_rm[:, :n_real]).abs().max()
+    )
+    w_q = ttnn.to_torch(w_t).float()
+    ref = torch.stack([x[0, g].float() @ w_q[0, ids[g]] for g in range(n_real)]).unsqueeze(0)
+    pcc = comp_pcc(ref, out_rm[:, :n_real], 0.9995)
+    print(
+        f"GROUPED_UNTILIZE_OUT G={G} K={K} N={N}: ROW_MAJOR output == TILE output on {n_real} real groups; PCC vs torch {pcc[1]}"
+    )
+    assert pcc[0], pcc[1]

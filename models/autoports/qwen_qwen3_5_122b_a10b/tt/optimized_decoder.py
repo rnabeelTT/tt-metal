@@ -392,12 +392,14 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
 
     # ---- routed experts, pairs dispatch (decode, few tokens) ---------------------------------------------------
     def _decode_sorted(self, T):
-        """QWEN35_DECODE_SORTED_MIN_ROWS = N (default 0 = off): decode steps of N or more rows take the expert-sorted
+        """QWEN35_DECODE_SORTED_MIN_ROWS = N (default 16; 0 = off): decode steps of N or more rows take the expert-sorted
         path (dispatch kernel + grouped resident sparse matmuls + gather-add un-dispatch) instead of the pairs / masked
         paths. Decode-width profile 2026-10-01: at 16 users the MoE is ~65 % of the layer step and reads one expert
         block per (user, expert) PAIR (128 reads) through the pairs path's relayout glue; sorting reads each distinct
-        expert once. Measured A/B in doc/perf_pass/work_log.md."""
-        n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "0") or 0)
+        expert once. Measured 2026-10-01 with the multi-core gather kernel + the row-major down projection: per-layer step
+        at 16 rows 1.99 / 1.87 ms (GDN / attn) vs 2.13 / 1.90 pairs-masked, at 32 rows 2.38 / 2.16 vs 2.72 / 2.60; at 8
+        rows the sorted path still loses (1.74 vs 1.32), hence the threshold."""
+        n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "16") or 0)
         return 0 < n <= T and self.opt.prefill_mode == "sorted"
 
     def _routed_gather(self, x4, scores, ids, T):
@@ -585,7 +587,13 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         din = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Nl)), m["weights"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(m["weights"])
         din = ttnn.reshape(din, (1, G, gs, Nl))
-        out_dn = self._alloc_dev((1, G, gs, H), act)
+        out_dn = self._alloc_dev(
+            (1, G, gs, H),
+            act,
+            layout=ttnn.ROW_MAJOR_LAYOUT
+            if (grouped and getattr(self, "_cfg_grouped_down_untilize", False))
+            else ttnn.TILE_LAYOUT,
+        )
         down = ttnn.sparse_matmul(
             din,
             self.down,
@@ -661,7 +669,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 if getattr(self.routed_ckc, "fp32_dest_acc_en", False):
                     while sw > 4:
                         sw -= 1
-                return ttnn.MatmulMultiCoreReuseProgramConfig(
+                pc = ttnn.MatmulMultiCoreReuseProgramConfig(
                     compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y),
                     in0_block_w=ib,
                     out_subblock_h=1,
@@ -670,13 +678,26 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                     per_core_N=n_tiles,
                     skip_padding_groups=self._skip_pad_groups_rule(),
                 )
+                return pc, bool(resident)  # the untilize_out path needs the resident compute kernel
 
             gu_tiles = -(-(2 * Nl) // self.tile_gu.tile_shape[1])
             tile_bytes = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088}
-            self._cfg_grouped = (
-                cfg(H, gu_tiles, opt.grouped_gate_up_in0, tile_bytes.get(self.up_gate.dtype, 2048)),
-                cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048)),
-            )
+            cfg_gu, _ = cfg(H, gu_tiles, opt.grouped_gate_up_in0, tile_bytes.get(self.up_gate.dtype, 2048))
+            cfg_dn, dn_resident = cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048))
+            # QWEN35_DOWN_UNTILIZE_OUT (default on): the down projection writes ROW_MAJOR rows (the compute kernel's
+            # pack-untilize path) straight into the gather-add un-dispatch - no separate untilize op (0.74 ms per MoE
+            # layer at 2048 tokens, 0.25 ms at 16 decode rows; 2026-10-01). Needs the skip-aware path (padding groups'
+            # rows are never written) and the bf16 activation dtype.
+            if (
+                os.environ.get("QWEN35_DOWN_UNTILIZE_OUT", "1") == "1"
+                and hasattr(cfg_dn, "untilize_out")
+                and dn_resident
+                and self._skip_pad_groups_rule()
+                and self.prec.act_dtype == ttnn.bfloat16
+            ):
+                cfg_dn.untilize_out = True
+            self._cfg_grouped = (cfg_gu, cfg_dn)
+            self._cfg_grouped_down_untilize = bool(cfg_dn.untilize_out)
         return self._cfg_grouped
 
     def _route(self, x4):

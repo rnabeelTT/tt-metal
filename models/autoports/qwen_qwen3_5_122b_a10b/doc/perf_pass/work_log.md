@@ -1084,3 +1084,22 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   projection's output untilize (0.74 ms at 2048 tokens, 0.25 ms at 16 rows, ahead of the multi-core gather-add) ->
   have the grouped sparse matmul factory emit ROW_MAJOR output (`untilize_out`, the bmm compute kernel's
   pack-untilize path) so the un-dispatch reads it directly.
+- 20:36 DOWN-PROJECTION `untilize_out` (grouped sparse matmul factory): new `MatmulMultiCoreReuseProgramConfig.
+  untilize_out` -> the op's output spec / optional output are ROW_MAJOR [1, G, 32, N]; the resident compute kernel
+  takes the bmm pack-untilize path (compile arg 15) and the in1 writer stores each real group as 32 sticks. Finding:
+  pack-untilize is exact only up to 16 tiles of row width on Blackhole (N=512 bit-exact, N >= 768 wrong, independent
+  of K), so the kernel untilizes the [32, N] block in chunks of UNTILIZE_CHUNK_W (largest multiple of the subblock
+  width dividing N, <= 16) and the writer stores partial sticks (page offset = chunk column). Needs the resident
+  kernel (TT_FATAL otherwise; the Python knob `QWEN35_DOWN_UNTILIZE_OUT`, default on, is gated on the resident
+  budget + skip-aware path + bf16 activations). Unit test `test_grouped_untilize_out_matches`: ROW_MAJOR == TILE
+  output bit for bit on the real groups for N = 512 / 768 / 1024 / 2048 / 3072 (down: K=256, N=3072). `undispatch_rows`
+  feeds the row-major output straight to the gather-add kernel (no untilize op). Validation chain running (layer
+  PCC, sorted decode PCC + per-width PERF, MoE-block Tracy at 2048).
+- 20:56 UNTILIZE_OUT RESULTS: layer PCC vs HF unchanged (0.9985 / 0.99998 prefill 2048; sorted decode B=16 / 32
+  per-user >= 0.99896); prefill MoE block at 2048 tokens (phase walls): un-dispatch 1.38 -> 0.64 ms -> MoE ~8.3 (this
+  morning) -> ~6.9 ms per layer (-1.4 ms x 48 = ~-67 ms per 2048-token segment, ~-10 % of a long prefill); decode
+  per-layer step with the expert-sorted path (gather kernel + untilize_out) 1.74 / 1.99 / 2.38 ms GDN and 1.61 /
+  1.87 / 2.16 attn at 8 / 16 / 32 rows vs the shipped pairs / masked 1.32 / 2.13 / 2.72 and 1.18 / 1.90 / 2.60:
+  -7 % at 16 users, -13 / -17 % at 32, still +32 % at 8. DECISION: `QWEN35_DECODE_SORTED_MIN_ROWS` defaults to 16
+  (projected served TPOT 16 users 103 -> ~94 ms, 32 users 130 -> ~112 ms). Full-model served check (production
+  config, EXTRA + IMAGE + benchmark c=16 / 32) launched; then bundle rebuild / verify / push.

@@ -81,10 +81,22 @@ ttnn::Shape compute_sparse_matmul_compact_output_shape(
 // activation batch is multiplied with expert indices[g] only (one product per group, not the
 // batchA x num_active cross product of the plain indexed mode), so the output is the compact
 // [1, G, M, N] tensor.
+bool grouped_untilize_out(const ttnn::prim::SparseMatmulParams& operation_attributes);
+
 bool is_grouped_mode(const ttnn::prim::SparseMatmulParams& operation_attributes) {
     return operation_attributes.program_config.has_value() &&
            std::holds_alternative<ttnn::operations::matmul::MatmulMultiCoreReuseProgramConfig>(
                operation_attributes.program_config.value());
+}
+
+// Grouped mode with the program config's `untilize_out`: the factory emits a ROW_MAJOR output.
+bool grouped_untilize_out(const ttnn::prim::SparseMatmulParams& operation_attributes) {
+    if (!operation_attributes.program_config.has_value()) {
+        return false;
+    }
+    const auto* rc = std::get_if<ttnn::operations::matmul::MatmulMultiCoreReuseProgramConfig>(
+        &operation_attributes.program_config.value());
+    return rc != nullptr && rc->untilize_out;
 }
 }  // namespace
 
@@ -308,9 +320,15 @@ void SparseMatmulDeviceOperation::validate_on_program_cache_miss(
         // ({in0 tile height, in1 tile width}), not from the output tensor, so an optional
         // output with any other tile would be paged differently than the writer writes it.
         const auto& optional_output_tile = tensor_args.optional_output_tensors.at(0)->tensor_spec().tile();
+        const bool rm_out = grouped_untilize_out(operation_attributes);
         TT_FATAL(
-            optional_output_tile.get_height() == in0_tile.get_height() &&
-                optional_output_tile.get_width() == in1_tile.get_width(),
+            tensor_args.optional_output_tensors.at(0)->layout() ==
+                (rm_out ? ttnn::Layout::ROW_MAJOR : ttnn::Layout::TILE),
+            "sparse_matmul: the optional output tensor must be {} for this program config",
+            rm_out ? "ROW_MAJOR (untilize_out)" : "TILE");
+        TT_FATAL(
+            rm_out || (optional_output_tile.get_height() == in0_tile.get_height() &&
+                       optional_output_tile.get_width() == in1_tile.get_width()),
             "Optional output tensor tile {}x{} must match the output tile {}x{} derived from the input tiles",
             optional_output_tile.get_height(),
             optional_output_tile.get_width(),
@@ -488,6 +506,14 @@ SparseMatmulDeviceOperation::spec_return_value_t SparseMatmulDeviceOperation::co
         operation_attributes.output_tile,
         /*optional_output_tensor_tile=*/std::nullopt);
 
+    if (grouped_untilize_out(operation_attributes)) {
+        return {tt::tt_metal::TensorSpec(
+            output_shape,
+            tt::tt_metal::TensorLayout(
+                output_dtype,
+                tt::tt_metal::PageConfig(tt::tt_metal::Layout::ROW_MAJOR),
+                operation_attributes.output_mem_config))};
+    }
     return {tt::tt_metal::TensorSpec(
         output_shape,
         tt::tt_metal::TensorLayout(

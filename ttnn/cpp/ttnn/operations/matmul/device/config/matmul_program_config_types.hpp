@@ -23,6 +23,9 @@ struct MatmulMultiCoreReuseProgramConfig {
     // Group-parallel sparse matmul only: groups whose `indices` entry is >= the number of experts (padding groups of an
     // expert-sorted MoE dispatch) are skipped entirely (no weight / activation reads, no output writes).
     bool skip_padding_groups = false;
+    // Group-parallel sparse matmul only: write the output ROW_MAJOR (the compute kernel's pack-untilize path) so a
+    // row-oriented consumer (the MoE gather-add un-dispatch) reads it without a separate untilize op.
+    bool untilize_out = false;
 };
 
 struct MatmulMultiCoreReuseMultiCastProgramConfig {

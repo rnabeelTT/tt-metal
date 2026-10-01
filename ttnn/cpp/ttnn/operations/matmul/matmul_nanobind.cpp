@@ -67,6 +67,7 @@ void py_module(nb::module_& mod) {
             std::size_t,
             std::size_t,
             std::optional<CoreRangeSet>,
+            bool,
             bool>(),
         nb::kw_only(),
         nb::arg("compute_with_storage_grid_size"),
@@ -76,10 +77,15 @@ void py_module(nb::module_& mod) {
         nb::arg("per_core_M").noconvert(),
         nb::arg("per_core_N").noconvert(),
         nb::arg("allowed_worker_cores") = nb::none(),
-        nb::arg("skip_padding_groups") = false);
+        nb::arg("skip_padding_groups") = false,
+        nb::arg("untilize_out") = false);
     matmul_multi_core_reuse_program_config.def_rw(
         "skip_padding_groups", &MatmulMultiCoreReuseProgramConfig::skip_padding_groups, R"doc(
         Group-parallel sparse matmul only: skip groups whose index is >= the number of experts (padding groups).
+    )doc");
+    matmul_multi_core_reuse_program_config.def_rw(
+        "untilize_out", &MatmulMultiCoreReuseProgramConfig::untilize_out, R"doc(
+        Group-parallel sparse matmul only: write the output ROW_MAJOR (pack-untilize in the compute kernel).
     )doc");
     matmul_multi_core_reuse_program_config.def_rw(
         "compute_with_storage_grid_size", &MatmulMultiCoreReuseProgramConfig::compute_with_storage_grid_size, R"doc(
