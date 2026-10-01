@@ -94,6 +94,11 @@ form's correctness against per-user prefill (the MTP verify pass already validat
   writes (116 ms) ~ 320 ms vs 4 x 238 = 952 ms today -> ~3x on short bursts (32 x 128-token TTFT 7.6 -> ~2.6 s).
 - MTP: requests admitted in a batch get no head rows -> mark their slots MTP-ineligible (plain decode even when they
   end up alone); single admissions keep today's path. Image prompts stay single (M-RoPE per user).
+- Status (22:45): steps 1-4 WRITTEN and committed (c8b026f34f9 attention method + test; c0baac21ffd driver
+  `tt/prefill_batched.py`, serving integration behind `QWEN35_BATCHED_PREFILL=1`, MTP head-less slots, model-level test
+  `tests/test_prefill_batched.py` incl. traced replay + compile guard). Device tests queued behind the measurement
+  chain (`scripts/20-batched-attn-test.sh`, `20b-batched-model-test.sh`); step 5 (served A/B on the 32 x 128-token
+  burst, program guard) and 6 (bundle) follow a clean pass.
 - Order of work: (1) `forward_prefill_paged_batched` + unit test vs 4 single-user prefills (reduced model);
   (2) `Qwen35MoeModel.prefill_batched(tokens [B,T], pts, lens, slots)` eager + PCC vs per-user prefill (logits + slot
   states); (3) persistent inputs + trace per (bucket, B=4) + warm-up; (4) `prefill_serving` grouping of final
