@@ -119,6 +119,7 @@ def test_batched_prefill_matches_per_user(mesh_device):
         print(f"BATCHED_PREFILL lens={lens}: min logits PCC {worst:.5f}, K/V identical")
     # traced replay (the served form): one trace per batched bucket, then the same groups through the traces must
     # reproduce the eager pass, compiling no program (compile-after-capture guard)
+    bp.warm(gen.page_table)  # every bucket's programs (128 / 256 / 512) before any capture, as the served warm-up does
     captured = bp.capture_traces(gen.page_table)
     assert set(captured) >= {128, 512}, captured
     n_prog = mesh_device.num_program_cache_entries()
