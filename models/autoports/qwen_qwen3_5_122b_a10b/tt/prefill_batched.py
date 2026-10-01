@@ -117,8 +117,15 @@ class BatchedPrefill:
 
     def unbind(self, prev):
         for dn, B_b, rec_b, conv_b, carry_b, zero0_b, zero_rec_b, zero_carry_b, stable_b, bcc_b in prev:
-            if getattr(dn, "_batched_conv_carry", None) is not None:
-                ttnn.deallocate(dn._batched_conv_carry)
+            # the pass leaves its last conv left-context on the layer: free it after an eager pass (a traced pass leaves
+            # a trace-owned handle, or None after a replay: nothing to free)
+            bcc = getattr(dn, "_batched_conv_carry", None)
+            if bcc is not None and bcc is not bcc_b:
+                try:
+                    if bcc.is_allocated():
+                        ttnn.deallocate(bcc)
+                except RuntimeError:  # trace-owned buffer
+                    pass
             dn.B = B_b
             dn.rec_state = rec_b
             dn.conv_states = conv_b
