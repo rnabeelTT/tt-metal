@@ -1,4 +1,10 @@
-# Chunked prefill interleaved with decode (turn 7 plan, 2026-10-01)
+# Chunked prefill (turn 7, 2026-10-01) - IMPLEMENTED, validated served, opt-in
+
+Status: `QWEN35_CHUNKED_PREFILL=1` (adapter capability + plugin shim passing the intermediate-row mask; generator
+`prefill_serving(start_pos, final)` with per-request carried GDN state keyed by the first KV block; continuation path
+warmed at start-up). Equivalence vs the whole prefill PCC 1.0 (4 chunking patterns, with another request's prefill
+interleaved); plugin needle test 3 / 3 on the full model at budget 2048 with 4 concurrent requests (ragged starts).
+Commits 0d830d92904 + follow-ups. Default stays off until a served long-prompt TTFT A/B.
 
 ## What the plugin does (vllm-tt-plugin, read 2026-10-01)
 - `model_capabilities["supports_chunked_prefill"] = True` + vLLM's default `enable_chunked_prefill` keep chunking on

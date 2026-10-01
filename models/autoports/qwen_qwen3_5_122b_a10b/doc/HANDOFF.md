@@ -133,8 +133,18 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   19.4 ms = 51.5 t/s/u vs 31.3 plain; code prompts 1.9x, prose ~1.06x; TTFT +60 ms (eager bucket prefill + head rows).
   Standalone tools: `tools/mtp_traced_run.py` (traced step, per-program walls), `tools/mtp_pass_check.py` (verify pass
   vs decode, row by row), `tools/mtp_generate_full.py` (eager loop), `tools/mtp_acceptance.py`.
-- Next levers (not done): multi-user MTP + speculative sampling (then default-on), chunked prefill interleaved with
-  decode, one weight pass per expert in the grouped sparse matmul, a fused GDN decode step.
+- Chunked prefill (turn 7, opt-in): `QWEN35_CHUNKED_PREFILL=1` + vLLM `--enable-chunked-prefill --max-num-batched-tokens
+  2048`; intermediate chunks run whole 2048-token segments from the request's own processed end with the GDN state
+  carried per request (keyed by its first KV block), the final chunk samples; validated with the plugin's needle test
+  (4 concurrent, ragged boundaries). The plugin never mixes prefill and decode in one step, so this bounds step length
+  and shares steps between prompts; it does not shorten running users' inter-token gap. `doc/perf_pass/chunked_prefill_plan.md`.
+- Decode router: `QWEN35_ROUTER_DRAM_SHARDED=1` (default) runs the [32, 3072] x [3072, 256] router as a DRAM-sharded
+  decode matmul (71 -> 25 us per layer at width 8; 0 restores the stock linear).
+- Multi-user MTP (built, measured negative at 2-4 users; opt-in via QWEN35_MTP with --max-num-seqs > 1) and the levers
+  that would flip it: `doc/perf_pass/mtp_plan.md`.
+- Next levers (not done): compact-layout decode MoE for 8-32 rows (gather / un-dispatch kernels; the same work as the
+  prefill levers "row gather" + "untilize before un-dispatch"), scan-only batched MTP commit, speculative sampling,
+  one weight pass per expert in the grouped sparse matmul, a fused GDN decode step.
 
 ## 5. Vision enablement path (not done in this bring-up)
 

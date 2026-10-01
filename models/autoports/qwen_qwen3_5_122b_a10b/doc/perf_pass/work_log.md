@@ -629,3 +629,19 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   chunks run only whole 2048-token segments from the request's own processed end and return zero logits; the carried
   state is keyed by the request's first KV block. Next: the same with another request's prefill interleaved between the
   chunks (the conv left-context is rebuilt from the taps on restore), then the plugin's needle test on the full model.
+- 01:26 chunked prefill with ANOTHER request's whole prefill interleaved between the chunks (the scratch reused in
+  between): all four patterns still PCC 1.000000 for logits and the slot state - the carried state (rec + taps, conv
+  carry rebuilt on restore) is correct under interleaving. Full-model served run with the plugin's needle test queued
+  (`scripts/15-serve-chunked.sh`: --max-num-batched-tokens 2048, 4 concurrent ~1-budget prompts with passphrases).
+- 01:38 served chunked prefill, full model, budget 2048: the plugin split a 3105-token prompt into [0, 2048) (intermediate,
+  mask delivered by the shim) + [2048, 3105) (final) and the model ran both; the program guard then fired on the
+  continuation chunk (1 program compiled after the captures: the carried-state restore / conv-carry rebuild ops are not
+  in the warm-up) and the engine died, so the needle test only saw connection errors. Fix: warm a dummy two-chunk
+  prefill in `_warm_prefill` when chunked prefill is on.
+- 01:52 SERVED chunked prefill VALIDATED on the full model: `--max-num-batched-tokens 2048 --enable-chunked-prefill`,
+  4 concurrent ~2048-token prompts with embedded passphrases (the plugin's tests/tt/test_chunked_prefill.py): 3 / 3
+  passed; the server log shows ragged chunk starts (949, 985, 2004, 2997, 3033) and steps mixing a final and an
+  intermediate row, all handled from each request's own processed end; the program guard stayed quiet after the
+  continuation path was warmed at start-up. Kept opt-in (`QWEN35_CHUNKED_PREFILL=1`): the plugin never runs a decode
+  in a prefill step, so chunking bounds step length and lets prompts share steps rather than cutting the running
+  users' gap; default-on needs a served TTFT A/B on long prompts (per-chunk overhead ~ a bucket call + a state clone).

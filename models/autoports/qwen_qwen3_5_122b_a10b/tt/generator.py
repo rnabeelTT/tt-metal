@@ -229,7 +229,23 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self._warm_all_logits()
         ttnn.synchronize_device(self.mesh_device)
         self._zero_gdn_state()
+        if os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
+            self._warm_chunked_prefill()
         logger.info(f"prefill buckets warmed in {time.time() - t0:.1f}s")
+
+    def _warm_chunked_prefill(self):
+        """Compile the chunked-prefill continuation path (carried-state save / restore, conv-carry rebuild, a segment at
+        chunk_start > 0) with a dummy two-chunk prefill on slot 0 before any trace capture (the served run compiled one
+        program at the first continuation otherwise: program guard)."""
+        seg = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
+        n = seg + 37
+        ids = torch.full((1, n), 1000, dtype=torch.int64)
+        pt = self.page_table[:1]
+        self.prefill_serving(ids[:, :seg], pt, [seg], [0], start_pos=[0], final=[False])
+        self.prefill_serving(ids, pt, [n], [0], start_pos=[seg], final=[True])
+        assert not self._pending_prefill, "the warm-up's final chunk must release its carried state"
+        self._zero_gdn_state()
+        ttnn.synchronize_device(self.mesh_device)
 
     def _warm_slot_writes(self):
         """Compile the per-slot GDN state writes of the batched decode buffers (`_write_gdn_slot`: slice / concat programs
@@ -712,6 +728,11 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             # the final chunk runs to e, samples and writes the decode slot as a whole prefill does.
             key = self._pending_key(pt[u])
             pending = self._pending_prefill.get(key)
+            if pending is not None and starts[u] == 0:
+                # a request starting from scratch on a first block that still carries another request's state (that
+                # request was aborted / preempted mid-prefill and vLLM reused its blocks): drop the stale entry
+                self._pending_free(self._pending_prefill.pop(key))
+                pending = None
             s0 = pending[0] if pending is not None else 0
             if pending is None:
                 assert (
