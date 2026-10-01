@@ -627,3 +627,27 @@ def test_undo_restores_original_functions(expect_error):
 
 
 # endregion
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [({}, "3"), ({"QWEN35_CHUNKED_PREFILL": "1"}, "0"), ({"QWEN35_MTP": "0"}, "0"), ({"QWEN35_MTP": "2"}, "2")],
+    ids=["default_on", "chunked_turns_it_off", "explicit_off", "explicit_k2"],
+)
+def test_adapter_import_pins_mtp_env(env, expected):
+    """The adapter decides k (default 3) and pins QWEN35_MTP for the model's bucket-input allocation: without the pin
+    a server started with no env crashed at the MTP warm-up (KeyError 'mtp_sel', 2026-10-01)."""
+    import os
+    import subprocess
+    import sys
+
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("QWEN35_MTP") and k != "QWEN35_CHUNKED_PREFILL"}
+    clean.update(env)
+    code = (
+        "import os, models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; "
+        "print('PIN', os.environ['QWEN35_MTP'], g._MTP_K)"
+    )
+    out = subprocess.run([sys.executable, "-c", code], env=clean, capture_output=True, text=True, timeout=600)
+    line = [l for l in out.stdout.splitlines() if l.startswith("PIN")]
+    assert line, out.stdout[-500:] + out.stderr[-800:]
+    assert line[0] == f"PIN {expected} {expected}", line[0]

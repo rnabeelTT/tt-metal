@@ -150,6 +150,10 @@ def _mtp_k_env() -> int:
 
 
 _MTP_K = _mtp_k_env()
+# One source of truth for every consumer that reads the raw env (the model allocates the MTP bucket inputs behind
+# `QWEN35_MTP`): a server started WITHOUT the env (the bundle) crashed at the MTP warm-up with KeyError 'mtp_sel'
+# (2026-10-01 readiness relaunch) because the default-on decision lived only here.
+os.environ["QWEN35_MTP"] = str(_MTP_K)
 if _MTP_K > 0:
     # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin: import-time monkeypatches
     from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
