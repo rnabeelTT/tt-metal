@@ -66,6 +66,10 @@ class MtpServing:
         self._cur_slot = 0
         self._hook_installed = False
         self._hid_ready = False
+        # slots admitted by the batched short-prompt prefill (no head rows over their prompt: the head's KV of the prompt
+        # positions is missing, so drafts would be poor) - they stay on the plain decode until a new request takes the
+        # slot (begin_prefill clears it)
+        self.no_head_slots = set()
         # QWEN35_MTP_TRACED_PREFILL=1 (default): the head's prompt rows run INSIDE the bucket program (one more layer per
         # segment, captured with the bucket traces: the eager-bucket path cost ~60 ms of TTFT at 128 tokens); 0 = the
         # eager-bucket path with the python hook and 32-row head groups
@@ -187,7 +191,8 @@ class MtpServing:
 
     def _drop_hid_rows(self):
         for t in self._hid_rows.values():
-            ttnn.deallocate(t)
+            if not isinstance(t, torch.Tensor):
+                ttnn.deallocate(t)
         self._hid_rows = {}
 
     def warm_prefill_path(self):
@@ -305,6 +310,7 @@ class MtpServing:
         if all(idx[i] == i for i in range(self.B)):
             return
         assert self._phase_slot is None, "leave the MTP phase before a slot remap"
+        self.no_head_slots = {i for i in range(self.B) if idx[i] in self.no_head_slots}
         P = torch.zeros(1, 1, self.B, self.B, dtype=torch.bfloat16)
         for i, j in enumerate(idx):
             P[0, 0, i, j] = 1.0
@@ -570,6 +576,7 @@ class MtpServing:
         prefill runs the queued requests in order (one bucket call per segment, chunk_start 0 first for each) and
         `end_prefill` hands every slot's first token / hidden to the runner."""
         self._prefill_queue.append((int(slot), list(prompt_ids), torch.as_tensor(page_table_row).to(torch.int32)))
+        self.no_head_slots.discard(int(slot))
         if self.in_trace:
             self._hid_ready = False
             return  # the bucket program carries the head rows; _bucket_stage takes the queue at chunk_start 0
@@ -595,6 +602,25 @@ class MtpServing:
         model._run_bucket_hidden = hook
         self._orig_hook = orig
         self._hook_installed = True
+
+    def note_batched(self, slot, hid_row, page_table_row):
+        """A request admitted by the batched short-prompt pass (tt/prefill_batched.py): it leaves the prefill queue
+        (no bucket program runs for it), its first-draft hidden is the pass's final-normed last-position row, and the
+        slot is marked head-less (no MTP phase) until a new request takes it."""
+        slot = int(slot)
+        for i, (s, _p, _r) in enumerate(self._prefill_queue):
+            if s == slot:
+                self._prefill_queue.pop(i)
+                break
+        else:
+            raise AssertionError(f"slot {slot} was not registered with begin_prefill")
+        old = self._hid_rows.pop(slot, None)
+        if old is not None and not isinstance(old, torch.Tensor):
+            ttnn.deallocate(old)
+        self._hid_rows[slot] = torch.as_tensor(hid_row).reshape(-1).clone()
+        self._slot_rows[slot] = torch.as_tensor(page_table_row).to(torch.int32)
+        self.no_head_slots.add(slot)
+        self._hid_ready = True  # a following single request re-arms this through its own bucket stage
 
     def _prompt_rows(self, h, bucket, cs):
         """Head rows for the prompt positions in this segment: row j (hidden of prompt position cs + j) pairs with the
@@ -660,7 +686,8 @@ class MtpServing:
                 else:
                     row = self._hid_rows.pop(slot)
                     self._put_row(slot, row)
-                    ttnn.deallocate(row)
+                    if not isinstance(row, torch.Tensor):
+                        ttnn.deallocate(row)
             return
         if self.multi:
             for t0, p, slot in zip(tok0, P, slots):
@@ -674,7 +701,8 @@ class MtpServing:
                     continue
                 row = self._hid_rows.pop(slot)
                 self.runner.set_slot(slot, int(t0), int(p), self._slot_rows[slot], row)
-                ttnn.deallocate(row)
+                if not isinstance(row, torch.Tensor):
+                    ttnn.deallocate(row)
             if self._stats is None:
                 self._stats = {"passes": 0, "tokens": 0, "hist": [0] * (self.k + 1), "wall": 0.0}
             return

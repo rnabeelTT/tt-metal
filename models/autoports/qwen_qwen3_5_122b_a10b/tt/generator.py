@@ -145,6 +145,14 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.mtp_head = Qwen35MtpHead(self.model, self.args.load_state_dict())
             self.mtp_head.allocate_kv_cache(self.kv_cache_shape, self.kv_dtype)
             logger.info(f"MTP head ready (layer {self.mtp_head.layer_idx}); kv {self.kv_cache_shape}")
+        # batched short-prompt prefill (tt/prefill_batched.py): groups of up to 4 final text prompts <= 512 tokens per
+        # prefill call run in one pass (QWEN35_BATCHED_PREFILL=1; default off until the served A/B lands)
+        self.batched_prefill = None
+        if self.max_batch_size >= 2 and os.environ.get("QWEN35_BATCHED_PREFILL", "0") == "1":
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_batched import GDN_BATCH_CAP, BatchedPrefill
+
+            self.batched_prefill = BatchedPrefill(self.model, B=min(GDN_BATCH_CAP, self.max_batch_size))
+            logger.info(f"batched short-prompt prefill enabled (groups of {self.batched_prefill.B})")
         # ORDER MATTERS (qwen36 #48536 rule): every prefill program and every persistent prefill allocation (masked-bucket
         # programs, expert-sorted dispatch constants, GDN conv carry, fused out-proj buffers) must exist BEFORE the decode
         # trace is captured. A prefill that first runs after the capture allocates into the trace's freed scratch range;
@@ -224,6 +232,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self._alloc_batched_zero_templates()  # B-sized zero templates for reset(), allocated before any trace
             self._warm_slot_writes()  # every slot's GDN state write (slice/concat programs are slot-specific)
             self._warm_slot_remap()  # vLLM batch-condense slot_remap of the GDN state (slice / concat / copy programs)
+            if self.batched_prefill is not None:
+                self.batched_prefill.warm(self.page_table)  # the batched pass + scratch-row slot writes, eager
         else:
             self.model.warmup_prefill_masked_buckets(self.page_table[:1])
             self._warm_all_logits()
@@ -320,6 +330,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 self.model._unbind_gdn_prefill_scratch(prev)
         else:
             self.model.capture_prefill_bucket_traces(self.page_table[:1], buckets=buckets)
+        if self.batched_prefill is not None:
+            got = self.batched_prefill.capture_traces(self.page_table)
+            logger.info(f"batched prefill traces captured: buckets {got} x {self.batched_prefill.B} prompts")
         ttnn.synchronize_device(self.mesh_device)
         self._zero_gdn_state()
         self._prefill_traces_warm = True
@@ -716,8 +729,35 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             for t in taps:
                 ttnn.deallocate(t)
 
+    def _batched_groups(self, lens, starts, finals, vision, pt):
+        """Groups (lists of request indices, same bucket, 2..B each) of the requests the batched pass can admit: final
+        text prompts starting at 0 whose length fits a batched bucket. Stale carried state on a reused first block is
+        dropped here (as the single path does)."""
+        bp = self.batched_prefill
+        if bp is None:
+            return []
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_batched import MAX_BATCHED_BUCKET
+
+        by_bucket = {}
+        for u in range(len(lens)):
+            if not (finals[u] and starts[u] == 0 and (vision is None or vision[u] is None)):
+                continue
+            if lens[u] > MAX_BATCHED_BUCKET:
+                continue
+            key = self._pending_key(pt[u])
+            if key in self._pending_prefill:
+                self._pending_free(self._pending_prefill.pop(key))
+            by_bucket.setdefault(self.model._mask_bucket_for(lens[u]), []).append(u)
+        groups = []
+        for b, us in sorted(by_bucket.items()):
+            for i in range(0, len(us), bp.B):
+                g = us[i : i + bp.B]
+                if len(g) >= 2:
+                    groups.append(g)
+        return groups
+
     def prefill_serving(
-        self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None, vision=None
+        self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None, vision=None, mtp=None
     ):
         """vLLM prefill: ``tokens`` [N, max_T] host ids (row u valid up to ``prompt_lens[u]``), ``page_table`` [N, width]
         (row u = request u's blocks), ``slots`` = the decode slot of each request. Runs each request through the warmed
@@ -737,8 +777,25 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self._pending_prefill = {}  # first block id -> (processed end, GDN state clones) of half-prefilled requests
         A = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         V = int(self.args.vocab_size)
-        outs = []
+        res = {}
+        # batched short-prompt admissions first: one pass per group of 2..4 same-bucket final text prompts; their GDN
+        # state is written from the B-row scratch, their MTP head rows are skipped (MtpServing.note_batched marks the
+        # slot: plain decode even when it ends up alone)
+        for g in self._batched_groups(lens, starts, finals, vision, pt):
+            g_lens = [lens[u] for u in g]
+            g_slots = [slots[u] for u in g]
+            lg, sh, hid = self.batched_prefill.prefill(
+                torch.stack([tokens[u, : max(g_lens)] for u in g]), g_lens, pt[g], g_slots
+            )
+            for i, u in enumerate(g):
+                self.model.set_slot_rope_delta(slots[u], 0)
+                res[u] = torch.tensor([[sampler(sh, u, row=i)]], dtype=torch.int64) if sampler else lg[i : i + 1]
+                if mtp is not None:
+                    mtp.note_batched(slots[u], hid[i], pt[u])
+            self._batched_admissions = getattr(self, "_batched_admissions", 0) + len(g)
         for u in range(N):
+            if u in res:
+                continue
             # per request: prefill on the bound B = 1 scratch (B > 1) or the B = 1 buffers, snapshot the scratch ON
             # DEVICE (clones) and write it into the request's slot on device before any further trace replay (stage 10).
             # Chunked prefill: an intermediate chunk [s, e) runs only its whole 2048-token segments [s0, E) from the
@@ -780,12 +837,12 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                     assert E > s0, f"request {u}: final chunk with nothing to run (s0 {s0}, end {E})"
                     # decode rope positions of this slot: KV position + the request's M-RoPE delta (0 for text)
                     self.model.set_slot_rope_delta(slots[u], self.model.rope.rope_delta if vis_u is not None else 0)
-                    outs.append(torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg)
+                    res[u] = torch.tensor([[sampler(sh, u)]], dtype=torch.int64) if sampler else lg
                     if pending is not None:
                         self._pending_free(self._pending_prefill.pop(key))
                     snap = self.model._snapshot_gdn_scratch_device() if batched else None
                 else:
-                    outs.append(torch.zeros(1, 1, V) if sampler is None else torch.zeros(1, 1, dtype=torch.int64))
+                    res[u] = torch.zeros(1, 1, V) if sampler is None else torch.zeros(1, 1, dtype=torch.int64)
                     if E > s0 or pending is None:
                         self._pending_save(key, max(E, s0))
             finally:
@@ -801,7 +858,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         if not hasattr(self._tt, "_slots_prefilled_since_decode"):
             self._tt._slots_prefilled_since_decode = set()
         self._tt._slots_prefilled_since_decode.update(slots)
-        return torch.cat(outs, dim=0)
+        return torch.cat([res[u] for u in range(N)], dim=0)
 
     def decode_forward(
         self,

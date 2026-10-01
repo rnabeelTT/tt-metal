@@ -531,8 +531,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             # that is neither running (per the last decode's positions) nor being admitted now.
             sampling_module.seed_manager.deactivate_slots_except(sorted(self._live_slots - set(slots)))
 
-            def sampler(logits_sh, u):
-                # the request's params broadcast to every sampler row (row 0 carries the token); the counted output
+            def sampler(logits_sh, u, row=0):
+                # the request's params broadcast to every sampler row (row 0 carries the token; a batched admission's
+                # request sits in row `row` of the group's logits); the counted output
                 # token pollutes the other rows' penalty counters exactly as the base Generator's per-user prefill does -
                 # the first decode after a layout change resets them from vLLM's prompt / output tokens
                 per_request = format_sampling_params(
@@ -544,7 +545,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                     empty_slots=[slots[u]],
                 )
                 tt_tokens, _ = sampling_module.sample(logits_sh, enable_trace=False)
-                return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[0])
+                return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[row])
 
         logger.info(
             f"Prefilling {N} request(s) into slots {slots} (chunk ends {plens}, starts {starts}, final {finals})"
@@ -563,7 +564,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             for u in range(N):
                 self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
-                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision)
+                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp)
             except Exception:
                 self._mtp.abort_prefill()
                 raise
@@ -791,7 +792,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             self.model[0]._remap_gdn_slots(slot_remap)
             mtp.remap(slot_remap)
         sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
-        if len(live) == 1 and self._mtp_eligible(sp, live[0]):
+        if len(live) == 1 and self._mtp_eligible(sp, live[0]) and live[0] not in mtp.no_head_slots:
             s = live[0]
             pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
             row = pt[s]
