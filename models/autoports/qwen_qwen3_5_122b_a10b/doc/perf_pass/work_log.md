@@ -1213,3 +1213,13 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   [300, 129, 512] vs the per-user path - logits PCC >= 0.9994 (argmax equal 6 / 7, one inside the top-5), GDN slot
   states match, users' K/V blocks identical; warm + 3 bucket traces, traced replay == eager, no program compiled after
   the captures. Served A/B (32 slots, batching on, c = 32 / 8 / 1, greedy text check, large-image requests) running.
+- 00:00 (10-02) SERVED A/B, BATCHED SHORT-PROMPT PREFILL (`logs/18/serve-batched-ab.log`, checkout server, production
+  config 32 slots / 262144 ctx / MTP k=3 / vision on / program guard, `QWEN35_BATCHED_PREFILL=1`; readiness streaming
+  benchmark 128 / 128, 4c requests): c=32 TTFT 3.76 s (was 6.34), TPOT 110.5 ms (110.2); c=8 TTFT 1.27 s (1.83), TPOT
+  63.9 (63.9); c=1 TTFT 272 ms (320), TPOT 19.6 ms (20.6). The server log shows the admissions (groups of 4 and 3 at
+  128 tokens, a [20, 26, 24] group), no program compiled after the captures. Greedy texts single vs batched admission:
+  3 / 4 identical, the fourth a fluent paraphrase diverging at char 54 (the batched GDN form's PCC 0.9995 numerics).
+  Image sizes on the same server: 1080p 2.0 s (2064 prompt tokens), 4032x3024 photo 3.3 s (4039), two images 2.8 s -
+  the served image fix works end to end. DECISION: batched prefill ON for serving (tt-model.yaml env + adapter default;
+  the standalone generator keeps it off). Bundle run 8 carries it; its verification adds the readiness sampling stage
+  against the bundle server (a default-on decision is exercised with the bundle's exact env).

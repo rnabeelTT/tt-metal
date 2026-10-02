@@ -229,7 +229,7 @@ evidence gathered so far; none of it blocks serving.
 | item | evidence | next step |
 |---|---|---|
 | Sampler cost at full occupancy | temperature-1 decode at 32 users 129.7 ms per step vs 110.2 ms greedy (`doc/perf_pass/deployed_sweep.md`, pass 2) | Tracy of one sampled step at 32 rows; top-k pre-selection on the vocab-sharded logits before the gather |
-| Batched short-prompt prefill default | driver + tests in the tree (`tt/prefill_batched.py`, `tests/test_prefill_batched.py`, `tests/test_batched_prefill_attention.py`), served A/B `~/qwen35-122b-bringup/logs/18/serve-batched-ab.log` | see the A/B row in `doc/perf_pass/work_log.md`; flip `QWEN35_BATCHED_PREFILL` in `tt-model.yaml` once a served conformance run (`readiness_check` sampling stage) passes with it on |
+| Batched short-prompt prefill | SHIPPED ON (run 8): served A/B 2026-10-02 TTFT 32 users 6.3 -> 3.8 s, 8 users 1.83 -> 1.27 s, decode unchanged (`doc/perf_pass/work_log.md` 00:00); `QWEN35_BATCHED_PREFILL=0` turns it off | the GDN slot write per admission (4 x 29 ms per group) is the next fixed cost; MTP head rows for batched admissions (they decode plain even when alone) |
 | GDN slot write per admission | 29 ms of the 238 ms fixed cost per 128-token prefill (`doc/perf_pass/work_log.md` 2026-10-01 prefill cost) | write the B=1 scratch straight into the slot inside the bucket trace (one-hot row select) |
 | Width-1 plain decode | 29.9 ms per token, ~90 small ops per layer; MTP hides most of it | router chain fusion (~5 ms), then a fused GDN decode kernel |
 | Long-context decode at high occupancy | 32 users x 32K: 425 ms per token (sweep pass 1) | Tracy at that point first (paged-attention reads vs prefill interleaving) |
