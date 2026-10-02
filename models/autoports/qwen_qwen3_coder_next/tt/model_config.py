@@ -89,6 +89,12 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
             logger.info(f"CCL topology forced by QWEN35_CCL_TOPOLOGY={forced}: {topo}")
         else:
             topo = super().ccl_topology()
+            if topo == ttnn.Topology.Ring and self.num_devices == 2:
+                # a 2-device "ring" makes both neighbours the same chip: the fused matmul + ring reduce-scatter of the
+                # out-projections deadlocks there (2026-10-02, P300 board, tt-triage: ring_reduce_scatter readers in
+                # noc_semaphore_wait_min). Two dies are a line.
+                topo = ttnn.Topology.Linear
+                logger.info("CCL topology: Linear (2-device mesh)")
             if topo == ttnn.Topology.Ring and self.mesh_device is not None and self.num_devices > 1:
                 try:
                     probe = ttnn.from_torch(

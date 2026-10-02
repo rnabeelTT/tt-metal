@@ -1,6 +1,6 @@
 {
-  "config_id": "coder_next_routed_bfp8",
-  "description": "as coder_next_routed_bfp4 with bfp8 routed experts (HiFi2)",
+  "config_id": "coder_next_routed_bfp8_mixers_bfp8",
+  "description": "routed experts bfp8, token mixers as baseline_s7 (bfp8), bfp4 LM head, bfp8 CCL",
   "weight_groups": {
     "embedding": {
       "dtype": "bf16"
@@ -9,10 +9,10 @@
       "dtype": "bf16"
     },
     "attention": {
-      "dtype": "bfp4"
+      "dtype": "bfp8"
     },
     "linear_attention": {
-      "dtype": "bfp4"
+      "dtype": "bfp8"
     },
     "router": {
       "dtype": "bf16"
@@ -30,8 +30,8 @@
   },
   "layer_exceptions": {},
   "compute_fidelities": {
-    "attention": "lofi",
-    "linear_attention": "lofi",
+    "attention": "hifi2",
+    "linear_attention": "hifi2",
     "router": "hifi4",
     "shared_moe": "hifi2",
     "routed_moe": "hifi2",
@@ -49,55 +49,81 @@
     "teacher_forcing_top5_min": 0.98,
     "teacher_forcing_top100_min": 1.0
   },
-  "selected_from_config_id": "coder_next_routed_bfp8",
+  "selected_from_config_id": "coder_next_routed_bfp8_mixers_bfp8",
   "mesh": "(1,4) P300x2 / P150x4 (TP4)",
-  "selection_rule": "4-die profiles: bfp8 routed experts unless they cost > 10 % single-user decode without an accuracy gain (owner rule 2026-10-02); measured +1.1 % ms/step with book-p2048 top1 0.89 -> 0.93",
+  "selection_rule": "4-die profiles: least quantization that costs <= ~10 % single-user decode (owner rule 2026-10-02). bfp8 routed experts (+1.1 % ms/step, book p2048 top1 0.89 -> 0.93) and bfp8 token mixers on top (+0.3 %, top1 0.93 -> 0.98); at least as precise as the 2-die policy in every group",
   "selected_measurement": {
     "teacher_forcing_code_chat": {
-      "top1": 0.97,
+      "top1": 0.99,
       "top5": 1.0,
       "top100": 1.0,
-      "ttft_ms": 152.0778990816325,
-      "decode_t/s/u": 36.36349276485147
+      "ttft_ms": 150.8527018595487,
+      "decode_t/s/u": 36.23978837291569
     },
     "teacher_forcing_book_p2048": {
-      "top1": 0.93,
-      "top5": 1.0,
+      "top1": 0.98,
+      "top5": 0.99,
       "top100": 1.0,
-      "ttft_ms": 445.54239814169705,
-      "decode_t/s/u": 36.14124834437953
+      "ttft_ms": 447.58542790077627,
+      "decode_t/s/u": 36.14728385655874
     },
     "token_out_ms_per_step": {
-      "blocking_readback": 27.635,
-      "deferred_readback": 27.298,
-      "replay_model_plus_sampler": 27.294,
-      "replay_model_only": 26.766,
-      "replay_sampler_only": 0.619
+      "blocking_readback": 27.548,
+      "deferred_readback": 27.39,
+      "replay_model_plus_sampler": 27.386,
+      "replay_model_only": 26.858,
+      "replay_sampler_only": 0.606
     },
-    "dram_allocated_gib_per_device": 21.64,
-    "compared_bfp4_experts": {
-      "teacher_forcing_code_chat": {
-        "top1": 0.97,
-        "top5": 1.0,
-        "top100": 1.0,
-        "ttft_ms": 146.92160417325795,
-        "decode_t/s/u": 36.68222206286744
+    "dram_allocated_gib_per_device": 21.82,
+    "candidates": {
+      "coder_next_routed_bfp4": {
+        "teacher_forcing_code_chat": {
+          "top1": 0.97,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 146.92160417325795,
+          "decode_t/s/u": 36.68222206286744
+        },
+        "teacher_forcing_book_p2048": {
+          "top1": 0.89,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 436.2804919946939,
+          "decode_t/s/u": 36.64725076081362
+        },
+        "token_out_ms_per_step": {
+          "blocking_readback": 27.143,
+          "deferred_readback": 26.998,
+          "replay_model_plus_sampler": 26.995,
+          "replay_model_only": 26.468,
+          "replay_sampler_only": 0.54
+        },
+        "dram_allocated_gib_per_device": 12.64
       },
-      "teacher_forcing_book_p2048": {
-        "top1": 0.89,
-        "top5": 1.0,
-        "top100": 1.0,
-        "ttft_ms": 436.2804919946939,
-        "decode_t/s/u": 36.64725076081362
-      },
-      "token_out_ms_per_step": {
-        "blocking_readback": 27.143,
-        "deferred_readback": 26.998,
-        "replay_model_plus_sampler": 26.995,
-        "replay_model_only": 26.468,
-        "replay_sampler_only": 0.54
-      },
-      "dram_allocated_gib_per_device": 12.64
+      "coder_next_routed_bfp8": {
+        "teacher_forcing_code_chat": {
+          "top1": 0.97,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 152.0778990816325,
+          "decode_t/s/u": 36.36349276485147
+        },
+        "teacher_forcing_book_p2048": {
+          "top1": 0.93,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 445.54239814169705,
+          "decode_t/s/u": 36.14124834437953
+        },
+        "token_out_ms_per_step": {
+          "blocking_readback": 27.635,
+          "deferred_readback": 27.298,
+          "replay_model_plus_sampler": 27.294,
+          "replay_model_only": 26.766,
+          "replay_sampler_only": 0.619
+        },
+        "dram_allocated_gib_per_device": 21.64
+      }
     },
     "regime": "48 layers, B=1; teacher forcing = readiness_check.run_teacher_forcing vs HF bf16 CPU references (100 tokens); token-out = tools/tokenout_bench.py 64 traced steps",
     "hardware": "4 x Blackhole p300c dies (2 x p300), 2026-10-02"

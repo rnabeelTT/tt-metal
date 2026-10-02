@@ -429,10 +429,14 @@ class MultichipDecoder(OptimizedDecoder):
             args.gdn_qkvz_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
                 1, args.dim, args.gdn_qkvzab_dim_tp, num_cores=44, grid_w=getattr(args, "decode_grid_w", 8)
             )
-        args.fuse_out_mmrs_decode = mc.fuse_out_mmrs_decode
+        # matmul_reduce_scatter_async always builds the RING reduce-scatter (matmul_reduce_scatter_async_program_factory
+        # -> build_ring_reduce_scatter_minimal_async_program_artifacts), which deadlocks on a 2-device mesh (both ring
+        # neighbours are the same chip; tt-triage 2026-10-02): the fused out-projections are 4-device-only.
+        ring_ok = args.num_devices > 2
+        args.fuse_out_mmrs_decode = mc.fuse_out_mmrs_decode and ring_ok
         args.norm_ag_persistent = mc.norm_ag_persistent
         args.out_proj_decode_dtype = {None: None, "bfp8": ttnn.bfloat8_b, "bf16": None}[mc.out_proj_decode_dtype]
-        args.gdn_prefill_mmrs = mc.gdn_prefill_mmrs
+        args.gdn_prefill_mmrs = mc.gdn_prefill_mmrs and ring_ok
         assert mc.mixer_fidelity in ("hifi2", "lofi"), mc.mixer_fidelity
         args.mixer_compute_cfg = (
             ttnn.WormholeComputeKernelConfig(
