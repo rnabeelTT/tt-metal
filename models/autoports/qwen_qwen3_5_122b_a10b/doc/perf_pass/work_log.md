@@ -1258,3 +1258,13 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   card, HANDOFF and report. Chained after run 9's verification (staged build dir shared): package -> fresh-device
   verification (smoke, large images, readiness sampling stage with the thinking-on default; failures there are
   reported as such) -> push.
+- 02:16 (10-02) BUNDLE RUN 9 VERIFIED (a063e347809, batched prefill off, thinking off; fresh device,
+  `logs/11/serve-bundle-run9-chain.log`): healthy in 11.5 min; chat / tool call / curl; 2381-token prompt; 32-request
+  burst 187 tok/s; 131072 tokens 45.0 s; 194119 tokens 73.8 s; 448 px image == HF; 1080p / 4032x3024 / two images
+  served (2.0 / 3.4 / 2.9 s). Readiness SAMPLING stage against the bundle: 72 passed, 1 failed
+  (`logs/11/bundle9-sampling_tests.saved.log`): `test_bad_words` saw "_hello! How can I help you today?_" - the
+  tokenizer has "_hello" as ONE token (id 93383, distinct from "hello" 14556 / " hello" 23066 that bad_words blocks),
+  so the blocker cannot see it and the test's punctuation stripping counts it as the word; a test false positive at
+  temperature 1.0 (it passed at 14:13 with other random draws). The 12 failures of run 8 were the batched prefill
+  (confirmed: off -> only this one remains). Engine conformance for the shipped tree: 72 / 73 + 1 known test false
+  positive. Run 10 (profiles, thinking on) packaging from da20251f443.
