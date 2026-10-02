@@ -233,6 +233,7 @@ evidence gathered so far; none of it blocks serving.
 | GDN slot write per admission | 29 ms of the 238 ms fixed cost per 128-token prefill (`doc/perf_pass/work_log.md` 2026-10-01 prefill cost) | write the B=1 scratch straight into the slot inside the bucket trace (one-hot row select) |
 | Width-1 plain decode | 29.9 ms per token, ~90 small ops per layer; MTP hides most of it | router chain fusion (~5 ms), then a fused GDN decode kernel |
 | Long-context decode at high occupancy | 32 users x 32K: 425 ms per token (sweep pass 1) | Tracy at that point first (paged-attention reads vs prefill interleaving) |
+| MTP draft length | served sweep 2026-10-02 at one user: k=2 23.9 ms, k=3 19.6-20.6 ms, k=4 24.0 ms TPOT (`doc/perf_pass/work_log.md` 00:26) | k = 3 stays (`QWEN35_MTP=3`) |
 | Multi-user MTP | batched MTP at 2-4 users measured slower than plain decode before the cheaper 16-32-row MoE; re-measurement script kept (`~/qwen35-122b-bringup/scripts/19-mtp-multi-ab.full.sh`) | run it; adopt only if TPOT at 2-4 users beats 37 / 44 ms |
 | Plugin asks (not in this tree) | chunked prefill is disabled for any model emitting more than one token per step; no prefill / decode alternation; prefix caching off | vllm-tt-plugin changes; the GDN carried-state primitive (`_pending_prefill`) is ready for prefix-boundary snapshots |
 

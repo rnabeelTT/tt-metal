@@ -1223,3 +1223,8 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   the served image fix works end to end. DECISION: batched prefill ON for serving (tt-model.yaml env + adapter default;
   the standalone generator keeps it off). Bundle run 8 carries it; its verification adds the readiness sampling stage
   against the bundle server (a default-on decision is exercised with the bundle's exact env).
+- 00:26 (10-02) MTP DRAFT-LENGTH SWEEP, served (one user, production config, readiness streaming benchmark 128 / 128;
+  `logs/18/serve-ksweep-k{2,4}.log`): k=2 TPOT 23.9 ms (41.8 tok/s; 2.35-2.47 accepted per 64-ms pass), k=4 TPOT
+  24.0 ms (41.7 tok/s; 2.9-3.4 accepted per 88-92 ms pass), k=3 (shipped) 19.6-20.6 ms (48-51 tok/s). Timed requests:
+  prose k=2 28.5 / k=3 26.4 / k=4 20.8 tok/s incl. TTFT; code k=2 39.3 / k=3 48.2 / k=4 46.7. DECISION: k = 3 stays
+  (the best of the three at one user on both prompt kinds and the benchmark).
