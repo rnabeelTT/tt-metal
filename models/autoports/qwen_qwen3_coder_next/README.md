@@ -1,53 +1,56 @@
-# Qwen3.5-122B-A10B on 4 Blackhole dies (p300x2 / p150x4)
+# Qwen3-Coder-Next on Blackhole (4 dies: p300x2 / p150x4, 2 dies: p300 / p150x2)
 
-TTNN port of `Qwen/Qwen3-Coder-Next` (256-expert MoE, 36 Gated DeltaNet + 12 gated attention layers, vision tower)
-served through vLLM and the Tenstorrent plugin on a (1,4) mesh: text and image chat, tool calls, 262144-token context,
-up to 32 concurrent sequences, speculative decoding from the checkpoint's MTP head. The engineering record is
-`doc/HANDOFF.md`; this file is the operator's view.
+TTNN port of `Qwen/Qwen3-Coder-Next` (80B total / 3B active MoE: 512 experts, top-10 + a shared expert, 36 Gated
+DeltaNet + 12 gated attention layers, text only) served through vLLM and the Tenstorrent plugin: chat, tool calls
+(`qwen3_coder` parser), 262144-token context, up to 32 concurrent sequences, chunked prefill always on.
+
+Ported from the Qwen3.5-122B-A10B autoport (`models/autoports/qwen_qwen3_5_122b_a10b`, same architecture family) as a
+full copy; the changes are listed below. The `QWEN35_*` environment names are kept from that port.
 
 ## Serve it
 
 ```bash
-tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile p300x2      # private Hub bundle, one image
-tt-model curl "Say hello in one sentence."
+tt-model serve raahemnabeel/qwen3-coder-next-blackhole --profile p300x2   # 4 dies (default); p150x4 / p300 / p150x2
+tt-model curl "Write a Python function that reverses a linked list."
 ```
 
-From this checkout instead of the bundle: `doc/HANDOFF.md` §2 (the readiness runner command and the env knobs).
-
-Thinking is ON by default (reasoning in the message's `reasoning` field, answer in `content`). Turn it off per request
-with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers; give thinking requests thousands of
-tokens of `max_tokens`. Images go in as `image_url` content parts (up to 4 per request, resized to at most 4 MP).
-
-## Profiles: which one for which use case
-
-One image serves every profile; a profile is a launch configuration (environment + server arguments). Each `p300x2-*`
-profile exists as `p150x4-*` for four p150 boards (the identical (1,4) mesh; untested on this host).
-
-| profile | use case | what it changes | what to expect |
+| profile | hardware | precision policy | single-user decode (token-out, 48 layers) |
 |---|---|---|---|
-| `p300x2` (default) | Interactive assistants and agents: one or a few users who want the fastest answer; images and tool calls | nothing: MTP speculative decoding at one user, vision tower resident, thinking on | 1 user: first token 0.32 s, ~50 tok/s; 8 users: 1.8 s, 15.7 tok/s each; 32 users: 6.3 s, 9.1 tok/s each (201 aggregate) |
-| `p300x2-burst` | Many short prompts arriving together: chat front-ends with dozens of users, batch classification / extraction jobs | `QWEN35_BATCHED_PREFILL=1`: up to four short prompts (<= 512 tokens) prefilled per pass | 32-request burst first token 3.8 s instead of 6.3 s, 8 users 1.27 s instead of 1.83 s, decode unchanged. A request's first token can depend on what arrived with it (seeded reproducibility and greedy consistency across batch compositions not guaranteed; 12 of 73 conformance tests fail in this mode) |
-| `p300x2-longctx` | Document and codebase work: very long prompts (tens of thousands of tokens) mixed with short questions | `QWEN35_CHUNKED_PREFILL=1`, `QWEN35_MTP=0`, `--enable-chunked-prefill --max-num-batched-tokens 2048` | prefill runs in 2048-token chunks shared between prompts, so a short question is not stuck behind a 100K-token upload; a lone user decodes at ~30 tok/s (no MTP); running users still pause while prefill chunks run (the plugin never mixes prefill and decode in one step) |
-| `p300x2-text` | Text-only deployments with long conversations at high occupancy | `QWEN35_VISION=0`, image limit 0 | vision tower not loaded: 28472 KV blocks of 64 tokens instead of 22725 (1.8 M pooled tokens for 32 users); image requests rejected at the front end |
+| `p300x2` (default), `p150x4` | 4 dies, TP4 | bfp8 routed experts, bfp8 token mixers, bfp4 LM head | 22.54 ms/step (44.4 tok/s) |
+| `p300`, `p150x2` | 2 dies, TP2 | bfp4 routed experts, bfp8 token mixers, bfp4 LM head | 24.74 ms/step (40.4 tok/s) |
 
-Numbers: `doc/perf_pass/deployed_sweep.md` (full sweep of the deployed bundle), `doc/HANDOFF.md` §1 (served table),
-`doc/perf_pass/work_log.md` (every measurement with its log). Settings that were measured and rejected (MTP draft
-length 2 / 4, the multi-user MTP step, thinking off as the default) are in `doc/HANDOFF.md` §6.
+The p150 profiles are untested on hardware (built for the identical meshes). The 2-die profiles pin
+`TT_VISIBLE_DEVICES=0,1` (a no-op on a 2-chip host; on a bigger host they use the first board).
 
-## Knobs (environment, read by the runtime)
+For reference, the shipped Qwen3.5-122B-A10B autoport measures 30.50 ms/step with the same tool on the same 4-die box.
 
-| knob | default | meaning |
+## Accuracy (teacher forcing vs the HF bf16 reference, 100 tokens)
+
+| mesh | coding chat prompt top1 / top5 | book p2048 top1 / top5 |
 |---|---|---|
-| `QWEN35_MTP` | 3 | MTP drafts per speculative pass; 0 disables speculative decoding |
-| `QWEN35_MTP_ADAPTIVE` | 1 | MTP step only when exactly one request is live (0 = the batched multi-user step, measured slower) |
-| `QWEN35_BATCHED_PREFILL` | 0 | batched short-prompt prefill (the `-burst` profiles) |
-| `QWEN35_CHUNKED_PREFILL` | 0 | scheduler-chunked prefill with carried GDN state (the `-longctx` profiles; needs the vLLM flags above) |
-| `QWEN35_VISION` / `QWEN35_VISION_MAX_IMAGES` / `QWEN35_VISION_MAX_PIXELS` | 1 / 4 / 4194304 | image support, images per request, resolution cap (every padded patch bucket up to the cap is warmed at start-up) |
-| `QWEN35_DECODE_SORTED_MIN_ROWS` | 16 | decode MoE: expert-sorted path from this many rows (pairs path below) |
-| `QWEN35_TRACE_REGION_MIB` | 768 | must match the TT config's `trace_region_size` |
-| `QWEN35_PROGRAM_GUARD` | 1 in the bundle | assert that no program compiles after the traces are parked |
+| 4 dies | 0.99 / 1.00 | 0.97 / 0.99 |
+| 2 dies | 0.98 / 1.00 | 0.92 / 0.99 |
+
+Precision selection: `doc/datatype_sweep/selected_precision_config.json` (4 dies) and
+`selected_precision_config_tp2.json` (2 dies), each with the candidates it was chosen over. bfp8 experts do not fit two
+32 GB dies (~41 GB each), so the 2-die profile keeps bfp4 experts.
+
+## What changed vs the 122B port
+
+- `tt/weights.py`: checkpoint prefix `model.`; Qwen3-Next fused GDN projections (`in_proj_qkvz`, `in_proj_ba`, grouped
+  per key head, b before a) split into the Qwen3.5 layout; per-expert tensors fused (bit-exact vs HF).
+- `tt/model_config.py`: shared-expert width overrides the flat config's `intermediate_size`; mesh helpers; 2-device
+  meshes run Linear CCLs.
+- `tt/multichip_decoder.py`, `tt/model.py`: the mesh follows the opened device ((1,4) or (1,2)); fused matmul +
+  reduce-scatter out-projections are 4-device-only (that op always builds a ring); TP2 on-device sampling.
+- `tt/generator_vllm.py`: text-only `Qwen3NextForCausalLM` (no MTP head or vision tower in this checkpoint), chunked
+  prefill on by default, per-mesh KV budget (`doc/context_contract.json` `serving_tp4` / `serving_tp2`).
+- Decode perf pass (27.39 -> 22.54 ms/step on 4 dies): router top-k through Blackhole's large-k route
+  (`QWEN35_ROUTER_TOPK_ROUTE_K`, default 80), one-token decode on the gather path (`QWEN35_MOE_PAIRS_MIN_TOKENS`,
+  default 2), down projection on 64 cores.
 
 ## Layout
 
-`tt/` runtime (`model.py`, `generator.py`, `generator_vllm.py`, `prefill_batched.py`, `mtp_*.py`, `moe*.py`, `vision.py`),
-`tests/` device tests, `doc/` per-stage evidence and the handoff, `tt-model.yaml` the bundle manifest (profiles, card).
+`tt/` runtime, `tests/` device tests (`test_multichip_decoder.py` runs on either mesh: `MESH_DEVICE=P300x2` or
+`MESH_DEVICE=P300 TT_VISIBLE_DEVICES=0,1`), `tools/` readiness / benchmarks, `doc/` precision evidence and the context
+contract, `tt-model.yaml` the bundle manifest.
