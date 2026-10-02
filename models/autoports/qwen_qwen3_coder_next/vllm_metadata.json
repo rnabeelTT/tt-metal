@@ -1,0 +1,7 @@
+{
+  "arch": "Qwen3NextForCausalLM",
+  "main_class": "models.autoports.qwen_qwen3_coder_next.tt.generator_vllm:Qwen3NextForCausalLM",
+  "hf_model": "Qwen/Qwen3-Coder-Next",
+  "mesh_device": ["P300x2", "P150x4", "P300", "P150x2"],
+  "notes": "Text-only serving of the Qwen3-Coder-Next autoport (ported from the Qwen3.5-122B-A10B autoport) on a (1,4) or (1,2) Blackhole mesh; registered by the vLLM TT plugin from EXTRA_MODELS_DIR (this folder)."
+}

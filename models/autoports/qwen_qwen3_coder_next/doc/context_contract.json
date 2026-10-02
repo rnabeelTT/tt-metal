@@ -1,0 +1,222 @@
+{
+  "hf_model": "Qwen/Qwen3-Coder-Next",
+  "hf_revision": "a7fbcb5c0e12d62a448eaa0e260346bf5dcc0feb",
+  "hf_advertised_context": 262144,
+  "current_supported_context": 262144,
+  "limiting_reason": null,
+  "capacity_evidence": {
+    "kv_layers": 12,
+    "gdn_layers": 36,
+    "kv_heads": 2,
+    "head_dim": 256,
+    "kv_bytes_per_token_bf16_all_layers": 24576,
+    "note": "12 of 48 layers hold a paged KV cache (24 KiB/token bf16 replicated; 12 KiB/token/chip under TP4 with KV heads split across device pairs); 36 GDN layers hold context-independent state (~144 MiB/user fp32)."
+  },
+  "functional_decoder": {
+    "prefill_context_tested": 262107,
+    "decode_context_tested": 262107,
+    "hf_parity_context_tested": {
+      "linear_attention": 262107,
+      "full_attention": 16421
+    },
+    "note": "262107 = 262144-37 prefilled in 2048-token chunks then decoded at that position, both layer kinds, outputs finite (capacity). HF parity (PCC>=0.995, last-2048 / all positions / decode): GDN 65573 and 262107 tokens (the full context) with the recurrent+conv state carried across 32 / 128 chunks; attention 16421 tokens (HF eager attention scores are B*Hq*T^2 fp32: 16K -> 34 GB, 32K -> 137 GB on this 249 GB host, so 16K is the CPU limit). Short-length parity: 5..4429 tokens.",
+    "long_prefill_tok_s_single_layer": {
+      "linear_attention": 3415,
+      "full_attention": 2229
+    },
+    "eager_decode_ms_at_262107_single_layer": {
+      "linear_attention": 66.1,
+      "full_attention": 59.9
+    },
+    "hf_parity_pcc": {
+      "linear_attention_65573": [
+        0.99732,
+        0.99741,
+        0.9979
+      ],
+      "full_attention_16421": [
+        0.99999,
+        0.99998,
+        0.99999
+      ],
+      "linear_attention_262107": [
+        0.99744,
+        0.99737,
+        0.99745
+      ]
+    },
+    "kv_cache_content_check": "chunked 2048+2048+333 and real-weight 2048+333: K/V read back through the page table match HF per 512-position window, PCC 0.99986"
+  },
+  "optimized_decoder_stage3": {
+    "kv_cache_dtype": "bfloat8_b (selected in stage 3: -4.5% attention decode at 16K context, PCC-neutral on real weights); K/V bytes per token per chip halve vs the stage-1 bf16 budget (12 layers x 2 KV heads x 256 x 2 (K,V) x 1.0625 B = 13 KiB/token on one chip; 6.5 KiB/token/chip with the KV heads split over device pairs)",
+    "gdn_state": "bfloat16 recurrent state + bf16 per-tap conv shift-register buffers (3 x [B,1,12288]); fp32 state measured, not selected",
+    "capacity_change": "KV pool capacity x2 vs the stage-1 bf16 contract (weights unchanged: bfp4 routed / bfp8 mixers)",
+    "prefill_chunk_note": "expert-sorted MoE dispatch above 512 tokens allocates ~(8T + 8224) x 3072 bf16 rows transiently (150 MB at 2048 tokens)",
+    "tested": "optimized policy incl. bfp8 KV: attention 16421-token HF parity and per-512-position K/V content windows re-run in the stage-3 final chain (see doc/optimized_decoder/README.md section 3)"
+  },
+  "multichip_decoder_stage4": {
+    "mesh": "(1,4) P300x2 (4 x Blackhole p300c dies, 31.9 GiB DRAM each), FABRIC_1D Ring; also valid for P150x4",
+    "parallelism": "TP=4 for attention (KV heads replicated per device pair -> 1 local KV head), GDN, norms, shared expert; routed experts TP on the intermediate dim (all 256 experts per device at width 256); residual fractured [.., 768] between layers",
+    "kv_cache_dtype": "bfloat8_b (unchanged from stage 3)",
+    "kv_bytes_per_token_per_device": 6528,
+    "kv_bytes_per_token_per_device_note": "12 attention layers x 1 local KV head x head_dim 256 x (K,V) x 1.0625 B; per_device_contract() reports 544 B/token/layer",
+    "gdn_state_bytes_per_user_per_device": 19759104,
+    "gdn_state_note": "36 GDN layers x (16 local v-heads x 128 x 128 bf16 recurrent state + 4 taps x 3072 local qkv channels bf16 conv shift register)",
+    "weights_gib_per_device": 17.0,
+    "weights_breakdown_gib": {
+      "routed_experts_bfp4": 15.19,
+      "attention_bfp8": 0.25,
+      "gdn_bfp8": 0.83,
+      "shared_experts_bfp8": 0.12,
+      "routers_bf16": 0.07,
+      "embedding_bf16_lm_head_bfp8_tp4": 0.544
+    },
+    "reserve_gib": 3.0,
+    "reserve_note": "trace region, CCL buffers, prefill transients (expert-sorted dispatch peaks ~330 MB at 2048 tokens)",
+    "gdn_state_gib_at_32_users": 0.59,
+    "kv_pool_gib": 11.306,
+    "kv_pool_tokens": 1859639,
+    "users_at_262144": 7,
+    "tokens_per_user_at_32_users": 58113,
+    "current_supported_context": 262144,
+    "capability_change": "none: the advertised 262144 context stays supported (7 concurrent users at full context = 1.835 M of 1.860 M pool tokens, or 32 users x ~58.1K tokens). No hard physical limit reached.",
+    "status": "computed from the stage-4 mesh plan; the full-model stage measures the actual per-device DRAM after loading all 48 layers and replaces these figures",
+    "weights_breakdown_note": "embedding bf16 hidden-sharded [248320,768] = 0.355 GiB + LM head bfp8 vocab-sharded [3072,62080] = 0.189 GiB (plan: embeddings bf16, LM head bfp8); routers bf16 [3072,256] x 48 = 0.070 GiB; attention/GDN/shared figures are rounded up (precise sum 16.95 GiB)"
+  },
+  "optimized_multichip_decoder_stage5": {
+    "status": "no change to any persistent allocation vs multichip_decoder_stage4: KV dtype/layout, GDN state dtype, weights dtypes and per-device shapes are unchanged; the stage changed decode matmul grids (attention qkv 72 cores) and replaced the host-written ttnn.zeros buffers of the MoE prefill with device-side allocations (ttnn.empty for the sparse-matmul outputs, ttnn.fill for the routing-matrix scatter target) that are freed inside the prefill call - nothing is cached across calls or layers",
+    "inter_layer_residual_contract": "fractured bf16 [1,1,B|T,768] per device between layers; one reduce-scatter per row-parallel boundary (mixer out-proj, MoE exit), one all-gather per norm; no gather/reshard/all-reduce between layers",
+    "prefill_note": "2048-token prefill as 4 x 512-token chunks on the committed default (counting-sort dispatch): host wall 133.0 (GDN) / 128.2 ms (attention) per layer = ~33 / 32 ms per chunk vs ~15.2 / 14.6 ms device per chunk (Tracy 60.97 / 58.23 ms per 2048 tokens, logs/05-perf-plain4.log and 05-final5-chain.log); the host gap is dispatch-bound eager prefill (traced prefill is the optimized-full-model item). No persistent allocation changed vs stage 4."
+  },
+  "full_model_stage6": {
+    "status": "measured on the 48-layer build (2026-09-24, logs/06-warm-fixed-1.log and 06-prefill-check-qwen35_122b_aime24_chat_g100.log MEMORY_REPORT), B=1, max_seq_len 262144",
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_after_build_and_prefill_warmup_gib": 19.669,
+    "kv_pool_b1_full_context_gib": 1.594,
+    "kv_bytes_per_token_per_device": 6528,
+    "non_kv_footprint_gib": 18.075,
+    "trace_region_reserved_mib": 512,
+    "trace_region_used_mib": 27.3,
+    "l1_bytes_per_core_held": 10496,
+    "kv_pool_available_gib": 12.75,
+    "kv_pool_tokens_all_users": 2095000,
+    "avg_tokens_per_user_at_32": 62000,
+    "current_supported_context": 262144,
+    "limiting_reason": "dram (the pool is shared by concurrent users: one user reaches the full 262144; 32 users share ~2.0M tokens)",
+    "capacity_evidence": "MEMORY_REPORT lines in logs/06-warm-fixed-{1,2}.log and logs/06-prefill-check-*.log; doc/full_model/README.md section 2",
+    "changes_vs_stage5": "none in persistent allocations; the router-gate L1 buffers are shared across layers (fused_decoder._share_gate_buffers)",
+    "note_trace_region": "total_bytes_per_bank already excludes the reserved trace region (verified: 4,234,838,400 B with a 300 MB region vs 4,205,232,512 B with 512 MiB); GDN state grows 19.8 MB per extra user per device (0.57 GiB at 32 users), included in the per-user average"
+  },
+  "optimized_full_model_stage7": {
+    "status": "measured on the 48-layer build with the stage-7 selected policy (2026-09-25, logs/07-prefill-check-qwen35_122b_aime24_chat_g100.log MEMORY_REPORT after the decode trace AND the five prefill bucket traces were parked), B=1, max_seq_len 262144",
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_all_traces_parked_gib": 19.829,
+    "dram_allocated_stage6_gib": 19.669,
+    "kv_bytes_per_token_per_device": 6528,
+    "kv_pool_available_gib": 13.096,
+    "kv_pool_tokens_all_users": 2154062,
+    "avg_tokens_per_user_at_32": 67314,
+    "kv_scratch_block": "1 block (64 tokens) reserved by the generator for the fixed-width bucket KV fill (pad rows), id = blocks_per_seq * max_batch_size",
+    "trace_region_reserved_mib": 512,
+    "trace_region_used_mib": 405.4,
+    "trace_region_decode_only_mib": 24.9,
+    "trace_region_prefill_buckets_mib": 380.5,
+    "l1_bytes_per_core_held": 18688,
+    "current_supported_context": 262144,
+    "limiting_reason": "dram (shared KV pool: one user reaches 262144; 32 users share ~2.1M tokens (1.89M on the conservative basis)); the trace region (512 MiB) holds the decode trace + 5 bucket traces at 79 % - a serving stack must reserve at least 512 MiB or capture fewer buckets (QWEN35_PREFILL_TRACE_MAX_BUCKET)",
+    "capacity_evidence": "MEMORY_REPORT lines in logs/07-prefill-check-*.log (two reports: after the decode capture, after the bucket captures); doc/optimized_full_model/README.md section 7",
+    "changes_vs_stage6": "+0.16 GiB persistent DRAM (per-bucket persistent prefill inputs and trace outputs, all-positions norm/LM-head programs, one KV scratch block); trace region 26 MiB -> 405 MiB (bucket traces 128/256/512/1024/2048); L1 held per core 10.5 KB -> 18.3 KB (gate op per-iteration buffers built once instead of per step)",
+    "token_out_ms_per_step_b1": 25.058,
+    "ttft_ms_traced": {
+      "128": 344.0,
+      "161": 555.8,
+      "2048": 1934.8
+    },
+    "kv_pool_b1_full_context_gib": 1.594,
+    "non_kv_footprint_gib": 18.235,
+    "kv_pool_conservative_gib": 11.502,
+    "kv_pool_conservative_tokens": 1891877,
+    "kv_pool_basis_note": "kv_pool_available_gib = dram_total - non_kv_footprint, the stage-6 basis (the B=1 full-context KV of 1.594 GiB inside the measured allocation is pool, not footprint); the conservative figures keep that KV inside the footprint (11.502 GiB, 1.89 M tokens), which is what the stage-7 README headline quoted before review round 3"
+  },
+  "datatype_sweep_stage8": {
+    "status": "measured on the 48-layer build with the selected policy combo_mixer_lmhead_bfp4_ccl_bfp8 (2026-09-25, logs/08/teacher-forcing_aime24_combo_mixer_lmhead_bfp4_ccl_bfp8.log MEMORY_REPORT after the decode trace and the five prefill bucket traces were parked; identical allocation to combo_mixer_lmhead_bfp4 - the bfp8 CCL payload allocates nothing persistent), B=1, max_seq_len 262144",
+    "selected_policy": "doc/datatype_sweep/selected_precision_config.json: bfp4 token-mixer projections (LoFi, incl. the prefill SDPA compute config) + bfp4 LM head (ttnn default = HiFi2) + bfp8 decode out-projection partials into the reduce-scatter; routed experts bfp4 LoFi, shared expert bfp8, router bf16, KV bfp8, GDN state bf16 (unchanged)",
+    "kv_cache_dtype": "bfloat8_b (unchanged: the bf16-KV candidate was not faster and halves the pool - see kv_candidates)",
+    "kv_bytes_per_token_per_device": 6528,
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_all_traces_parked_gib": 19.254,
+    "kv_pool_b1_full_context_gib": 1.594,
+    "non_kv_footprint_gib": 17.66,
+    "kv_pool_available_gib": 13.671,
+    "kv_pool_tokens_all_users": 2248707,
+    "avg_tokens_per_user_at_32": 70272,
+    "users_at_262144": 8,
+    "trace_region_reserved_mib": 512,
+    "trace_region_used_mib": 405.4,
+    "current_supported_context": 262144,
+    "capability_change": "none: 262144 stays supported; the selected policy's persistent DRAM is 0.575 GiB/device smaller than stage 7 (19.829 -> 19.254 GiB: bfp4 token-mixer projections and bfp4 LM head), so the shared KV pool grows from 13.096 to 13.671 GiB (2.15 M -> 2.25 M tokens)",
+    "kv_candidates": {
+      "kv_bf16": {
+        "kv_bytes_per_token_per_device": 12288,
+        "dram_allocated_gib": 21.246,
+        "non_kv_footprint_gib": 18.246,
+        "kv_pool_available_gib": 13.085,
+        "kv_pool_tokens_all_users": 1141000,
+        "avg_tokens_per_user_at_32": 35700,
+        "users_at_262144": 4,
+        "verdict": "rejected: 39.79 t/s/u (= baseline), pool halved; 0.98/1.00/1.00 accuracy identical within noise"
+      },
+      "routed_down_bfp8": {
+        "dram_allocated_gib": 24.329,
+        "non_kv_footprint_gib": 22.736,
+        "kv_pool_available_gib": 8.596,
+        "kv_pool_tokens_all_users": 1412000,
+        "users_at_262144": 5,
+        "verdict": "rejected: slower (39.37 t/s/u), no accuracy gain beyond noise (0.98)"
+      }
+    },
+    "capacity_evidence": "MEMORY_REPORT lines in logs/08/teacher-forcing_aime24_*.log; doc/datatype_sweep/README.md section 6"
+  },
+  "production_2026_10_01_mtp_vision": {
+    "config": "max-num-seqs 32, max-model-len 262144, block 64, trace region 768 MiB, QWEN35_MTP=3 (adaptive), QWEN35_VISION=1 (bfp8 tower)",
+    "kv_blocks_vllm": 22725,
+    "kv_pool_tokens": 1454400,
+    "kv_pool_gib": 16.644,
+    "note": "vLLM block count printed by allocate_kv_cache with the MTP head, its scratch/traces and the vision tower resident; the stage-13 text-only server (no MTP, no tower) had 28472 blocks (1.82 M tokens). One request can still hold the full 262144 context (4096 blocks).",
+    "source": "~/qwen35-122b-bringup/logs/13/serve-vision-full.log + readiness_vllm/server.log 2026-10-01 13:28"
+  },
+  "serving_tp4": {
+    "status": "Qwen3-Coder-Next (1,4) build, policy coder_next_routed_bfp8 (doc/datatype_sweep/selected_precision_config.json), measured 2026-10-02 on the 48-layer teacher-forcing build (B=1, max_seq_len 262144, MEMORY_REPORT after the traces were parked: 21.64 GiB allocated per device incl. the 1.59 GiB B=1 full-context KV)",
+    "selected_policy": "coder_next_routed_bfp8",
+    "kv_cache_dtype": "bfloat8_b (unchanged: the bf16-KV candidate was not faster and halves the pool - see kv_candidates)",
+    "kv_bytes_per_token_per_device": 6528,
+    "dram_total_gib_per_device": 31.331,
+    "dram_allocated_all_traces_parked_gib": 21.64,
+    "kv_pool_b1_full_context_gib": 1.594,
+    "non_kv_footprint_gib": 20.05,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 262144,
+    "kv_candidates": {
+      "kv_bf16": {
+        "kv_bytes_per_token_per_device": 12288,
+        "dram_allocated_gib": 21.246,
+        "non_kv_footprint_gib": 18.246,
+        "kv_pool_available_gib": 13.085,
+        "kv_pool_tokens_all_users": 1141000,
+        "avg_tokens_per_user_at_32": 35700,
+        "users_at_262144": 4,
+        "verdict": "rejected: 39.79 t/s/u (= baseline), pool halved; 0.98/1.00/1.00 accuracy identical within noise"
+      },
+      "routed_down_bfp8": {
+        "dram_allocated_gib": 24.329,
+        "non_kv_footprint_gib": 22.736,
+        "kv_pool_available_gib": 8.596,
+        "kv_pool_tokens_all_users": 1412000,
+        "users_at_262144": 5,
+        "verdict": "rejected: slower (39.37 t/s/u), no accuracy gain beyond noise (0.98)"
+      }
+    },
+    "capacity_evidence": "MEMORY_REPORT lines in logs/08/teacher-forcing_aime24_*.log; doc/datatype_sweep/README.md section 6"
+  },
+  "note_port": "Qwen3-Coder-Next autoport (copied from Qwen3.5-122B-A10B): sections up to production_2026_10_01_mtp_vision are the 122B record kept for reference; the serving budgets this model reads are serving_tp4 / serving_tp2."
+}

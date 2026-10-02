@@ -1,0 +1,47 @@
+{
+  "config_id": "lm_head_bfp4",
+  "description": "LM head bfp4 (halves the 0.76B-parameter read per token)",
+  "weight_groups": {
+    "embedding": {
+      "dtype": "bf16"
+    },
+    "norms": {
+      "dtype": "bf16"
+    },
+    "attention": {
+      "dtype": "bfp8"
+    },
+    "linear_attention": {
+      "dtype": "bfp8"
+    },
+    "router": {
+      "dtype": "bf16"
+    },
+    "shared_moe": {
+      "dtype": "bfp8"
+    },
+    "routed_moe": {
+      "gate_up": "bfp4",
+      "down": "bfp4"
+    },
+    "lm_head": {
+      "dtype": "bfp4"
+    }
+  },
+  "layer_exceptions": {},
+  "compute_fidelities": {
+    "attention": "hifi2",
+    "linear_attention": "hifi2",
+    "router": "hifi4",
+    "shared_moe": "hifi2",
+    "routed_moe": "lofi",
+    "lm_head": "ttnn_default"
+  },
+  "activation_dtype": "bf16",
+  "residual_dtype": "bf16",
+  "ccl_dtype": "bf16",
+  "kv_cache_dtype": "bfp8",
+  "linear_state_dtype": "bf16",
+  "logits_dtype": "bf16",
+  "sampling_dtype": "uint32"
+}

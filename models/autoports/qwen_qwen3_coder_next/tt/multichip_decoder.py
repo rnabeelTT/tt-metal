@@ -1,0 +1,722 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Multichip (tensor-parallel) decoder layer for Qwen/Qwen3-Coder-Next (stage 4 of the autoport).
+
+One :class:`MultichipDecoder` is one HF ``Qwen3_5MoeDecoderLayer`` spread over a 1D mesh (the target is the
+(1,4) Blackhole P300x2 mesh, FABRIC_1D, Ring). It keeps the stage-3 :class:`~.optimized_decoder.OptimizedDecoder`
+public contract (``from_state_dict`` / ``allocate_kv_cache`` / ``allocate_gdn_state`` / ``reset_gdn_state`` /
+``rope_decode_host`` / ``prefill_forward`` / ``decode_forward``) but drives the qwen36 TENSOR-PARALLEL token mixers
+(``TPAttention``, ``TPGatedDeltaNet``, ``DistributedNorm``; ``Qwen36DecoderLayer`` builds them when
+``args.num_devices > 1``) and the TP path of the MoE block (``Qwen35MoE`` with ``num_devices > 1``: expert
+intermediate dim sharded, ``up_gate`` dim=-1 / ``down`` dim=-2, reduce-scatter of routed+shared at the exit).
+
+Parallelisation (see doc/multichip_decoder/PLAN.md, "Strategy" / "Residual contract"):
+
+* the residual stream is FRACTURED along the hidden dim: every device holds ``[1, 1, T|B, dim/tp]`` (768 columns at
+  TP=4); the layer's norms all-gather it to the replicated full-dim mixer input; attention / GDN / MoE end with one
+  reduce-scatter (``tt_all_reduce(dim=3)`` == ``reduce_scatter_minimal_async`` on a 1D mesh) so the residual adds
+  stay fractured. 4 collectives per layer at decode (attn-norm AG, mixer RS, ffn-norm AG, MoE RS).
+* attention: device ``d`` holds q heads ``8d..8d+7`` and KV head ``d // 2`` (``kv_replication``: TP=4 > 2 KV heads);
+  the paged KV cache is one ``[blocks, 1, block_size, head_dim]`` tensor PER DEVICE (each device caches its local
+  head; devices 0/1 hold head 0, 2/3 hold head 1). Page tables / positions / cos-sin are replicated.
+* GDN: device ``d`` holds key heads ``4d..4d+3`` and value heads ``16d..16d+15``; the recurrent state
+  ``[B, Nv/tp, Dk, Dv]`` and the conv history (``K`` taps ``[1, B, qkv_dim/tp]``) live inside ``TPGatedDeltaNet``
+  (``_stable_state`` == fixed addresses, in-place updates -> trace-safe decode).
+* routed experts: TP on the expert intermediate dim (``routed_mode="tp"``: per device ``up_gate [1,256,3072,512]``,
+  ``down [1,256,256,3072]``; routing replicated). Expert parallelism (EP=4) stays a documented alternative
+  (PLAN.md "Routed experts (b)").
+
+Tensor contract (per device; the tests shard at entry with ``ShardTensorToMesh(dim=-1)`` and compose at exit with
+``ConcatMeshToTensor(dim=-1)``):
+
+``prefill_forward(hidden, *, start_pos=0, page_table=None, user_id=0, valid_len=None)``
+    ``hidden``: ``[1, 1, T, dim/tp]`` bf16 TILE, fractured. Any logical ``T`` is accepted (padded to the GDN chunk
+    of 128 internally, masked with ``valid_len`` for GDN, sliced back). ``page_table``: replicated int32
+    ``[B, blocks]``; K/V for ``[start_pos, start_pos+T)`` are written through ``paged_fill_cache`` into the row of
+    ``user_id``. ``start_pos > 0`` continues a single-user sequence (multiple of 128 and of the KV block size).
+    Returns ``[1, 1, T, dim/tp]`` fractured.
+``decode_forward(hidden, *, current_pos, page_table=None, cos=None, sin=None)``
+    ``hidden``: ``[1, 1, B, dim/tp]`` fractured; ``current_pos``: replicated int32 ``[B]``; ``cos``/``sin``:
+    replicated bf16 ``[1, B, 1, rope_dim]`` (rope_tp / HF split-halves format, see :meth:`rope_decode_host`);
+    ``page_table``: replicated int32 ``[B, blocks]``. Returns ``[1, 1, B, dim/tp]`` fractured. Trace-safe.
+
+No host/torch work happens inside a forward pass (the only accepted boundary is the qwen36 GDN kernels' host-built
+``valid_len`` selector for NON-aligned prefill lengths, exactly as on the single-chip baseline).
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+import torch  # host-side only: rope_decode_host (setup helper), never inside a forward pass
+
+import ttnn
+from models.autoports.qwen_qwen3_coder_next.tt.functional_decoder import GDN_CHUNK, _text_config
+from models.autoports.qwen_qwen3_coder_next.tt.model_config import Qwen35MoeModelArgs, check_mesh_shape
+from models.autoports.qwen_qwen3_coder_next.tt.optimized_decoder import (
+    SELECTED,
+    OptimizationConfig,
+    OptimizedDecoder,
+    Qwen35MoeOptimizedDecoderLayer,
+)
+from models.autoports.qwen_qwen3_coder_next.tt.weights import remap_hf_layer_state
+from models.demos.blackhole.qwen36.tt import tp_common as tpc
+from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
+from models.tt_transformers.tt.ccl import TT_CCL
+
+# Bytes per element incl. the shared exponent (block floats), for the per-device contract numbers.
+_BYTES_PER_ELEM = {ttnn.bfloat16: 2.0, ttnn.bfloat8_b: 1.0625, ttnn.bfloat4_b: 0.5625, ttnn.float32: 4.0}
+
+
+@dataclass(frozen=True)
+class MultichipConfig:
+    """Stage-4 policy: what transfers from the stage-3 ``SELECTED`` policy and the TP-only knobs.
+
+    Everything here is a field so ``tools``/tests can A/B it on the mesh (``with_``). Defaults are the plan's
+    starting point (PLAN.md "Implementation steps" 4); values marked *verify* are re-measured on hardware.
+    """
+
+    # --- parallelisation -------------------------------------------------------------------------------------------
+    mesh_shape: tuple | None = (
+        None  # None = follow the opened mesh ((1,4) or (1,2), model_config.SUPPORTED_MESH_SHAPES)
+    )
+    routed_mode: str = (
+        "tp"  # "tp" = experts sharded on the intermediate dim (implemented); "ep" = documented alternative
+    )
+    # PREFILL norm mode. False (option A): the framework rule (dim <= 4096 on a 1D mesh) gathers BEFORE the norm, the
+    # mixers take the plain column-parallel matmul on the replicated activation (AGMM fusion gated off). True (option
+    # B): distributed prefill norm (fractured output, 768/die = 24 tiles) + fused all-gather+matmul in-projections.
+    prefill_norm_distributed: bool = False
+    # Channels per depthwise ttnn.conv1d call in the GDN prefill. The blocked implementation issues C / max_channels
+    # calls ([q512|k512], [v1024], [v1024]); the 9B TP path (4096 channels per device) overflowed the conv1d CB in one
+    # call. Here C = 3072 per device also works in one call (sweep `conv1d`, equal PCC/time); 1024 is the proven block.
+    gdn_conv1d_max_channels: int = 1024
+    # --- decode 1D matmul grids of the TP token mixers (None = the qwen36 _init_tp_config defaults tuned on 27B:
+    # attn qkv 64, attn wo 33, GDN qkvzab 44, GDN out 33 cores). Re-sweep for K=3072 / N=4608, 2048/3072, 5152, 2048/3072.
+    # stage 5 (`dense_1d_long`, 20 replays x2): attention qkv: 88 requested -> (11,8) grid, per_core_N=2 -> 72 of 88 cores active (144 N tiles); -7 us per
+    # step vs the 48-core default; wo 33 = the qwen36 default (kept explicit).
+    attn_qkv_decode_cores: int | None = 88
+    attn_wo_decode_cores: int | None = 33
+    gdn_qkvz_decode_cores: int | None = None
+    gdn_out_decode_cores: int | None = None
+    # shared expert decode matmuls ([3072,513] packed and [256,3072] down per device): 1D decode configs on 16 cores
+    # (sweep `shared`: 16 cores -26 us per step on both layer kinds vs the ttnn auto program on 17 cores; the stage-3
+    # 44-core config was sized for N=2049 / K=1024 and does not transfer to 17 / 8 tiles). None = auto.
+    shared_decode_cores: int | None = (
+        16  # 1D decode configs for the [3072,513] / [256,3072] shared expert (sweep `shared`: -26 us vs auto)
+    )
+    # --- sparse (routed expert) matmul geometry at the TP width Nl = 256 ---------------------------------------------
+    # gate_up: N = 2*Nl = 512 -> 16 output tiles -> at most 16 cores with per_core_N = 1 (K = 3072 -> in0 32 of 96 tiles).
+    # down: K = Nl = 256 -> 8 tiles -> in0_block_w 8; N = 3072 -> 96 tiles -> 48 cores (2 tiles each).
+    gate_up_cores: int = 16
+    gate_up_in0: int = 32
+    down_cores: int = 48
+    down_in0: int = 8
+    gate_up_output_tile: tuple | None = None  # stage-5 probe: (32, 16) output tiles -> 32 gate/up cores
+    # --- stage-5 (optimized multichip) families -----------------------------------------------------------------
+    # decode token-mixer matmuls: "1d" = interleaved weights + tuned 1D grids (stage 4); "ds_in" = DRAM-sharded
+    # in-projection weights (qwen36 sharded_decode_matmul, proj_1d_decode off); "ds_all" = also DRAM-sharded out/wo.
+    mixer_decode_mode: str = "1d"
+    # DRAM-sharded decode matmuls (ds_in / ds_all): Blackhole multi-reader kernel, num_workers_per_dram_bank 1..3
+    # (applied where the per-bank N shard splits evenly: qkv N=4608 -> 18 tiles/bank (2,3), out N=3072 -> 12 (2,3),
+    # GDN in N=5152 -> padded 5376 = 21 tiles/bank (3)).
+    # NOTE: r > 1 asserts on the (1,4) mesh in this checkout (matmul_utilities.cpp:446 -> get_worker_noc_hop_distance,
+    # unit-mesh only); kept as the measured review-2 candidate, default 1.
+    mixer_ds_readers: int = 1
+    # decode norm all-gathers write into persistent output buffers (tt_transformers DistributedNorm, review-2 candidate).
+    norm_ag_persistent: bool = False
+    # decode out-projection output dtype: None = bf16; "bfp8" = the matmul emits bfp8 partials straight into the
+    # reduce-scatter (CCL payload dtype family, review-2; op-level RS 22.2 -> 20.8 us).
+    out_proj_decode_dtype: str | None = None
+    # ds_in only: keep the tuned interleaved 1D out-projection (default False = qwen36 plain interleaved matmul).
+    mixer_ds_out_1d: bool = False
+    # decode out-projection (GDN out / attention wo) fused with the reduce-scatter (matmul_reduce_scatter_async).
+    fuse_out_mmrs_decode: bool = False
+    # GDN prefill out-projection: fused fp32 matmul_reduce_scatter_async (qwen36 default) or plain matmul + reduce-scatter.
+    # A trace holding the fused op AND the MoE reduce-scatter hangs at replay (stage-5 bisect `mixer_moe`); the unfused path
+    # is the candidate fix for traced prefill / prefill-after-traced-decode.
+    gdn_prefill_mmrs: bool = True
+    # --- stage-7 (optimized full model) decode op-count families -------------------------------------------------
+    # Every decode op costs ~1 us of trace-replay dispatch on the mesh on top of its device time (stage-5 Tracy: 103 /
+    # 84 ops per GDN / attention layer, 131 / 87 us of op-to-op gaps); these remove layout traffic, not math.
+    gdn_gqa_matmul: bool = False  # GQA head expansion as one exact one-hot matmul per q/k (replaces repeat_interleave)
+    gdn_ab_tile_pad: bool = False  # a/b fields tile-aligned in the fused in-projection (no untilize/tilize per step)
+    gdn_state_inplace: bool = False  # recurrent state update written in place by the kernel (no staging copy)
+    moe_gate_fast: bool = False  # gate op on the full persistent buffers (no per-step constant slices / reshards)
+    moe_router_l1: bool = False  # router logits in L1 (multi-core relayout into the gate op's token faces)
+    moe_gather_tail: bool = False  # views instead of reshapes on the gather rows; fast_reduce_nc instead of ttnn.sum
+    gdn_norm_fold: bool = False  # decode q/k L2-norm scale + query scale folded into rms_norm weights (-3 ops)
+    gdn_conv_l1: bool = False  # decode conv FIR chain (mac x3) kept in L1
+    # prefill MoE routing: the expert-sorted dispatch below this many tokens as well (stage-3 default 512: the masked
+    # 64-token-chunk path re-reads every active expert's weights per chunk; at 128-256 tokens the bucket prefill is
+    # DRAM-bound on those re-reads — stage-7 README section 4)
+    sorted_min_tokens: int | None = None
+    # token-mixer matmul fidelity (qwen36 TP default HiFi2; stage 3 selected LoFi for the single-die mixers): "hifi2" | "lofi"
+    mixer_fidelity: str = "hifi2"
+    # explicit in0_block_w (K tiles per block) of the 1D decode in-projections; None = the helper's largest divisor
+    attn_qkv_in0: int | None = None
+    gdn_qkvz_in0: int | None = None
+    # --- precision knobs taken from SELECTED where they transfer (verify on the mesh: PLAN.md "Risks") -------------
+    kv_dtype: object = SELECTED.kv_dtype  # bfp8 paged KV (drives the bf8 SDPA / fill cast in TPAttention)
+    gdn_state_dtype: object = ttnn.float32 if SELECTED.gdn_state_fp32 else ttnn.bfloat16  # TPGatedDeltaNet.reset_state
+    gdn_decode_high_precision: bool = SELECTED.gdn_state_fp32  # fp32 recurrent decode step (TP default was True)
+    sdpa_decode_q_chunk: int | None = SELECTED.sdpa_decode_q_chunk  # TP default was 0/0 (auto); SELECTED = 32/256
+    sdpa_decode_k_chunk: int | None = SELECTED.sdpa_decode_k_chunk
+    # --- datatype-sweep (stage 8) weight groups outside the MoE block: token-mixer projections and the LM head; None =
+    # the validated bfp8 default of the qwen36 TP loaders; the loaders tag the tensor cache with any other dtype -------
+    attn_weight_dtype: object = None
+    gdn_weight_dtype: object = None
+    lm_head_dtype: object = None
+    lm_head_fidelity: str | None = None  # None = ttnn.linear default; "hifi2_default" (the resolved default, explicit) | "lofi" | "hifi2" | "hifi4"
+    # per-layer MoE precision overrides: ((layer_idx, {"routed_gate_up": dtype, ...}), ...) -> MoEPrecision.from_args
+    precision_layer_exceptions: tuple = ()
+    # the stage-3 policy every other MoE knob is inherited from (precision, fidelity, prefill mode, router pc, ...)
+    base: OptimizationConfig = SELECTED
+
+    def with_(self, **kw):
+        return replace(self, **kw)
+
+    def to_optimization_config(self) -> OptimizationConfig:
+        """The ``OptimizationConfig`` the (shared) ``Qwen35MoEOptimized`` block reads on the mesh.
+
+        Single-device-only knobs are disabled: the DRAM-sharded / 1D dense decode hooks (the TP mixers use their own
+        ``proj_1d_decode`` matmuls and ignore ``attn_decode_matmul_fn``), the sharded decode norm and the sharded
+        attention-norm output (``DistributedNorm`` already emits the width-sharded decode activation).
+        """
+        base = self.base
+        env_min = os.environ.get("QWEN35_SORTED_MIN_TOKENS")  # perf-pass sweep knob: overrides the selected value
+        if env_min is not None:
+            base = base.with_(sorted_min_tokens=int(env_min))
+        elif self.sorted_min_tokens is not None:
+            base = base.with_(sorted_min_tokens=int(self.sorted_min_tokens))  # prefill MoE path threshold (stage 7)
+        env_gs = os.environ.get("QWEN35_SORTED_GROUP_ROWS")
+        if env_gs:  # perf-pass experiment knob: rows per expert block of the sorted dispatch (multiple of 32)
+            base = base.with_(sorted_group_rows=int(env_gs))
+        return base.with_(
+            kv_dtype=self.kv_dtype,
+            gdn_state_fp32=(self.gdn_state_dtype == ttnn.float32),
+            sdpa_decode_q_chunk=self.sdpa_decode_q_chunk,
+            sdpa_decode_k_chunk=self.sdpa_decode_k_chunk,
+            gather_gate_up_cores=self.gate_up_cores,
+            gather_gate_up_in0=self.gate_up_in0,
+            gather_gate_up_output_tile=self.gate_up_output_tile,
+            gather_down_cores=self.down_cores,
+            gather_down_in0=self.down_in0,
+            sorted_gate_up_cores=self.gate_up_cores,
+            sorted_gate_up_in0=self.gate_up_in0,
+            sorted_down_cores=self.down_cores,
+            sorted_down_in0=self.down_in0,
+            masked_gate_up_cores=self.gate_up_cores,
+            masked_down_cores=self.down_cores,
+            masked_down_in0=self.down_in0,
+            shared_decode_cores=self.shared_decode_cores,
+            dense_decode_mode="default",
+            dense_decode_mode_attn=None,
+            dense_decode_mode_gdn=None,
+            mega_split_ds=False,
+            decode_norm_sharded=False,
+            attn_norm_out_sharded=False,
+        )
+
+    def describe(self) -> dict:
+        d = {}
+        for k, v in self.__dict__.items():
+            if isinstance(v, OptimizationConfig):
+                d[k] = v.describe()
+            elif isinstance(v, (int, bool, type(None), str, tuple)):
+                d[k] = v
+            else:
+                d[k] = str(v).replace("DataType.", "")
+        return d
+
+
+# The stage-4 starting policy (PLAN.md step 4); re-selected by the stage-4 sweeps (doc/multichip_decoder/README.md).
+MULTICHIP_SELECTED = MultichipConfig(  # stage-7 selected policy: seven decode op-count reductions + the prefill dispatch
+    # threshold, measured in doc/optimized_full_model/README.md section 3 (GDN layer 0.579 -> 0.523 ms, attention 0.446 ->
+    # 0.430 ms, sweeps/final_policy.jsonl; PCC unchanged except gdn_norm_fold's 1e-6 rounding-order shift)
+    gdn_gqa_matmul=True,
+    gdn_ab_tile_pad=True,
+    gdn_state_inplace=True,
+    moe_gate_fast=True,
+    # moe_router_l1 NOT adopted: with the once-built gate buffers (moe_gate_fast) the attention layer's decode output
+    # stopped being bit-identical across identical prefill+decode cycles (87 / 3072 elements at 1 bf16 LSB,
+    # test_mc_stress_repeated_runs[attn]; either knob alone is deterministic); it bought 2 us per layer
+    moe_gather_tail=True,
+    gdn_norm_fold=True,
+    gdn_conv_l1=True,
+    sorted_min_tokens=128,  # expert-sorted prefill dispatch from bucket 128 (perf pass 2026-09-30: with the group-parallel
+    # sparse matmul factory the 128-token bucket runs 345 -> 303 ms on 48 layers; stage 7 had pinned 256 because the
+    # multicast factory made the masked chunks win at 128: 344 vs 456 ms) — doc/perf_pass/README.md turn 4
+)  # norm_ag_persistent measured -5 us/step but NOT adopted: attention traced-decode replays
+# were no longer bit-identical with the persistent all-gather output buffer (final suite 3, test_mc_traced_decode[attn])
+
+
+class MultichipDecoder(OptimizedDecoder):
+    """Tensor-parallel decoder layer on a 1D mesh. Same public contract as :class:`OptimizedDecoder`; see the module
+    docstring for the per-device tensor shapes."""
+
+    LAYER_CLS = Qwen35MoeOptimizedDecoderLayer
+
+    def __init__(self, *, args, layer, layer_idx, mesh_device, rope, tt_ccl, mc: MultichipConfig):
+        super().__init__(args=args, layer=layer, layer_idx=layer_idx, mesh_device=mesh_device, rope=rope)
+        self.tt_ccl = tt_ccl
+        self.mc = mc
+        self.num_devices = int(args.num_devices)
+        self.hidden_local = args.dim // self.num_devices  # fractured residual width per device
+
+    # ---------------------------------------------------------------------------------------------
+    @classmethod
+    def from_state_dict(
+        cls,
+        state_dict,
+        *,
+        hf_config,
+        layer_idx,
+        mesh_device,
+        max_batch_size: int = 1,
+        max_seq_len: int | None = None,
+        tensor_cache_path: str | Path | None = None,
+        mc: MultichipConfig | None = None,
+        **kwargs,
+    ):
+        """Build the TP layer from HF-format weights of layer ``layer_idx`` on ``mesh_device`` (a 1D mesh, > 1 device).
+
+        Mirrors :meth:`FunctionalDecoder.from_state_dict` but builds ONE ``TT_CCL`` per layer (semaphore pools for the
+        collectives) and hands it to the layer; ``mc`` (default :data:`MULTICHIP_SELECTED`) is turned into the args
+        the TP modules read (see :meth:`_args_hook`). ``tensor_cache_path`` should carry the mesh suffix
+        (``Qwen36ModelArgs.weight_cache_path`` -> ``tensor_cache_bfp8_mesh1x4``): ``as_tensor`` reloads a cached file
+        as-is, ignoring the mesh mapper, so single-device and mesh caches must never share a directory.
+        """
+        mc = mc or MULTICHIP_SELECTED
+        if mc.routed_mode != "tp":
+            raise NotImplementedError(
+                f"routed_mode={mc.routed_mode!r}: only the intermediate-dim TP layout is implemented (EP is the documented "
+                "alternative, PLAN.md 'Routed experts (b)')"
+            )
+        nd = mesh_device.get_num_devices()
+        if nd <= 1:
+            raise ValueError("MultichipDecoder needs a mesh with > 1 device; use OptimizedDecoder on a single die")
+        check_mesh_shape(mesh_device)
+        if mc.mesh_shape is not None and tuple(mesh_device.shape) != tuple(mc.mesh_shape):
+            raise ValueError(f"mesh {tuple(mesh_device.shape)} != MultichipConfig.mesh_shape {tuple(mc.mesh_shape)}")
+        kwargs.pop("opt", None)
+        kwargs.pop("fusion_flags", None)
+        kwargs.pop("moe_precision", None)
+        kwargs.pop("_args_hook", None)
+        opt = mc.to_optimization_config()
+
+        text = _text_config(hf_config)
+        if max_seq_len is None:
+            max_seq_len = int(text.max_position_embeddings)
+        args = Qwen35MoeModelArgs(mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len)
+        cls._args_hook(args, mc, opt, mesh_device)
+        if int(text.hidden_size) != args.dim or int(text.num_hidden_layers) != args.n_layers:
+            raise ValueError(
+                f"hf_config (hidden {text.hidden_size}, layers {text.num_hidden_layers}) does not match the "
+                f"HF_MODEL checkpoint (hidden {args.dim}, layers {args.n_layers})"
+            )
+        if text.layer_types[layer_idx] not in ("linear_attention", "full_attention"):
+            raise ValueError(f"unsupported layer_type {text.layer_types[layer_idx]!r}")
+        internal = remap_hf_layer_state(
+            state_dict,
+            layer_idx,
+            linear_q_dim=args.linear_q_dim,
+            linear_k_dim=args.linear_k_dim,
+            num_k_heads=args.linear_num_key_heads,
+        )
+        cache = Path(tensor_cache_path) if tensor_cache_path else None
+        tt_ccl = TT_CCL(mesh_device)
+        layer = cls.LAYER_CLS(mesh_device, args, internal, layer_idx, cache, tt_ccl=tt_ccl)
+        rope = Qwen36RoPESetup(mesh_device, args) if layer.is_full_attention else None
+        dec = cls(args=args, layer=layer, layer_idx=layer_idx, mesh_device=mesh_device, rope=rope, tt_ccl=tt_ccl, mc=mc)
+        dec.opt = opt
+        return dec
+
+    @staticmethod
+    def _args_hook(args, mc: MultichipConfig, opt: OptimizationConfig, mesh_device):
+        """Install the policy on ``Qwen35MoeModelArgs`` (``num_devices``/per-device dims already come from the mesh via
+        ``Qwen36ModelArgs._init_tp_config``)."""
+        nd = mesh_device.get_num_devices()
+        assert int(args.num_devices) == nd, (args.num_devices, nd)
+        assert args.n_heads % nd == 0, f"n_heads {args.n_heads} not divisible by TP={nd}"
+        assert nd % args.n_kv_heads == 0 or args.n_kv_heads % nd == 0, (args.n_kv_heads, nd)
+        assert args.moe_intermediate_size % (nd * 32) == 0, (args.moe_intermediate_size, nd)
+        assert args.shared_expert_intermediate_size % (nd * 32) == 0, (args.shared_expert_intermediate_size, nd)
+        # stage-3 knobs that transfer (the MoE block reads args.opt; the fusion flags select the gate op / packed shared)
+        args.mc = mc
+        args.opt = opt
+        args.fusion_flags = opt.fusion
+        args.attn_fuse_qkv = opt.fusion.attn_fused_qkv  # single-device attention only; harmless on TP
+        # token-mixer / LM-head weight dtypes (stage 8): consumed by load_attention_weights_tp / load_gdn_weights_tp /
+        # Qwen36Model (None -> bfp8); the stage-3 opt fields stay bfp8 and are not consulted on the mesh
+        args.attn_weight_dtype = mc.attn_weight_dtype or opt.attn_weight_dtype
+        args.gdn_weight_dtype = mc.gdn_weight_dtype or opt.gdn_weight_dtype
+        args.lm_head_dtype = mc.lm_head_dtype
+        # None = ttnn.linear's own default (resolves to HiFi2, fp32 dest off, packer L1 acc on for a bf16 x block-float
+        # matmul in this ttnn build); "hifi2_default" spells that resolved config out explicitly (a pin that changes nothing);
+        # "lofi" | "hifi2" | "hifi4" build the mixers' style config (fp32 dest accumulation ON) — a two-setting change vs default
+        _fid = {"lofi": ttnn.MathFidelity.LoFi, "hifi2": ttnn.MathFidelity.HiFi2, "hifi4": ttnn.MathFidelity.HiFi4}
+        if mc.lm_head_fidelity == "hifi2_default":
+            args.lm_head_compute_cfg = ttnn.WormholeComputeKernelConfig(
+                math_fidelity=ttnn.MathFidelity.HiFi2,
+                math_approx_mode=False,
+                fp32_dest_acc_en=False,
+                packer_l1_acc=True,
+            )
+        elif mc.lm_head_fidelity:
+            args.lm_head_compute_cfg = ttnn.WormholeComputeKernelConfig(
+                math_fidelity=_fid[mc.lm_head_fidelity],
+                math_approx_mode=False,
+                fp32_dest_acc_en=True,
+                packer_l1_acc=True,
+            )
+        else:
+            args.lm_head_compute_cfg = None
+        args.precision_layer_exceptions = {int(k): dict(v) for k, v in mc.precision_layer_exceptions}
+        # single-device-only layouts off (layer.forward gates them on num_devices == 1 anyway)
+        args.decode_norm_sharded = False
+        args.attn_norm_out_sharded = False
+        # TP policy hooks consumed by the shared modules
+        args.prefill_norm_distributed = mc.prefill_norm_distributed  # Qwen35MoeModelArgs.is_distributed_norm(PREFILL)
+        args.gdn_conv1d_max_channels = mc.gdn_conv1d_max_channels  # load_gdn_weights_tp conv channel blocks
+        args.gdn_state_dtype = mc.gdn_state_dtype  # TPGatedDeltaNet.reset_state
+        args.gdn_decode_high_precision = mc.gdn_decode_high_precision  # recurrent_gated_delta_rule_decode_ttnn
+        args.kv_dtype = mc.kv_dtype  # TPAttention._sdpa_bf8 (fill cast + bf8 chunked SDPA)
+        args.sdpa_decode_q_chunk = mc.sdpa_decode_q_chunk  # TPAttention.forward_decode SDPAProgramConfig
+        _g = os.environ.get("QWEN35_SDPA_DECODE_GRID")  # stage-10 probe knob: "x,y" caps the SDPA-decode core grid
+        if _g:
+            args.sdpa_decode_grid = tuple(int(v) for v in _g.split(","))
+        args.sdpa_decode_k_chunk = mc.sdpa_decode_k_chunk
+        # stage-5 families
+        assert mc.mixer_decode_mode in ("1d", "ds_in", "ds_all"), mc.mixer_decode_mode
+        args.proj_1d_decode = mc.mixer_decode_mode == "1d"
+        args.out_proj_1d_decode = True if (mc.mixer_decode_mode == "ds_in" and mc.mixer_ds_out_1d) else None
+        if mc.mixer_decode_mode == "ds_all":
+            args.gdn_out_weight_memcfg = tpc.create_dram_sharded_mem_config(args.gdn_value_dim_tp, args.dim)
+            args.attn_wo_weight_memcfg = tpc.create_dram_sharded_mem_config(args.attn_out_dim_tp, args.dim)
+        if mc.mixer_decode_mode != "1d" and mc.mixer_ds_readers > 1:
+            r = mc.mixer_ds_readers
+            args.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.dim, args.gdn_qkvzab_dim_tp, readers=r
+            )
+            args.attn_qkv_fused_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.dim, args.attn_qkv_fused_dim_tp, readers=r
+            )
+            args.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.gdn_value_dim_tp, args.dim, readers=r
+            )
+            args.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(
+                1, args.attn_out_dim_tp, args.dim, readers=r
+            )
+        # stage-7 decode op-count knobs (read by qwen36 gdn/tp.py and the MoE block)
+        args.gdn_gqa_matmul = mc.gdn_gqa_matmul
+        args.gdn_ab_tile_pad = mc.gdn_ab_tile_pad
+        args.gdn_state_inplace = mc.gdn_state_inplace
+        args.moe_gate_fast = mc.moe_gate_fast
+        args.moe_router_l1 = mc.moe_router_l1
+        args.moe_gather_tail = mc.moe_gather_tail
+        args.gdn_norm_fold = mc.gdn_norm_fold
+        args.gdn_conv_l1 = mc.gdn_conv_l1
+        if mc.gdn_ab_tile_pad:
+            # the fused [qkv|z|a|b] width grows by the a/b tile padding; every consumer derives from this dim
+            pad = -(-args.gdn_nv_tp // tpc.TILE_SIZE) * tpc.TILE_SIZE
+            args.gdn_qkvzab_dim_tp = args.gdn_qkvz_dim_tp + 2 * pad
+            args.gdn_qkvzab_weight_memcfg = tpc.create_dram_sharded_mem_config(args.dim, args.gdn_qkvzab_dim_tp)
+            args.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(1, args.dim, args.gdn_qkvzab_dim_tp)
+            args.gdn_qkvz_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1, args.dim, args.gdn_qkvzab_dim_tp, num_cores=44, grid_w=getattr(args, "decode_grid_w", 8)
+            )
+        args.fuse_out_mmrs_decode = mc.fuse_out_mmrs_decode
+        args.norm_ag_persistent = mc.norm_ag_persistent
+        args.out_proj_decode_dtype = {None: None, "bfp8": ttnn.bfloat8_b, "bf16": None}[mc.out_proj_decode_dtype]
+        args.gdn_prefill_mmrs = mc.gdn_prefill_mmrs
+        assert mc.mixer_fidelity in ("hifi2", "lofi"), mc.mixer_fidelity
+        args.mixer_compute_cfg = (
+            ttnn.WormholeComputeKernelConfig(
+                math_fidelity=ttnn.MathFidelity.LoFi, math_approx_mode=True, fp32_dest_acc_en=True, packer_l1_acc=True
+            )
+            if mc.mixer_fidelity == "lofi"
+            else tpc.COMPUTE_HIFI2
+        )
+        # optional re-sweep of the 1D decode grids of the token mixers (interleaved weights, proj_1d_decode)
+        grid_w = getattr(args, "decode_grid_w", 8)
+        if mc.attn_qkv_decode_cores or mc.attn_qkv_in0:
+            args.attn_qkv_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1,
+                args.dim,
+                args.attn_qkv_fused_dim_tp,
+                mc.attn_qkv_decode_cores or 64,
+                grid_w=grid_w,
+                in0_block_w=mc.attn_qkv_in0,
+            )
+        if mc.attn_wo_decode_cores:
+            args.attn_wo_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1, args.attn_out_dim_tp, args.dim, mc.attn_wo_decode_cores, grid_w=grid_w
+            )
+        if mc.gdn_qkvz_decode_cores or mc.gdn_qkvz_in0:
+            args.gdn_qkvz_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1,
+                args.dim,
+                args.gdn_qkvzab_dim_tp,
+                mc.gdn_qkvz_decode_cores or 44,
+                grid_w=grid_w,
+                in0_block_w=mc.gdn_qkvz_in0,
+            )
+        if mc.gdn_out_decode_cores:
+            args.gdn_out_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
+                1, args.gdn_value_dim_tp, args.dim, mc.gdn_out_decode_cores, grid_w=grid_w
+            )
+
+    # ---------------------------------------------------------------------------------------------
+    # Contract numbers (doc/context_contract.json "multichip_decoder_stage4")
+    def per_device_contract(self) -> dict:
+        a = self.args
+        kv_b = _BYTES_PER_ELEM.get(self.mc.kv_dtype, 2.0)
+        st_b = _BYTES_PER_ELEM.get(self.mc.gdn_state_dtype, 2.0)
+        conv_b = 2.0
+        return {
+            "mesh": list(self.mesh_device.shape),
+            "layer_idx": self.layer_idx,
+            "layer_type": self.layer_type,
+            "hidden_local": self.hidden_local,
+            "kv_heads_per_device": int(a.n_local_kv_heads),
+            "kv_replication": bool(getattr(a, "kv_replication", False)),
+            "kv_bytes_per_token_per_device_per_layer": int(round(2 * a.n_local_kv_heads * a.head_dim * kv_b)),
+            "gdn_state_bytes_per_user_per_device_per_layer": int(
+                round(a.gdn_nv_tp * a.gdn_dk * a.gdn_dv * st_b + a.gdn_conv_kernel_size * a.gdn_qkv_dim_tp * conv_b)
+            ),
+            "routed_expert_local_intermediate": a.moe_intermediate_size // self.num_devices,
+            "config": self.mc.describe(),
+        }
+
+    # ---------------------------------------------------------------------------------------------
+    # State allocation (setup-time)
+    def allocate_kv_cache(self, *, max_batch_size, max_seq_len, block_size=64, dtype=None):
+        """Paged KV cache, ONE ``[num_blocks, n_local_kv_heads, block_size, head_dim]`` tensor per device (replicated
+        shape; each device fills/reads its own local KV head). Bound to ``TPAttention.set_paged_kv_cache``."""
+        assert self.layer.is_full_attention, "only full_attention layers hold a KV cache"
+        dtype = dtype or self.mc.kv_dtype
+        blocks_per_seq = math.ceil(max_seq_len / block_size)
+        num_blocks = max_batch_size * blocks_per_seq
+        shape = (num_blocks, self.args.n_local_kv_heads, block_size, self.args.head_dim)
+        # ttnn.zeros with device=<mesh> materialises the same zero buffer on every device (replicated placement).
+        k = ttnn.zeros(shape, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh_device)
+        v = ttnn.zeros(shape, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh_device)
+        self.layer.attention.set_paged_kv_cache(k, v)
+        self.kv_cache = {
+            "k": k,
+            "v": v,
+            "block_size": block_size,
+            "num_blocks": num_blocks,
+            "blocks_per_seq": blocks_per_seq,
+            "per_device_shape": shape,
+            "kv_heads_per_device": self.args.n_local_kv_heads,
+        }
+        return self.kv_cache
+
+    def allocate_gdn_state(self, *, batch_size: int):
+        """Batched GDN decode buffers INSIDE ``TPGatedDeltaNet`` (as ``Qwen36Model._allocate_kv_caches_tp`` does):
+        ``rec_state [B, Nv/tp, Dk, Dv]`` (``mc.gdn_state_dtype``), ``conv_states`` = K taps ``[1, B, qkv_dim/tp]``,
+        ``conv_carry [1, K-1, qkv_dim/tp]`` (chunk continuation) and the persistent zero sources. ``_stable_state``
+        makes every later prefill/decode update them IN PLACE (addresses fixed -> trace-safe)."""
+        assert not self.layer.is_full_attention, "only linear_attention layers hold GDN state"
+        dn = self.layer.attention
+        self._free_gdn_buffers(dn)
+        dn.B = int(batch_size)
+        dn.reset_state()
+        dn._stable_state = True
+        dn._pending = []
+        self.gdn_state = {
+            "recurrent": dn.rec_state,
+            "conv": dn.conv_states,
+            "carry": dn.conv_carry,
+            "batch_size": int(batch_size),
+        }
+        return self.gdn_state
+
+    @staticmethod
+    def _free_gdn_buffers(dn):
+        """Release a previous allocation (``reset_state`` allocates fresh buffers and would leak the old ones)."""
+        for name in ("rec_state", "conv_carry", "_zero_conv0", "_zero_conv_carry", "_zero_rec"):
+            t = getattr(dn, name, None)
+            if t is not None:
+                ttnn.deallocate(t)
+                setattr(dn, name, None)
+        for t in getattr(dn, "conv_states", None) or []:
+            ttnn.deallocate(t)
+        dn.conv_states = None
+
+    def reset_gdn_state(self):
+        """Zero the recurrent / conv / carry buffers in place (new sequence; addresses unchanged)."""
+        assert self.gdn_state is not None, "call allocate_gdn_state(batch_size=...) first"
+        dn = self.layer.attention
+        dn.reset_state_inplace()
+        dn._pending = []
+
+    # ---------------------------------------------------------------------------------------------
+    def rope_decode_host(self, position_ids: torch.Tensor):
+        """Host bf16 cos/sin ``[1, B, 1, rope_dim]`` for decode positions (rope_tp format consumed by
+        ``apply_partial_rope_decode``; replicate to the mesh / copy into persistent replicated buffers).
+
+        NOTE: the single-chip baseline returns ``[B, 1, rope_dim]``; the TP attention wants the batch on dim 1.
+        """
+        assert self.rope is not None
+        pos = position_ids.reshape(-1).to(torch.long)
+        rd = self.args.rope_head_dim
+        cos = self.rope.cos_cpu[pos].reshape(1, -1, 1, rd)
+        sin = self.rope.sin_cpu[pos].reshape(1, -1, 1, rd)
+        return cos, sin
+
+    def _as_4d(self, x, rows_first: bool):
+        """Accept the 4D contract shape or a 3D convenience shape and return (``[1,1,N,dim/tp]`` view, original shape).
+
+        ``rows_first``: a 3D input is ``[1, T, dim/tp]`` (prefill) when True, ``[B, 1, dim/tp]`` (decode) when False.
+        """
+        orig = list(x.shape)
+        if len(orig) == 4:
+            assert orig[0] == 1 and orig[1] == 1, f"expected [1,1,N,{self.hidden_local}], got {orig}"
+            x4 = x
+        elif len(orig) == 3:
+            n = orig[1] if rows_first else orig[0]
+            assert (orig[0] if rows_first else orig[1]) == 1, f"3D input must be [1,T,dim/tp] or [B,1,dim/tp]: {orig}"
+            x4 = ttnn.reshape(x, (1, 1, n, orig[2]))
+        else:
+            raise ValueError(f"unsupported input rank {len(orig)}: {orig}")
+        assert x4.shape[-1] == self.hidden_local, (
+            f"input must be FRACTURED on the hidden dim: expected {self.hidden_local} columns per device, got "
+            f"{x4.shape[-1]} (shard the full-dim tensor with ShardTensorToMesh(dim=-1))"
+        )
+        return x4, orig
+
+    # ---------------------------------------------------------------------------------------------
+    def prefill_forward(self, hidden_states, *, start_pos: int = 0, page_table=None, user_id: int = 0, valid_len=None):
+        x, orig = self._as_4d(hidden_states, rows_first=True)
+        T = x.shape[2]
+        T_logical = T if valid_len is None else int(valid_len)
+        T_pad = -(-T // GDN_CHUNK) * GDN_CHUNK
+        if T_pad != T:
+            x = ttnn.pad(x, [(0, 0), (0, 0), (0, T_pad - T), (0, 0)], value=0.0)
+        # Chunk-continuation contract (as the baseline): start_pos is a multiple of the GDN chunk and the KV block size;
+        # the chunked SDPA derives its q/k chunk from the lowest set bit of chunk_start_idx.
+        assert start_pos % GDN_CHUNK == 0, f"start_pos {start_pos} must be a multiple of {GDN_CHUNK}"
+        if self.layer.is_full_attention:
+            assert valid_len is None, "full_attention prefill takes the logical length from the tensor (no valid_len)"
+            out = self._attention_prefill(x, T, T_pad, start_pos, page_table, user_id)
+        else:
+            out = self._gdn_prefill(x, T_logical if T_pad != T_logical else None, user_id, start_pos)
+        if T_pad != T:
+            ttnn.deallocate(x)
+            out_full = out
+            out = ttnn.slice(out_full, [0, 0, 0, 0], [1, 1, T, self.hidden_local])
+            ttnn.deallocate(out_full)
+        if len(orig) != 4:
+            out = ttnn.reshape(out, orig)
+        return out
+
+    def _attention_prefill(self, x, T, T_pad, start_pos, page_table, user_id):
+        """Paged TP attention prefill of one user: cos/sin ``[1,1,T_pad,rope_dim]`` sliced from the resident replicated
+        tables, a ONE-ROW page table for ``user_id`` (``TPAttention.forward_prefill_paged`` fills ``batch_idx=0`` of the
+        page table it is given, so the row selects the user) and the chunk page table starting at this chunk's block."""
+        assert page_table is not None and self.kv_cache is not None, "full_attention prefill needs a paged KV cache"
+        bs = self.kv_cache["block_size"]
+        assert start_pos % bs == 0, f"start_pos {start_pos} must be a multiple of the KV block size {bs}"
+        rd = self.args.rope_head_dim
+        cos3 = ttnn.slice(self.rope.cos_device, [0, start_pos, 0], [1, start_pos + T_pad, rd])
+        sin3 = ttnn.slice(self.rope.sin_device, [0, start_pos, 0], [1, start_pos + T_pad, rd])
+        cos = ttnn.reshape(cos3, (1, 1, T_pad, rd))  # rope_tp prefill format [1,1,S,rope_dim]
+        sin = ttnn.reshape(sin3, (1, 1, T_pad, rd))
+        # K/V are written for the LOGICAL tokens' blocks only (pad rows inside the last block are harmless and are
+        # overwritten by decode); never beyond the user's page-table row.
+        n_blocks = -(-(start_pos + T) // bs)
+        assert (
+            n_blocks <= page_table.shape[1]
+        ), f"{start_pos + T} tokens need {n_blocks} blocks > page table width {page_table.shape[1]}"
+        pt_row = (
+            page_table
+            if page_table.shape[0] == 1
+            else ttnn.slice(page_table, [user_id, 0], [user_id + 1, page_table.shape[1]])
+        )
+        # paged_fill_cache writes input tile i into chunk_page_table[i // block_size]: the chunk's table must START at
+        # this chunk's first block (start_pos // bs). forward_prefill_paged slices K/V to the table's length, so only the
+        # logical tokens' blocks are written; the chunked SDPA reads the (32-block padded) full row.
+        chunk_pt = ttnn.slice(pt_row, [0, start_pos // bs], [1, n_blocks])
+        out = self.layer.forward(
+            x,
+            cos=cos,
+            sin=sin,
+            mode="prefill",
+            page_table=pt_row,
+            chunk_page_table=chunk_pt,
+            chunk_start_idx=start_pos,
+        )
+        for t in (cos, sin, chunk_pt):
+            ttnn.deallocate(t)
+        if pt_row is not page_table:
+            ttnn.deallocate(pt_row)
+        return out
+
+    def _gdn_prefill(self, x, valid_len, user_id, start_pos):
+        """Linear-attention prefill of ONE user into the batched TP state buffers.
+
+        ``B == 1``: the ``_stable_state`` carry path of ``TPGatedDeltaNet.forward_prefill`` (``capture_state=True``): the
+        chunk kernel starts from ``rec_state`` / ``conv_carry`` and copies the new state back IN PLACE. A fresh sequence
+        zeroes them first (``reset_state_inplace``); a continuation (``start_pos > 0``) first rebuilds ``conv_carry``
+        from the decode shift register ``conv_states[1..K-1]`` (decode advances only the taps; right after a prefill both
+        are already in sync, so the copy is a value no-op there) -- the TP analogue of the baseline's fused-window rebuild.
+        ``B > 1``: from-scratch per-user prefill (``gdn_collect=True`` -> ``forward_prefill_collect`` stashes
+        ``(rec, conv_window)``), written into decode slot ``user_id`` with ``write_slot`` (the other rows are preserved).
+        """
+        dn = self.layer.attention
+        st = self.gdn_state
+        assert st is not None, "call allocate_gdn_state(batch_size=...) before prefill"
+        B = st["batch_size"]
+        assert 0 <= user_id < B, (user_id, B)
+        if B == 1:
+            if start_pos == 0:
+                dn.reset_state_inplace()
+            else:
+                self._rebuild_conv_carry(dn)
+            return self.layer.forward(x, mode="prefill", chunk_size=GDN_CHUNK, valid_len=valid_len)
+        assert start_pos == 0, "chunked prefill continuation is supported for single-user GDN state (B == 1)"
+        out = self.layer.forward(x, mode="prefill", chunk_size=GDN_CHUNK, valid_len=valid_len, gdn_collect=True)
+        assert len(dn._pending) == 1, f"expected one collected per-user state, got {len(dn._pending)}"
+        rec, conv_window = dn._pending.pop()  # rec [1, Nv/tp, Dk, Dv]; conv_window [1, K-1, qkv_dim/tp] (oldest first)
+        taps = self._conv_taps_from_window(dn, conv_window)
+        ttnn.deallocate(conv_window)
+        dn.write_slot(user_id, rec, taps)  # consumes rec and taps
+        return out
+
+    @staticmethod
+    def _rebuild_conv_carry(dn):
+        """``conv_carry[0, j] = conv_states[j + 1][0, 0]`` for ``j < K-1`` (B == 1): the last K-1 conv inputs, oldest first."""
+        window = ttnn.concat(list(dn.conv_states[1:]), dim=1)  # K-1 x [1,1,D] -> [1,K-1,D]
+        if window.layout != dn.conv_carry.layout:
+            window = ttnn.to_layout(window, dn.conv_carry.layout)
+        ttnn.copy(window, dn.conv_carry)
+        ttnn.deallocate(window)
+
+    @staticmethod
+    def _conv_taps_from_window(dn, conv_window):
+        """``[1, K-1, D]`` last-inputs window -> the K ``[1, 1, D]`` shift-register taps ``write_slot`` wants:
+        tap 0 = the shifted-out zero, tap m = window[m-1] (``assemble_batched_state`` convention)."""
+        D = dn.qkv_dim_tp
+        zero = ttnn.slice(dn._zero_conv0, (0, 0, 0), (1, 1, D))  # [1,B,D] zero source -> one row
+        taps = [zero]
+        for m in range(1, dn.K):
+            taps.append(ttnn.reshape(ttnn.slice(conv_window, (0, m - 1, 0), (1, m, D)), (1, 1, D)))
+        return taps
+
+    # ---------------------------------------------------------------------------------------------
+    def decode_forward(self, hidden_states, *, current_pos, page_table=None, cos=None, sin=None):
+        x, orig = self._as_4d(hidden_states, rows_first=False)
+        if self.layer.is_full_attention:
+            assert page_table is not None and cos is not None and sin is not None
+            out = self.layer.forward(x, cos, sin, mode="decode", position_tensor=current_pos, page_table=page_table)
+        else:
+            out = self.layer.forward(x, mode="decode")
+        if len(orig) != 4:
+            out = ttnn.reshape(out, orig)
+        return out

@@ -1,0 +1,123 @@
+# tt-model container (v5.1) manifest for the Qwen3-Coder-Next autoport on Blackhole: 4 dies (p300x2 / p150x4) or 2 dies
+# (p300 / p150x2).
+# Authoring interface of `tt-model package --container models/autoports/qwen_qwen3_coder_next/tt-model.yaml`.
+schema: "5.1"
+
+repo: raahemnabeel/qwen3-coder-next-blackhole
+name: qwen3-coder-next-blackhole
+# weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
+weights: {repo: Qwen/Qwen3-Coder-Next, revision: a7fbcb5c0e12d62a448eaa0e260346bf5dcc0feb}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/tt-metal
+  code:  # the autoport's import closure (checked with a symlinked tree of exactly these paths); the autoport ships its
+         # runtime files only (not the per-stage doc/ evidence with profiler CSVs, not tests/)
+    - models/autoports/qwen_qwen3_coder_next/__init__.py
+    - models/autoports/qwen_qwen3_coder_next/tt
+    - models/autoports/qwen_qwen3_coder_next/vllm_metadata.json
+    - models/autoports/qwen_qwen3_coder_next/vllm_bundle
+    - models/autoports/qwen_qwen3_coder_next/doc/context_contract.json            # read by generator_vllm at build
+    - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config.json       # 4-die policy
+    - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config_tp2.json   # 2-die policy
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  # the released sdist built in the image with VLLM_TARGET_DEVICE=empty, installed --no-deps on top of the lock (the
+  # wheel form resolves the wheel's own dependency set and would pull torch 2.14 over tt-metal's 2.11.0 pin)
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin}
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json (a copy of the autoport's vllm_metadata.json lives in
+  # vllm_bundle/qwen3_coder_next/; the checkout-based serving uses EXTRA_MODELS_DIR=models/autoports directly)
+  extra_models_dir: models/autoports/qwen_qwen3_coder_next/vllm_bundle
+  # resolution overrides: the torch / torchvision tt-metal pins (the ttnn extension is built against 2.11.0) and the
+  # transformers this bring-up validated; vLLM 0.26.0 would otherwise resolve torch 2.14 (a full dev-env freeze as a lock
+  # dragged unrelated conflicting pins in, so the build resolves live under these overrides and freezes the result)
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 262144
+  capabilities:
+    tool_parser: qwen3_coder
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 805306368
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: Qwen/Qwen3-Coder-Next
+    QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
+    QWEN35_PROGRAM_GUARD: "1"
+    # Chunked prefill ON in every profile: long prompts are prefilled in 2048-token scheduler chunks (GDN state carried
+    # per request), so a short request is not stuck behind a 100K-token prompt. The checkpoint has no MTP head and no
+    # vision tower, so nothing competes with it.
+    QWEN35_CHUNKED_PREFILL: "1"
+  args: [--enable-auto-tool-choice, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+
+# One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
+# `tt-model serve <bundle> --profile <name>`. The mesh size picks the precision policy and the KV budget at build.
+serve_profiles:
+  - name: p300x2
+    description: >
+      Two p300 boards (4 dies, TP4): 32 sequences, 262144 context, routed experts in the 4-die precision policy.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies, TP4), same configuration as p300x2. Untested on hardware (built for the identical (1,4) mesh).
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: >
+      One p300 board (2 dies, TP2): 32 sequences, 262144 context, bfp4 routed experts (the 4-die policy's experts do not
+      fit two dies).
+    hardware: p300
+    mesh_device: P300
+    # the first two chips (on a 4-chip host: the two dies of the first board; fabric init needs every visible chip in
+    # the mesh). A no-op on a single p300.
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150x2
+    description: Two p150 boards (2 dies, TP2), same configuration as p300. Untested on hardware (built for the identical (1,2) mesh).
+    hardware: p150x2
+    mesh_device: P150x2
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+default_profile: p300x2
+
+verify:
+  - "import models.autoports.qwen_qwen3_coder_next.tt.generator_vllm as g; assert g.Qwen3NextForCausalLM and not g.Qwen3NextForCausalLM.supports_multimodal"
+  - "import models.autoports.qwen_qwen3_coder_next.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+
+card:
+  description: >
+    Qwen3-Coder-Next (80B total / 3B active MoE: 512 experts, top-10 + shared expert, 48 layers of Gated DeltaNet +
+    gated attention) served on Blackhole through vLLM and the Tenstorrent plugin - four dies (p300x2 / p150x4) or two
+    dies (p300 / p150x2). Tensor-parallel mixers, experts sharded on the intermediate dimension, on-device sampling,
+    per-width decode traces, chunked prefill, tool calling (qwen3_coder), 262144-token context, up to 32 concurrent
+    sequences. Ported from the Qwen3.5-122B-A10B Blackhole autoport (same architecture family).
+  quickstart: |
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `Qwen/Qwen3-Coder-Next`. The model does not think (no reasoning block); tool calls use vLLM's `qwen3_coder` parser
+    (`--enable-auto-tool-choice` is on). Without sampling parameters a request uses the checkpoint's defaults
+    (temperature 1.0, top_p 0.95, top_k 40).
+
+    ### Profiles
+    `tt-model serve raahemnabeel/qwen3-coder-next-blackhole --profile <name>`:
+    - `p300x2` (default) / `p150x4` - four dies: the faster profile.
+    - `p300` / `p150x2` - two dies: the same features on half the hardware, with bfp4 routed experts.
+    Every profile runs chunked prefill, so long prompts (codebases, long files) do not block short requests.
