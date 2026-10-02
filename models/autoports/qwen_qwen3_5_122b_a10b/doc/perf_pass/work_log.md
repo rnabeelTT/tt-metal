@@ -1268,3 +1268,15 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   temperature 1.0 (it passed at 14:13 with other random draws). The 12 failures of run 8 were the batched prefill
   (confirmed: off -> only this one remains). Engine conformance for the shipped tree: 72 / 73 + 1 known test false
   positive. Run 10 (profiles, thinking on) packaging from da20251f443.
+- 02:45 (10-02) BUNDLE RUN 10 VERIFIED AND PUSHED - the final bundle (tt-metal da20251f443; profiles p300x2 /
+  -burst / -longctx / -text and the p150x4 four; thinking ON by default). Fresh device
+  (`doc/tti_release/bundle_run10/verify.log`): healthy in 11 min; chat answers with 595 reasoning tokens then
+  "The capital of France is Paris."; tool call; 2381-token prompt; 32-request burst 189 tok/s; 131072 tokens 44.9 s;
+  194119 tokens 74.0 s; 1080p / 4032x3024 / two-image requests served (2.0 / 3.3 / 2.9 s, thinking off per request);
+  the 448 px smoke request with max_tokens 64 and the thinking default returned an empty `content` (the think block
+  consumed the budget: the documented thinking-on behaviour, the same prompt answers with `enable_thinking: false`).
+  Readiness SAMPLING stage with the thinking-on default: 71 passed, 2 failed (`sampling_tests.log`): `test_bad_words`
+  (the "_hello" single-token false positive, run 9 too) and one structured-output mix test whose response had empty
+  `content` (budget consumed by thinking). Run 9's thinking-off pass (72 / 73) is the engine gate. PUSHED private:
+  Hub revision 511541bd2499 (02:45; image manifest sha256:50b6c42fe139, config sha256:ba18ed1b00bd).
+  Production list closed; remaining items are future scope (HANDOFF §6).
