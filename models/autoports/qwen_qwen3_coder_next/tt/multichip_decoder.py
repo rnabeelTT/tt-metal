@@ -113,7 +113,7 @@ class MultichipConfig:
     # down: K = Nl = 256 -> 8 tiles -> in0_block_w 8; N = 3072 -> 96 tiles -> 48 cores (2 tiles each).
     gate_up_cores: int = 16
     gate_up_in0: int = 32
-    down_cores: int = 48
+    down_cores: int = 64  # Qwen3-Coder-Next: N = H = 2048 = 64 tiles -> one tile per core (22.72 -> 22.54 ms/step)
     down_in0: int = 8
     gate_up_output_tile: tuple | None = None  # stage-5 probe: (32, 16) output tiles -> 32 gate/up cores
     # --- stage-5 (optimized multichip) families -----------------------------------------------------------------

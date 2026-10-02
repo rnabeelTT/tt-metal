@@ -32,6 +32,10 @@ from models.autoports.qwen_qwen3_coder_next.tt.moe_dispatch import SortedDispatc
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.utils.substate import substate
 
+# Qwen3-Coder-Next perf pass: at one decode token the pairs path repeats the TILE row block on the batch dim instead of
+# the row-major to_layout / repeat / tilize round trip (two tilizes, ~24 us per layer).
+PAIRS_T1_TILE_REPEAT = os.environ.get("QWEN35_PAIRS_T1_TILE_REPEAT", "0") == "1"
+
 
 @dataclass(frozen=True)
 class OptimizationConfig:
@@ -70,6 +74,11 @@ class OptimizationConfig:
     # perf pass turn 2 adopted 8; 2026-10-01 traced per-layer probe at width 16: pairs 1.843 / 2.078 ms (attn / GDN layer
     # step) vs masked 2.212 / 2.288 -> 16; at width 32 the 256 pair groups lose (3.17 / 3.59 vs 2.60 / 2.73): masked stays
     pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "16"))
+    # Qwen3-Coder-Next (512 experts, top-10, Nl = 128 per die): below this many decode rows the 64-core gather path beats
+    # the pairs path's one core per (token, expert) group (width 1: 25.9 vs 27.4 ms/step, 48 layers)
+    pairs_min_tokens: int = int(
+        os.environ.get("QWEN35_MOE_PAIRS_MIN_TOKENS", "2")
+    )  # with the topk route: 24.36 -> 22.72 ms
     # routed-expert prefill: "masked" (per-group expert union, stage 1/2) or "sorted" (expert-sorted dispatch: every 32-row
     # group is one expert; see tt/moe_dispatch.py); geometry of the two compact sparse matmuls
     prefill_mode: str = "sorted"
@@ -412,7 +421,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
     def _routed_gather(self, x4, scores, ids, T):
         if self._decode_sorted(T):
             return self._routed_sorted(x4, scores, ids, T)
-        if 0 < T <= int(self.opt.pairs_max_tokens):
+        if int(self.opt.pairs_min_tokens) <= T <= int(self.opt.pairs_max_tokens) and T > 0:
             if getattr(self, "rows_sorted", False) and self.opt.prefill_mode == "sorted":
                 # MTP rows mode: the expert-sorted path (dispatch kernel, two grouped sparse matmuls with the padding
                 # groups skipped, gather-add un-dispatch) instead of the pairs path's ~18 relayout ops
@@ -431,12 +440,16 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         RM = ttnn.ROW_MAJOR_LAYOUT
         cfg_gu, cfg_dn = self._grouped_configs(TILE, H, Nl)
         # activation rows -> one padded tile per pair (row of token t repeated k times), ids -> one uint16 stick
-        x_rm = ttnn.to_layout(x4, RM, memory_config=dram)  # [1,1,T,H]
-        x_rows = ttnn.reshape(x_rm, (1, T, 1, H))
-        x_rep = ttnn.repeat(x_rows, ttnn.Shape([1, 1, k, 1]), memory_config=dram)  # [1,T,k,H]: row t repeated k times
-        ttnn.deallocate(x_rm)
-        x_pairs = ttnn.to_layout(ttnn.reshape(x_rep, (1, G, 1, H)), ttnn.TILE_LAYOUT, memory_config=dram)  # [1,G,1,H]
-        ttnn.deallocate(x_rep)
+        if T == 1 and PAIRS_T1_TILE_REPEAT and x4.layout == ttnn.TILE_LAYOUT and tuple(x4.shape) == (1, 1, 1, H):
+            # one token: repeat its (tile-padded) row block k times on the batch dim, no row-major round trip
+            x_pairs = ttnn.repeat(x4, ttnn.Shape([1, k, 1, 1]), memory_config=dram)  # [1,G,1,H] TILE
+        else:
+            x_rm = ttnn.to_layout(x4, RM, memory_config=dram)  # [1,1,T,H]
+            x_rows = ttnn.reshape(x_rm, (1, T, 1, H))
+            x_rep = ttnn.repeat(x_rows, ttnn.Shape([1, 1, k, 1]), memory_config=dram)  # [1,T,k,H]: row t repeated k
+            ttnn.deallocate(x_rm)
+            x_pairs = ttnn.to_layout(ttnn.reshape(x_rep, (1, G, 1, H)), ttnn.TILE_LAYOUT, memory_config=dram)
+            ttnn.deallocate(x_rep)
         # ids [1,1,T,k] -> one uint16 stick [1,G]: the data-moving reshape takes uint32 (not uint16), the final
         # [1,1,1,G] -> [1,G] reshape is a view
         ids_u32 = ttnn.typecast(ids, ttnn.uint32) if ids.dtype != ttnn.uint32 else ids

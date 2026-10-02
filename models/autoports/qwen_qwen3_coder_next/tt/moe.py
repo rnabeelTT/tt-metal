@@ -39,6 +39,13 @@ TILE = 32
 # functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
 ROUTER_TOPK_FIRST = os.environ.get("QWEN35_ROUTER_TOPK_FIRST", "1") == "1"  # default since the perf pass (2026-09-29)
 ROUTER_TOPK_PAD = int(os.environ.get("QWEN35_ROUTER_TOPK_PAD", "0") or 0)  # probe knob; 1024 measured SLOWER (rejected)
+# Router top-k through Blackhole's large-k route: ttnn.topk with k > 64 (here 80) and stable=False takes the
+# topk_large_indices composite (45 us on [32, 512]) instead of the single-core bitonic factory (77 us for k = 10 over
+# 512 experts, the costliest op of the Qwen3-Coder-Next decode layer); the top `top_k` columns are sliced off.
+# 0 = stock ttnn.topk. Results: same top-k set and sorted values as the stock op (bf16 ties may swap order).
+ROUTER_TOPK_ROUTE_K = int(
+    os.environ.get("QWEN35_ROUTER_TOPK_ROUTE_K", "80") or 0
+)  # 48-layer token-out 27.39 -> 24.36 ms
 ROUTER_L1 = (
     os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
 )  # L1-resident router intermediates for decode rows (experiment)
@@ -382,7 +389,21 @@ class Qwen35MoE:
                 if padded is not logits:
                     ttnn.deallocate(logits)
                 logits = padded
-            values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True, memory_config=r_mc)
+            if (
+                ROUTER_TOPK_ROUTE_K > max(64, self.top_k)
+                and logits.shape[-1] >= ROUTER_TOPK_ROUTE_K
+                and logits.shape[-2] <= TILE  # decode rows only (prefill row counts not measured)
+            ):
+                v_all, i_all = ttnn.topk(
+                    logits, k=ROUTER_TOPK_ROUTE_K, dim=-1, largest=True, sorted=True, stable=False, memory_config=r_mc
+                )
+                rows = v_all.shape[-2]
+                values = ttnn.slice(v_all, [0, 0, 0, 0], [1, 1, rows, self.top_k], memory_config=r_mc)
+                ids = ttnn.slice(i_all, [0, 0, 0, 0], [1, 1, rows, self.top_k], memory_config=r_mc)
+                ttnn.deallocate(v_all)
+                ttnn.deallocate(i_all)
+            else:
+                values, ids = ttnn.topk(logits, k=self.top_k, dim=-1, largest=True, sorted=True, memory_config=r_mc)
             ttnn.deallocate(logits)
             scores = ttnn.softmax(values, dim=-1, numeric_stable=True, memory_config=r_mc)
             ttnn.deallocate(values)
