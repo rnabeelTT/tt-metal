@@ -164,6 +164,9 @@ if _MTP_K > 0:
 # QWEN35_VISION=1: serve image content parts (the checkpoint's ViT on the mesh through tt/vision.py; images are spliced
 # into the prompt embedding inside the traced prefill buckets, M-RoPE per request, per-slot decode deltas). Off: text
 # only (the processor advertises no image / video support, so vLLM rejects multimodal requests at the frontend).
+# served default: batched short-prompt prefill on (tt/prefill_batched.py; the standalone generator keeps it off unless
+# the env says so) - served A/B 2026-10-02: TTFT at 32 users 6.3 -> 3.8 s, 8 users 1.83 -> 1.27 s, decode unchanged
+os.environ.setdefault("QWEN35_BATCHED_PREFILL", "1")
 _VISION = os.environ.get("QWEN35_VISION", "0") == "1"
 _VISION_MAX_IMAGES = int(os.environ.get("QWEN35_VISION_MAX_IMAGES", "4") or 4)
 
