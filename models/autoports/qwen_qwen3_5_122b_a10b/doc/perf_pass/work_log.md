@@ -1250,3 +1250,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   a063e347809) - conformance (73 / 73) outranks the TTFT win for the shipped default. Future scope: make the first-token
   numerics admission-independent (same kernels for single and batched, row-0 RNG semantics via a row select) and add
   the MTP head rows for batched admissions, then flip the default. Bundle run 9 (opt-in off) packaging + verifying.
+- 01:50 (10-02) WRAP-UP (owner): bundle run 10 = serving PROFILES (`tt-model.yaml serve_profiles`: `p300x2` interactive
+  default; `p300x2-burst` = QWEN35_BATCHED_PREFILL=1; `p300x2-longctx` = QWEN35_CHUNKED_PREFILL=1 + QWEN35_MTP=0 +
+  `--enable-chunked-prefill --max-num-batched-tokens 2048`; `p300x2-text` = QWEN35_VISION=0 + image limit 0; `p150x4`)
+  and THINKING ON by default (`--default-chat-template-kwargs '{"enable_thinking": true}'`, per-request opt-out) by
+  owner decision - the gates and the latency numbers stay those of the thinking-off configuration, documented in the
+  card, HANDOFF and report. Chained after run 9's verification (staged build dir shared): package -> fresh-device
+  verification (smoke, large images, readiness sampling stage with the thinking-on default; failures there are
+  reported as such) -> push.
