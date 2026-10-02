@@ -13,7 +13,8 @@ Blackhole mesh (p300x2 = 2 x p300c, or p150x4). Served through vLLM 0.26.0 and t
 | mesh | (1,4), `MESH_DEVICE=P300x2` or `P150x4`, `fabric_config FABRIC_1D`, `l1_small_size 24576`, trace region 768 MiB |
 | parallelism | TP4 mixers (KV heads replicated per device pair), routed experts TP on the intermediate dim (all 256 experts per die at width 256), vocab-sharded LM head, on-device sampling |
 | precision | `doc/datatype_sweep/selected_precision_config.json`: routed experts bfp4 LoFi, mixers bfp4 LoFi, shared expert bfp8, router bf16, LM head bfp4, KV bfp8, GDN state bf16 |
-| serving | `--max-num-seqs 32 --max-model-len 262144 --block-size 64`, `sample_on_device_mode all`, `--reasoning-parser qwen3 --tool-call-parser qwen3_xml --enable-auto-tool-choice`, `--default-chat-template-kwargs '{"enable_thinking": false}'` (the validated release configuration); thinking on per request with `chat_template_kwargs {"enable_thinking": true}` (reasoning in the message's `reasoning` field, needs thousands of tokens) |
+| serving | `--max-num-seqs 32 --max-model-len 262144 --block-size 64`, `sample_on_device_mode all`, `--reasoning-parser qwen3 --tool-call-parser qwen3_xml --enable-auto-tool-choice`, `--default-chat-template-kwargs '{"enable_thinking": true}'` (the validated release configuration); thinking on per request with `chat_template_kwargs {"enable_thinking": true}` (reasoning in the message's `reasoning` field, needs thousands of tokens) |
+| profiles (run 10+) | `--profile p300x2` interactive default (thinking on, MTP, vision) · `p300x2-burst` (batched short-prompt prefill on: 32-request burst TTFT 3.8 s vs 6.3 s; seeded / greedy consistency across batch compositions not guaranteed) · `p300x2-longctx` (chunked prefill, MTP off: prefill steps shared between prompts) · `p300x2-text` (no vision tower, 28472 KV blocks) · `p150x4` (default on four p150) - one image, launch-time env/args (tt-model.yaml `serve_profiles`) |
 | decode | one trace per power-of-two width 2..32 (`tt/decode_buckets.py`; width 1 not served, see section 4) |
 | KV pool | 1,820,160 tokens shared by the live users (one user reaches 262144; 32 users share ~57K each) |
 
@@ -52,12 +53,12 @@ eval "$(python "$TT_MODEL_BRINGUP_ROOT/scripts/environment.py")"
 python -m readiness_check.run_vllm_server --model-dir models/autoports/qwen_qwen3_5_122b_a10b --hf-model $HF_MODEL \
   --mesh-device P300x2 --stages serve --max-num-seqs 32 --max-model-len 262144 --block-size 64 --port 8131 \
   --tt-config '{"trace_region_size": 805306368, "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}' \
-  --additional-server-args "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --default-chat-template-kwargs '{\"enable_thinking\": false}'"
+  --additional-server-args "--reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --default-chat-template-kwargs '{\"enable_thinking\": true}'"
 ```
 From the bundle (`tt-model` 0.1.0, `~/tt-model-manager/.venv/bin/tt-model`):
 ```bash
 tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile p300x2   # or --profile p150x4
-tt-model curl "Say hello in one sentence."   # thinking off by default; add --chat_template_kwargs '{"enable_thinking": true}' --max-tokens 4096 for thinking
+tt-model curl "Say hello in one sentence."   # thinking ON by default (reasoning in the `reasoning` field); add --chat_template_kwargs '{"enable_thinking": false}' for a direct answer
 ```
 Rebuild the bundle: `tt-model package --container models/autoports/qwen_qwen3_5_122b_a10b/tt-model.yaml --out <dir outside the tree>`
 (the build takes ~1 h on this host; shipped files must be world-readable; see `doc/tti_release/RUN_NOTES.md` "container bundle").
@@ -102,7 +103,7 @@ TT config's `trace_region_size`), `QWEN35_PROGRAM_GUARD` (assert no program comp
   end in verbatim two-line repetition; the bf16 HF reference on CPU shows the same dithering (`doc/tti_release/RUN_NOTES.md`
   run 7). Answers that do finish score at the published level (94.35 % on the non-empty IFEval rows). The card's GENERAL
   thinking preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) removes the loops: in RUN_NOTES run 8a all
-  16 probe prompts finish with no repetition. The bundle serves thinking OFF by default because a plain request gets the
+  16 probe prompts finish with no repetition. UPDATE 2026-10-02 (owner decision): the bundle serves thinking ON by default from run 10 (`--default-chat-template-kwargs '{"enable_thinking": true}'`); clients turn it off per request with `{"enable_thinking": false}`, which is the configuration every gate below was measured in. Until run 9 the bundle served thinking OFF by default because a plain request gets the
   model's `generation_config.json` decoding (temperature 0.6, no presence penalty), which is the looping one; clients
   enabling thinking must pass the general preset and a budget of thousands of tokens.
   Whether the port's precision policy changes the loop frequency was NOT measured: the alternative-policy servers (stage-7

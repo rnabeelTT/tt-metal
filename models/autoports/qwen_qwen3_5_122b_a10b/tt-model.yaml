@@ -79,19 +79,55 @@ serve:
     # the parameter-conformance suite's seeded-reproducibility / greedy-consistency tests across batch compositions
     # failed (12 / 73, bundle run 8). Off keeps 73 / 73; turn on for throughput-first deployments.
     QWEN35_BATCHED_PREFILL: "0"
-  # Thinking OFF by default: the configuration every release gate ran on (TTI release, 22 / 22 conformance tests, full-set
-  # evals). The model's own default (thinking on) loops on constraint-heavy prompts under greedy / low-temperature decoding
-  # (reproduced by the bf16 HF reference; doc/tti_release/RUN_NOTES.md run 7) and returns an empty `content` when the budget
-  # ends inside the think block. Clients opt in per request with "chat_template_kwargs": {"enable_thinking": true}.
-  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": false}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
+  # Thinking ON by default (owner decision 2026-10-02; the model's own default): a plain chat request reasons first and
+  # answers in `content`; the reasoning arrives in the message's `reasoning` field (vLLM 0.26; `reasoning_content` in
+  # older clients). Clients turn it off per request with "chat_template_kwargs": {"enable_thinking": false}. Caveats
+  # measured on this port (doc/tti_release/thinking_default_test, RUN_NOTES run 7): in thinking mode the model
+  # deliberates at length (give it thousands of tokens of budget; `content` is empty when the budget ends inside the
+  # think block) and can repeat itself on constraint-heavy prompts under greedy decoding (also with the bf16 reference
+  # weights) - the checkpoint's generation_config (temperature 0.6, top_p 0.95, top_k 20) applies when a request sends no
+  # sampling parameters. Every release gate (TTI release, 73 / 73 and 22 / 22 conformance) ran with thinking OFF, i.e.
+  # the per-request {"enable_thinking": false} configuration.
+  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
-serve_profiles:  # one image, the two 4-die Blackhole targets; both are the (1,4) mesh
+# One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
+# `tt-model serve <bundle> --profile <name>`. Numbers: doc/perf_pass/deployed_sweep.md and doc/HANDOFF.md §1.
+serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies), 32 concurrent sequences, 262144 context.
+    description: >
+      Interactive default on two p300 boards (4 dies): 32 sequences, 262144 context, text + images, MTP speculative
+      decoding at one user (about 50 tok/s), thinking on. First token 0.32 s at 1 user, 6.3 s for a 32-request burst.
     hardware: p300x2
     mesh_device: P300x2
+  - name: p300x2-burst
+    description: >
+      Many short prompts arriving together (chat front-ends, batch jobs): batched short-prompt prefill ON - first token
+      for a 32-request burst 3.8 s instead of 6.3 s (8 users 1.27 s instead of 1.83 s), decode unchanged. Trade-off:
+      a request's first token depends slightly on what arrived with it (seeded reproducibility and greedy consistency
+      across batch compositions are not guaranteed; 12 / 73 conformance tests fail in that mode).
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_BATCHED_PREFILL: "1"}
+  - name: p300x2-longctx
+    description: >
+      Long prompts mixed with short ones: chunked prefill ON (2048-token scheduler chunks, prefill steps shared between
+      prompts so a short prompt no longer waits for a 100K one to finish) with MTP off (the plugin cannot chunk a
+      multi-token-per-step model). Single-user decode about 30 tok/s instead of 50; running users still pause during
+      prefill steps (the plugin never mixes prefill and decode in one step).
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+  - name: p300x2-text
+    description: >
+      Text only, largest KV pool: the vision tower is not loaded (28472 KV blocks of 64 tokens instead of 22725, i.e.
+      1.8 M pooled tokens for the 32 slots) and image requests are rejected at the front end. Otherwise the default.
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_VISION: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p150x4
-    description: Four p150 boards, 32 concurrent sequences, 262144 context (same (1,4) mesh; untested on this host).
+    description: Four p150 boards, the interactive default on the same (1,4) mesh (untested on this host).
     hardware: p150x4
     mesh_device: P150x4
 default_profile: p300x2
@@ -109,11 +145,16 @@ card:
   quickstart: |
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
-    `Qwen/Qwen3.5-122B-A10B`. Thinking is OFF by default in this bundle (the validated release configuration); turn it on
-    per request with `"chat_template_kwargs": {"enable_thinking": true}` — the reasoning then arrives in the message's
-    `reasoning` field (vLLM 0.26; older clients know it as `reasoning_content`) and needs a large `max_tokens`
-    (thousands): when the budget ends inside the think block, `content` is empty. In thinking mode the model tends to
-    deliberate at length and can repeat itself on constraint-heavy prompts (also with the bf16 reference weights); use
-    the model card's general thinking preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) rather than
-    greedy decoding there.
-    Tool calls use the `qwen3_xml` parser.
+    `Qwen/Qwen3.5-122B-A10B`. Thinking is ON by default: the reasoning arrives in the message's `reasoning` field (vLLM
+    0.26; older clients know it as `reasoning_content`) and the answer in `content`. Give thinking requests a large
+    `max_tokens` (thousands): when the budget ends inside the think block, `content` is empty. Turn thinking off per
+    request with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers (the configuration the
+    release gates and the published latency numbers were measured in). Without sampling parameters a request uses the
+    checkpoint's defaults (temperature 0.6, top_p 0.95, top_k 20); for thinking on constraint-heavy prompts the model
+    card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
+    Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile <name>`: `p300x2` (interactive default),
+    `p300x2-burst` (many short prompts at once: first token 1.7x sooner for bursts), `p300x2-longctx` (long prompts
+    mixed with short ones: chunked prefill, MTP off), `p300x2-text` (text only, 25 % larger KV pool), `p150x4`.
