@@ -1236,3 +1236,17 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   MTP k=3 adaptive, batched short-prompt prefill on, vision on with the 4 MP cap, expert-sorted decode MoE from 16
   rows, thinking off. Package + fresh-device verification (bundle smoke, large images, readiness sampling stage
   against the bundle server) running.
+- 01:34 (10-02) BUNDLE RUN 8 VERIFIED EXCEPT CONFORMANCE (packaged from 1d90836a5b4, batched prefill ON; fresh device,
+  `logs/11/serve-bundle-run8-chain.log`): healthy in 12 min; chat / tool call / tt-model curl OK; 2381-token prompt;
+  32-request burst 3200 tokens in 14.2 s = 225 tok/s (run 6: 188); 131072-token prompt 44.9 s; 194119-token book
+  74.0 s; 448 px image == HF reference; 1080p 2.0 s / 4032x3024 3.2 s / two images 2.8 s (the served image fix,
+  verified on the bundle). Readiness SAMPLING stage against the bundle server: 61 passed, 12 FAILED
+  (`logs/11/bundle8-sampling_tests.saved.log`): seeded reproducibility across batches / uniform seed / same seeds
+  across batches, greedy consistency across positions and runs, mixed-param batch isolation, mixed-batch penalties,
+  bad_words. Cause: a batched admission's first token comes from the batched pass (GDN batched form, PCC 0.9995 vs the
+  single path -> near-tie flips: "1.3: The" vs "1.3.2") sampled from row i of the group's logits (a different RNG
+  row than the single path's row 0), so the same request yields different tokens depending on what arrived with it.
+  DECISION: batched short-prompt prefill back to OPT-IN (`QWEN35_BATCHED_PREFILL=1`; yaml "0", adapter default off;
+  a063e347809) - conformance (73 / 73) outranks the TTFT win for the shipped default. Future scope: make the first-token
+  numerics admission-independent (same kernels for single and batched, row-0 RNG semantics via a row select) and add
+  the MTP head rows for batched admissions, then flip the default. Bundle run 9 (opt-in off) packaging + verifying.
