@@ -1228,3 +1228,11 @@ every batch size including 1; first fix the width-1 non-determinism so one user 
   24.0 ms (41.7 tok/s; 2.9-3.4 accepted per 88-92 ms pass), k=3 (shipped) 19.6-20.6 ms (48-51 tok/s). Timed requests:
   prose k=2 28.5 / k=3 26.4 / k=4 20.8 tok/s incl. TTFT; code k=2 39.3 / k=3 48.2 / k=4 46.7. DECISION: k = 3 stays
   (the best of the three at one user on both prompt kinds and the benchmark).
+- 00:55 (10-02) MULTI-USER MTP A/B, run 3 (`logs/13/serve-mtpmulti-{sorted,pairs}.log`; QWEN35_MTP_ADAPTIVE=0, 4 slots,
+  expert-sorted vs pairs rows, readiness streaming benchmark c = 1 / 2 / 4): TPOT c=1 48.5 ms, c=2 46.7 ms, c=4 58.7 ms
+  (both rows paths identical within noise; 6.2-6.6 accepted tokens per 152-ms 4-user pass). Against the shipped
+  adaptive mode (c=1 19.6-20.6 ms MTP step; c=2 37 ms, c=4 44.5 ms plain decode) the batched multi-user step loses at
+  every concurrency. DECISION: adaptive stays (`QWEN35_MTP_ADAPTIVE=1`, the default). Settings final for bundle run 8:
+  MTP k=3 adaptive, batched short-prompt prefill on, vision on with the 4 MP cap, expert-sorted decode MoE from 16
+  rows, thinking off. Package + fresh-device verification (bundle smoke, large images, readiness sampling stage
+  against the bundle server) running.

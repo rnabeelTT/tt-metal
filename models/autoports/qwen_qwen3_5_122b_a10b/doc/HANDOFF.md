@@ -234,7 +234,7 @@ evidence gathered so far; none of it blocks serving.
 | Width-1 plain decode | 29.9 ms per token, ~90 small ops per layer; MTP hides most of it | router chain fusion (~5 ms), then a fused GDN decode kernel |
 | Long-context decode at high occupancy | 32 users x 32K: 425 ms per token (sweep pass 1) | Tracy at that point first (paged-attention reads vs prefill interleaving) |
 | MTP draft length | served sweep 2026-10-02 at one user: k=2 23.9 ms, k=3 19.6-20.6 ms, k=4 24.0 ms TPOT (`doc/perf_pass/work_log.md` 00:26) | k = 3 stays (`QWEN35_MTP=3`) |
-| Multi-user MTP | batched MTP at 2-4 users measured slower than plain decode before the cheaper 16-32-row MoE; re-measurement script kept (`~/qwen35-122b-bringup/scripts/19-mtp-multi-ab.full.sh`) | run it; adopt only if TPOT at 2-4 users beats 37 / 44 ms |
+| Multi-user MTP | measured 2026-10-02 (4 slots, `QWEN35_MTP_ADAPTIVE=0`): TPOT c=1 48.5 / c=2 46.7 / c=4 58.7 ms vs adaptive 19.6 / 37 / 44.5 ms - loses at every concurrency (`doc/perf_pass/work_log.md` 00:55) | adaptive stays; revisit only with a cheaper multi-row verify pass |
 | Plugin asks (not in this tree) | chunked prefill is disabled for any model emitting more than one token per step; no prefill / decode alternation; prefix caching off | vllm-tt-plugin changes; the GDN carried-state primitive (`_pending_prefill`) is ready for prefix-boundary snapshots |
 
 ## 7. Where things are
