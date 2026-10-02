@@ -73,9 +73,12 @@ serve:
     # is 16 MP). The tower's programs are keyed by the padded patch count; every bucket up to this cap is warmed at
     # start-up, so no image request compiles a program after the traces are parked (2026-10-01 served image failure).
     QWEN35_VISION_MAX_PIXELS: "4194304"
-    # Batched short-prompt prefill ON: final text prompts <= 512 tokens that arrive together are prefilled up to four
-    # per pass (served A/B 2026-10-02: TTFT at 32 users 6.3 -> 3.8 s, at 8 users 1.83 -> 1.27 s, decode unchanged).
-    QWEN35_BATCHED_PREFILL: "1"
+    # Batched short-prompt prefill: OPT-IN ("1"). Final text prompts <= 512 tokens that arrive together are prefilled
+    # up to four per pass (served A/B 2026-10-02: TTFT at 32 users 6.3 -> 3.8 s, at 8 users 1.83 -> 1.27 s, decode
+    # unchanged) but the first-token numerics then differ from a single admission (batched GDN form, PCC 0.9995), and
+    # the parameter-conformance suite's seeded-reproducibility / greedy-consistency tests across batch compositions
+    # failed (12 / 73, bundle run 8). Off keeps 73 / 73; turn on for throughput-first deployments.
+    QWEN35_BATCHED_PREFILL: "0"
   # Thinking OFF by default: the configuration every release gate ran on (TTI release, 22 / 22 conformance tests, full-set
   # evals). The model's own default (thinking on) loops on constraint-heavy prompts under greedy / low-temperature decoding
   # (reproduced by the bf16 HF reference; doc/tti_release/RUN_NOTES.md run 7) and returns an empty `content` when the budget
