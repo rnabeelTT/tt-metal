@@ -126,10 +126,29 @@ serve_profiles:
     mesh_device: P300x2
     env: {QWEN35_VISION: "0"}
     args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+  # The same four configurations on four p150 boards (the identical (1,4) mesh; kernels compile at launch). Untested on
+  # this host (p300x2 only); the p300x2 numbers are the expectation.
   - name: p150x4
-    description: Four p150 boards, the interactive default on the same (1,4) mesh (untested on this host).
+    description: Four p150 boards, the interactive default (thinking on, MTP at one user, text + images).
     hardware: p150x4
     mesh_device: P150x4
+  - name: p150x4-burst
+    description: Four p150 boards, batched short-prompt prefill ON (many short prompts arriving together); see p300x2-burst.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_BATCHED_PREFILL: "1"}
+  - name: p150x4-longctx
+    description: Four p150 boards, chunked prefill ON with MTP off (long prompts mixed with short ones); see p300x2-longctx.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+  - name: p150x4-text
+    description: Four p150 boards, text only with the largest KV pool (no vision tower); see p300x2-text.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_VISION: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
 default_profile: p300x2
 
 verify:
@@ -154,7 +173,18 @@ card:
     card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
     Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
 
-    ### Profiles
-    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile <name>`: `p300x2` (interactive default),
-    `p300x2-burst` (many short prompts at once: first token 1.7x sooner for bursts), `p300x2-longctx` (long prompts
-    mixed with short ones: chunked prefill, MTP off), `p300x2-text` (text only, 25 % larger KV pool), `p150x4`.
+    ### Profiles - which one for which use case
+    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile <name>` (p300x2 names below; the same four exist
+    as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
+    - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
+      Speculative decoding gives a single user about 50 tok/s; images and tool calls work; thinking on.
+    - `p300x2-burst` - many short prompts arriving together (chat front-ends with dozens of users, batch classification,
+      extraction jobs): up to four prompts are prefilled per pass, so a 32-request burst gets its first token in 3.8 s
+      instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
+      of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
+    - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
+      ones: prefill runs in 2048-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
+      upload. Speculative decoding is off in this profile (about 30 tok/s for a lone user), and running users still pause
+      while prefill chunks run.
+    - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled
+      tokens for 32 users) for longer conversations at high occupancy; image requests are rejected at the front end.
