@@ -24,6 +24,17 @@ The p150 profiles are untested on hardware (built for the identical meshes). The
 
 For reference, the shipped Qwen3.5-122B-A10B autoport measures 30.50 ms/step with the same tool on the same 4-die box.
 
+Served (vLLM, 32 slots, 262144 context, 128-token prompts; per-token time at 1 / 8 / 16 / 32 users):
+
+| mesh | 1 user | 8 users | 16 users | 32 users (aggregate) |
+|---|---|---|---|---|
+| 4 dies | 23.2 ms | 47.4 ms | 72.0 ms | 109.4 ms (209 tok/s) |
+| 2 dies | 25.3 ms | 57.0 ms | 89.3 ms | 131.0 ms (179 tok/s) |
+| 122B, 4 dies | 29.9 ms plain / 20.6 ms MTP | 63.9 ms | 95.3 ms | 110.2 ms (201 tok/s) |
+
+The decode MoE takes the gather path at one row, the pairs path at 2 to 16 rows and the expert-sorted path at 32 rows
+(`QWEN35_MOE_PAIRS_MIN_TOKENS`, `QWEN35_DECODE_SORTED_MIN_ROWS`), chosen from a served A/B.
+
 ## Accuracy (teacher forcing vs the HF bf16 reference, 100 tokens)
 
 | mesh | coding chat prompt top1 / top5 | book p2048 top1 / top5 |
