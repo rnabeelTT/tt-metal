@@ -73,7 +73,7 @@ class OptimizationConfig:
     # 1.906 -> 1.282 ms; 48-layer traced step w4 50.8 -> 46.6 ms, w8 79.8 -> 67.8 ms; bit-reproducible at widths 2-8.
     # perf pass turn 2 adopted 8; 2026-10-01 traced per-layer probe at width 16: pairs 1.843 / 2.078 ms (attn / GDN layer
     # step) vs masked 2.212 / 2.288 -> 16; at width 32 the 256 pair groups lose (3.17 / 3.59 vs 2.60 / 2.73): masked stays
-    pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "16"))
+    pairs_max_tokens: int = int(os.environ.get("QWEN35_MOE_PAIRS_MAX_TOKENS", "32"))  # Coder-Next: pairs to 32 rows
     # Qwen3-Coder-Next (512 experts, top-10, Nl = 128 per die): below this many decode rows the 64-core gather path beats
     # the pairs path's one core per (token, expert) group (width 1: 25.9 vs 27.4 ms/step, 48 layers)
     pairs_min_tokens: int = int(
@@ -415,7 +415,10 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             # QWEN35_MTP_MOE_ROWS (pairs), not by the row count (served c=1 TPOT 18.6 -> 26.5 ms when this rule took
             # the padded block to the sorted path, 2026-10-01 21:14)
             return False
-        n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "16") or 0)
+        # Qwen3-Coder-Next (512 experts, top-10): the pairs path beats the expert-sorted path at every decode width up to
+        # 32 rows (per-layer traced step, 4 dies: 16 rows 2.03 -> 1.39 ms, 32 rows 2.43 -> 2.22 ms; 2 dies 2.54 -> 1.84 /
+        # 3.19 -> 3.07 ms), so the sorted decode path is off by default here (16 on the 122B port).
+        n = int(os.environ.get("QWEN35_DECODE_SORTED_MIN_ROWS", "0") or 0)
         return 0 < n <= T and self.opt.prefill_mode == "sorted"
 
     def _routed_gather(self, x4, scores, ids, T):
