@@ -1,0 +1,180 @@
+{
+ "tag": "hubv2_122b_p300x2",
+ "summary": {
+  "served_default": {
+   "runs": 4,
+   "garble_per_1k_mean": 3.09,
+   "garble_per_1k_max": 7.14,
+   "nonword_total": 7
+  },
+  "greedy": {
+   "runs": 2,
+   "garble_per_1k_mean": 6.61,
+   "garble_per_1k_max": 11.65,
+   "nonword_total": 5
+  }
+ },
+ "rows": [
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_large",
+   "rep": 0,
+   "prompt_tokens": 42232,
+   "completion_tokens": 889,
+   "elapsed_s": 42.1,
+   "n_words": 587,
+   "nonword": 1,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 1.7,
+   "examples": {
+    "nonword": [
+     "Tenstorrent's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements a highly optimized, multi-device inference engine for the Qwen3.5-MoE architecture, specifically tailored for Tenstorrent's Blackhole hardware. The implementation is split across three primary modules: `tt/moe.py`, `tt/weights.py`, and `tt/model.py`. Together, they form a sophisticated pipeline that manages sparse expert routing, memory-efficient weight streaming, and complex multi-chip coordination to maximize throughput while adhering to strict hardware constraints.\n\nThe `tt/moe.py` file is the computational heart of the model's feed-forward network. It implements the logic for the Mixture of Experts (MoE) layer, which consists of 256 experts where the top-8 are selected for each token. The code distinguishes between two primary execution paths: \"gather\" and \"masked.\" The gather path is optimized for decode time (single or few tokens), where the router selects specific experts, and the data is explicitly gathered into a compact buffer before processing. This avoids the overhead of processing unused experts. Conversely, the masked path is designed for prefill (batched tokens), where tokens are grouped into chunks, and a union mask is created to determine which experts are active across the entire chunk. This approach allows the system to leverage `ttnn.sparse_matmul` efficiently, ensuring that only the necessary expert computations are performed. The file also handles the intricate weight packing strategy, fusing the \"gate\" and \"up\" projections into a single tensor to enable the use of the hardware-accelerated `ttnn.swiglu` operation, which computes `gate * silu(up)`.\n\nNumerical precision is managed through a flexible policy system defined in `MoEPrecision` and applied within `tt/model.py`. The architecture supports mixed-precision computation, utilizing `bfloat16` for general activations and routing, while employing `bfloat8_b` (a lower-precision format) for the heavy matrix multiplications in the expert layers to save memory bandwidth and increase throughput. The precision policy can be overridden on a per-layer basis, allowing engineers to tune specific layers for stability or performance. This configuration is applied during the model construction phase in `create_model`, where a `precision_policy` is loaded and verified against the actual tensor configurations to ensure no mismatches occur. This rigorous checking is crucial because the MoE architecture is sensitive to numerical drift, especially when routing decisions depend on softmax probabilities.\n\nThe routing mechanism at decode time is a critical component handled in `tt/moe.py`. The router first computes logits for all 256 experts. To optimize performance, the code implements a \"top-k first\" strategy (controlled by `ROUTER_TOPK_FIRST`), which performs a top-k operation on the raw logits before applying the softmax. This reduces the computational complexity from a full softmax over 256 experts to a softmax only over the selected 8 experts. The resulting probabilities are then renormalized to sum to one. The routing logic is further optimized by using specialized kernels like `ttnn.topk_large_indices` for high-dimensional inputs, ensuring that the routing overhead remains minimal even as the number of experts scales.\n\nSeveral design decisions in this codebase reflect a deliberate focus on hardware-specific optimization and system stability. The use of \"streaming\" weights in `tt/weights.py` is a notable choice; rather than loading the entire 160GB model into memory, weights are read on-demand from disk using memory-mapped files. This allows the system to handle massive models that exceed system RAM. Additionally, the implementation of \"lockstep sampling\" in `tt/model.py` addresses a critical reproducibility issue in multi-device setups. By ensuring that every device in the mesh uses identical seeds and synchronizes token selection, the system prevents the \"drift\" that can occur when parallel hardware units generate slightly different random numbers, which would otherwise lead to inconsistent outputs. The separation of the MoE logic into a distinct class (`Qwen35MoE`) and the use of environment variables for configuration knobs (like `QWEN35_ROUTER_TOPK_FIRST` or `QWEN35_CHUNKED_PREFILL`) provide engineers with fine-grained control over the trade-offs between speed, memory usage, and accuracy, making the system adaptable to different hardware configurations and workloads."
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_large",
+   "rep": 1,
+   "prompt_tokens": 42232,
+   "completion_tokens": 900,
+   "elapsed_s": 40.5,
+   "n_words": 560,
+   "nonword": 4,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 7.14,
+   "examples": {
+    "nonword": [
+     "decoupling",
+     "foundational",
+     "vectorized",
+     "orchestrator"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements a highly optimized, hardware-aware inference engine for the Qwen3.5-MoE architecture, specifically tailored for the Tenstorrent Blackhole processor architecture. The system is designed to handle the extreme parallelism and memory constraints of large-scale Mixture-of-Experts (MoE) models by decoupling weight loading, precision management, and execution logic into three distinct but tightly integrated modules: `tt/moe.py`, `tt/weights.py`, and `tt/model.py`.\n\n**File Responsibilities and Architecture**\n\nThe `tt/weights.py` module serves as the foundational data access layer. It implements a `StreamingStateDict` class that avoids loading the entire 160 GB checkpoint into host memory. Instead, it uses `safetensors` mmap-backed reading to lazily load specific tensors only when requested. Crucially, it handles the complex logic of \"fusing\" the raw checkpoint data. While the source checkpoint stores expert weights individually (e.g., `experts.0.gate_proj`, `experts.1.gate_proj`), the inference engine requires them packed into contiguous blocks (e.g., `[E, 2I, H]`) to enable efficient vectorized operations. This module also manages the splitting of fused attention projections (`in_proj_qkvz`) into their constituent Q, K, V, and Z components, ensuring the data layout matches the expectations of the downstream C++/TTNN kernels.\n\nThe `tt/moe.py` file contains the core computational logic for the MoE block, specifically the routing and expert execution. It defines the `Qwen35MoE` class, which orchestrates the selection of experts based on input tokens. It implements two distinct execution paths: a \"gather\" path for small batch sizes (typically single-token decode steps) where specific experts are fetched directly, and a \"masked\" path for larger batches (prefill or multi-token decode) where a sparsity mask is constructed to compute the union of all active experts in a batch. This file also defines the `sparse_matmul_program_config`, which configures the low-level Tenstorrent kernel parameters, such as core mapping and block sizes, to maximize throughput on the specific hardware grid.\n\nThe `tt/model.py` file acts as the high-level orchestrator, integrating the MoE logic into the full transformer model (`Qwen35MoeModel`). It handles the lifecycle of the model, including the initialization of the mesh device, the management of the KV cache, and the coordination of the prefill and decode phases. It implements a sophisticated \"trace\" system where the execution graph is captured once and replayed for subsequent steps to avoid compilation overhead. It also manages the \"bucketing\" strategy, where inputs are padded to specific sizes to match pre-compiled execution traces, and handles the complex logic of MTP (Multi-Token Prediction) and vision integration, though these are currently disabled for the text-only configuration.\n\n**Numerical Precision Configuration**\n\nPrecision is managed through a policy-driven approach defined in `MoEPrecision` and applied via the `precision_policy` loaded from a JSON configuration file. This allows the system to dynamically switch between `bfloat16` and `bfloat8` (bfp8) based on empirical performance and stability testing. For instance, the router weights and the final output of the expert networks might use `bfloat16` for stability, while the intermediate computations within the experts (the `gate_up` and `down` projections) can be performed in `bfloat8` to save memory bandwidth and increase throughput. The `MoEPrecision.from_args` method allows for layer-specific overrides, meaning the first or last layer of the network can be forced to a different precision (e.g., bfp8) to handle edge cases where lower precision might cause numerical instability. This granular control is essential for balancing the trade-off between inference speed and model accuracy on the Blackhole architecture.\n\n**Mixture-of-Experts Routing Mechanism**\n\nThe routing logic in `tt/moe.py` is the heart of the MoE efficiency. The process begins with a linear projection (`router_w`) that calculates logits for all 256 experts for each token. To optimize performance, the code implements a \"top-k first\" strategy (`ROUTER_TOPK_FIRST`), which computes the top-k logits directly and then applies a local"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 20887,
+   "completion_tokens": 900,
+   "elapsed_s": 33.5,
+   "n_words": 622,
+   "nonword": 0,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 0.0,
+   "examples": {
+    "nonword": [],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements a sophisticated, high-performance inference engine for the Qwen3.5-122B-A10B model, specifically optimized for the Tenstorrent Blackhole architecture. It is divided into three primary responsibilities: defining and enforcing precision policies, managing the complex data structures of Mixture-of-Experts (MoE) layers, and handling the lazy loading of massive model weights from disk. Together, these modules enable the model to run efficiently on distributed hardware by balancing computational fidelity with memory constraints.\n\nThe foundation of the system's precision management lies in `tt/precision.py`. This file acts as the central configuration authority, translating a high-level JSON policy into the specific runtime arguments required by the `ttnn` (Tenstorrent Neural Network) library. It defines a \"baseline policy\" that assigns specific data types (such as `bfloat16`, `bfloat8_b`, or `bfloat4_b`) and compute fidelities (like `HiFi2` or `LoFi`) to different components of the network. For instance, it specifies that the router weights should remain in `bfloat16` with high-fidelity computation, while the routed experts (the core of the MoE) can utilize lower-precision formats like `bfloat4` or `bfloat8` to save memory and increase throughput. Crucially, the system includes a validation mechanism (`apply_policy` and `check_effective`) that ensures the hardware configuration matches the requested policy exactly. If a user requests a precision that the runtime cannot physically construct\u2014such as a specific activation dtype that the kernel doesn't support\u2014the system raises an error immediately. This \"fail-fast\" approach prevents silent numerical degradation. The code also distinguishes between global defaults and layer-specific exceptions, allowing engineers to fine-tune precision for specific layers (e.g., keeping the first or last layer in higher precision) without rewriting the entire configuration.\n\nThe logic for the Mixture-of-Experts layer itself is contained in `tt/moe.py`. This module implements the forward pass for a decoder layer that utilizes both routed experts and a shared expert. The architecture is designed to handle two distinct operational modes: \"decode\" (generating one token at a time) and \"prefill\" (processing a batch of tokens). In decode mode, the system optimizes for latency by using a \"gather\" path. It calculates routing scores, selects the top-k experts for each token, and uses sparse matrix multiplication to compute only the necessary expert outputs. This avoids the overhead of computing all experts. In contrast, prefill mode uses a \"masked\" path, processing tokens in chunks and using a union mask to determine which experts are active across the entire batch. A key design decision here is the separation of the router, the routed experts, and the shared expert. The router determines which experts are active, while the routed experts handle the specialized processing. The shared expert provides a baseline activation for all tokens. The code also includes several \"probe knobs\" (environment variables) that allow engineers to experiment with different memory layouts, such as sharding the router weights across DRAM or altering the tile sizes for sparse matrix operations, to squeeze out maximum performance.\n\nFinally, `tt/weights.py` addresses the challenge of managing the model's massive weight set (160 GB). It implements a `StreamingStateDict` class that provides a lazy, read-only mapping of tensor names to their data on disk. Instead of loading the entire model into memory, which would be impossible for large models, it uses `safe_open` to memory-map the safetensors files. This allows the code to access specific tensors on demand without consuming excessive RAM. The file also handles the complex reformatting required to match the internal model architecture with the external Hugging Face checkpoint format. This includes splitting fused projections (like `in_proj_qkvz`) and fusing per-expert tensors (`gate_proj`, `up_proj`, `down_proj`) into single contiguous blocks. This transformation is essential because the internal model expects a specific memory layout for efficient computation, while the checkpoints store weights in a format optimized for general storage.\n\nSeveral deliberate design decisions stand out. First, the separation of precision configuration from the model logic allows for flexible experimentation. Engineers can test different precision combinations (e.g., `bfp4` for experts, `bfp8` for shared) by simply changing the JSON"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_mid",
+   "rep": 1,
+   "prompt_tokens": 20887,
+   "completion_tokens": 900,
+   "elapsed_s": 33.1,
+   "n_words": 565,
+   "nonword": 2,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 3.54,
+   "examples": {
+    "nonword": [
+     "Tenstorrent's",
+     "reshaping"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "The provided codebase implements a sophisticated, hardware-aware pipeline for running the Qwen3.5-122B-A10B model on Tenstorrent hardware, specifically focusing on the dynamic configuration of numerical precision and the efficient execution of Mixture-of-Experts (MoE) layers. The architecture is divided into three distinct but interconnected responsibilities: policy definition and validation (`tt/precision.py`), MoE execution logic (`tt/moe.py`), and lazy weight streaming (`tt/weights.py`).\n\n**File Responsibilities and Architecture**\nThe system operates on a \"policy-driven\" paradigm. `tt/precision.py` serves as the central authority for numerical configuration. It defines a `BASELINE_POLICY` dictionary that specifies the data types (e.g., `bfloat16`, `bfloat8`, `bfloat4`) and compute fidelities (e.g., `HiFi2`, `LoFi`) for every tensor group, including attention weights, MoE experts, and the language model head. Crucially, this file provides the `apply_policy` function, which validates a user's configuration against hard constraints\u2014such as the requirement that router weights must remain `bfloat16` and that attention and linear attention fidelities must match\u2014and then injects these settings into the `MultichipConfig` object used by the runtime. It also includes an `effective_policy` function that reads the *actual* runtime state back from the model to verify that the hardware executed the intended precision, a critical step for debugging non-deterministic or performance-regressed runs.\n\n`tt/weights.py` handles the memory management challenge of a 160GB checkpoint. Instead of loading the entire model into host memory, it implements a `StreamingStateDict`. This class acts as a lazy proxy, using `safetensors` to mmap files from disk. It maps the standard Hugging Face key naming conventions to an internal schema optimized for Tenstorrent's specific tensor layouts. It performs on-the-fly transformations, such as splitting fused QKV projections or stacking individual expert weights into contiguous tensors (`gate_up_proj`, `down_proj`) required by the MoE kernel. This allows the system to process massive models on hardware with limited host RAM by only materializing the specific layer or tensor needed at any given moment.\n\n`tt/moe.py` contains the core execution logic for the Mixture-of-Experts block. It implements the forward pass for both the router (which selects experts) and the experts themselves. It handles two distinct execution modes: a \"gather\" mode for small batches (decode) where individual tokens are processed sequentially, and a \"masked\" mode for larger batches (prefill) where tokens are processed in chunks. The class manages the complex tensor reshaping, sparse matrix multiplications, and the specific kernel configurations required to run these operations efficiently on the Tenstorrent mesh.\n\n**Numerical Precision Configuration**\nPrecision is not a global setting but a granular policy applied per tensor group. The `precision.py` module defines a hierarchy where a baseline policy can be overridden by layer-specific exceptions. For instance, while the default routed experts might use `bfp4` weights with `LoFi` (low fidelity) compute, a specific layer could be configured to use `bfp8` with `HiFi2` fidelity. This flexibility is vital for balancing the trade-off between memory bandwidth (lower precision) and numerical stability (higher precision). The system distinguishes between weight dtypes (stored in DRAM) and activation/compute dtypes (processed in L1). The `apply_policy` function ensures that these configurations are legally constructible by the runtime, preventing errors like attempting to use `fp32` activations where the hardware only supports `bf16`. The `effective_policy` function then acts as a verification step, ensuring the hardware actually utilized the requested precision, which is essential for proving that a performance optimization (like switching to `bfp4`) was successfully applied.\n\n**MoE Routing at Decode Time**\nThe routing mechanism in `moe.py` is highly optimized for the decode phase, where batch sizes are small (often 1 token). The `forward` method first calculates routing scores by multiplying the input by the router weights. It then employs a \"top-k\" operation to select the most relevant experts. A key optimization here is the `ROUTER_TOPK_FIRST` flag"
+  },
+  {
+   "setting": "greedy",
+   "sampling": {
+    "temperature": 0.0
+   },
+   "prompt": "ctx_large",
+   "rep": 0,
+   "prompt_tokens": 42232,
+   "completion_tokens": 900,
+   "elapsed_s": 39.2,
+   "n_words": 637,
+   "nonword": 1,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 1.57,
+   "examples": {
+    "nonword": [
+     "linearity"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements a highly optimized, hardware-specific adaptation of the Qwen3.5-MoE (Mixture of Experts) architecture for the Tenstorrent Blackhole AI accelerator. The implementation is split across three primary modules that handle model definition, weight management, and the serving interface, all designed to maximize throughput on a multi-device mesh while managing the extreme sparsity of the MoE layer.\n\n**File Responsibilities and Architecture**\nThe `tt/moe.py` file defines the core computational logic for the MoE feed-forward block. It encapsulates the logic for routing tokens to specific experts and performing the sparse matrix multiplications required for the \"routed\" experts, alongside a \"shared\" expert that processes all tokens. This file is the engine of the model's non-linearity, handling the complex logic of selecting the top-k experts per token and fusing the gate and up-projection weights to utilize the hardware's `swiglu` instruction.\n\nThe `tt/weights.py` file acts as a streaming state dictionary manager. Because the model checkpoint is massive (160 GB) and split across 40 shards, it is impossible to load the entire state dictionary into host memory. This module implements a lazy-loading mechanism that reads tensors directly from disk via memory-mapped files (`safe_open`) only when a specific layer is needed. It also handles the complex transformation of weights from the standard Hugging Face format into the internal format required by the Tenstorrent runtime, such as fusing per-expert weights into contiguous blocks and splitting fused attention projections.\n\nThe `tt/model.py` file serves as the high-level orchestration layer. It integrates the MoE block and weight manager into a full transformer model class (`Qwen35MoeModel`). It manages the lifecycle of the model, including the initialization of the mesh device, the setup of the sampling generator, and the coordination of prefill and decode phases. It also implements the logic for \"trace capture,\" where the execution path is recorded to create optimized, compiled kernels for subsequent inference steps, a critical step for performance on this hardware.\n\n**Numerical Precision Configuration**\nPrecision is managed through a sophisticated policy system defined in `MoEPrecision` within `moe.py`. The system distinguishes between different parts of the network to balance speed and accuracy. The router (which decides which experts to use) operates in `bfloat16` with high fidelity (`HiFi4`) to ensure accurate selection. In contrast, the heavy compute of the expert feed-forward networks (both the routed and shared experts) utilizes `bfloat8_b` (a lower-precision format) with `HiFi2` fidelity. This mixed-precision approach allows the model to run significantly faster on the Blackhole hardware, which is optimized for lower-precision matrix multiplications, while maintaining the stability of the routing decisions. This policy can be overridden per layer via command-line arguments or environment variables, allowing engineers to experiment with precision in specific layers without recompiling the entire model.\n\n**Mixture-of-Experts Routing at Decode Time**\nThe routing mechanism is the most complex part of the inference process. When a token arrives, the router computes logits for all 256 experts. The code implements a \"top-k first\" optimization: instead of computing a full softmax over all 256 experts and then selecting the top 8, it uses a specialized `topk` operation to find the highest scoring experts first, then normalizes only those scores. This reduces computational overhead significantly.\n\nAt decode time, the system dynamically chooses between two execution paths based on the number of tokens being processed simultaneously (`T`):\n1.  **Gather Path (Small Batch):** If the number of tokens is small (typically `T <= 4`), the system uses a \"gather\" mode. It explicitly collects the weights for the specific experts selected by each token and runs a dense matrix multiplication for each. This avoids the overhead of managing a large sparse mask for a small number of tokens.\n2.  **Masked Path (Large Batch):** For larger batches, the system switches to a \"masked\" mode. It groups tokens into chunks and computes a union of all experts selected by any token in that chunk. It then creates a binary mask indicating which experts are active and runs a single sparse matrix multiplication. This is more efficient for larger batches where the overhead of individual"
+  },
+  {
+   "setting": "greedy",
+   "sampling": {
+    "temperature": 0.0
+   },
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 20887,
+   "completion_tokens": 900,
+   "elapsed_s": 30.4,
+   "n_words": 601,
+   "nonword": 4,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 11.65,
+   "examples": {
+    "nonword": [
+     "Tenstorrent's",
+     "foundational",
+     "datatypes",
+     "runtime's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "and"
+    ]
+   },
+   "text": "This codebase implements the runtime infrastructure for a highly optimized, sparse Mixture-of-Experts (MoE) transformer model, specifically a port of the Qwen3.5-122B architecture to Tenstorrent's hardware. The system is designed to handle massive model sizes by separating the concerns of weight management, precision policy enforcement, and the complex execution logic of the MoE block.\n\nThe `tt/weights.py` file serves as the foundational data access layer. It implements a `StreamingStateDict` class that acts as a lazy, read-only mapping from internal tensor keys to the actual weight data stored in Hugging Face `safetensors` shards. Because the full model checkpoint is too large (160 GB) to fit in host memory, this class never materializes the entire state dictionary. Instead, it uses memory-mapped I/O to load specific tensors on demand. Crucially, it handles the structural translation between the Hugging Face checkpoint format and the internal format required by the Tenstorrent runtime. This includes splitting fused projection matrices (like the GDN projections `in_proj_qkvz` and `in_proj_ba`) and, most importantly, fusing the per-expert weights. In the raw checkpoint, experts are stored individually; `weights.py` aggregates these into contiguous blocks (`gate_up_proj` and `down_proj`) to facilitate efficient memory access patterns during the sparse matrix multiplications. It also provides utilities for Multi-Token Prediction (MTP) and vision tower weights, ensuring the runtime can access any part of the model without loading the whole thing.\n\nThe `tt/precision.py` file defines the \"precision policy,\" which dictates the numerical datatype and compute fidelity for every operation in the model. This is critical for balancing performance and accuracy on the target hardware. The policy is defined in JSON files (e.g., `selected_precision_config.json`) and can be overridden via environment variables. The `apply_policy` function validates these settings against a `MultichipConfig`, ensuring that the requested datatypes (like `bfloat16`, `bfloat8`, or `bfloat4`) and compute fidelities (like `LoFi`, `HiFi2`, or `HiFi4`) are compatible with the runtime's capabilities. For instance, it enforces that attention and linear attention fidelities must match because they share a hardware configuration knob. It also handles layer-specific exceptions, allowing the user to override the precision for specific layers (e.g., using higher precision for the first or last layer) while maintaining a global default. The `effective_policy` and `check_effective` functions provide a verification loop, reading back the actual configuration from the built model to prove that the requested policy was successfully applied, a vital step for debugging and reproducibility in large-scale sweeps.\n\nThe `tt/moe.py` file contains the core logic for the Mixture-of-Experts feed-forward block. It implements the forward pass for both the routed experts and the shared expert. The routing mechanism is highly optimized: it calculates logits for all experts, then uses a \"top-k\" operation to select the most relevant experts for each token. The code includes a performance optimization (`ROUTER_TOPK_FIRST`) that performs the top-k selection before the softmax, reducing the number of operations from four to two. The `forward` method dynamically chooses between two execution paths based on the number of tokens (`T`): a \"gather\" path for small batches (decode mode) where individual tokens are processed sequentially, and a \"masked\" path for larger batches (prefill mode) where tokens are processed in chunks to maximize parallelism. The `sparse_matmul` operations are configured with specific program configurations (`sparse_matmul_program_config`) that determine how the computation is distributed across the device cores, optimizing for memory bandwidth and compute utilization.\n\nSeveral design decisions appear deliberate and are driven by hardware constraints and performance optimization. The separation of the \"gather\" and \"masked\" paths in the MoE block is a classic trade-off: the gather path minimizes memory overhead for single-token inference (decode), while the masked path maximizes throughput for batched inference (prefill). The use of `bfloat4` for routed experts and `bfloat8` for shared experts in the baseline policy suggests a careful calibration where the most computationally expensive and sparse parts of the network (routed experts) are quantized more aggressively to save"
+  }
+ ]
+}
