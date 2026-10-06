@@ -35,37 +35,46 @@ Served (vLLM, 32 slots, 262144 context, 128-token prompts; per-token time at 1 /
 The decode MoE takes the gather path at one row, the pairs path at 2 to 16 rows and the expert-sorted path at 32 rows
 (`QWEN35_MOE_PAIRS_MIN_TOKENS`, `QWEN35_DECODE_SORTED_MIN_ROWS`), chosen from a served A/B.
 
-## Known defect (open): word corruption when sampling on device
+## Fixed defect: word corruption when sampling on device
 
-**The released bundle (Hub revision `ef463288`) is affected; the manifest in this tree now defaults
-the server to greedy (`temperature 0`), which is not.** With on-device *sampling* (any non-zero
-temperature) and more than roughly 2,000 tokens of context, served output drops the first token of
-multi-token words - about one corrupted word every thirty in a long answer, while the answer stays
-on topic:
+**Hub revisions up to `ef463288` are affected** (they served greedy by default to hide it). With
+on-device *sampling* (any non-zero temperature) a long answer showed about one wrong word in thirty
+while staying on topic:
 
     "...stored as checkpointsetensors shards..."   (safetensors)
     "...the Integrationplay between layers..."     (interplay)
 
-Measured at 22K context, 600-token answers, 4 dies (`tools/text_quality.py`; a clean reference scores
-about 9 per 1000 words):
+**Root cause.** The device sampler (`models/common/sampling`) runs `ttnn.sampling` on every die of
+the mesh; each die holds the same gathered candidate row, draws its own random number from its own
+hardware PRNG, writes its token into *its* persistent decode token input, and the host reads die 0's
+copy. The unseeded path parks the PRNGs in their free-running state (one concrete seed, then the
+MAX_UINT32 "SKIP" sentinel), which keeps the dies in lockstep only while every die advances its PRNG
+identically between draws. Inside this model's decode step they do not (with only the sampler running
+the dies stay in lockstep; the decode kernel that desynchronises them is not pinned down), so the dies
+drift apart and draw *different* tokens from the same distribution. The host then reports die
+0's token while the model continues from the other dies' tokens: the visible word is the wrong
+sibling candidate (" checkpoints" in place of " saf"), and the continuation ("etensors") is coherent
+because the model never saw the reported token. Greedy is unaffected because the argmax ignores the
+draw; host sampling is unaffected because one token is fed to every die. The Qwen3.5-122B-A10B and
+Ornith autoports run the same sampler in the same free-running state and are therefore exposed to the
+same hazard; it was measured severe here and not noticeably in the 122B, and the difference has not
+been explained, so the same fix should be applied there too.
 
-| condition | garble per 1000 words |
-|---|---|
-| on-device sampling, `temperature 1.0` (**the default**) | 66 - 102 |
-| `temperature 0.7` | 65 |
-| greedy (`temperature 0`) | 9.6 |
-| host sampling | 17 - 21 |
+Measured on p300x2 with the real model at 20K context, 400 sampled decode steps (`temperature 1.0,
+top_p 0.95, top_k 40`), reading the token buffer of every die after each step:
 
-Clean below ~2K context, intermittent around 8K, consistent by 20K.
+| | steps where a die disagrees with die 0 | garble per 1000 words |
+|---|---|---|
+| before | 196 / 400 | 86 |
+| after | 0 / 400 | 19 (two real words flagged by the scorer) |
 
-**Mitigation in force:** `serve.args` overrides the generation config to greedy. For a code and
-agentic model that is also how most callers run it, so the cost is output diversity on open-ended
-prose rather than anything on the model's primary use. A request that explicitly sets a non-zero
-temperature still takes the sampled path and still shows the corruption. Host sampling is also
-correct but is ~5x slower (8 tok/s vs 42). Root cause is not yet isolated; the full evidence trail and every eliminated hypothesis are in
-`doc/text_quality/README.md`. The Qwen3.5-122B-A10B and Ornith autoports share this sampling path and
-also ship `sample_on_device_mode: all`, so they are likely affected (less visibly on the 122B, whose
-checkpoint default is `temperature 0.6 / top_k 20`).
+**Fix** (`tt/model.py`, `_install_lockstep_sampling`): identical fresh seeds are pushed before every
+draw (the seed tensor is replicated on the mesh and `ttnn.manual_seed` runs immediately before
+`ttnn.sampling` in the sampler trace), and after the draw die 0's token row is all-gathered and
+copied into every die's token buffer, so the token fed back is the token the host reports whatever
+the dies drew. Decode step time is unchanged (23.3 ms at one user). The manifest serves the
+checkpoint's own generation config again (`temperature 1.0 / top_p 0.95 / top_k 40`). The shared
+sampler still has this hazard for any other multi-die model whose dies do unequal work.
 
 ## Limitations
 

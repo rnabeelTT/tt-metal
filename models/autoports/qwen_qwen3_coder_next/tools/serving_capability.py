@@ -142,10 +142,13 @@ def build(mesh: str, server_log: Path | None) -> dict:
         "known_defects": [
             {
                 "id": "long-context-device-sampling-word-corruption",
-                "status": "open",
-                "summary": "With on-device stochastic sampling above ~2K tokens of context, output drops "
-                "the first token of multi-token words (~1 corrupted word in 30).",
-                "unaffected": ["temperature 0 (greedy)", "host sampling"],
+                "status": "fixed",
+                "summary": "Hub revisions up to ef463288: with on-device stochastic sampling, output showed a wrong "
+                "word about once in thirty (first token of a word replaced by a sibling candidate).",
+                "root_cause": "ttnn.sampling runs on every die with a free-running hardware PRNG; the dies' "
+                "draws drifted apart, each die fed its own token back into the model while the host read die 0's.",
+                "fix": "tt/model.py _install_lockstep_sampling: identical fresh seeds pushed before every draw and "
+                "die 0's token broadcast into every die's token buffer (0 of 400 sampled steps disagree, was 196).",
                 "evidence": "models/autoports/qwen_qwen3_coder_next/doc/text_quality/README.md",
             }
         ],

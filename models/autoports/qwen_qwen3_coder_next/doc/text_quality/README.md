@@ -1,5 +1,56 @@
 # Long-context text quality
 
+## Root cause and fix (2026-10-06)
+
+**Fixed in `tt/model.py` (`_install_lockstep_sampling`).** Everything below this section is the
+investigation record as it stood before the cause was found; its hypotheses about the top-p scan,
+the multinomial draw and the LM-head tensor are superseded.
+
+The device sampler runs `ttnn.sampling` independently on every die of the mesh. Each die holds the
+same gathered candidate row, draws its own random number from its own hardware PRNG, and writes its
+token into *its own* persistent decode token input (`tt_out_tok`), which the next decode step reads
+back. The host reads die 0's copy only (`process_output_decode`). The unseeded `SeedManager` path
+pushes one concrete seed and then the MAX_UINT32 "SKIP" sentinel, which leaves every die's PRNG
+free-running; the PRNGs stay in lockstep only while every die advances its PRNG identically between
+draws. Inside this model's decode step they do not - with only the sampler running the dies stay in
+lockstep, so some decode kernel desynchronises them (not pinned down; both ports shard experts on the
+intermediate dimension, so it is not an expert-parallel difference) - and the dies draw *different*
+tokens from the same distribution.
+
+Direct measurement (`xdev_probe`: real model, 4 dies, 19.8K-token prompt, 400 sampled steps at the
+served `temperature 1.0 / top_p 0.95 / top_k 40`, token buffer of every die read after each step):
+
+    step    4 pos 19793: host=' quant'  dies: d0 ' quant' | d1 ' Q' | d2 ' Q' | d3 ' Q'
+    step   19 pos 19808: host=' Ten'    dies: d0 ' Ten'   | d1 ' the' | d2 ' the' | d3 ' the'
+    step  280 pos 20069: host='you'     dies: d0 'you'    | d1 'the' | d2 's' | d3 's'
+
+    before: 196 of 400 steps had a die disagree with die 0 (d0!=d1 132, d0!=d2 138, d0!=d3 124); garble 86/1k
+    after :   0 of 400                                                                        ; garble 19/1k
+
+So every "dropped first token" was die 0's draw being shown to the user while three dies continued
+from a sibling candidate; "with with" and "interpreterterpreter" are the same event where the sibling
+happened to overlap. This explains every constraint the investigation had collected: greedy is clean
+(the argmax ignores the draw), host sampling is clean (one token is fed to every die), a standalone
+reproduction of the sampler is clean (with nothing but the sampler running, the dies stay in lockstep
+- verified: 0 % cross-die disagreement in SKIP mode over 40 draws with an unrelated SFPU op in
+between). Why the 122B port's dies stay in step (or diverge too rarely to notice) while this model's
+do not is NOT explained; the two ports run the same sampler in the same free-running state, so the
+122B and Ornith autoports carry the same hazard and should take the same fix.
+
+The fix makes the dies agree two independent ways: the seed manager pushes fresh *identical* seeds
+before every draw instead of SKIP (`ttnn.manual_seed` runs right before `ttnn.sampling` inside the
+sampler trace; standalone 4-die test: 0 % cross-die disagreement, 88 % step-to-step variation), and
+after the draw die 0's token row is all-gathered and copied into every die's token buffer, so the
+token fed back is the token the host reports whatever the dies drew (`QWEN35_SAMPLER_TOKEN_BROADCAST=0`
+disables that half for A/B). Decode step time is unchanged (23.3 ms at one user, 20K context). The
+greedy serving override is removed; the earlier seed-state experiments in `generator_vllm.py`
+(SKIP priming / advancing, which only ever drove the manager to the free-running state) are deleted.
+
+The same hazard remains in the shared sampler for any multi-die model whose dies do unequal work
+between draws.
+
+## Investigation record (superseded)
+
 ## The symptom
 
 The bundle shipped with visible word-level corruption in long answers, while the answer

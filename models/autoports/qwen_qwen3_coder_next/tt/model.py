@@ -33,6 +33,7 @@ from models.autoports.qwen_qwen3_coder_next.tt.multichip_decoder import (
     MultichipDecoder,
 )
 from models.autoports.qwen_qwen3_coder_next.tt.optimized_decoder import Qwen35MoeOptimizedDecoderLayer
+from models.common.sampling.generator import SeedManager
 from models.demos.blackhole.qwen36.tt.generator_interface import unpack_rope
 from models.demos.blackhole.qwen36.tt.model import Qwen36Model
 from models.tt_transformers.tt.common import Mode
@@ -59,6 +60,75 @@ class _CacheRoot(type(Path())):
         if self._disabled or "tok_embeddings" in str(key):
             return None
         return super().__truediv__(key)
+
+
+class _LockstepSeedManager(SeedManager):
+    """SeedManager whose UNSEEDED path pushes fresh per-slot seeds before EVERY draw.
+
+    The stock manager pushes concrete seeds once and then MAX_UINT32 ("SKIP"), which leaves each die's hardware PRNG
+    free-running. ``ttnn.sampling`` runs on EVERY die of the mesh (each die holds the same gathered candidate row), the
+    host reads die 0's token (``process_output_decode``) and every die feeds ITS OWN token back into the next decode
+    step (``tt_out_tok`` is the persistent decode token input). The free-running PRNGs stay in lockstep only while every
+    die advances its PRNG identically between draws. Inside this model's decode step they do not (with only the sampler
+    running the dies stay in lockstep; which decode kernel desynchronises them is not pinned down), so the dies drift
+    apart and draw DIFFERENT tokens from the same distribution (measured on p300x2 at 20K context: 196 of 400 sampled
+    steps had at least one die disagree with die 0). Die 0's token then goes to the user while the model
+    continues from the other dies' tokens: the long-context word corruption of doc/text_quality/README.md
+    ("checkpoints" + "etensors", "interpreterterpreter").
+
+    Identical seeds pushed right before each draw (``ttnn.manual_seed`` runs immediately before ``ttnn.sampling`` in the
+    sampler trace, the seed tensor is replicated on the mesh) re-synchronise every die on every step: 0 % cross-die
+    disagreement and ~88 % step-to-step draw variation in the standalone 4-die op test. The seeded path is unchanged
+    (it already pushes concrete per-step seeds for every live slot). Cost: one 128-byte host-to-device copy per step.
+    """
+
+    def get_new_values(self, empty_slots=None, replicate_seeds=False):
+        if self._seed_active:
+            return super().get_new_values(empty_slots, replicate_seeds=replicate_seeds)
+        self._active_request_seed = False
+        new_seeds = [self._next_unseeded_device_seed() for _ in range(self.max_batch_size)]
+        self.write_device_seed_values(new_seeds)
+        self._reseted = False
+        self._needs_skip = False
+        return tuple(new_seeds)
+
+
+def _install_lockstep_sampling(sampling, mesh_device):
+    """Make every die of the mesh feed back the SAME sampled token the host reads (see _LockstepSeedManager).
+
+    Two independent guarantees: (1) identical fresh seeds before every draw, so the dies draw identically; (2) after
+    ``ttnn.sampling`` the token row is all-gathered and die 0's row is copied into the token buffer on every die, so
+    even a die whose draw differed for any other reason feeds back die 0's token - the one the host reports.
+    QWEN35_SAMPLER_TOKEN_BROADCAST=0 disables (2) (A/B only). The greedy force-argmax path (not enabled on this mesh)
+    is deterministic per die and is left alone.
+    """
+    old = sampling.seed_manager
+    sampling.seed_manager = _LockstepSeedManager(
+        sampling.tt_sampling, max_batch_size=old.max_batch_size, salt_duplicate_seeds=old.salt_duplicate_seeds
+    )
+    ts = sampling.tt_sampling
+    orig_forward = ts.forward
+    broadcast = os.environ.get("QWEN35_SAMPLER_TOKEN_BROADCAST", "1") == "1"
+
+    def forward(x, tt_out_tok=None):
+        tokens, log_probs = orig_forward(x, tt_out_tok=tt_out_tok)
+        if not broadcast or ts.force_argmax_sampling:
+            return tokens, log_probs
+        # [1,1,1,S] uint32 ROW_MAJOR on every die -> [1,1,N,S] -> die 0's row -> back into the (persistent) buffer.
+        # (The sampled-token log-probs, when enabled, were computed from each die's own draw; on this mesh the plugin
+        # samples on the host whenever log-probs are requested, so that tensor is never consumed here.)
+        gathered = ttnn.all_gather(tokens, dim=2, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        first = ttnn.slice(gathered, [0, 0, 0, 0], [1, 1, 1, tokens.shape[-1]])
+        ttnn.deallocate(gathered)
+        ttnn.copy(first, tokens)
+        ttnn.deallocate(first)
+        return tokens, log_probs
+
+    ts.forward = forward
+    logger.info(
+        f"sampler lockstep installed on {mesh_device.get_num_devices()} dies: fresh identical seeds every draw"
+        f"{', die-0 token broadcast' if broadcast else ''}"
+    )
 
 
 class Qwen35MoeModel(Qwen36Model):
@@ -91,6 +161,9 @@ class Qwen35MoeModel(Qwen36Model):
             args.pad_logits_to_power_of_2 = True
             self._supports_on_device_sampling = True
             self.sampling = SamplingGenerator(args=args, mesh_device=mesh_device, tt_ccl=self.tt_ccl)
+        if self.sampling is not None and mesh_device.get_num_devices() > 1:
+            # every die must feed back the token the host reads (doc/text_quality/README.md root cause)
+            _install_lockstep_sampling(self.sampling, mesh_device)
         # Device-owned decode inputs: tokens via tt_out_tok, positions via plus_one (no per-token host refresh).
         self._tt_vllm_always_refresh_decode_trace_inputs = False
         rd = self.args.rope_head_dim

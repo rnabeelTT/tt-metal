@@ -1,0 +1,500 @@
+{
+ "tag": "fix_p300x2",
+ "summary": {
+  "served_default": {
+   "runs": 6,
+   "garble_per_1k_mean": 13.52,
+   "garble_per_1k_max": 16.54,
+   "nonword_total": 31
+  },
+  "checkpoint_t1.0": {
+   "runs": 6,
+   "garble_per_1k_mean": 12.99,
+   "garble_per_1k_max": 26.0,
+   "nonword_total": 34
+  },
+  "greedy": {
+   "runs": 3,
+   "garble_per_1k_mean": 8.92,
+   "garble_per_1k_max": 19.01,
+   "nonword_total": 12
+  }
+ },
+ "rows": [
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_small",
+   "rep": 0,
+   "prompt_tokens": 7174,
+   "completion_tokens": 900,
+   "elapsed_s": 23.2,
+   "n_words": 544,
+   "nonword": 5,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 1,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 16.54,
+   "examples": {
+    "nonword": [
+     "behaviors",
+     "curated",
+     "runtime's",
+     "Embeddings",
+     "dt"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "to"
+    ]
+   },
+   "text": "### Overview: Precision and Decode Bucketing in the Qwen3.5-122B-A10B System\n\nThis system targets high-throughput inference of the *Qwen3.5-122B-A10B* model on Tenstorrent hardware, where two complementary mechanisms\u2014**numerical precision control** and **decode-time batching optimization**\u2014work in tandem to maximize performance while preserving model quality. The `tt/precision.py` file defines *how* numerical precision is configured and enforced across the model, while `tt/decode_buckets.py` defines *how decoding is batched efficiently* for variable-length, dynamically changing sequences. Though they address different concerns, they are deeply intertwined: precision decisions influence latency, which in turn affects how batching and host-device interaction are optimized.\n\n---\n\n### 1. Responsibility and Integration\n\n#### `precision.py`: The Precision Control Plane  \nThis module governs the **numerical datatype policy** for the entire model. It does *not* modify the model directly; instead, it supplies a structured configuration (a \u201cpolicy\u201d) that is later interpreted by the runtime to configure low-level behaviors\u2014weight dtypes, activation dtypes, compute fidelity (math accuracy), and even accumulator precision for matrix multiplications. A policy is a rich JSON document specifying per-group settings: e.g., routed MoE experts use `bfp4`, shared experts use `bfp8`, routers use `bf16`, and so on. The system ships with a curated default policy (`selected_precision_config.json`), and the environment variable `QWEN35_PRECISION_CONFIG` lets engineers select alternative configurations for experimentation (e.g., tuning accuracy vs. speed).  \n\nCrucially, the module *validates* and *enforces* the runtime\u2019s constraints: not all combinations are supported. For instance, the embedding layer and normalization layers *must* use `bf16` (hardwired by the runtime), and certain matmul fidelities are locked to specific modes (e.g., token mixers use one knob to control both attention and linear attention fidelity). The `apply_policy()` function translates this high-level spec into `MultichipConfig` and `OptimizationConfig` objects\u2014the actual knobs consumed by the low-level runtime and compiled kernels. Conversely, `effective_policy()` reads back the *actual* dtypes and configs *after* compilation (e.g., inspecting tensor dtypes and kernel configs) to verify that the intended policy was actually realized. The `check_effective()` function thus serves as a debug and validation tool during datatype sweeps, ensuring that measured performance corresponds to the expected precision.\n\n#### `decode_buckets.py`: Decode-Time Batch Management  \nThis module addresses a core hardware constraint: the model\u2019s decoder is compiled for *fixed batch sizes* (powers of two), but inference operates with *variable-length, dynamic batches*. Instead of recompiling for every change in active sequence count (which would be prohibitively expensive), the system pre-compiles *multiple* versions of the decode kernel\u2014one per power-of-two width (1, 2, 4, ..., up to `max_batch_size`). At runtime, it selects the smallest compiled width that can accommodate the *current number of live sequences*, reusing the same compiled code while only transferring and updating the relevant portion of the device-side buffers. This is termed **decode bucketing**.\n\nThe key idea is *front-packing*: the plugin keeps only active sequences in the front of the batch buffer; idle sequences are marked with position `-1`. Because the device-side trace is static (compiled ahead of time), switching between widths is a *host-authoritative* decision\u2014once selected, the width remains until the next explicit layout change (e.g., new request admission, request completion, or condense). When a switch occurs, `carry_over_inputs()` copies the previous width\u2019s device-resident tokens and positions into the new width\u2019s buffers, ensuring continuity despite the underlying data layout changing.\n\n---\n\n### 2. Numerical Precision Configuration and Application\n\nPrecision is defined in layers, with strict dependencies:\n\n- **Fixed components**: Embeddings, normalization layers, and the residual stream *must* be `bf16`; the sampler consumes logits as `uint32` (bit-identical to integer tokens), and logits themselves are forced to `bf16` to match sampler expectations.\n- **Weight dt"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_small",
+   "rep": 1,
+   "prompt_tokens": 7174,
+   "completion_tokens": 900,
+   "elapsed_s": 23.2,
+   "n_words": 531,
+   "nonword": 4,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 2,
+   "language_skip": false,
+   "garble_per_1k": 11.3,
+   "examples": {
+    "nonword": [
+     "tradeoffs",
+     "stateful",
+     "Tensix",
+     "embeddings"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements two deeply intertwined subsystems for the Qwen3.5-122B-A10B large language model deployed on Tenstorrent hardware: *decode bucketing* for efficient dynamic batching and *precision configuration* for optimal throughput-latency tradeoffs. Together, they reflect careful architectural decisions around hardware constraints, software compilation behavior, and production deployment needs.\n\n**Decode Bucketing: Dynamic Batching Without Recompilation**\n\nThe `decode_buckets.py` module addresses a critical performance challenge: when serving requests with variable batch sizes (e.g., 1 to 32 concurrent users), naive full-width execution wastes compute and memory bandwidth. Instead of compiling separate kernels for each batch size, the system exploits the observation that the *hardware* only needs a single compiled trace per *power-of-two* width (e.g., 1, 2, 4, 8, 16, 32). The plugin (host-side scheduler) tracks how many requests are *active* (non-idle) at each decoding step. Since idle requests are front-packed and marked with `start_pos == -1`, only the leading slice of rows needs computation. However, compiled traces are *stateful*: they carry persistent device-side inputs like token buffers, position indices, and page-table rows. Switching the active batch width mid-execution would otherwise require recompilation\u2014a prohibitively expensive operation (~100 ms per trace). To avoid this, the system pre-builds a small family of traces, one per power-of-two width up to the maximum batch size (32). Each width owns its own set of device-resident inputs and outputs, effectively acting as a distinct *trace bucket*. At runtime, before each decoding step, the system selects the *smallest* width whose capacity covers the current number of active requests (e.g., for 13 active requests, width 16 is chosen). Crucially, this selection is *host-authoritative* but *device-coherent*: only the host performs the switch, and it ensures device buffers from the previous width are copied into the new width\u2019s buffers *before* the step begins. This copy (`carry_over_inputs`) is minimal\u2014only the first *N* tokens and positions from the old buffer are transferred into the new (larger) buffer, with idle slots initialized to -1/0. The key innovation is *tracing over state* rather than tracing over data: the trace itself doesn\u2019t change, only its \u201cwindow\u201d into the device memory does. Because the device kernel is compiled once per width and reused, this avoids the compilation overhead entirely. The `select` function orchestrates this: when `reset_batch=True`, the host knows the layout may have changed (e.g., after admission, completion, or condensing of requests), and only then does it perform a width switch. The `active_prefix` helper infers how many requests are actually active by scanning the `start_pos` array. Because the trace captures the full memory layout but logically only processes the leading `num_active` rows, the hardware remains efficient.\n\n**Precision Configuration: Hardware-Aware Optimization**\n\nPrecision matters immensely on this hardware. The `precision.py` module defines a *policy* system that specifies, for every tensor group (embedding, attention weights, MoE experts, LM head, etc.), not just the *numerical format* (e.g., `bfp4`, `bfp8`, `bf16`), but also the *compute fidelity* (e.g., `LoFi`, `HiFi2`) used in matmul operations. The system is designed around the *Tensix* architecture\u2019s matmul units, which support configurable accumulation precision and rounding behavior. Crucially, the runtime enforces a *fixed subset* of possibilities: not all combinations are valid. For instance, embeddings, norms, residuals, logits, and sampling tokens are hardwired at `bf16`, `bf16`, `bf16`, `bf16`, and `uint32`, respectively\u2014attempting to override them raises an error. Similarly, the `router` weights *must* use `bf16`, and `attention`/`linear_attention` layers share a fidelity knob (`mixer_fidelity`), because they are driven by the same hardware control path. The policy is loaded from a JSON file (`selected_precision"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 19789,
+   "completion_tokens": 900,
+   "elapsed_s": 26.5,
+   "n_words": 467,
+   "nonword": 4,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 14.99,
+   "examples": {
+    "nonword": [
+     "Tenstorrent's",
+     "programmatically",
+     "decoupling",
+     "declaratively"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "is"
+    ]
+   },
+   "text": "This codebase implements the Qwen3-Coder-Next model on Tenstorrent\u2019s Blackhole architecture, with a strong focus on optimizing performance and memory usage through *precision control* and *expert routing*, especially for large-scale (256-expert) MoE models. Below is a detailed explanation of the architecture, precision system, and routing behavior.\n\n---\n\n### 1. File Responsibilities and Integration\n\nThe three Python files form a tightly coordinated pipeline for loading weights, configuring numerical precision, and executing the MoE feed-forward block.\n\n- **`tt/precision.py`** defines the *precision policy* system: a declarative way to specify how each tensor group (weights, activations, compute kernels, etc.) should be quantized. It supports two key functions: `apply_policy`, which enforces and translates a high-level JSON policy (e.g., \u201c`routed_moe.down` is `bfp4`, `router` is `bf16`\u201d) into the concrete `MultichipConfig` knobs the runtime accepts; and `effective_policy` + `check_effective`, which allow the *runtime* to verify that a built model truly used the intended precision configuration. The policy also accounts for layer-specific exceptions (e.g., using `bfp8` instead of `bfp4` on the first and last layers) and hard constraints (e.g., activation and residual dtypes *must* be `bf16`). The baseline policy shipped with the model uses `bfp4` for routed experts (to save memory bandwidth and on-die storage), `bfp8` for shared experts and attention (to maintain accuracy), and `bf16` for routers and CCL communication. The file also includes helpers for building candidate policies programmatically for automated sweep experiments.\n\n- **`tt/moe.py`** implements the *actual MoE feed-forward block forward pass*\u2014including routing, sparse expert selection, and both gather-based (decode) and masked (prefill) execution modes. It uses the policy to determine dtypes/fidelities of its internal tensors and matmul kernels, but does *not* read the policy JSON directly; instead, it receives a finalized configuration (`MoEPrecision`) from the runtime through `args`. This decoupling ensures that the MoE block is agnostic to how the policy was selected\u2014it only consumes the knobs.\n\n- **`tt/weights.py`** handles *lazy loading of model weights* from the original Hugging Face safetensors checkpoint (160\u202fGB bf16, 40 shards), mapping HF keys into an internal canonical representation used by `tt/moe.py` and other components. Crucially, it transforms fused per-expert tensors (e.g., `mlp.experts.e.gate_proj`, `mlp.experts.e.up_proj` per expert `e`) into a *packed* format expected by the runtime (`[gate; up]` concatenated along the output dimension), and splits fused GDN projections (`in_proj_qkvz`, `in_proj_ba`) into the sub-projections needed by the linear-attention module.\n\nAll three files feed into a *single logical feed-forward path*: weights are lazily mapped and packed, then the MoE block executes using those weights with dtypes/fidelities drawn from the precision policy.\n\n---\n\n### 2. Numerical Precision Configuration and Application\n\nPrecision is configured *declaratively* via a JSON policy (or overridden at runtime via environment variables and command-line args). This policy is *validated* and *applied* by `tt/precision.py`\u2019s `apply_policy`, which cross-checks user-provided settings against hard runtime constraints and translates them into `MultichipConfig` fields like `routed_gate_up_dtype`, `routed_fidelity`, `lm_head_fidelity`, `kv_cache_dtype`, and so on.\n\n#### Key Design Constraints\n\n- **Fixed dtypes**: The runtime enforces that `embedding`, `norms`, `residual`, `logits`, and `sampling` dtypes *must* be `bf16`, `bf16`, `bf16`, `bf16`, and `uint32` respectively\u2014any deviation raises an error. This is likely because the hardware\u2019s gather operations, residual adds, and on-device sampling infrastructure are implemented with these dtypes and cannot be re"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "ctx_mid",
+   "rep": 1,
+   "prompt_tokens": 19789,
+   "completion_tokens": 900,
+   "elapsed_s": 26.5,
+   "n_words": 511,
+   "nonword": 5,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 9.78,
+   "examples": {
+    "nonword": [
+     "decoupling",
+     "scalability",
+     "iteratively",
+     "fallbacks",
+     "runtime's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "### 1. File Responsibilities and Integration\n\nThis codebase implements the Qwen3-Coder-Next (a large Mixture-of-Experts language model) on the Tenstorrent Blackhole architecture, with explicit support for heterogeneous numerical precision across its compute graph. The three core files\u2014`precision.py`, `moe.py`, and `weights.py`\u2014serve distinct but tightly coordinated roles.\n\n- **`weights.py`** is the *data-access layer*. It provides a lazy, streaming interface (`StreamingStateDict`) to read the model\u2019s ~160 GB of `bfloat16` weights from disk (stored across 40 sharded safetensors files) without ever loading the full model into host memory. It normalizes heterogeneous Hugging Face weight layouts (including fused projections like `in_proj_qkvz` and per-expert tensors) into a *single internal key scheme* consumed by downstream code. Crucially, it handles both the main language model and (optionally) the multi-token-prediction (MTP) head and vision tower, ensuring any layer\u2019s weights can be reconstructed on demand as a dictionary of tensors keyed by stable, architecture-specific names. This decoupling of weight loading from model construction allows the same code to support multiple model variants and checkpoint formats.\n\n- **`moe.py`** implements the *Mixture-of-Experts feed-forward block*, the heart of Qwen3-Coder-Next\u2019s scalability. Each model layer contains a `Qwen35MoE` module that routes input tokens to a subset of 256 experts (top-8), performs computation only on the selected experts via sparse matrix multiplication (`ttnn.sparse_matmul`), and merges the results with a dense shared expert. The class encapsulates both *decode* (single-token) and *prefill* (batched, chunked) execution strategies, with specialized kernels for each. Its implementation is sensitive to memory layout, tiling, and device-side resource allocation\u2014especially since expert weights are stored and accessed in a way that maximizes reuse and minimizes data movement across the chip mesh.\n\n- **`precision.py`** is the *precision-policy engine*. It defines a declarative JSON-serializable specification (the *precision policy*) that dictates, per weight group and optionally per layer, the exact data types and compute fidelities used across the model: weight dtypes (e.g., `bfp8`, `bfp4`, `bf16`), compute fidelity levels (e.g., `LoFi`, `HiFi2`, `HiFi4`), and dtypes for intermediate tensors (activations, residuals, CCL payloads, KV cache, logits, sampling). It is responsible for both *applying* a policy (via `apply_policy`) to construct a runtime `MultichipConfig`, and for *verifying* that the built model indeed used the requested configuration (via `effective_policy` and `check_effective`). This enables automated precision sweeps: the system can iteratively test configurations, record what was *actually* used (including fallbacks or implicit defaults), and compare performance vs. accuracy trade-offs.\n\nThese modules are integrated in a layered fashion: `weights.py` loads raw tensors; `moe.py` consumes them (with their dtypes determined externally) and executes the MoE forward pass; `precision.py` *orchestrates* how those tensors are interpreted at runtime by configuring the underlying runtime\u2019s compute kernels and memory layouts. The policy is not applied directly to the tensors at load time (because device kernels and memory configs are fixed at model *build* time), but rather embedded in the model\u2019s `MultichipConfig`, which is passed to `moe.py` via `args.moe_precision` (and extended with layer-specific exceptions). Thus, precision is a *static configuration* determined before inference, but applied dynamically across all layers.\n\n---\n\n### 2. Numerical Precision Configuration and Application\n\nPrecision is a first-class concern in this design. The core idea is that not all computations need the same accuracy: expensive, high-entropy operations (like MoE expert matmuls) can tolerate lower precision (e.g., `bfp4`), while critical control-path operations (like the router and normalization) require higher precision (e.g., `bf16`) to maintain stability.\n\nA *precision policy*"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "prose_long",
+   "rep": 0,
+   "prompt_tokens": 74,
+   "completion_tokens": 900,
+   "elapsed_s": 21.2,
+   "n_words": 586,
+   "nonword": 7,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 11.95,
+   "examples": {
+    "nonword": [
+     "affine",
+     "misestimated",
+     "misindexed",
+     "stochastically",
+     "misestimate",
+     "quantizer's",
+     "expressivity"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "When a quantized language model running on custom accelerator hardware occasionally emits an incorrect word, the root cause typically lies in a confluence of numerical approximation errors introduced during quantization, hardware-specific execution anomalies, and potential mismatches between training-time assumptions and inference-time execution semantics. This is not a single-point failure but an emergent phenomenon arising from the interaction of multiple system layers. To understand it, one must trace the signal pathway from the model\u2019s logits through the accelerator\u2019s computation pipeline, across memory hierarchies, and into the final token selection mechanism.\n\nQuantization\u2014specifically post-training quantization (PTQ) or quantization-aware training (QAT)\u2014maps high-precision floating-point weights and activations (typically FP32 or FP16) to lower-bit integer representations (e.g., INT8, INT4) via affine transformations:  \n\\[\nx_q = \\text{clip}\\left(\\text{round}\\left(\\frac{x}{s} + z\\right), x_{\\min}, x_{\\max}\\right)\n\\]  \nwhere \\(s\\) is the scaling factor and \\(z\\) is the zero-point. This introduces two primary error sources: *bias* (systematic offset from rounding or misestimated zero-point) and *variance inflation* (reduced resolution amplifies noise in low-magnitude regions). In transformers, attention scores and residual connections are especially vulnerable: a small error in a key query-key dot product can distort the attention distribution across positions, causing the model to over-attend to irrelevant tokens. For example, if the quantized representation of a low-magnitude attention logit is rounded upward due to an imprecise scaling factor, it may push the softmax distribution just enough to shift peak probability from the correct token to a neighboring candidate\u2014particularly when the top-two logits are already close (i.e., \\(\\Delta \\log p < 0.1\\)), where quantization noise can dominate the signal-to-noise ratio.\n\nOn the hardware side, custom accelerators often exploit sparse or structured computation to save power and area, using techniques such as sparse weight pruning, structured sparsity (e.g., 2:4 patterns), or approximate arithmetic units (e.g., log-domain multipliers). If the quantization schedule assumes dense matmul behavior during offline profiling but the hardware executes a sparse variant at runtime\u2014due to dynamic sparsity or compiler optimization\u2014then certain weights may be skipped or reinterpreted incorrectly. Consider a sparse GEMM kernel that relies on lookup tables (LUTs) of pre-quantized multipliers. If a weight\u2019s quantized value falls at the boundary of a LUT bin, quantization error can cause a misindexed LUT entry, resulting in an unintended scaling of an entire dot product. This manifests as a *deterministic bias* under identical inputs\u2014*but* only if the input pattern (e.g., token IDs and positions) consistently triggers that boundary condition. In practice, minor variations in input ordering, batching, or even cache state can cause the error to appear *stochastically*, creating an illusion of randomness.\n\nFurthermore, quantized inference on accelerators often employs *dynamic quantization* where scales and zero-points are computed per-tensor or per-channel during calibration, but some accelerators use *per-token dynamic quantization* (e.g., for activations) via online quantization estimators (e.g., min-max tracking via running averages). If the estimator\u2019s forgetting factor or initial warm-up phase is poorly tuned, it can misestimate activation ranges during edge-case inputs\u2014such as rare n-grams or long-context inputs that exceed the calibration distribution\u2019s support\u2014causing saturation or overflow in the quantizer\u2019s clipping stage. For instance, a layer\u2019s activation may clip at INT8 = 127 when it should have been ~135, suppressing the effective dynamic range by 6%, which disproportionately affects layers with low signal variance (e.g., residual branches in deep transformers), leading to *vanishing gradients in practice* (though not during training) and degraded model expressivity in specific regions of the input space.\n\nThe quantized logits feed into the *sampling layer*, which may be implemented as a fused operator on the accelerator (e.g., a logit\u2192softmax\u2192top-k\u2192sample unit). Here, errors compound. Suppose the logit vector is quantized to INT8 before softmax computation. Softmax in"
+  },
+  {
+   "setting": "served_default",
+   "sampling": {},
+   "prompt": "prose_long",
+   "rep": 1,
+   "prompt_tokens": 74,
+   "completion_tokens": 900,
+   "elapsed_s": 21.2,
+   "n_words": 363,
+   "nonword": 6,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 16.53,
+   "examples": {
+    "nonword": [
+     "affine",
+     "lossless",
+     "discretizes",
+     "feedforward",
+     "hypersurfaces",
+     "embeddings"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "In a quantized language model deployed on custom accelerator hardware, occasional erroneous word emissions arise not from a single failure mode but from a confluence of numerical precision degradation, quantization-induced topological distortion in the model\u2019s decision space, and hardware-specific execution anomalies. To understand this, we must examine the full pipeline: training (or fine-tuning), quantization, compilation, and inference\u2014especially where floating-point semantics collapse under integer constraints and hardware execution diverges from idealized mathematical models.\n\n**1. Quantization as Approximate Representation**\n\nQuantization maps high-precision (typically FP32 or FP16) weights and activations to lower-precision representations\u2014commonly INT8 or INT4\u2014using affine transformations:  \n\\[\nx_q = \\text{clip}\\left(\\text{round}\\left(\\frac{x_{fp}}{s} + z\\right), x_{\\min}, x_{\\max}\\right)\n\\]  \nwhere \\(s\\) is the scale (step size), \\(z\\) is the zero-point (offset), and rounding introduces deterministic bias. During inference, the inverse mapping \\(\\hat{x}_{fp} = s \\cdot (x_q - z)\\) reconstructs an approximate value. This approximation is *intentional* but not lossless. The core issue is that quantization discretizes a continuous decision manifold into a coarse lattice. For example, the dot product \\(\\mathbf{w}^\\top \\mathbf{x}\\) critical for attention logits or feedforward layer outputs becomes:  \n\\[\n\\hat{\\mathbf{w}}_q^\\top \\hat{\\mathbf{x}}_q \\cdot s_w \\cdot s_x + \\epsilon_{\\text{quant}}\n\\]  \nwhere \\(\\epsilon_{\\text{quant}}\\) includes bias from rounding, scale mismatches, and activation redistribution errors. Though quantization-aware training (QAT) mitigates this by simulating quantization during optimization, it assumes a *stationary* quantization scheme across the entire dataset. Real-world inputs, however, exhibit long-tail distributions and out-of-distribution (OOD) structures\u2014e.g., rare syntactic constructions, domain-specific tokens, or adversarial perturbations\u2014where the local geometry of the loss landscape is poorly approximated by the quantization grid. In these regions, the model\u2019s decision boundaries (which were originally smooth hypersurfaces in FP32 space) become \u201cjagged\u201d or shifted due to non-uniform quantization error. The most common manifestation is **logit skew**: the intended top-ranked token\u2019s logit drops below a competitor\u2019s solely because quantization error *across multiple layers* has compounded asymmetrically.\n\n**2. Mechanisms of Token-Level Failure**\n\nConsider the final language modeling head:  \n\\[\n\\mathbf{y} = W_{\\text{lm}} \\mathbf{h}_L + \\mathbf{b}_{\\text{lm}}\n\\]  \nwhere \\(\\mathbf{h}_L\\) is the last-layer hidden state. If \\(W_{\\text{lm}}\\) is quantized to INT8, each column (corresponding to a token embedding in vocabulary space) undergoes per-channel quantization. Suppose token A (correct) and token B (incorrect, e.g., \u201cthen\u201d vs. \u201cthan\u201d) have similar but not identical embeddings. Their logits differ by \\(\\delta = y_A - y_B = (\\mathbf{w}_A - \\mathbf{w}_B)^\\top \\mathbf{h}_L\\). In FP32, \\(\\delta > 0.3\\) ensures high softmax probability for A. After quantization, the *effective* difference becomes:  \n\\[\n\\hat{\\delta} = \\hat{y}_A - \\hat{y}_B = \\delta + \\Delta_{\\text{quant}}^{(A)} - \\Delta_{\\text{quant}}^{(B)}\n\\]  \nwhere \\(\\Delta^{(i)}\\) is the quantization error for logit \\(i\\). Crucially, \\(\\Delta^{(i)}\\) is *input-dependent* because \\(\\mathbf{h}_L\\) varies per token sequence. In a \u201cgood\u201d region, \\(\\Delta^{(A)} - \\Delta^{(B)} \\approx 0\\). But"
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "ctx_small",
+   "rep": 0,
+   "prompt_tokens": 7174,
+   "completion_tokens": 900,
+   "elapsed_s": 23.2,
+   "n_words": 565,
+   "nonword": 3,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 5.31,
+   "examples": {
+    "nonword": [
+     "unimpeded",
+     "embeddings",
+     "tunable"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements two tightly coupled but conceptually independent optimizations for the *Qwen3.5-122B-A10B* large language model deployed on Tenstorrent hardware: **decode-time batching via dynamic width selection** and **fine-grained numerical precision control across tensor groups and layers**. Understanding both is essential for grasping how the system achieves performance while preserving accuracy in production inference.\n\nThe first file, `decode_buckets.py`, addresses a key inefficiency in server-side batched inference: when requests arrive and complete asynchronously, the number of *active* sequences (those with valid tokens to generate) fluctuates, often leaving many rows in the batch idle. A naive implementation would run the full batch width (e.g., 32) even when only 2 or 4 sequences are active \u2014 wasting compute and memory bandwidth. Instead, this module enables *dynamic decode bucketing*, where the server selects the smallest power-of-two width that accommodates the current number of active requests (1, 2, 4, 8, 16, or 32 in this case), then reuses pre-compiled, width-specific traces for decoding. This is crucial because compiling a new trace for every unique width would be prohibitively expensive, but reusing *one trace per width* amortizes compilation cost and leverages device-side optimizations. The system maintains one set of persistent device inputs (tokens, positions, RoPE indices, page-table rows) per width, which are pre-allocated and ready to use. When a batch width switch occurs\u2014triggered either by the plugin (e.g., upon admission or completion of requests) or by internal tracking\u2014the `select` function binds the generator\u2019s decode-trace infrastructure (trace IDs, input buffers, output buffer, and sampler namespace) to the new width\u2019s pre-initialized structures. A rare but important step, `carry_over_inputs`, ensures that if the *previous* width\u2019s device-side tokens and positions contain live data (e.g., the tail end of a long-running request), those values are copied into the *new* width\u2019s buffers *before* the switch, preventing stale or dropped data from corrupting subsequent generations. This copy is minimal (just the portion overlapping the smaller width) and only happens on actual switches\u2014otherwise the generator\u2019s normal asynchronous flow proceeds unimpeded.\n\nThe second file, `precision.py`, governs the *numerical configuration* of the model. It defines and enforces a *precision policy*\u2014a specification of how each weight tensor group and activation stream should be quantized or represented (e.g., `bfp4`, `bfp8`, `bf16`, `fp32`)\u2014and how matmul operations should be computed (e.g., with high fidelity or LoFi mode). The policy is driven by a JSON file (`selected_precision_config.json`), which may differ between hardware configurations (e.g., 2-chip vs. 4-chip meshes) due to memory constraints (as noted: bfp8 routed experts of the 4-chip policy are too large for 32 GB dies, so a tailored TP2 variant is used). The policy distinguishes *fixed* values (e.g., embeddings and norms must be bf16; logits and sampling tokens are uint32) from *tunable* ones (e.g., MoE router vs. routed experts, attention vs. linear attention). Critically, fidelity\u2014how aggressively numerical approximations are applied during computation\u2014is controlled separately from data type; for example,MoE experts may use `bfp4` weight type but run in `LoFi` mode (LoFi math, no fp32 accumulation), while routers run at `bfp8` or `bf16` with `HiFi4`. The system supports *per-layer exceptions*, allowing fine-tuned adjustments (e.g., raising precision on specific layers where accuracy-sensitive operations occur). After building the model, the `effective_policy` function *verifies* what was actually compiled by inspecting tensor dtypes and kernel configurations, enabling regression testing and sweep validation.\n\nThese two modules intersect at decode time, because the batch width chosen by `decode_buckets.py` influences how much data moves and how precisely each computation must be done\u2014but more importantly, precision settings affect *when* and *how* width switches are possible. For instance, switching widths involves copying"
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "ctx_small",
+   "rep": 1,
+   "prompt_tokens": 7174,
+   "completion_tokens": 900,
+   "elapsed_s": 23.2,
+   "n_words": 591,
+   "nonword": 3,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 5.08,
+   "examples": {
+    "nonword": [
+     "scalable",
+     "handoff",
+     "discriminative"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements two tightly coupled yet conceptually distinct optimizations for a large, heterogeneous large language model\u2014Qwen3.5-122B-A10B\u2014deployed on a multi-chip TT-200-class accelerator. The first is *decode bucketing*, a dynamic batching strategy that mitigates the high per-token latency of sparse, routed MoE inference. The second is *precision policy management*, which governs how each tensor\u2014weights, activations, intermediate states\u2014is quantized or retained in higher precision to balance throughput, memory usage, and numerical fidelity. Together, they enable scalable inference for a model too large to run efficiently on commodity hardware without aggressive specialization.\n\n**Decode Bucketing: Dynamic, Width-Adaptive Batching for MoE**\n\nThe decode bucketing system (`decode_buckets.py`) addresses a fundamental mismatch between static hardware provisioning and dynamic request patterns. Large MoE models, such as this 122B-parameter variant, exhibit extreme sparsity at decode time: only a tiny subset of experts (typically two) are active per token, but the underlying computation must still prepare the full capacity for each batch. Capturing a full-width trace (e.g., 32 concurrent sequences) is expensive: one measurement shows a 32-wide MoE step taking **124 ms/token**, whereas a single-sequence step requires only **24 ms**. Yet the vLLM plugin front-packs live sequences and uses `-1` as a sentinel to mark inactive rows. This makes it possible\u2014indeed desirable\u2014to run the decode step at *exactly* the number of active sequences, not at the maximum batch size.\n\nThe solution is *width-based bucketing*: the system pre-compiles and caches decode traces for multiple powers-of-two widths (e.g., 1, 2, 4, 8, 16, 32) and, before each decode step, selects the smallest bucket whose capacity covers the current number of live sequences. Crucially, each width maintains its *own* on-device resources: token buffers, position tensors, RoPE indices, and page-table references. This avoids expensive per-step host-device synchronization or buffer reallocation. A width switch is a *host-authoritative* event: the plugin only triggers one when the logical layout changes\u2014due to new request admission, completion, or internal compaction\u2014and signals this via `reset_batch=True`. On such a switch, `select()` switches the generator\u2019s active trace namespace, and `carry_over_inputs()` performs the rare, low-cost handoff: it copies only the *valid* tokens and positions from the old width\u2019s buffers into the new width\u2019s buffers, leaving the remainder as idle (`-1`, `0`). This copying is minimal because (a) switches are infrequent, and (b) the number of live sequences rarely changes abruptly.\n\nThe bucketing strategy is tightly coupled with the MoE architecture. In this model, each Transformer layer contains both a *router* that decides which two experts to invoke, and *shared* and *routed* experts. The MoE step must execute on only the active rows of the batch. By tying trace ownership to bucket width, the system ensures that the compiled decode kernel\u2014especially the MoE-specific Gated Delta Network (GDN) and attention components\u2014does not waste compute or memory bandwidth on padding. Idle rows are simply skipped at runtime because the GDN\u2019s `forward_decode` method respects row masks derived from the position buffer (`start_pos == -1`). Moreover, the paged attention mechanism remains oblivious to bucketing: it uses a global slot space but accesses only rows `0:W` via the page table rows, meaning it automatically scales with the selected bucket.\n\n**Precision Policy: Fine-Grained Datatype Control**\n\nPrecision configuration (`precision.py`) governs the data type of every tensor in the model. Because the model is large and heterogeneous, different parts tolerate different quantization levels. For instance, routed experts (the two active per layer) use **bfp4** weights to minimize memory footprint and bandwidth, while the router itself uses **bf16** to preserve the discriminative power needed to select the correct experts. Shared experts and attention layers use **bfp8**, and the attention output projection uses **bf16** during decode to keep partial accumulations accurate. Crucially, the system enforces a"
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 19789,
+   "completion_tokens": 900,
+   "elapsed_s": 26.5,
+   "n_words": 476,
+   "nonword": 2,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 4.2,
+   "examples": {
+    "nonword": [
+     "remapping",
+     "decoupling"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "### Overview of the System and File Responsibilities\n\nThis codebase implements a highly optimized inference system for the Qwen3-Coder-Next (a 122B-parameter mixture-of-experts model) targeting the Tenstorrent Blackhole hardware. It manages numerical precision across the model, implements sparse MoE routing for computational efficiency, and ensures precise control over memory and compute resources\u2014critical when deploying billion-parameter models on hardware with limited per-die memory and bandwidth.\n\n**`tt/precision.py`** is the *precision policy engine*. It defines a declarative configuration format (as a Python dictionary, typically loaded from JSON) that specifies, at the granularity of tensor groups (e.g., attention weights, MoE router, LM head), the desired data type (e.g., `bfloat16`, `bfloat8`, `bfloat4`) and compute fidelity (e.g., `LoFi`, `HiFi2`). Crucially, it enforces which precision choices are *fixed by the runtime* (e.g., activations must be `bf16`, routing tokens are always `uint32`) and which are configurable knobs. The `apply_policy` function translates this high-level policy into concrete runtime knobs (e.g., setting `routed_gate_up_dtype` on `MultichipConfig`), raising clear errors for unsupported configurations. Conversely, `effective_policy` *verifies* that a built model actually used the requested precision\u2014essential for the datatype-sweep optimization stage that measures performance and accuracy trade-offs. The `policy_from_overrides` function enables experimentation by applying nested overrides to a baseline configuration.\n\n**`tt/moe.py`** is the *MoE computation engine*. It implements the feed-forward block with both *routed* experts (top-8 of 256, selected per token) and a *shared* expert (always active). It handles sparse matrix multiplication (`sparse_matmul`) to compute only selected experts, manages expert selection logic, and performs the routing-weighted combination. It is the execution engine that consumes the policy defined in `precision.py`.\n\n**`tt/weights.py`** is the *weight streaming and remapping layer*. It avoids loading the full ~160 GB checkpoint into memory by lazily loading weights from individual safetensors shards on demand. Crucially, it translates between the Hugging Face (HF) format (where experts and fused projections are stored differently) and the *internal format* expected by `moe.py` and the Qwen3.5-122B-A10B codebase (where experts are fused per-layer, and GDN projections are split). This decoupling allows the same runtime to work with different checkpoint formats.\n\nAll three files work together: `weights.py` prepares the weights, `precision.py` tells the runtime *how* to interpret and compute them (bit-width, fidelity), and `moe.py` executes the computation with those constraints.\n\n---\n\n### Numerical Precision Configuration and Application\n\nPrecision is configured through a **hierarchical policy**. At the top level, the policy declares *global* dtypes for major tensor groups: e.g., `attention: \"bfp8\"`, `routed_moe.gate_up: \"bfp4\"`, `router: \"bfp16\"`. It also sets *global* compute fidelities: LoFi (approximate math) for routed experts (where accuracy is less critical), HiFi2 for token mixers and shared MoE, HiFi4 for the router (where routing accuracy impacts downstream correctness). A key insight is that fused operations (like `swiglu`) demand careful alignment: the fused gate/up projection uses `bfp4`, but the shared expert, which does dense `gate * up` activation, uses `bfp8` to maintain accuracy.\n\nPrecision is applied in two stages:\n1. **Policy Application (`apply_policy`)**: Before model construction, this function validates the policy against hard runtime constraints (e.g., activations *must* be `bfloat16`) and maps high-level fields to concrete `MultichipConfig` parameters (e.g., `routed_gate_up_dtype` \u2192 `ttnn.bfloat4_b`). It rejects policies with unsupported combinations.\n2. **Policy Ejection and Verification (`effective_policy`, `check_effective`)**: After the model is built"
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "ctx_mid",
+   "rep": 1,
+   "prompt_tokens": 19789,
+   "completion_tokens": 900,
+   "elapsed_s": 26.5,
+   "n_words": 495,
+   "nonword": 5,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 0,
+   "delim_imbalance": 1,
+   "language_skip": false,
+   "garble_per_1k": 18.18,
+   "examples": {
+    "nonword": [
+     "runtime's",
+     "tunable",
+     "nonlinearity",
+     "instantiated",
+     "scalability"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "the"
+    ]
+   },
+   "text": "### Overview of the Precision and MoE Architecture in Qwen3-Coder-Next\n\nThis codebase implements a highly optimized inference pipeline for the Qwen3-Coder-Next model (a large language model with Mixture-of-Experts, or MoE), specifically targeting the Tenstorrent Blackhole (BH) hardware. Three core files govern its behavior: `tt/precision.py` defines *how* numerical precision is configured and enforced; `tt/moe.py` implements the *runtime logic* for the MoE feed-forward block\u2014especially the sparse, expert-routing forward pass at inference time; and `tt/weights.py` handles *lazy, streaming loading* of the enormous checkpoint (~160\u202fGB) without ever materializing the full model in host memory. Together, they enable efficient, end-to-end inference on multi-chip MeshDevice configurations (2- or 4-device TP2/TP4), where precise control over datatype and compute fidelity is critical for performance and stability.\n\n---\n\n### 1. File Responsibilities and Integration\n\n**`tt/precision.py`** is the *authoritative source of truth* for numerical precision policies. It defines a structured policy (as a dictionary) specifying dtypes and compute fidelities for each tensor group\u2014weights (e.g., attention, MoE experts, LM head), activation paths (residual, CCL, KV-cache), and per-layer overrides. Its two core functions are `apply_policy`, which injects this policy into the `MultichipConfig` (the runtime\u2019s knobs), and `effective_policy`, which reads back the *actual* configuration used by the built model (e.g., from tensor dtypes and kernel configs), enabling verification via `check_effective`. The policy includes fixed fields (e.g., residual, logits, sampling are *always* `bf16`, `uint32`, etc.) and tunable knobs (e.g., MoE expert dtypes can be `bfp8` or `bfp4`). The shipped default (`BASELINE_POLICY`) reflects the stage-7 optimized configuration: bfp4 for routed experts (LoFi), bfp8 for shared MoE and attention (HiFi2), with router and LM head in bf16 or bfp8 depending on context. Crucially, this policy is *not* a suggestion\u2014it\u2019s validated at build time and raises errors if the runtime cannot realize the requested configuration (e.g., `activation_dtype != bf16` is rejected). This ensures all tensor dtypes and kernel configurations are physically realizable on the hardware.\n\n**`tt/moe.py`** implements the *forward pass* of the MoE block: given an activation, it computes which top-*k* experts to invoke (via the router), performs sparse matrix multiplications only for those experts, fuses the SwiGLU nonlinearity in the expert projections, and adds the shared expert branch. It is the execution engine that translates the policy into concrete operations. It uses `ttnn.sparse_matmul` with precomputed sparse masks (one per chunk) to skip inactive experts, and supports two execution paths: *gather mode* (for decode with \u2264 `GATHER_MAX_TOKENS`, e.g., 4 tokens) where each token selects its experts individually, and *masked mode* (for prefill or large batched decode) where tokens are batched and a union mask determines which experts are live. The class `Qwen35MoE` is instantiated per layer and is deeply integrated with `tt/precision.py`: it reads `MoEPrecision.from_args`, which merges global policy defaults with layer-specific exceptions (e.g., \u201cforce first/last layer experts to bfp8 instead of bfp4\u201d) to produce a per-layer configuration (`prec`). The class also includes numerous knobs (e.g., `ROUTER_TOPK_ROUTE_K`, `GATHER_T1_SHORTCUT`, `moe_gather_tail`) that let engineers experimentally tune behavior\u2014often discovered in performance passes.\n\n**`tt/weights.py`** solves the *scalability problem* of loading a 160\u202fGB bf16 checkpoint. Instead of reading and storing the entire state dict, it lazily maps checkpoint keys to on-disk safetensors shards. On first access, it reads *only* the requested tensor via `safetensors.safe"
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "prose_long",
+   "rep": 0,
+   "prompt_tokens": 74,
+   "completion_tokens": 900,
+   "elapsed_s": 21.2,
+   "n_words": 470,
+   "nonword": 9,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 19.15,
+   "examples": {
+    "nonword": [
+     "multidisciplinary",
+     "microarchitecture",
+     "affine",
+     "misestimated",
+     "outlier",
+     "misestimated",
+     "discriminative",
+     "backpropagation",
+     "differentiable"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "When a quantized language model deployed on custom accelerator hardware occasionally emits an incorrect word\u2014despite otherwise plausible output\u2014the root cause is rarely a single point failure, but rather a confluence of numerical approximation, hardware-specific execution semantics, and system-level design trade-offs. Understanding and resolving such anomalies demands a multidisciplinary diagnostic approach spanning deep learning theory, compiler optimization, hardware microarchitecture, and software stack instrumentation.\n\n**Why Quantization Introduces Subtle Errors**\n\nQuantization reduces the precision of weights and activations (typically to 8-bit integers, FP16, or even lower-bit formats like INT4) to improve throughput and reduce memory bandwidth demands\u2014especially critical on resource-constrained or power-sensitive accelerators. While linear quantization (e.g., per-tensor or per-channel affine mapping: \\(x_{int} = \\mathrm{round}(x_{fp} / s + z)\\), where \\(s\\) is scale and \\(z\\) is zero-point) preserves representational capacity in expectation, it introduces deterministic *bias* and stochastic *rounding noise*. For most tokens, these errors remain within the basin of attraction of the correct argmax during greedy or beam search, but in high-entropy regions of the logit space\u2014where the top candidate probabilities are close\u2014the perturbation can tip the decision boundary.\n\nConsider the final classification layer, where logits \\( \\mathbf{z} \\in \\mathbb{R}^V \\) (V = vocabulary size \u2248 32k\u2013100k) are computed as \\( \\mathbf{z} = W^\\top \\mathbf{h} + \\mathbf{b} \\). After quantization, this becomes:\n\n\\[\n\\tilde{\\mathbf{z}} = \\mathrm{Dequant}\\left( \\mathrm{Quant}(W) \\otimes \\mathrm{Quant}(\\mathbf{h}) \\right) + \\mathrm{Dequant}(\\mathbf{b})\n\\]\n\nwhere \\( \\otimes \\) denotes quantized matrix multiplication (e.g., via INT8 GEMM with dequantization fused after accumulation). The error \\( \\delta \\mathbf{z} = \\tilde{\\mathbf{z}} - \\mathbf{z} \\) comprises:\n\n1. **Quantization noise** in weights: Per-channel per-axis quantization of \\(W\\) typically minimizes KL-divergence or L2 error over the weight distribution, but non-Gaussian tails may be misestimated. A small number of outlier weights (e.g., from attention heads specialized for rare syntactic patterns) can suffer disproportionately large relative error after quantization.\n\n2. **Activation quantization noise**: Accumulated across layers. Each quantized ReLU, SiLU, or GELU approximation introduces non-monotonic errors or clip-induced bias if the dynamic range is misestimated. For instance, if a layer\u2019s activation saturation point is set too aggressively to fit the 0\u2013127 INT8 range, a critical residual path may lose discriminative signal.\n\n3. **Rounding and truncation artifacts**: Integer quantization (e.g., INT8) forces deterministic rounding (e.g., round-to-nearest or floor), but in fused operations\u2014such as quantized RoPE (rotary position embedding) or layer normalization\u2014the order of operations and intermediate rounding can alter results. For example, in quantized LayerNorm, the computed mean and variance are themselves quantized; bias in variance estimation shifts the entire activation distribution.\n\n4. **Quantization-aware training (QAT) vs. post-training quantization (PTQ) discrepancy**: If PTQ is used (common for deployment), the model is quantized *after* training, without backpropagation through quantization noise. This misses the non-differentiable rounding operation\u2019s effect on gradient flow. A model optimized for FP16 may have logit confidence margins (difference between top-1 and top-2 logits) that are only a few uLPs (units in the last place). In such cases, a quantization-induced logit perturbation of +1.2 bits can flip the argmax.\n\n**Hardware-Specific Amplifiers**\n\nCustom accelerators exacerbate these issues due to:\n\n- **Non-IEEE-754 floating point semantics**: Some accelerators implement FP8 with nonlinear exponent/bias scaling, or truncate instead of round."
+  },
+  {
+   "setting": "checkpoint_t1.0",
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 40
+   },
+   "prompt": "prose_long",
+   "rep": 1,
+   "prompt_tokens": 74,
+   "completion_tokens": 900,
+   "elapsed_s": 21.2,
+   "n_words": 577,
+   "nonword": 12,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 26.0,
+   "examples": {
+    "nonword": [
+     "Jetson",
+     "Groq's",
+     "outlier",
+     "discretization",
+     "representable",
+     "exp",
+     "exp",
+     "exponentiated",
+     "exp",
+     "exp",
+     "exponentiated",
+     "subspaces"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "exp"
+    ]
+   },
+   "text": "In modern deep learning pipelines, quantized language models deployed on custom accelerator hardware\u2014such as specialized neural network inference chips (e.g., Google TPUs, NVIDIA Jetson SoCs, or custom ASICs like Groq\u2019s LPU)\u2014are increasingly common due to gains in throughput, energy efficiency, and latency. Nevertheless, these optimizations can introduce subtle failures, including the occasional emission of semantically or syntactically incorrect tokens. While quantization is often treated as a benign compression technique, its interaction with hardware-specific implementation details can lead to anomalous outputs. To understand why this occurs, one must examine the end-to-end data flow: from high-precision model weights and activations, through the quantization process, to the low-precision arithmetic executed on the accelerator, and finally to the decoding strategy employed at generation time.\n\nAt the model level, quantization refers to the process of mapping floating-point (typically FP32 or FP16) parameters and intermediate activations to lower-precision representations, such as 8-bit signed integers (int8), 4-bit integers (int4), or mixed-precision formats like block-wise float8. Common schemes include post-training quantization (PTQ), where quantization parameters (e.g., scale and zero-point) are inferred after training, and quantization-aware training (QAT), where the model is fine-tuned under the constraint of simulated quantization to mitigate accuracy degradation. Even with careful calibration, quantization introduces *systematic* and *statistical* errors. Systematic errors arise from *clipping* and *bias* introduced by uniform symmetric quantization, particularly in outlier regions where activation magnitudes exceed the quantization range, causing saturation and information loss. Statistical errors stem from the *discretization* itself: a continuous range of values is projected onto a finite lattice of representable points. The difference between the true value *x* and its quantized counterpart *Q(x)* is the *quantization error*, *\u03b5 = x \u2212 Q(x)*, which, though bounded per operation, can propagate and compound through deep computational graphs.\n\nIn language models\u2014particularly autoregressive transformers\u2014the impact of such errors is nonlinear and context-dependent. Each token generation step relies on multiplications in the attention mechanism (e.g., *QK\u1d40*), softmax normalization (sensitive to input offsets), and layer-wise residual connections that may accumulate or amplify discrepancies. Consider the softmax operation: *softmax(z)_i = exp(z_i)/\u2211_j exp(z_j)*. If the logits *z* are quantized *before* exponentiation, small absolute errors in high-magnitude logits (e.g., *z_i* \u2248 15 vs. *z_j* \u2248 10) can cause disproportionately large relative errors in the exponentiated values (e.g., *exp(15) \u2248 3.3\u00d710\u2076*, *exp(10) \u2248 2.2\u00d710\u2074*), thereby distorting the probability distribution. Even if the quantized logits differ by only \u00b10.2 in the quantized domain, the exponentiated values may differ by orders of magnitude, causing the model to assign non-negligible probability mass to tokens it would otherwise dismiss. This effect is exacerbated when the model is operating near decision boundaries\u2014i.e., when the highest and second-highest logits differ by less than one quantization step in the quantized domain\u2014resulting in *logit instability*.\n\nMoreover, quantization errors are not identically distributed across layers. The attention head\u2019s *value projection* is especially vulnerable: its output is passed into a residual connection, then layer-normalized, and ultimately fed into the feed-forward network (FFN). If quantization-induced noise corrupts the value vectors, it can perturb the global attention context, subtly altering the hidden state for the current token. Over multiple layers, these perturbations can compound into *catastrophic drift*, where small per-layer discrepancies accumulate to produce a divergent hidden state by the final layer. This is particularly problematic when quantization is *asymmetric* or when per-tensor vs. per-channel quantization is inconsistently applied. Per-channel quantization of weights (e.g., per-output-channel int8 for linear layers) helps preserve fidelity for dominant features but can still misrepresent low-magnitude subspaces where critical syntactic or semantic cues"
+  },
+  {
+   "setting": "greedy",
+   "sampling": {
+    "temperature": 0.0
+   },
+   "prompt": "ctx_small",
+   "rep": 0,
+   "prompt_tokens": 7174,
+   "completion_tokens": 900,
+   "elapsed_s": 23.2,
+   "n_words": 525,
+   "nonword": 2,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 3.81,
+   "examples": {
+    "nonword": [
+     "jitter",
+     "runtime's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements two critical, interrelated subsystems for the Qwen3.5-122B-A10B model running on Tenstorrent hardware: **decode bucketing** (in `decode_buckets.py`) and **precision configuration** (in `precision.py`). Together, they enable efficient, high-performance inference of a massive MoE model on hardware with constrained memory and specific numerical requirements.\n\n### 1. Decode Bucketing: Dynamic Batch Handling Without Recompilation\n\nThe `decode_buckets.py` module addresses a fundamental challenge in production LLM serving: *variable-length batch sizes*. While the model is compiled for a maximum batch size (here, 32), real-world workloads rarely hit that exact size. Re-compiling the decode kernel for every different batch size would be prohibitively expensive. Instead, the system pre-compiles and caches *one decode trace per power-of-two width* (1, 2, 4, 8, 16, 32), and dynamically selects the smallest width that can accommodate the current number of active requests.\n\nThe key insight is that the vLLM plugin front-packs active requests (rows with valid `start_pos \u2265 0`) to the top of the batch, leaving idle rows with `start_pos = -1`. This allows the decode kernel to operate only on the live prefix without needing to know the exact batch size at compile time. Each width (`W`) owns its own set of *device-resident* inputs: token buffer, position arrays, RoPE indices, and page-table rows. Crucially, the *device memory* for these buffers is allocated once per width and reused across steps. When the number of active requests changes (e.g., due to request completion or new admission), the system performs a *width switch*. This is *host-authoritative*: the plugin detects the change and signals it with `reset_batch=True`. The `select()` function then binds the generator\u2019s trace references to the new width\u2019s pre-allocated device buffers.\n\nA subtle but critical detail is the *carry-over* mechanism. Because the device-side buffers are one step ahead of the host view (due to async scheduling), switching widths requires copying the *live* tokens and positions from the old width\u2019s buffers into the new width\u2019s buffers *before* the next decode step. This ensures continuity: the new width doesn\u2019t start with stale or uninitialized data. Idle rows in the new, larger width are initialized to `-1` (position) and `0` (token), making them effectively inactive. The shared GDN (Gated Delta Network) recurrent state, however, remains fully allocated at `max_batch_size` and is *not* copied\u2014only the active rows are updated, preserving memory and performance.\n\nThis design enables *low-latency, low-jitter inference* by avoiding recompilation while still supporting dynamic batch sizes. It\u2019s especially important for MoE models, where the decode step (which includes routing decisions) must be predictable and fast.\n\n### 2. Precision Configuration: Enforcing Hardware-Aware Numerical Policies\n\nThe `precision.py` module implements a *precision policy system* that dictates the numerical format (e.g., `bfp4`, `bfp8`, `bf16`, `fp32`) used for every tensor group\u2014weights, activations, residuals, and intermediate states\u2014across the model. This is not just about accuracy; it\u2019s about *hardware feasibility*. The A10B accelerator has strict constraints: certain operations *must* use specific dtypes to fit in on-chip memory or to meet performance targets. The policy is defined in a JSON file (e.g., `selected_precision_config.json`) and applied via `apply_policy()`, which configures a `MultichipConfig` object\u2014the runtime\u2019s central knob for precision.\n\nThe policy distinguishes between *fixed* and *configurable* fields. For instance, embedding weights, normalization layers, residuals, logits, and sampling tokens are *fixed* at `bf16`, `bf16`, `bf16`, `bf16`, and `uint32`, respectively\u2014any deviation raises an error. This reflects hard runtime constraints (e.g., the on-device sampler expects `uint32` tokens). Other fields, like MoE expert weights (`routed_moe.gate_up`, `down`) and compute fidelities"
+  },
+  {
+   "setting": "greedy",
+   "sampling": {
+    "temperature": 0.0
+   },
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 19789,
+   "completion_tokens": 900,
+   "elapsed_s": 26.5,
+   "n_words": 508,
+   "nonword": 1,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 1,
+   "language_skip": false,
+   "garble_per_1k": 3.94,
+   "examples": {
+    "nonword": [
+     "versioned"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "This codebase implements the Qwen3-Coder-Next model on the Tenstorrent Blackhole architecture, with a strong focus on numerical precision control and efficient mixture-of-experts (MoE) inference. Let me break down the architecture and design decisions for an engineer new to this system.\n\n## File Responsibilities and Integration\n\nThe three files form a precision-aware MoE inference pipeline. `tt/precision.py` defines the *policy* system: a declarative JSON configuration that specifies exactly which data types (bfloat16, bfloat8, bfloat4) should be used for every tensor group\u2014weights, activations, residuals, and compute fidelities\u2014across the entire model. This policy is not just documentation; it's a runtime contract enforced by `apply_policy()`, which translates high-level dtype specifications into concrete `MultichipConfig` knobs the runtime understands. The policy also includes layer-specific exceptions (e.g., \"make the first and last MoE layers use bfp8 instead of bfp4 for routed experts\") and validates that the runtime can actually construct the requested configuration. `tt/moe.py` implements the MoE feed-forward block itself\u2014the router, the sparse expert selection, and the fused shared expert\u2014orchestrating how tokens flow through the sparse expert graph. `tt/weights.py` handles the heavy lifting of loading weights from the 160GB HF checkpoint without ever materializing the full state dict, converting HF's per-expert tensor layout into the fused format the MoE block expects.\n\nThese files connect through the `args` object passed between stages: `precision.py`'s `apply_policy` populates `args.precision_layer_exceptions` and `args.moe_precision`, which `moe.py`'s `MoEPrecision.from_args` reads to determine per-layer dtype policies. The `args` object also carries `num_devices` (for TP sharding) and `act_shard_hidden` (for router optimization), creating a clean separation between *what* precision to use (policy) and *how* to apply it (MoE implementation).\n\n## Precision Configuration and Enforcement\n\nPrecision is configured through a JSON policy file (e.g., `selected_precision_config.json`) that specifies:\n\n- **Weight groups**: `routed_moe.gate_up` and `down` can be bfp4/bfp8/bf16; `router` must be bf16; `shared_moe` and `lm_head` are typically bfp8; attention weights are bfp8.\n- **Compute fidelities**: Routed MoE matmuls run at LoFi (fast, less accurate), while the router uses HiFi4 (full precision), and shared MoE uses HiFi2.\n- **Fixed constraints**: The runtime *requires* bf16 for embedding, norms, residual paths, logits, and uint32 for token sampling\u2014any policy violating these raises immediately.\n\nThe `apply_policy` function enforces these rules by mapping policy fields to `MultichipConfig` constructor arguments. Crucially, it validates that the requested configuration is *constructible*\u2014for example, rejecting policies that ask for bfp4 routed experts on layers where the runtime doesn't support it. The `effective_policy` function then *reads back* the actual dtypes from the built model (via tensor `.dtype` attributes and kernel configs) to verify the runtime used the requested policy, enabling automated sweep validation.\n\nThe policy system is layered: `BASELINE_POLICY` (stage-7) defines the shipped configuration, while `policy_from_overrides` lets researchers prototype new policies by merging changes into the baseline. This design supports both reproducibility (baseline policies are versioned) and experimentation (overrides can be tested without touching core code).\n\n## MoE Routing at Decode Time\n\nDuring decode (single-token inference), routing follows a sparse-gather path optimized for low latency:\n\n1. **Router computation**: The input token passes through a bf16 router matmul to produce 256 logits, then `topk` selects the top 8 experts (with optional padding to 1024 for multi-core routing). A softmax over these 8 scores produces normalized weights.\n\n2. **Sparse gather**: For each of the 8 selected experts, the system performs a sparse matmul: `x @ up_gate` (where `up_gate` is the"
+  },
+  {
+   "setting": "greedy",
+   "sampling": {
+    "temperature": 0.0
+   },
+   "prompt": "prose_long",
+   "rep": 0,
+   "prompt_tokens": 74,
+   "completion_tokens": 900,
+   "elapsed_s": 21.2,
+   "n_words": 526,
+   "nonword": 9,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 1,
+   "language_skip": false,
+   "garble_per_1k": 19.01,
+   "examples": {
+    "nonword": [
+     "idealities",
+     "affine",
+     "lossy",
+     "suboptimal",
+     "submodules",
+     "convolutional",
+     "outlier",
+     "decoder's",
+     "associativity"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "When a quantized language model deployed on custom accelerator hardware occasionally emits an incorrect word, the root cause is rarely a single point failure but rather a confluence of numerical approximation, hardware-specific non-idealities, and architectural constraints interacting across the inference pipeline. To understand this phenomenon rigorously, we must dissect the signal flow from model weights and activations\u2014originally represented in high-precision floating-point (e.g., FP32 or FP16)\u2014to their quantized counterparts (e.g., INT8, INT4), and finally to the low-level operations executed on the accelerator. The occurrence of erroneous tokens is typically probabilistic and context-dependent, often manifesting as occasional hallucinations, grammatical slips, or semantic drift rather than systematic failure.\n\nQuantization itself introduces *deterministic approximation errors* that are usually benign under average-case conditions but can be amplified under specific input conditions. In post-training quantization (PTQ), weights and activations are mapped from floating-point to lower-bit integer representations via affine transformations:  \n\\[\nx_q = \\text{round}\\left(\\frac{x_{fp}}{s} + z\\right)\n\\]  \nwhere \\(s\\) is the scale factor and \\(z\\) is the zero-point (offset). During inference, the inverse mapping is applied:  \n\\[\n\\hat{x}_{fp} = s \\cdot (x_q - z)\n\\]  \nThis process is lossy: rounding introduces quantization noise, and the finite resolution (e.g., 8 bits = 256 levels) means that small but critical differences in activation magnitudes may be collapsed into the same quantization bin. In transformer-based models, attention logits\u2014particularly in the final layer before the softmax\u2014are highly sensitive to minute variations because the softmax function is exponentially sensitive to input differences:  \n\\[\n\\text{softmax}(z_i) = \\frac{e^{z_i}}{\\sum_j e^{z_j}}\n\\]  \nIf the quantized logits for two candidate tokens differ by less than the quantization resolution (e.g., 1 INT8 unit \u2248 0.02 in FP32 after dequantization), their softmax probabilities may become nearly indistinguishable. In such cases, the argmax operation may select the suboptimal token due to rounding artifacts or tie-breaking heuristics in the hardware softmax unit. This is especially likely in low-entropy regions of the output distribution\u2014e.g., when the model is uncertain\u2014and can be exacerbated by *activation saturation* in quantized ReLU or GELU approximations, where clipped activation values reduce gradient-like signal propagation during inference.\n\nMoreover, custom accelerators often employ *mixed-precision* or *heterogeneous quantization*, where different layers or submodules use different quantization schemes (e.g., per-tensor vs. per-channel scaling). Per-channel quantization of weights (common for convolutional and linear layers) reduces sensitivity to outlier weights, but inconsistencies in scale factor computation across layers can lead to *scale mismatch errors* during dequantization. For instance, if the output scale of layer \\(L\\) does not exactly match the input scale of layer \\(L+1\\), a residual connection or matmul chain may accumulate a systematic bias. While this bias is typically small per layer, in deep transformers (e.g., 70B+ parameter models), it can compound across dozens of layers, especially in the decoder\u2019s self-attention and cross-attention blocks where repeated matrix multiplications dominate compute.\n\nHardware-specific factors further contribute. Custom accelerators may use *approximate arithmetic units* (e.g., non-IEEE-compliant FP8 or INT8 multipliers with truncated rounding) to save area and power. These units may implement *stochastic rounding* or *nearest-even rounding* with implementation-defined tie-breaking, leading to non-deterministic behavior across runs\u2014even with identical inputs\u2014if the accelerator lacks deterministic execution guarantees (e.g., due to parallel reduction trees with non-associative summation). In such cases, floating-point summation\u2019s non-associativity becomes pronounced:  \n\\[\n\\sum_{i=1}^n x_i \\neq \\sum_{\\pi(i)} x_{\\pi(i)}\n\\]  \nfor arbitrary permutations \\(\\pi\\), especially when intermediate sums exceed the representational range of the accumulator (e.g., 16-bit accumulators in some NPU designs"
+  }
+ ]
+}

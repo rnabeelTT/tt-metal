@@ -460,7 +460,6 @@ class Qwen3NextForCausalLM(Qwen36ForCausalLM):
                     self._gen._warm_prefill_traces()
                 self._gen._program_cache_after_warmup = self._gen.program_cache_entries()
             else:
-                self._prime_sampler_seeds_for_trace()
                 self._gen.capture_traces(widths=self._decode_widths)
             self._warm_phase["traces"] = True
 
@@ -607,7 +606,6 @@ class Qwen3NextForCausalLM(Qwen36ForCausalLM):
         start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
         if start_pos is not None:
             self._live_slots = {i for i, p in enumerate(torch.as_tensor(start_pos).reshape(-1).tolist()) if int(p) >= 0}
-        self._advance_sampler_seeds()
         if len(self._decode_widths) > 1:
             args, kwargs = self._select_decode_bucket(list(args), kwargs, start_pos, slot_remap)
         out = Generator.decode_forward(self, *args, **kwargs)
@@ -617,95 +615,6 @@ class Qwen3NextForCausalLM(Qwen36ForCausalLM):
         if self._decode_steps % 2000 == 0:
             self._log_program_cache(f"after {self._decode_steps} served decode steps")
         return out
-
-    # MAX_UINT32 is the SeedManager sentinel that tells the device sampler to stop re-initialising
-    # its PRNG and let rand_tile() free-run.
-    _SEED_SKIP = 0xFFFFFFFF
-
-    def _prime_sampler_seeds_for_trace(self):
-        """Put the device seed tensor in its free-running state BEFORE the decode traces are captured.
-
-        ``ttnn.manual_seed`` runs inside the sampler's trace, so whatever the seed tensor holds at
-        capture time is what EVERY replay re-seeds with; writing it from the host afterwards cannot
-        change a captured replay. ``TTSampling`` initialises that tensor to ``torch.arange(32)`` -
-        concrete, non-sentinel values - and ``SeedManager`` starts in its steady state, so
-        ``get_new_values()`` early-returns and never replaces them. The traces therefore captured a
-        PRNG that is re-seeded identically on every decode step.
-
-        Measured on device (32 users, 24 draws of a fixed distribution):
-
-            concrete seeds -> draw changes step-to-step   0.0 %, 1.00 distinct tokens per user
-            SKIP sentinel  -> draw changes step-to-step  96.6 %, 14.8 distinct tokens per user
-
-        A frozen draw means the sampler returns the same cumulative-probability quantile at every
-        step: whenever the top-1 token's probability falls below it, the step emits a lower-ranked
-        token. That is the long-context word corruption in doc/text_quality/README.md, and it is why
-        greedy (k=1, which ignores the draw) and host sampling were both unaffected.
-
-        Only the UNSEEDED path is traced - ``SamplingGenerator.sample`` runs seeded requests eagerly
-        precisely so a replay cannot observe stale seed state - so pinning the captured value to the
-        sentinel is correct for every traced step.
-        """
-        sampling_module = getattr(self.model[0], "sampling", None)
-        if sampling_module is None:
-            logger.warning("SEED_PRIME: no sampling module; device sampler seeds not primed")
-            return
-        sm = sampling_module.seed_manager
-        sm.write_device_seed_values([self._SEED_SKIP] * sm.max_batch_size)
-        sm._reseted = False
-        sm._needs_skip = False
-        logger.info(f"SEED_PRIME wrote SKIP to all {sm.max_batch_size} slots before decode trace capture")
-
-    def _advance_sampler_seeds(self):
-        """Drive the on-device sampler's seed state machine to its free-running state every decode step.
-
-        ``SeedManager.get_new_values`` is a three-state machine for unseeded requests: push per-user
-        entropy seeds, then push the MAX_UINT32 SKIP sentinel so the device's ``rand_tile()`` advances
-        on its own, then steady (no host-to-device copy). ONLY the SKIP state draws independently.
-
-        Measured on device (one Blackhole, 32 users, 24 draws of a fixed distribution):
-
-            manual_seed with CONCRETE seeds -> draw changes step-to-step   0.0 %, 1.00 distinct tokens
-            manual_seed with the SKIP value -> draw changes step-to-step  96.6 %, 14.8 distinct tokens
-
-        With concrete seeds the PRNG is re-initialised identically before every draw, so a request
-        returns the SAME cumulative-probability quantile at every step instead of sampling: whenever
-        the top-1 token's probability falls below that fixed quantile the step emits a lower-ranked
-        token. That is the long-context word corruption in doc/text_quality/README.md.
-
-        ``apply_prefill_state`` calls ``get_new_values`` exactly once per admission, which leaves the
-        machine in the concrete-seed state, and ``apply_decode_state`` deliberately does not advance it
-        ("callers manage seed advancement separately"). So the serving path must, as the qwen36 text
-        demo does before capturing its trace. In the steady state the call early-returns with no device
-        traffic, so the per-step cost is a Python call.
-
-        Deliberately NOT gated on the step's sampling params: an earlier version of this guarded on
-        ``sampling_params is not None`` and silently never fired.
-        """
-        sampling_module = getattr(self.model[0], "sampling", None)
-        if sampling_module is None:
-            logger.warning("SEED_ADVANCE: no sampling module; on-device sampler seeds NOT advanced")
-            return
-        sm = sampling_module.seed_manager
-        pushed = [sm.get_new_values()]
-        if not getattr(sm, "_seed_active", False):
-            # unseeded: a second call lands on SKIP when the first one re-pushed entropy seeds
-            # (a fresh admission); both early-return once the machine is steady.
-            pushed.append(sm.get_new_values())
-        if not getattr(self, "_seed_advance_logged", False):
-            self._seed_advance_logged = True
-            MAXU = 0xFFFFFFFF
-
-            def _d(v):
-                if v is None:
-                    return "steady(no push)"
-                return "SKIP" if all(int(x) == MAXU for x in v) else f"concrete{tuple(int(x) for x in v[:3])}"
-
-            logger.info(
-                f"SEED_ADVANCE pushes={[_d(v) for v in pushed]} "
-                f"seed_active={getattr(sm, '_seed_active', None)} "
-                f"reseted={getattr(sm, '_reseted', None)} needs_skip={getattr(sm, '_needs_skip', None)}"
-            )
 
     # MTP steps return a host int32 [B_pad, k+1] tensor; the plugin still routes it through the model's read / host-format
     # hooks (the base Generator's versions expect per-device handles), so pass host tensors through untouched
