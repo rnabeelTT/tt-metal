@@ -8,7 +8,7 @@ up to 32 concurrent sequences, speculative decoding from the checkpoint's MTP he
 ## Serve it
 
 ```bash
-tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2 --profile p300x2   # private Hub bundle, one image
+tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile p300x2      # private Hub bundle, one image
 tt-model curl "Say hello in one sentence."
 ```
 
@@ -18,10 +18,10 @@ Thinking is ON by default (reasoning in the message's `reasoning` field, answer 
 with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers; give thinking requests thousands of
 tokens of `max_tokens`. Images go in as `image_url` content parts (up to 4 per request, resized to at most 4 MP).
 
-## Fixed defect (v2 repo): dies drawing different tokens with on-device sampling
+## Fixed defect: dies drawing different tokens with on-device sampling
 
-`raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2` is the first revision with this fix; the original
-`raahemnabeel/qwen3-5-122b-a10b-blackholex4` repo is kept as it was.
+Fixed in the Hub bundle from the 2026-10-06 revision on (validated first as a separate `-v2` repo,
+then pushed to `raahemnabeel/qwen3-5-122b-a10b-blackholex4`).
 
 The device sampler runs `ttnn.sampling` on every die of the mesh; each die draws from its own hardware
 PRNG, writes its token into *its* persistent decode token input, and the host reads die 0's copy. The

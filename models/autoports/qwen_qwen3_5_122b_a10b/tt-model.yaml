@@ -2,8 +2,8 @@
 # Authoring interface of `tt-model package --container models/autoports/qwen_qwen3_5_122b_a10b/tt-model.yaml`.
 schema: "5.1"
 
-repo: raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2
-name: qwen3-5-122b-a10b-blackholex4-v2
+repo: raahemnabeel/qwen3-5-122b-a10b-blackholex4
+name: qwen3-5-122b-a10b-blackholex4
 # weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
 weights: {repo: Qwen/Qwen3.5-122B-A10B, revision: dc4d348443bc740c68e2d77492492c11606384d5}
 kind: vllm-plugin
@@ -173,15 +173,8 @@ card:
     card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
     Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
 
-    ### What changed in this repo (v2)
-    Same model, weights, profiles and precision as `raahemnabeel/qwen3-5-122b-a10b-blackholex4`, plus one fix in the
-    on-device sampler: every die of the mesh now draws the sampled token from identical per-step seeds and adopts die
-    0's token (the one the client receives). Without it the dies' free-running random generators can drift apart, so
-    the model continues from a token the client never saw; this was found on the sibling Qwen3-Coder-Next package
-    (about one wrong word in thirty of a long sampled answer) and the same sampler state is used here. Verified on
-    p300x2 with the per-die token probe before and after (numbers in the autoport README); decode speed unchanged.
-
-    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2 --profile <name>` (p300x2 names below; the same four exist
+    ### Profiles - which one for which use case
+    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile <name>` (p300x2 names below; the same four exist
     as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
     - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
       Speculative decoding gives a single user about 50 tok/s; images and tool calls work; thinking on.
