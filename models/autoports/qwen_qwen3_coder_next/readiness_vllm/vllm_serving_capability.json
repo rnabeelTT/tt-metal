@@ -1,0 +1,98 @@
+{
+ "model": "Qwen/Qwen3-Coder-Next",
+ "architecture": "Qwen3NextForCausalLM",
+ "mesh_device": "P300x2",
+ "mesh_shape": [
+  1,
+  4
+ ],
+ "resident_layers": 48,
+ "max_model_len": 262144,
+ "max_num_seqs": 32,
+ "page_size": 64,
+ "decode_trace_enabled": true,
+ "decode_trace_buckets": [
+  1,
+  2,
+  4,
+  8,
+  16,
+  32
+ ],
+ "chunked_prefill": true,
+ "max_num_batched_tokens": 2048,
+ "kv_cache_owner": "vllm",
+ "precision": {
+  "schema_version": 2,
+  "config_id": "coder_next_routed_bfp8_mixers_bfp8",
+  "config_path": "models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config.json",
+  "config_sha256": "d3c86d47da914df740c9d5604137f6781f4694d410e23ef68881522d256d4c32",
+  "terminal": {
+   "embedding_weight": "bf16",
+   "normalization_weight": "bf16",
+   "lm_head_weight": "bfp4",
+   "lm_head_math_fidelity": "ttnn_default",
+   "logits_dtype": "bf16",
+   "sampling_dtype": "uint32",
+   "full_logits_gather": {
+    "mode": "not_materialized_for_sampling",
+    "runtime_path": "sharded TTSampling consumes LM-head output directly",
+    "force_full_vocab_argmax_allowed": true,
+    "force_full_vocab_argmax_selected": "per-request (temperature 0)"
+   }
+  },
+  "layer_runtime_groups": [
+   {
+    "attention_weight": "bfp8",
+    "linear_attention_weight": "bfp8",
+    "router_weight": "bf16",
+    "shared_expert_weight": "bfp8",
+    "routed_expert_gate_up": "bfp8",
+    "routed_expert_down": "bfp8",
+    "kv_cache": "bfp8",
+    "linear_state": "bf16",
+    "ccl": "bfp8",
+    "residual": "bf16",
+    "activation": "bf16",
+    "routed_fidelity": "hifi2",
+    "attention_fidelity": "hifi2",
+    "router_fidelity": "hifi4"
+   }
+  ],
+  "accuracy_gate": {
+   "teacher_forcing_top1_min": 0.9,
+   "teacher_forcing_top5_min": 0.98,
+   "teacher_forcing_top100_min": 1.0
+  }
+ },
+ "model_capabilities": {
+  "supports_async_decode": true,
+  "supports_sample_on_device": true,
+  "max_device_sampling_top_k": 32,
+  "device_sampling_top_k_above_max": "clamped (NOT moved to host sampling)",
+  "supports_batched_prefill": false,
+  "supports_prefix_caching": false,
+  "supports_mtp": false,
+  "supports_vision": false,
+  "device_logprobs": "unsupported on a 4-die mesh; any logprobs request falls back to host sampling"
+ },
+ "known_defects": [
+  {
+   "id": "long-context-device-sampling-word-corruption",
+   "status": "open",
+   "summary": "With on-device stochastic sampling above ~2K tokens of context, output drops the first token of multi-token words (~1 corrupted word in 30).",
+   "unaffected": [
+    "temperature 0 (greedy)",
+    "host sampling"
+   ],
+   "evidence": "models/autoports/qwen_qwen3_coder_next/doc/text_quality/README.md"
+  }
+ ],
+ "validation": {
+  "teacher_forcing": "greedy top-1 agreement vs HF bf16, 100 tokens, prompts up to 2048 tokens",
+  "served_benchmark_evals": null,
+  "longest_context_measured": 2048,
+  "longest_generation_reviewed": 200,
+  "note": "Teacher forcing measures greedy agreement and does not bound sampled serving quality."
+ }
+}

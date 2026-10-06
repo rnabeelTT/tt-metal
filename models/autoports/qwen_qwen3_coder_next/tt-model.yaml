@@ -24,6 +24,12 @@ source:
     - models/autoports/qwen_qwen3_coder_next/doc/context_contract.json            # read by generator_vllm at build
     - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config.json       # 4-die policy
     - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config_tp2.json   # 2-die policy
+    # machine-readable declaration of what this package serves: capabilities, the precision policy
+    # pinned by content hash, the device sampler's top-k ceiling, and the open defects. Same artifact
+    # the tt-hous/gpt-oss-120b-p150x4 bundle ships.
+    - models/autoports/qwen_qwen3_coder_next/readiness_vllm/vllm_serving_capability.json
+    # the long-context sampling defect: evidence and every eliminated hypothesis, referenced by the card
+    - models/autoports/qwen_qwen3_coder_next/doc/text_quality/README.md
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet
@@ -68,7 +74,15 @@ serve:
     # per request), so a short request is not stuck behind a 100K-token prompt. The checkpoint has no MTP head and no
     # vision tower, so nothing competes with it.
     QWEN35_CHUNKED_PREFILL: "1"
-  args: [--enable-auto-tool-choice, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+  # Greedy by DEFAULT (owner decision 2026-10-05). The checkpoint's own recommendation is
+  # temperature 1.0 / top_p 0.95 / top_k 40, but on-device sampling above ~2K tokens of context
+  # currently corrupts words (doc/text_quality/README.md); greedy is unaffected and measured clean
+  # and deterministic at 22K context. For a code and agentic model T=0 is also what most callers
+  # run anyway, for syntax determinism and stable tool-call signatures. A request that explicitly
+  # sends a non-zero temperature still gets the sampled path, and still hits the defect - that is
+  # why the card documents it. Remove this override once the sampler defect is fixed.
+  args: [--enable-auto-tool-choice, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"],
+         [--override-generation-config, '{"temperature": 0.0, "top_k": 1, "top_p": 1.0}']]
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
 # `tt-model serve <bundle> --profile <name>`. The mesh size picks the precision policy and the KV budget at build.
@@ -121,3 +135,36 @@ card:
     - `p300x2` (default) / `p150x4` - four dies: the faster profile.
     - `p300` / `p150x2` - two dies: the same features on half the hardware, with bfp4 routed experts.
     Every profile runs chunked prefill, so long prompts (codebases, long files) do not block short requests.
+
+    ### Known defect (open)
+
+    **This package serves greedy (`temperature 0`) by default**, which is not affected.
+
+    With on-device *sampling* (any non-zero temperature) and more than roughly 2,000 tokens of
+    context, output drops the first token of multi-token words - about one corrupted word every
+    thirty in a long answer, while the answer stays on topic ("safetensors" -> "etensors",
+    "interplay" -> "play"). Clean below ~2K context, intermittent around 8K, consistent by 20K.
+
+    A request that explicitly sets a non-zero `temperature` still takes that path and will still
+    show the corruption. The checkpoint's own recommendation is `temperature 1.0, top_p 0.95,
+    top_k 40`; this package overrides it to greedy until the defect is fixed, which for a code and
+    agentic model also matches how most callers run it. Root cause is not yet isolated and the
+    sibling Qwen3.5-122B-A10B package is unaffected. Evidence: `doc/text_quality/README.md`.
+
+    ### Limitations
+
+    - The device sampler supports `top_k` up to 32. This checkpoint's recommended default is
+      `top_k 40`, which is clamped to 32 rather than moved to host sampling, so a default request is
+      not served with the sampler the model card specifies.
+    - Agentic benchmarks (SWE-Bench Verified, LiveCodeBench), which is what Qwen publishes for this
+      checkpoint, were not run. Neither were the 2-die profiles evaluated; the numbers below are the
+      4-die p300x2 profile.
+
+    ### Benchmark evals
+
+    Through the served API on four dies with lm-evaluation-harness 0.4.9, at the greedy default:
+    HumanEval pass@1 68.9 %, MBPP pass@1 77.2 %, GSM8K exact match 92.4 %, IFEval prompt-level strict
+    75.8 %. Re-run at `temperature 1.0`, HumanEval falls to 60.4 % while the others stay within their
+    error bars - HumanEval is the one task here where a single wrong token fails the whole answer.
+    Qwen does not publish HumanEval or MBPP for this checkpoint, so these are baselines for the port
+    rather than a comparison against a vendor figure.
