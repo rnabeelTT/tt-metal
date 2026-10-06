@@ -161,8 +161,13 @@ class Qwen35MoeModel(Qwen36Model):
             args.pad_logits_to_power_of_2 = True
             self._supports_on_device_sampling = True
             self.sampling = SamplingGenerator(args=args, mesh_device=mesh_device, tt_ccl=self.tt_ccl)
-        if self.sampling is not None and mesh_device.get_num_devices() > 1:
-            # every die must feed back the token the host reads (doc/text_quality/README.md root cause)
+        if (
+            self.sampling is not None
+            and mesh_device.get_num_devices() > 1
+            and os.environ.get("QWEN35_SAMPLER_LOCKSTEP", "1") == "1"
+        ):
+            # every die must feed back the token the host reads (doc/text_quality/README.md root cause);
+            # QWEN35_SAMPLER_LOCKSTEP=0 restores the stock sampler (A/B measurement only)
             _install_lockstep_sampling(self.sampling, mesh_device)
         # Device-owned decode inputs: tokens via tt_out_tok, positions via plus_one (no per-token host refresh).
         self._tt_vllm_always_refresh_decode_trace_inputs = False

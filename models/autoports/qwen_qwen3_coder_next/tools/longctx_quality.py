@@ -116,7 +116,13 @@ def main(argv=None):
         help="fail (exit 1) if the mean garble_per_1k of served_default exceeds this",
     )
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument(
+        "--extra-body",
+        default="{}",
+        help="JSON merged into every request body (e.g. chat_template_kwargs for a thinking model)",
+    )
     a = ap.parse_args(argv)
+    extra_body = json.loads(a.extra_body)
 
     SETTINGS["served_default"] = json.loads(a.served_sampling)
     prompts = build_prompts([p for p in a.prompts.split(",") if p])
@@ -138,6 +144,7 @@ def main(argv=None):
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": a.max_tokens,
                     **sp,
+                    **extra_body,
                 }
                 t0 = time.time()
                 try:
