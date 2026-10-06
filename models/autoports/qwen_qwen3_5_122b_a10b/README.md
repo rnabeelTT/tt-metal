@@ -8,7 +8,7 @@ up to 32 concurrent sequences, speculative decoding from the checkpoint's MTP he
 ## Serve it
 
 ```bash
-tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4 --profile p300x2      # private Hub bundle, one image
+tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2 --profile p300x2   # private Hub bundle, one image
 tt-model curl "Say hello in one sentence."
 ```
 
@@ -17,6 +17,32 @@ From this checkout instead of the bundle: `doc/HANDOFF.md` §2 (the readiness ru
 Thinking is ON by default (reasoning in the message's `reasoning` field, answer in `content`). Turn it off per request
 with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers; give thinking requests thousands of
 tokens of `max_tokens`. Images go in as `image_url` content parts (up to 4 per request, resized to at most 4 MP).
+
+## Fixed defect (v2 repo): dies drawing different tokens with on-device sampling
+
+`raahemnabeel/qwen3-5-122b-a10b-blackholex4-v2` is the first revision with this fix; the original
+`raahemnabeel/qwen3-5-122b-a10b-blackholex4` repo is kept as it was.
+
+The device sampler runs `ttnn.sampling` on every die of the mesh; each die draws from its own hardware
+PRNG, writes its token into *its* persistent decode token input, and the host reads die 0's copy. The
+unseeded seed manager leaves those PRNGs free-running after the first step, and over a long context the
+dies drift apart, so the client receives die 0's word while the model continues from the other dies'
+word. Found on the sibling Qwen3-Coder-Next port (`models/autoports/qwen_qwen3_coder_next/doc/text_quality/README.md`),
+which shows it from ~8K tokens of context; this model needs a longer context before the dies drift.
+Measured here with the real model on p300x2 (default sampling `temperature 0.6, top_p 0.95, top_k 20`,
+token buffer of every die read after each decode step):
+
+| context | sampler | steps where a die disagrees with die 0 | ms / step |
+|---|---|---|---|
+| 20K | stock | 0 / 400 | 31.34 |
+| 20K | fixed | 0 / 400 | 31.36 |
+| 95K | stock | **162 / 600** | 32.91 |
+| 95K | fixed | **0 / 600** | 32.86 |
+
+Fix (`tt/model.py`, `_install_lockstep_sampling`, same code as the Coder-Next port): identical fresh
+seeds pushed before every draw, and after the draw die 0's token row is all-gathered and copied into
+every die's token buffer, so the token fed back is the token the client receives whatever the dies
+drew. `QWEN35_SAMPLER_LOCKSTEP=0` restores the stock sampler for A/B measurement only.
 
 ## Profiles: which one for which use case
 
