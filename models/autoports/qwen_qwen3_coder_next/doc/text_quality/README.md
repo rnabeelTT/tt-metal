@@ -33,9 +33,11 @@ happened to overlap. This explains every constraint the investigation had collec
 (the argmax ignores the draw), host sampling is clean (one token is fed to every die), a standalone
 reproduction of the sampler is clean (with nothing but the sampler running, the dies stay in lockstep
 - verified: 0 % cross-die disagreement in SKIP mode over 40 draws with an unrelated SFPU op in
-between). Why the 122B port's dies stay in step (or diverge too rarely to notice) while this model's
-do not is NOT explained; the two ports run the same sampler in the same free-running state, so the
-122B and Ornith autoports carry the same hazard and should take the same fix.
+between). The 122B port is NOT immune, it only needs a longer context: with the stock sampler its dies
+disagreed on 0 of 400 steps at 20K tokens of context but on 162 of 600 at 95K (default sampling
+`temperature 0.6 / top_k 20`). So the drift is context-length dependent in both models (the kernel
+that advances the per-die PRNGs unevenly is not identified; it scales with context), and every
+multi-die port takes the same fix.
 
 The fix makes the dies agree two independent ways: the seed manager pushes fresh *identical* seeds
 before every draw instead of SKIP (`ttnn.manual_seed` runs right before `ttnn.sampling` inside the

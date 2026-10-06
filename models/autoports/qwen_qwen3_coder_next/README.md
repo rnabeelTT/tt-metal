@@ -55,10 +55,10 @@ drift apart and draw *different* tokens from the same distribution. The host the
 0's token while the model continues from the other dies' tokens: the visible word is the wrong
 sibling candidate (" checkpoints" in place of " saf"), and the continuation ("etensors") is coherent
 because the model never saw the reported token. Greedy is unaffected because the argmax ignores the
-draw; host sampling is unaffected because one token is fed to every die. The Qwen3.5-122B-A10B and
-Ornith autoports run the same sampler in the same free-running state and are therefore exposed to the
-same hazard; it was measured severe here and not noticeably in the 122B, and the difference has not
-been explained, so the same fix should be applied there too.
+draw; host sampling is unaffected because one token is fed to every die. The drift grows with context:
+the Qwen3.5-122B-A10B port, which runs the same sampler in the same state, measured 0 of 400
+disagreeing steps at 20K tokens of context but 162 of 600 at 95K, so every multi-die port is exposed and
+the 122B carries the same fix (its `-v2` Hub repo).
 
 Measured on p300x2 with the real model at 20K context, 400 sampled decode steps (`temperature 1.0,
 top_p 0.95, top_k 40`), reading the token buffer of every die after each step:
