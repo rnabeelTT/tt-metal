@@ -641,9 +641,40 @@ def sharded_decode_matmul(
             ttnn.deallocate(x_sh)
         return ttnn.to_memory_config(out, decode_out_memory_config)
     pc = prefill_progcfg_fn(seq, prefill_k, weight.shape[-1])
-    return ttnn.linear(
-        x, weight, compute_kernel_config=compute_cfg, program_config=pc, memory_config=ttnn.DRAM_MEMORY_CONFIG
-    )
+    rows = PREFILL_MAX_ROWS or seq
+    if rows >= seq:
+        return ttnn.linear(
+            x, weight, compute_kernel_config=compute_cfg, program_config=pc, memory_config=ttnn.DRAM_MEMORY_CONFIG
+        )
+    # PREFILL_MAX_ROWS (set by a caller that runs these modules at full width on ONE device, e.g. the GDN qkvzab
+    # projection with N = 386 tiles): the 2D config's per-core output block grows with the rows and a long prefill
+    # overflows L1, so run row slices of at most that many rows.
+    outs = []
+    for r0 in range(0, seq, rows):
+        r1 = min(seq, r0 + rows)
+        lead = [int(d) for d in list(x.shape)[:-2]]  # ttnn.Shape has no slicing
+        xs = ttnn.slice(
+            x, [0] * len(lead) + [r0, 0], lead + [r1, int(x.shape[-1])], memory_config=ttnn.DRAM_MEMORY_CONFIG
+        )
+        outs.append(
+            ttnn.linear(
+                xs,
+                weight,
+                compute_kernel_config=compute_cfg,
+                program_config=prefill_progcfg_fn(r1 - r0, prefill_k, weight.shape[-1]),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
+        )
+        ttnn.deallocate(xs)
+    out = ttnn.concat(outs, dim=-2, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    for o in outs:
+        ttnn.deallocate(o)
+    return out
+
+
+# Max prefill rows per sharded_decode_matmul call (None = no limit: every multi-device mesh). Set by callers that run
+# the TP modules at degree 1, whose full-width 2D prefill configs overflow L1 above ~512 rows.
+PREFILL_MAX_ROWS = None
 
 
 def replicate(torch_tensor, mesh, cache_path, dtype=ttnn.bfloat16):

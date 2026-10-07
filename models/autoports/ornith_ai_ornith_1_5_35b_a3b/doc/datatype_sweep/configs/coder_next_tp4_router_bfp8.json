@@ -1,0 +1,53 @@
+{
+  "config_id": "coder_next_tp4_router_bfp8",
+  "description": "4-die selected policy with bfp8 router weights (HiFi4)",
+  "weight_groups": {
+    "embedding": {
+      "dtype": "bf16"
+    },
+    "norms": {
+      "dtype": "bf16"
+    },
+    "attention": {
+      "dtype": "bfp8"
+    },
+    "linear_attention": {
+      "dtype": "bfp8"
+    },
+    "router": {
+      "dtype": "bfp8"
+    },
+    "shared_moe": {
+      "dtype": "bfp8"
+    },
+    "routed_moe": {
+      "gate_up": "bfp8",
+      "down": "bfp8"
+    },
+    "lm_head": {
+      "dtype": "bfp4"
+    }
+  },
+  "layer_exceptions": {},
+  "compute_fidelities": {
+    "attention": "hifi2",
+    "linear_attention": "hifi2",
+    "router": "hifi4",
+    "shared_moe": "hifi2",
+    "routed_moe": "hifi2",
+    "lm_head": "ttnn_default"
+  },
+  "activation_dtype": "bf16",
+  "residual_dtype": "bf16",
+  "ccl_dtype": "bfp8",
+  "kv_cache_dtype": "bfp8",
+  "linear_state_dtype": "bf16",
+  "logits_dtype": "bf16",
+  "sampling_dtype": "uint32",
+  "accuracy_gate": {
+    "teacher_forcing_top1_min": 0.9,
+    "teacher_forcing_top5_min": 0.98,
+    "teacher_forcing_top100_min": 1.0
+  },
+  "mesh": "(1,4) P300x2 / P150x4 (TP4)"
+}

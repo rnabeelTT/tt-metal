@@ -1,0 +1,56 @@
+{
+  "hf_model": "ornith-ai/Ornith-1.5-35B-A3B",
+  "hf_revision": "10fbf86fed7ecee4a061f8b499a618f46001cac1",
+  "hf_advertised_context": 262144,
+  "current_supported_context": 262144,
+  "note_port": "Ornith-1.5-35B-A3B v2 port: the Qwen3-Coder-Next / Qwen3.5-122B-A10B autoport code (same qwen3_5_moe checkpoint format as the 122B, Coder-Next's hidden-2048 dims). Per-mesh serving budgets below; generator_vllm reads serving_tp{N}, else datatype_sweep_stage8.",
+  "capacity_evidence": {
+    "kv_layers": 10,
+    "gdn_layers": 30,
+    "kv_heads": 2,
+    "head_dim": 256,
+    "kv_bytes_per_token_bf16_all_layers": 20480,
+    "note": "10 of 40 layers hold a paged KV cache; TP4 / TP2 keep one local KV head per device (KV heads replicated per device pair at TP4): 10 x 2 (K,V) x 256 x 1.0625 B (bfp8) = 5440 B/token/device"
+  },
+  "datatype_sweep_stage8": {
+    "status": "fallback for unknown mesh sizes = the TP4 numbers",
+    "kv_bytes_per_token_per_device": 5440,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 12.0,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 262144
+  },
+  "serving_tp4": {
+    "status": "MEASURED 2026-10-07 (40-layer teacher-forcing build, B=1, MEMORY_REPORT): 10.44 GiB allocated per device with bfp8 routed experts; budgeted at 12.0 GiB (decode-width traces, MTP head and vision tower on top)",
+    "selected_policy": "ornith_routed_bfp8_mixers_bfp8",
+    "kv_cache_dtype": "bfloat8_b",
+    "kv_bytes_per_token_per_device": 5440,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 12.0,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 262144
+  },
+  "serving_tp2": {
+    "status": "MEASURED 2026-10-07 (40-layer teacher-forcing build, B=1, MEMORY_REPORT): 19.12 GiB allocated per device with bfp8 routed experts; budgeted at 19.5 GiB",
+    "selected_policy": "ornith_routed_bfp8_mixers_bfp8",
+    "kv_cache_dtype": "bfloat8_b",
+    "kv_bytes_per_token_per_device": 5440,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 19.5,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 262144
+  },
+  "serving_tp1": {
+    "status": "MEASURED 2026-10-07 (40-layer teacher-forcing build, B=1, MEMORY_REPORT): 22.86 GiB allocated with bfp4 routed experts; budgeted at 23.2 GiB. The gate/up-bfp4 + down-bfp8 policy (configs/ornith_routed_gu_bfp4_down_bfp8_mixers_bfp8.json: book p2048 top1/5/100 0.86/0.97/1.00 vs 0.84/0.94/0.99) allocates 27.86 GiB and leaves almost no KV pool at 32 slots - opt-in via QWEN35_PRECISION_CONFIG for few-user deployments",
+    "selected_policy": "ornith_routed_bfp4_mixers_bfp8",
+    "kv_cache_dtype": "bfloat8_b",
+    "kv_bytes_per_token_per_device": 10880,
+    "kv_bytes_note": "10 attention layers x 2 local KV heads x head_dim 256 x (K,V) x 1.0625 B",
+    "per_slot_gib": 0.06,
+    "per_slot_note": "GDN recurrent state 30 layers x 32 v-heads x 128 x 128 bf16 = 30 MiB + conv taps + B-sized decode buffers; all heads on one die",
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 23.2,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 262144
+  }
+}

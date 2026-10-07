@@ -30,6 +30,9 @@ class Qwen36DecoderLayer:
         self.args = args
         self.tt_ccl = tt_ccl
         self.num_devices = getattr(args, "num_devices", 1)
+        # TP attention / GDN modules: on a multi-device mesh, or on one device when the args ask for them
+        # (tp_modules_single_device: the TP modules at degree 1, CCLs are no-ops; used by the autoports' single-die serving)
+        self._tp_modules = self.num_devices > 1 or bool(getattr(args, "tp_modules_single_device", False))
         self.is_full_attention = args.is_full_attention_layer(layer_num)
 
         prefix = f"layers.{layer_num}"
@@ -80,7 +83,7 @@ class Qwen36DecoderLayer:
             enable_all_gather=not self._fuse_ff_agmm,
         )
 
-        if self.num_devices > 1:
+        if self._tp_modules:
             # Tensor-parallel modules (sharded weights from the raw substate).
             # Cache the sharded mesh weights to disk so re-runs skip the (slow,
             # single-threaded) reorder+shard of the full 27B.
@@ -235,7 +238,7 @@ class Qwen36DecoderLayer:
             keep_sharded=bool(self.is_full_attention and getattr(self.args, "attn_norm_out_sharded", False)),
         )
 
-        if self.num_devices > 1:
+        if self._tp_modules:
             # TP modules: input is the gathered (full-dim) norm output [1,1,B/S,dim];
             # output is fractured along dim=3. cos/sin are in rope_tp format.
             if self.is_full_attention:

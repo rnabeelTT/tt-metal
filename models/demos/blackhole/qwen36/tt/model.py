@@ -2655,7 +2655,7 @@ class Qwen36Model:
 
         Trace capture runs forward twice; GDN state is non-idempotent. Must re-zero before each
         real sequence. In-place buffers (_chunk_inplace_state) use _reset_dn_state_inplace."""
-        if self.num_devices > 1:
+        if self.num_devices > 1 or getattr(self.args, "tp_modules_single_device", False):
             # TP: reset_state_inplace preserves decode-trace baked addresses.
             for layer in self.layers:
                 if not layer.is_full_attention:
@@ -2720,7 +2720,7 @@ class Qwen36Model:
         # QWEN_SDPA_BF8: bf8 paged KV for SDPA; halves KV memory (gated — validate PCC at long ctx).
         if os.environ.get("QWEN_SDPA_BF8", "0") == "1":
             dtype = ttnn.bfloat8_b
-        if self.num_devices > 1:
+        if self.num_devices > 1 or getattr(self.args, "tp_modules_single_device", False):
             return self._allocate_kv_caches_tp(kv_cache_shape, dtype, batch_size)
 
         kv_caches = []
