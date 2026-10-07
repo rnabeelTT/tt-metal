@@ -1,0 +1,262 @@
+# tt-model container package (v5.1) — qwen3-coder-30b-a3b on QB2 (2x P300, 4 chips).
+#
+# This one file is the whole authoring interface:
+#   tt-model package --container models/demos/blackhole/qwen3_coder_30b_a3b/tt-model.yaml
+#
+# It lives next to the model on purpose: the serving recipe then travels through review
+# in the same PR as the code it serves.
+schema: "5.1"
+
+repo: raahemnabeel/qwen3-coder-30b-a3b-v2
+name: qwen3-coder-30b-a3b-v2
+weights: {repo: Qwen/Qwen3-Coder-30B-A3B-Instruct, revision: b2cff646eb4bb1d68355c01b18ae02e7cf42d120}   # a POINTER (57 GB), never baked into the image
+kind: vllm-plugin                            # stock vLLM + the standalone tenstorrent/vllm-tt-plugin
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal
+
+  # EXACTLY what ships — an allowlist, never a denylist. The image's tt-metal tree holds
+  # NO models/ except these, so an under-specified list fails the image's own build-time
+  # import check on the author's machine, not on a consumer's first boot.
+  code:
+    # tt/ imports models.common.modules.sampling.sampling_1d,
+    # models.common.modules.tt_ccl and models.common.readiness_check.contract
+    - models/common
+    # the whole model, 1.6 MB: tt/, vllm_bundle/, config/, tests/, README.md
+    - models/demos/blackhole/qwen3_coder_30b_a3b
+
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  # The plugin monkeypatches vLLM internals, so this pin is load-bearing, not cosmetic.
+  # This box serves with 0.24.0 (reported 0.24.0+empty — the local tag comes from the
+  # VLLM_TARGET_DEVICE=empty sdist build, which is what the image does too).
+  vllm: {version: "0.26.0"}
+
+  # THE PLUGIN, bundled from your own checkout — the same hermetic treatment
+  # source.tt_metal gets. Whatever is in this directory ships, uncommitted work
+  # included; nothing is fetched at build time and nothing is resolved at serve time.
+  # `package` records its HEAD sha and flags the tree dirty if it is.
+  #
+  # Alternatives, when a local checkout is not the right input:
+  #   plugin: {repo: https://github.com/tenstorrent/vllm-tt-plugin, ref: <pushed sha>}
+  #   plugin: {version: "0.1.0"}
+  plugin:
+    path: /home/raahem/vllm-tt-plugin
+
+  # The directory the plugin SCANS — it walks the CHILDREN of this dir for
+  # vllm_metadata.json. Registration chain:
+  #   register_tt_models() -> _register_models_from_extra_dir() -> this dir ->
+  #   vllm_bundle/qwen3_coder_30b_a3b_instruct/vllm_metadata.json ->
+  #   Qwen3MoeForCausalLM registered as TTQwen3MoeForCausalLM ->
+  #   "tt_qwen3_coder_30b_a3b_instruct:Qwen3CoderForCausalLM" -> the shim ->
+  #   models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm:Qwen3CoderForCausalLM
+  # The shim's parents[6] still resolves in-container: the tree lands at
+  # /opt/tt-metal/models/demos/blackhole/<model>/vllm_bundle/<bundle>/, so six levels up
+  # is /opt/tt-metal, which is also PYTHONPATH. Setting this also makes the build pass
+  # TT_VLLM_BUILTIN_MODELS=0, so registration comes solely from here.
+  extra_models_dir: models/demos/blackhole/qwen3_coder_30b_a3b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+  # Uncomment once requirements.lock is committed next to this file, after the first
+  # successful build — later builds then resolve nothing at all.
+  # lock: requirements.lock
+
+serve:
+  # The port the image binds under a bare `docker run`. `tt-model serve` does NOT use this
+  # as its seed — it opens 20000 and walks past busy ports — so leave it at vLLM's default.
+  port: 8000
+
+  # 256000, NOT the 262144 HF advertises. config/context_contract.json records
+  # current_supported_context: 256000 with capability_reduction: true, and
+  # tt/generator_vllm.py reads that file as the source of truth and REFUSES to start
+  # above it. (Reason on record: an unresolved prefill cliff in the last ~3,100 tokens,
+  # and 17.5 min TTFT at that length even on the path that works.)
+  max_model_len: 256000
+
+  # 64, from the validated tt-inference-server P300X2 spec, which is authoritative here.
+  # config/context_contract.json's prose says "paging is unchanged (block_size 32)"; that
+  # text is older than the serving config and the spec supersedes it.
+  block_size: 64
+
+  # One configuration, measured. max_num_seqs only bounds what vLLM batches IN FLIGHT, and
+  # with the stage-11 decode-width ladder now the model default, batch-1 decode is already
+  # efficient at this cap — so a lower cap buys nothing. Measured on this box, 128 output
+  # tokens, tt-model 0.1.0:
+  #
+  # (All figures below are p300x2. The p150x4 profile is validated by the author but its
+  # throughput was not separately measured, so do not read these numbers as applying to it.)
+  #
+  #                          seqs=1        seqs=32
+  #   single-stream TTFT     0.232 s       0.219 s
+  #   single-stream decode   50.6 tok/s    49.2 tok/s
+  #   8 concurrent, total    46.7 tok/s    71.4 tok/s
+  #   8 concurrent, /user     5.8 tok/s     8.9 tok/s
+  #   slowest of the 8       21.9 s        14.4 s
+  #
+  # seqs=32 is identical for one user and strictly better for several, so there is no
+  # latency-vs-capacity trade to expose as separate profiles. Untested above 8 concurrent,
+  # and TTFT-under-load is unmeasured; if either turns out to matter, `serve_profiles:`
+  # is how you would split this again.
+  #
+  # Those decode figures are the ARGMAX path, which the --override-generation-config below
+  # now makes the default request — so they describe what an unparameterised client gets.
+  # A client that asks for sampling gets 38.6 tok/s instead; that gap is the strategy, not
+  # the configuration. Re-measured on this box after the warmup change: unparameterised
+  # 49.147 tok/s at 0.304 s TTFT first request, 8 concurrent 77.55 tok/s aggregate
+  # (9.69 tok/s/u), max TTFT 0.90 s.
+  # hardware/mesh_device are the ONLY per-profile fields — see serve_profiles below.
+  max_num_seqs: 32
+
+  # Structured, not a JSON string: tt-model renders it into --additional-config.
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 50331648
+      fabric_config: FABRIC_1D_RING
+
+  # Tool calling. tt-model emits --enable-auto-tool-choice alongside the parser, because
+  # vLLM hard-errors on the parser flag without it.
+  capabilities:
+    tool_parser: qwen3_coder
+
+  # Runtime environment, from the validated tt-inference-server P300X2 spec.
+  # MESH_DEVICE is NOT listed: it is derived from each profile's mesh_device.
+  # VLLM_TARGET_DEVICE is NOT listed either: it is a BUILD-time variable for the vLLM
+  # fork, and this image builds stock vLLM with VLLM_TARGET_DEVICE=empty plus the plugin.
+  env:
+    ARCH_NAME: blackhole
+    VLLM_CONFIGURE_LOGGING: "1"
+    VLLM_RPC_TIMEOUT: "900000"
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    TORCHDYNAMO_DISABLE: "1"
+    TT_METAL_OPERATION_TIMEOUT_SECONDS: "120.0"
+    # The variable-width decode ladder (stage 11, doc/batch_scaling). This is the model's
+    # default now, so setting it changes nothing today — it is kept to pin the behaviour
+    # explicitly, so a future change to that default cannot silently move this model.
+    QWEN3_DECODE_WIDTHS: "1,2,4,8,16,32"
+    # Warm a decode graph for every ladder width in BOTH sampling strategies at startup,
+    # rather than compiling one on whichever request first needs it. Costs 9.5 s of boot
+    # (decode warmup 2.41 s -> 11.89 s) and 24.8 MB/die; buys 1.64 s off the first
+    # request's TTFT (1.9416 s -> 0.2989 s) and removes the same stall from the first
+    # request at any other width or strategy. "both" is the model default; it is pinned
+    # here for the same reason QWEN3_DECODE_WIDTHS is.
+    QWEN3_WARMUP_SAMPLING: "both"
+    # Prefill bucketing (doc/prefill_buckets). A prefill program is compiled per exact
+    # sequence length, so without this every new prompt length paid a fresh compile —
+    # measured on 4 dies, cold cache: 4–11 s on top of the 0.89 ms/token floor, and
+    # recurring, not a startup cost (2443 tok cost 22.87 s, then 2444 tok cost 4.29 s
+    # again). Bucketing rounds each prefill to a ladder rung so the shape space is
+    # finite and warmable. "proportional" bounds the padding waste at 1/8th of the
+    # prefill at every length; measured steady-state tax is 2–3%, against 26% for a
+    # half-power-of-two ladder and ~111 s worst case for plain powers of two.
+    QWEN3_PREFILL_BUCKETS: "proportional"
+    # Warm the ladder once per HOST, not once per boot. The rungs and the cached-suffix
+    # shapes cost 217.9 s to compile on a cold cache and ~68 k tokens of prefill to run,
+    # so "auto" runs them only when its marker is absent from TT_METAL_CACHE — which
+    # tt-model mounts per model and keeps across container removal on purpose. Clearing
+    # that cache clears the marker, and the next boot re-warms. "full" ignores the
+    # marker; "off" skips it and leaves every shape to compile on a real request.
+    QWEN3_PREFILL_WARMUP: "auto"
+    # Warm every rung up to and including the one that covers 8192 tokens (23 rungs).
+    # Longer prompts still compile lazily, once each, and persist in the same cache.
+    # Raising this lengthens only the first boot on a fresh host; "0" warms all 52.
+    QWEN3_PREFILL_WARMUP_MAX: "8192"
+    # The cached-suffix (prefix-cache hit) path is a separate program set, keyed on the
+    # chunked-SDPA chunk size AND the suffix length. Reachable chunk sizes are just
+    # {64, 128, 256} at block_size 64, so this caps the second axis: suffix rungs up to
+    # 1024, which is where a hit's new tail actually lands.
+    QWEN3_PREFILL_WARMUP_SUFFIX_MAX: "1024"
+
+  # Anything without a named field goes here, verbatim.
+  args:
+    - [--max-num-batched-tokens, "256000"]
+    - [--max-log-len, "32"]
+    - [--generation-config, vllm]
+    # A GREEDY DEFAULT, measured. `--generation-config vllm` alone means an
+    # unparameterised request arrives at vLLM's own temperature=1.0 / top_p=1.0, and the
+    # model routes anything with k>1 or p>0 to split sampling: 25.88 ms/token (38.6 t/s/u)
+    # against 20.35 ms (49.1) for argmax, on 4 dies, 24-token completions. For a coding
+    # model that is the wrong default three times over — 21 % slower, non-deterministic
+    # across identical prompts, and full-distribution sampling at temperature 1.0 is the
+    # worst of the three available regimes for code. Overriding temperature to 0 makes the
+    # default request greedy (verified: 49.147 t/s/u unparameterised) while leaving
+    # repetition_penalty unset, so the decode graph stays on penalty mode 0. A client that
+    # wants sampling still sends temperature itself and gets the split path, warm — the
+    # model warms both strategies at startup (QWEN3_WARMUP_SAMPLING below).
+    #
+    # QUOTING IS LOAD-BEARING. launchers.py joins these with spaces into ONE
+    # Written BARE. The extra single quotes this used to carry were a workaround for the
+    # vllm-fork path, which joins args into one --additional-server-args string that the
+    # runner shlex-splits: bare JSON lost its double quotes there and reached vLLM as
+    # {temperature: 0}. This model is vllm-plugin, which passes argv loose -- compose_run
+    # hands docker the list and the entrypoint ends in `exec "$@"`, so nothing consumes a
+    # shell quote and the literal ' characters reached json.loads instead. tt-model now
+    # shlex-quotes the fork path itself, so bare is correct for both kinds.
+    - [--override-generation-config, '{"temperature": 0}']
+    - [--seed, "9472"]
+
+
+# TWO BOARDS, ONE CONFIGURATION. p300x2 (2x P300) and p150x4 (4x P150) are both four
+# Blackhole chips on a (1, 4) mesh — tt-model derives 4 from either label and
+# parse_mesh_device resolves both SKUs to the same (1, 4) — so nothing above this line
+# differs between them: same context bound, same block size, same slot count, same
+# trace region, same fabric, same env, same args. Both were tested on hardware.
+#
+# They are separate profiles rather than one because `hardware` is what tt-model uses to
+# state a package's device requirement, and a p150x4 box should not have to read "p300x2"
+# and infer that the chip counts happen to match.
+#
+# p300x2 stays the default: it is the box every number in this file was measured on.
+# `tt-model serve --profile p150x4` selects the other; `tt-model profiles` lists both.
+default_profile: p300x2
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, experts 32 per die), 32 sequences, 256000 context.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2.
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: One p300 board (2 dies, experts 64 per die, Linear collectives), 32 sequences, 256000 context.
+    hardware: p300
+    mesh_device: P300
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300. Not run on hardware (the identical (1,2) mesh).
+    hardware: p150x2
+    mesh_device: P150x2
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: One p150 (1 die, all 128 experts), 32 sequences sharing a 98304-token context (bf16 KV is 96 KiB per token on one die), no fabric.
+    hardware: p150
+    mesh_device: P150
+    max_model_len: 98304
+    additional_config: {tt: {fabric_config: DISABLED}}
+    args: [[--max-num-batched-tokens, "98304"], [--max-log-len, "32"], [--generation-config, vllm], [--override-generation-config, '{"temperature": 0}'], [--seed, "9472"]]
+
+verify:
+  # config/ is RUNTIME DATA, not documentation. tt/generator_vllm.py reads both files;
+  # _supported_context() swallows OSError and silently falls back to in-code defaults, so
+  # a missing file would serve at the wrong precision/context with no error at all.
+  - "from pathlib import Path; p = Path('/opt/tt-metal/models/demos/blackhole/qwen3_coder_30b_a3b'); assert (p/'config'/'selected_precision_config.json').is_file(), 'precision config missing — the model would silently use in-code defaults'; assert (p/'config'/'context_contract.json').is_file(), 'context contract missing — _supported_context() would silently fall back'"
+  # the real adapter. (The bundle shim is NOT asserted here: it is importable only once
+  # something has put its folder on sys.path, which is what the plugin does. tt-model
+  # verifies that resolution generically for every model — see launchers.py's
+  # RESOLVE_EXTRA_MODELS — so a per-model assertion would only duplicate it, badly.)
+  - "from models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm import Qwen3CoderForCausalLM; assert Qwen3CoderForCausalLM"
+
+card:
+  description: >
+    Qwen3-Coder-30B-A3B-Instruct — a 30B mixture-of-experts coding model for agentic
+    development work, with tool calling and a 256K context, served on Blackhole via vLLM.
+  quickstart: |
+    ### Use it
+    Point any OpenAI client at the address `tt-model serve` prints (port 20000 unless it
+    was busy), with model id `Qwen/Qwen3-Coder-30B-A3B-Instruct`.
