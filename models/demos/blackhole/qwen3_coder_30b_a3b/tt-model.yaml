@@ -254,9 +254,140 @@ verify:
 
 card:
   description: >
-    Qwen3-Coder-30B-A3B-Instruct — a 30B mixture-of-experts coding model for agentic
-    development work, with tool calling and a 256K context, served on Blackhole via vLLM.
+    Qwen3-Coder-30B-A3B-Instruct (30B total / 3B active MoE: 128 experts, top-8, 48 layers) for agentic coding with tool
+    calling, served on Blackhole through vLLM on four, two or one dies: expert-sorted MoE prefill and wide-batch decode,
+    expert-parallel experts, tensor-parallel attention, on-device sampling, prefix caching, up to 256000-token context
+    and 32 concurrent sequences.
   quickstart: |
-    ### Use it
-    Point any OpenAI client at the address `tt-model serve` prints (port 20000 unless it
-    was busy), with model id `Qwen/Qwen3-Coder-30B-A3B-Instruct`.
+    ### What v2 changes
+    v2 keeps this model's Blackhole implementation (expert-parallel experts, tensor-parallel attention, on-device sampling,
+    per-width decode traces) and adds the MoE kernels of the Qwen3.5-122B-A10B Blackhole port:
+    - **Expert-sorted MoE** for prefill and for decode batches of 4 or more: each die dispatches only the (token, expert)
+      pairs routed to its own experts, sorted by expert (`ttnn.moe_sorted_dispatch`), runs them through group-parallel
+      sparse matmuls that read each expert's weights once, and gathers them back (`ttnn.moe_gather_add_rows`). v1 ran every
+      prompt token through all of a die's experts and re-read each expert's weights for every decode (user, expert) pair.
+    - The tuned SDPA prefill configuration from 4096 tokens (6x on the attention op at long context).
+    - Two- and one-die meshes (p300 / p150x2 / p150) next to the four-die ones.
+
+    v1 -> v2 on the same four dies (p300x2): TTFT at 4K tokens 4.1 -> 0.79 s, 16K 22.4 -> 2.84 s, 32K 53.9 -> 6.48 s;
+    TPOT at 32 concurrent users 260 -> 37 ms; peak aggregate output 127 -> 585 tok/s. Single-user decode is unchanged
+    (~20 ms). Teacher forcing against the Hugging Face bf16 model is unchanged by the new prefill (8192-token book prompt:
+    top-1 / top-5 / top-100 0.86 / 0.96 / 1.00 with either path; 2048 tokens 0.91 vs 0.92 top-1).
+
+    ### Use with your client
+    Point any OpenAI client at the address `tt-model serve` prints (port 20000 unless it was busy), with model id
+    `Qwen/Qwen3-Coder-30B-A3B-Instruct`. Tool calls use the `qwen3_coder` parser. The server's default generation config
+    is greedy (temperature 0); per-request sampling parameters apply.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/qwen3-coder-30b-a3b-v2 --profile <name>`:
+    - `p300x2` (default) / `p150x4` - four dies (32 experts per die), 256000-token context.
+    - `p300` / `p150x2` - two dies (64 experts per die), 256000-token context.
+    - `p150` - one die (all 128 experts), 98304-token context (the bf16 KV cache is 96 KiB per token on one die).
+
+    All profiles: 32 concurrent sequences, prefix caching, bfp4 routed experts.
+
+    ### Performance
+    Measured 2026-10-07 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
+    with the same code this package ships, served from the source tree. Random-token prompts of exactly the input length,
+    output pinned with ignore_eos, greedy, streamed; users are concurrent requests in a closed loop; TTFT = time to first
+    streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per input length.
+
+    #### p300x2 (4 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 205 | 624 | 20.2 | 49.4 | 2.78 |
+    | 1,024 | 256 | 330 | 3,107 | 20.6 | 48.5 | 5.58 |
+    | 4,096 | 256 | 793 | 5,163 | 21.2 | 47.1 | 6.21 |
+    | 16,384 | 256 | 2,842 | 5,765 | 22.1 | 45.2 | 8.48 |
+    | 32,768 | 256 | 6,484 | 5,054 | 23.1 | 43.3 | 12.37 |
+    | 65,536 | 256 | 15,900 | 4,122 | 25.5 | 39.3 | 22.39 |
+    | 130,816 | 256 | 38,322 | 3,414 | 29.8 | 33.6 | 45.91 |
+
+    Concurrency (peak aggregate output: 584.9 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 205 | 20.2 | 49.4 | 46.1 | 2.78 |
+    | 128 | 128 | 2 | 8 | 197 | 27.9 | 35.8 | 68.6 | 3.72 |
+    | 128 | 128 | 4 | 16 | 406 | 33.0 | 30.3 | 111.5 | 4.59 |
+    | 128 | 128 | 8 | 32 | 618 | 33.4 | 29.9 | 210.5 | 4.85 |
+    | 128 | 128 | 16 | 64 | 1,072 | 34.4 | 29.1 | 376.3 | 5.43 |
+    | 128 | 128 | 32 | 128 | 1,947 | 37.2 | 26.9 | 584.9 | 6.61 |
+    | 1,024 | 256 | 1 | 4 | 330 | 20.6 | 48.5 | 45.8 | 5.58 |
+    | 1,024 | 256 | 2 | 8 | 448 | 28.0 | 35.7 | 67.4 | 7.62 |
+    | 1,024 | 256 | 4 | 16 | 896 | 33.5 | 29.8 | 108.5 | 9.44 |
+    | 1,024 | 256 | 8 | 31 | 1,605 | 34.0 | 29.4 | 193.1 | 10.27 |
+    | 1,024 | 256 | 16 | 64 | 3,034 | 35.6 | 28.1 | 338.1 | 12.12 |
+    | 1,024 | 256 | 32 | 128 | 5,890 | 38.0 | 26.3 | 526.1 | 15.55 |
+
+    #### p300 (2 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 183 | 700 | 26.4 | 37.8 | 3.54 |
+    | 1,024 | 256 | 337 | 3,035 | 26.9 | 37.2 | 7.19 |
+    | 4,096 | 256 | 916 | 4,473 | 27.9 | 35.8 | 8.03 |
+    | 16,384 | 256 | 3,711 | 4,415 | 29.5 | 33.9 | 11.23 |
+    | 32,768 | 256 | 9,100 | 3,601 | 31.6 | 31.7 | 17.15 |
+    | 65,536 | 256 | 24,136 | 2,715 | 36.0 | 27.8 | 33.31 |
+    | 130,816 | 256 | 63,103 | 2,073 | 43.8 | 22.8 | 74.28 |
+
+    Concurrency (peak aggregate output: 460.5 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 183 | 26.4 | 37.8 | 36.2 | 3.54 |
+    | 128 | 128 | 2 | 8 | 219 | 39.1 | 25.6 | 49.3 | 5.19 |
+    | 128 | 128 | 4 | 16 | 425 | 41.6 | 24.0 | 90.3 | 5.65 |
+    | 128 | 128 | 8 | 32 | 719 | 42.8 | 23.3 | 166.8 | 6.10 |
+    | 128 | 128 | 16 | 64 | 1,303 | 46.9 | 21.3 | 284.6 | 7.20 |
+    | 128 | 128 | 32 | 128 | 2,483 | 50.5 | 19.8 | 460.5 | 8.84 |
+    | 1,024 | 256 | 1 | 4 | 337 | 26.9 | 37.2 | 35.6 | 7.19 |
+    | 1,024 | 256 | 2 | 8 | 525 | 39.5 | 25.3 | 48.3 | 10.61 |
+    | 1,024 | 256 | 4 | 16 | 1,039 | 42.1 | 23.8 | 87.0 | 11.75 |
+    | 1,024 | 256 | 8 | 32 | 1,948 | 42.4 | 23.6 | 160.3 | 12.75 |
+    | 1,024 | 256 | 16 | 64 | 3,761 | 48.6 | 20.6 | 254.7 | 16.16 |
+    | 1,024 | 256 | 32 | 128 | 7,389 | 52.0 | 19.2 | 397.4 | 20.61 |
+
+    #### p150 (1 die)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 198 | 647 | 36.8 | 27.2 | 4.87 |
+    | 1,024 | 256 | 403 | 2,538 | 37.4 | 26.7 | 9.95 |
+    | 4,096 | 256 | 1,126 | 3,638 | 39.0 | 25.6 | 11.07 |
+    | 16,384 | 256 | 5,111 | 3,205 | 42.3 | 23.6 | 15.91 |
+    | 32,768 | 256 | 14,150 | 2,316 | 45.8 | 21.8 | 25.84 |
+    | 65,536 | 256 | 39,380 | 1,664 | 54.3 | 18.4 | 53.22 |
+
+    Concurrency (peak aggregate output: 328.7 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 198 | 36.8 | 27.2 | 26.3 | 4.87 |
+    | 128 | 128 | 2 | 8 | 272 | 59.9 | 16.7 | 32.5 | 7.89 |
+    | 128 | 128 | 4 | 16 | 531 | 56.6 | 17.7 | 66.6 | 7.69 |
+    | 128 | 128 | 8 | 32 | 961 | 58.9 | 17.0 | 121.9 | 8.39 |
+    | 128 | 128 | 16 | 64 | 1,808 | 63.1 | 15.8 | 207.9 | 9.79 |
+    | 128 | 128 | 32 | 128 | 3,519 | 69.9 | 14.3 | 328.7 | 12.35 |
+    | 1,024 | 256 | 1 | 4 | 403 | 37.4 | 26.7 | 25.7 | 9.95 |
+    | 1,024 | 256 | 2 | 8 | 728 | 60.3 | 16.6 | 31.8 | 16.11 |
+    | 1,024 | 256 | 4 | 16 | 1,355 | 58.1 | 17.2 | 63.4 | 16.12 |
+    | 1,024 | 256 | 8 | 31 | 2,607 | 58.8 | 17.0 | 112.5 | 17.50 |
+    | 1,024 | 256 | 16 | 64 | 5,102 | 66.4 | 15.1 | 186.4 | 22.02 |
+    | 1,024 | 256 | 32 | 128 | 10,112 | 74.1 | 13.5 | 282.3 | 29.03 |
+
+    ### Limitations
+    - p150x4 and p150x2 run the same meshes as p300x2 / p300 but were not run on p150 boards.
+    - Every newly admitted request re-captures the decode traces (keeping them live across prefills hung the NoC in v1),
+      which shows up as TTFT under concurrent load.
+    - In the 1,024 / 256 / 8-user row of the 4-die concurrency table one of 32 requests streamed no visible text and is
+      excluded from its medians.
