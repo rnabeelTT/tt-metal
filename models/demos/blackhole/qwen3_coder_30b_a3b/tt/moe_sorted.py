@@ -52,9 +52,11 @@ def use_sorted(seq_len: int) -> bool:
     return MOE_PREFILL_MODE == "sorted" and seq_len >= SORTED_MIN_TOKENS
 
 
-# Decode rows from which the decode layer takes the sorted path (0 = never). 32: the per-pair decode path's B x 32-expert
-# intermediates leave L1 above 18 rows and every (row, expert) pair streams its expert's weights again.
-SORTED_DECODE_MIN_ROWS = int(os.environ.get("QWEN3_DECODE_SORTED_MIN_ROWS", "0") or 0)  # 32 once validated
+# Decode rows from which the decode layer takes the sorted path (0 = never). The per-pair decode path streams an expert's
+# weights once per (row, expert) pair and its B x 32-expert intermediates leave L1 above 18 rows; the sorted path reads
+# each local expert once per step at a flat ~33 ms (served, 4 dies, 128/128, 2026-10-07): TPOT per-pair vs sorted at
+# 1 / 2 / 4 / 8 / 16 / 32 users = 20.2 / 27.9 / 38.7 / 62.5 / 108.5 / 264 ms vs 32.0 / 33.4 / 33.0 / 33.4 / 34.4 / 36.3.
+SORTED_DECODE_MIN_ROWS = int(os.environ.get("QWEN3_DECODE_SORTED_MIN_ROWS", "4") or 0)
 
 
 def use_sorted_decode(rows: int) -> bool:
