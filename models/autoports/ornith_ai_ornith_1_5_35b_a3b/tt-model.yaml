@@ -64,13 +64,18 @@ serve:
     HF_MODEL: ornith-ai/Ornith-1.5-35B-A3B
     QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
     QWEN35_PROGRAM_GUARD: "1"
-    QWEN35_VISION: "0"
+    # Vision ON (multi-die profiles): image content parts are served by the checkpoint's ViT on the mesh (bfp8), up to
+    # 4 images per request, every padded-patch bucket up to 4 MP warmed at start-up. Verified on 4 dies: 1080p, 12 MP
+    # and two-image requests answered in 1.6-3.1 s. Set to "0" for a text-only server.
+    QWEN35_VISION: "1"
+    QWEN35_VISION_MAX_IMAGES: "4"
+    QWEN35_VISION_MAX_PIXELS: "4194304"
     QWEN35_BATCHED_PREFILL: "0"
     VLLM_ENGINE_READY_TIMEOUT_S: "3600"
   # Thinking ON by default (the model's own default); turn it off per request with
   # "chat_template_kwargs": {"enable_thinking": false}. MTP speculative decoding (the checkpoint's own mtp.* head) runs
   # when exactly one request is live, plain decode otherwise.
-  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}']
+  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). The mesh size
 # picks the precision policy and the KV budget at build.
@@ -94,12 +99,169 @@ serve_profiles:
     mesh_device: P150x2
     env: {TT_VISIBLE_DEVICES: "0,1"}
   - name: p150
-    description: One p150 (1 die), 32 sequences, bfp4 routed experts (bfp8 does not fit one die), no fabric.
+    description: One p150 (1 die), 32 sequences, bfp4 routed experts (bfp8 does not fit one die), text only, no fabric.
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
+    env: {QWEN35_VISION: "0"}   # one die keeps its DRAM for the KV pool
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
 default_profile: p300x2
 
 verify:
   - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
   - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+
+card:
+  description: >
+    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet +
+    gated attention, vision tower, MTP head) served on Blackhole through vLLM and the Tenstorrent plugin on four, two or
+    one dies: tensor-parallel mixers, experts sharded on the intermediate dimension, expert-sorted MoE prefill,
+    on-device sampling, single-user multi-token prediction, text + image chat, tool calling, 262144-token context, up
+    to 32 concurrent sequences.
+  quickstart: |
+    ### What v2 changes
+    v2 serves Ornith-1.5-35B-A3B through the Blackhole code of the Qwen3.5-122B-A10B / Qwen3-Coder-Next ports (the same
+    `qwen3_5_moe` architecture): tensor-parallel Gated DeltaNet and gated attention, routed experts sharded on the
+    intermediate dimension, expert-sorted MoE prefill, on-device sampling, decode traces for 1-32 users, multi-token
+    prediction from the checkpoint's own MTP head, and the vision tower. The v1 package
+    ([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)) served one die per vLLM
+    process at batch 1 with host sampling and a ~400 tok/s MoE prefill.
+
+    Same single p150, v1 -> v2: TTFT at 4K tokens 9.9 -> 1.5 s, 16K 40.4 -> 5.9 s, 64K 166 -> 27.3 s, 128K not runnable ->
+    65 s; peak aggregate output 30.6 -> 206 tok/s (32 concurrent users instead of 1).
+
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `ornith-ai/Ornith-1.5-35B-A3B`. Thinking is ON by default (reasoning in the message's `reasoning` field, answer in
+    `content`); turn it off per request with `"chat_template_kwargs": {"enable_thinking": false}`. Give thinking requests a
+    large `max_tokens`. Tool calls use the `qwen3_xml` parser. Images (up to 4 per request, resized to at most 4 MP) as
+    `image_url` parts on the multi-die profiles.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b-v2 --profile <name>`:
+    - `p300x2` (default) / `p150x4` - four dies, bfp8 routed experts, text + images.
+    - `p300` / `p150x2` - two dies, bfp8 routed experts, text + images.
+    - `p150` - one die, bfp4 routed experts (bfp8 does not fit one die), text only.
+
+    Every profile: 32 concurrent sequences, 262144-token context, MTP speculative decoding while one request is live.
+
+    ### Accuracy
+    Teacher forcing against the Hugging Face bf16 model (100 greedy tokens; top-1 / top-5 / top-100 agreement):
+
+    | profile | code chat prompt | 2048-token book prompt |
+    | --- | --- | --- |
+    | 4 dies (bfp8 experts) | 0.97 / 1.00 / 1.00 | 0.89 / 0.98 / 1.00 |
+    | 2 dies (bfp8 experts) | 0.96 / 1.00 / 1.00 | 0.91 / 0.97 / 1.00 |
+    | 1 die (bfp4 experts) | 0.96 / 1.00 / 1.00 | 0.84 / 0.94 / 0.99 |
+
+    vLLM sampling-parameter conformance on 4 dies: 71 passed; the 2 failures are the thinking-on-by-default artefact the
+    Qwen3.5-122B-A10B bundle also has (`content` is empty while the model is still thinking). Benchmark evals (GPQA,
+    LiveCodeBench, IFEval) were not re-run for v2.
+
+    ### Performance
+    Measured 2026-10-07 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
+    with the same code this package ships, served from the source tree. Random-token prompts of exactly the input length,
+    output pinned with ignore_eos, greedy, streamed; users are concurrent requests in a closed loop; TTFT = time to first
+    streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per input length. Single-user rows run MTP
+    speculative decoding, whose speed-up depends on how predictable the text is (random-token prompts make it vary from
+    row to row); concurrent rows run plain decode.
+
+    #### p300x2 (4 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 178 | 717 | 10.9 | 91.4 | 1.57 |
+    | 1,024 | 256 | 290 | 3,526 | 16.2 | 61.8 | 4.42 |
+    | 4,096 | 256 | 719 | 5,695 | 19.0 | 52.5 | 5.57 |
+    | 16,384 | 256 | 2,726 | 6,010 | 20.5 | 48.8 | 7.95 |
+    | 32,768 | 256 | 5,722 | 5,727 | 11.1 | 90.5 | 8.54 |
+    | 65,536 | 256 | 12,577 | 5,211 | 12.6 | 79.4 | 15.79 |
+    | 130,816 | 256 | 30,027 | 4,357 | 27.1 | 36.9 | 36.93 |
+
+    Concurrency (peak aggregate output: 350.8 tok/s at 1024 input / 256 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 178 | 10.9 | 91.4 | 80.0 | 1.57 |
+    | 128 | 128 | 2 | 8 | 352 | 24.7 | 40.4 | 73.3 | 3.49 |
+    | 128 | 128 | 4 | 16 | 702 | 28.3 | 35.3 | 118.8 | 4.31 |
+    | 128 | 128 | 8 | 32 | 1,177 | 37.0 | 27.0 | 173.8 | 5.88 |
+    | 128 | 128 | 16 | 64 | 2,190 | 55.1 | 18.2 | 222.8 | 9.20 |
+    | 128 | 128 | 32 | 128 | 4,169 | 60.2 | 16.6 | 346.9 | 11.78 |
+    | 1,024 | 256 | 1 | 4 | 290 | 16.2 | 61.8 | 57.5 | 4.42 |
+    | 1,024 | 256 | 2 | 8 | 564 | 24.2 | 41.3 | 75.9 | 6.74 |
+    | 1,024 | 256 | 4 | 16 | 1,126 | 28.3 | 35.3 | 122.7 | 8.34 |
+    | 1,024 | 256 | 8 | 32 | 2,056 | 37.0 | 27.0 | 177.9 | 11.51 |
+    | 1,024 | 256 | 16 | 64 | 3,869 | 55.3 | 18.1 | 227.5 | 17.99 |
+    | 1,024 | 256 | 32 | 128 | 7,541 | 62.0 | 16.1 | 350.8 | 23.35 |
+
+    #### p300 (2 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 208 | 616 | 13.3 | 75.0 | 1.90 |
+    | 1,024 | 256 | 344 | 2,978 | 18.0 | 55.6 | 4.93 |
+    | 4,096 | 256 | 889 | 4,606 | 18.7 | 53.6 | 5.65 |
+    | 16,384 | 256 | 3,427 | 4,781 | 19.1 | 52.3 | 8.30 |
+    | 32,768 | 256 | 7,062 | 4,640 | 12.2 | 81.8 | 10.18 |
+    | 65,536 | 256 | 15,322 | 4,277 | 23.4 | 42.7 | 21.30 |
+    | 130,816 | 256 | 35,786 | 3,655 | 16.5 | 60.5 | 40.00 |
+
+    Concurrency (peak aggregate output: 275.4 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 208 | 13.3 | 75.0 | 63.1 | 1.90 |
+    | 128 | 128 | 2 | 8 | 278 | 28.0 | 35.7 | 64.8 | 4.01 |
+    | 128 | 128 | 4 | 16 | 722 | 34.5 | 29.0 | 100.3 | 5.10 |
+    | 128 | 128 | 8 | 32 | 1,272 | 48.0 | 20.8 | 138.8 | 7.37 |
+    | 128 | 128 | 16 | 64 | 2,358 | 74.9 | 13.3 | 172.0 | 11.89 |
+    | 128 | 128 | 32 | 128 | 4,534 | 81.6 | 12.3 | 275.4 | 14.87 |
+    | 1,024 | 256 | 1 | 4 | 344 | 18.0 | 55.6 | 50.3 | 4.93 |
+    | 1,024 | 256 | 2 | 8 | 649 | 28.2 | 35.5 | 65.3 | 7.84 |
+    | 1,024 | 256 | 4 | 16 | 1,296 | 34.4 | 29.1 | 101.6 | 10.07 |
+    | 1,024 | 256 | 8 | 32 | 2,416 | 48.1 | 20.8 | 139.5 | 14.67 |
+    | 1,024 | 256 | 16 | 64 | 4,623 | 75.2 | 13.3 | 171.8 | 23.84 |
+    | 1,024 | 256 | 32 | 128 | 9,060 | 84.1 | 11.9 | 268.9 | 30.51 |
+
+    #### p150 (1 die)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 247 | 519 | 15.9 | 63.0 | 2.26 |
+    | 1,024 | 256 | 455 | 2,251 | 18.9 | 52.8 | 5.28 |
+    | 4,096 | 256 | 1,504 | 2,723 | 17.5 | 57.1 | 5.98 |
+    | 16,384 | 256 | 5,944 | 2,757 | 29.1 | 34.3 | 13.38 |
+    | 32,768 | 256 | 12,427 | 2,637 | 23.1 | 43.2 | 18.33 |
+    | 65,536 | 256 | 27,314 | 2,399 | 26.8 | 37.3 | 34.15 |
+    | 130,816 | 256 | 64,703 | 2,022 | 28.6 | 35.0 | 71.98 |
+
+    Concurrency (peak aggregate output: 206.1 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 247 | 15.9 | 63.0 | 56.3 | 2.26 |
+    | 128 | 128 | 2 | 8 | 421 | 37.0 | 27.1 | 50.0 | 5.11 |
+    | 128 | 128 | 4 | 16 | 835 | 45.9 | 21.8 | 76.8 | 6.67 |
+    | 128 | 128 | 8 | 32 | 1,502 | 64.5 | 15.5 | 105.7 | 9.69 |
+    | 128 | 128 | 16 | 64 | 2,822 | 100.7 | 9.9 | 131.1 | 15.62 |
+    | 128 | 128 | 32 | 128 | 5,442 | 112.9 | 8.9 | 206.1 | 19.76 |
+    | 1,024 | 256 | 1 | 4 | 455 | 18.9 | 52.8 | 45.9 | 5.28 |
+    | 1,024 | 256 | 2 | 8 | 839 | 36.5 | 27.4 | 50.4 | 10.15 |
+    | 1,024 | 256 | 4 | 16 | 1,668 | 45.9 | 21.8 | 76.6 | 13.37 |
+    | 1,024 | 256 | 8 | 32 | 3,169 | 64.6 | 15.5 | 104.2 | 19.65 |
+    | 1,024 | 256 | 16 | 64 | 6,159 | 101.3 | 9.9 | 128.0 | 32.00 |
+    | 1,024 | 256 | 32 | 128 | 12,133 | 119.7 | 8.4 | 191.6 | 42.65 |
+
+    ### Limitations
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
+    - One die serves text only, with bfp4 routed experts (book-prompt top-1 0.84 vs 0.89-0.91 on more dies). A gate/up bfp4 +
+      down bfp8 policy scores 0.86 / 0.97 / 1.00 but leaves almost no KV pool at 32 sequences (opt-in:
+      `QWEN35_PRECISION_CONFIG=.../configs/ornith_routed_gu_bfp4_down_bfp8_mixers_bfp8.json`).
+    - The device sampler supports `top_k` up to 32.

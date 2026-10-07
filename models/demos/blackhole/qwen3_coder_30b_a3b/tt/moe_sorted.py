@@ -52,6 +52,15 @@ def use_sorted(seq_len: int) -> bool:
     return MOE_PREFILL_MODE == "sorted" and seq_len >= SORTED_MIN_TOKENS
 
 
+# Decode rows from which the decode layer takes the sorted path (0 = never). 32: the per-pair decode path's B x 32-expert
+# intermediates leave L1 above 18 rows and every (row, expert) pair streams its expert's weights again.
+SORTED_DECODE_MIN_ROWS = int(os.environ.get("QWEN3_DECODE_SORTED_MIN_ROWS", "0") or 0)  # 32 once validated
+
+
+def use_sorted_decode(rows: int) -> bool:
+    return 0 < SORTED_DECODE_MIN_ROWS <= rows
+
+
 def dispatch_rows(T: int, k: int, E: int) -> int:
     """Static dispatched-row count: padded pairs (worst case: every pair local) + per-expert padding + one all-padding
     trailing group."""

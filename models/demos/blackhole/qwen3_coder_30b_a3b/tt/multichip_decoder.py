@@ -1827,6 +1827,29 @@ def decoder_layer_decode_multichip(
     ttnn.deallocate(attn_out)
 
     normed_sharded = decode_residual_norm(hidden, weights.post_attention_layernorm_rm, eps, precision)
+    if moe_sorted.use_sorted_decode(int(normed_sharded.shape[-2])):
+        # Wide decode batches (2026-10-07): the expert-sorted path of tt/moe_sorted.py reads each local expert's
+        # weights once per step instead of once per (row, expert) pair, and keeps the [B x 32 experts] intermediates out
+        # of the L1 -> DRAM cliff above 18 rows. Inactive slots are dispatched too (their rows are discarded).
+        normed = ttnn.sharded_to_interleaved(normed_sharded, ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(normed_sharded)
+        moe_partial = moe_sorted.moe_prefill_sorted(
+            normed,
+            weights.router,
+            weights.experts,
+            num_devices=config.num_devices,
+            num_experts_local=config.local_moe.num_experts,
+            top_k=config.global_config.moe.num_experts_per_tok,
+            compute_config=_expert_compute_kernel_config(x.device(), precision),
+            act_dtype=precision.activation_dtype,
+        )
+        ttnn.deallocate(normed)
+        moe_out = all_reduce_decode(moe_partial, ctx, precision)
+        ttnn.deallocate(moe_partial)
+        out = ttnn.add(hidden, moe_out)
+        ttnn.deallocate(hidden)
+        ttnn.deallocate(moe_out)
+        return out
     # The router projection reads the shard directly -- N = 128 is 4 tiles, so
     # the matmul uses 4 cores either way, but a width-sharded L1 in0 turns a
     # 24.62 us DRAM-interleaved read into 5.85 us of L1 with bit-identical
