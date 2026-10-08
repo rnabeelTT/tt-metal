@@ -1,0 +1,46 @@
+{
+  "hf_model": "zai-org/GLM-4.5-Air",
+  "hf_revision": "a24ceef6ce4f3536971efe9b778bdaa1bab18daa",
+  "hf_advertised_context": 131072,
+  "current_supported_context": 131072,
+  "note_port": "GLM-4.5-Air port: the Qwen3.5-122B-A10B / Qwen3-Coder-Next / Ornith v2 autoport code. Every one of the 46 layers holds a paged KV cache (8 KV heads x 128; TP4 = 2 local KV heads per die, TP2 = 4). Per-mesh serving budgets below; generator_vllm reads serving_tp{N}, else datatype_sweep_stage8.",
+  "capacity_evidence": {
+    "kv_layers": 46,
+    "gdn_layers": 0,
+    "kv_heads": 8,
+    "head_dim": 128,
+    "kv_bytes_per_token_bf16_all_layers": 188416,
+    "note": "46 x 2 (K,V) x local KV heads x 128 x 1.0625 B (bfp8): 25024 B/token/die at TP4, 50048 at TP2"
+  },
+  "datatype_sweep_stage8": {
+    "status": "fallback for unknown mesh sizes = the TP4 numbers",
+    "kv_bytes_per_token_per_device": 25024,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 19.5,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 131072,
+    "per_slot_gib": 0.017
+  },
+  "serving_tp4": {
+    "status": "MEASURED 2026-10-08 (46-layer teacher-forcing build, B=1, MEMORY_REPORT): 22.21 GiB allocated per device with gate/up bfp4 + down bfp8 routed experts and a 131136-token bfp8 KV cache (3.06 GiB) -> 19.15 GiB non-KV; budgeted at 19.5 GiB",
+    "selected_policy": "glm_routed_gu_bfp4_down_bfp8_mixers_bfp8",
+    "kv_cache_dtype": "bfloat8_b",
+    "kv_bytes_per_token_per_device": 25024,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 19.5,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 131072,
+    "per_slot_gib": 0.017
+  },
+  "serving_tp2": {
+    "status": "ESTIMATE 2026-10-08 (bfp4 everything: routed experts ~26.1 GiB per die); to be replaced by the measured MEMORY_REPORT",
+    "selected_policy": "glm_tp2_routed_bfp4_mixers_bfp4",
+    "kv_cache_dtype": "bfloat8_b",
+    "kv_bytes_per_token_per_device": 50048,
+    "dram_total_gib_per_device": 31.331,
+    "non_kv_footprint_gib": 29.5,
+    "trace_region_reserved_mib": 512,
+    "current_supported_context": 131072,
+    "per_slot_gib": 0.017
+  }
+}

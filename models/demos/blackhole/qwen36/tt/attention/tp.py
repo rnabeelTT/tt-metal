@@ -44,7 +44,45 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
     kv_rep = lambda w: tpc.replicate_kv_weight(w, args.n_kv_heads, args.num_devices, args.head_dim)
     k_proj, v_proj = kv_rep(state_dict["k_proj.weight"]), kv_rep(state_dict["v_proj.weight"])
 
-    if fused_qkv:
+    # Architecture flags (GLM-4.5 style attention: q/k/v biases, no output gate, no q/k norm). Defaults = Qwen3.5.
+    gated = getattr(args, "attn_gated", True)
+    qk_norm = getattr(args, "attn_qk_norm", True)
+    qkv_bias = getattr(args, "attn_qkv_bias", False)
+    assert gated or fused_qkv, "the ungated attention layout is implemented for the fused QKV weight only"
+    assert not qkv_bias or fused_qkv, "q/k/v biases are implemented for the fused QKV weight only"
+
+    if fused_qkv and not gated:
+        # [q_d | k_d | v_d] per device (no gate block): the whole fused output is the contiguous q|k|v block
+        fused = tpc.prepare_attn_qkv(
+            state_dict["q_proj.weight"],
+            k_proj,
+            v_proj,
+            args.n_local_heads * args.head_dim,
+            args.n_local_kv_heads * args.head_dim,
+            args.num_devices,
+        )
+        _proj1d = getattr(args, "proj_1d_decode", False)
+        tw["wqkv_fused"] = tpc.shard_w(
+            fused,
+            mesh,
+            dim=-1,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG if _proj1d else args.attn_qkv_fused_weight_memcfg,
+            cache_path=c("wqkv_fused_nogate" + (".il" if _proj1d else ".dramshard")),
+            dtype=_wdt,
+        )
+        if qkv_bias:
+            # biases in the same per-device [q_d | k_d | v_d] order, bf16 [1, 1, 1, N] (broadcast over the rows)
+            col = lambda b: b.reshape(-1, 1)
+            bias = tpc.prepare_attn_qkv(
+                col(state_dict["q_proj.bias"]),
+                col(kv_rep(state_dict["k_proj.bias"].reshape(-1, 1))),
+                col(kv_rep(state_dict["v_proj.bias"].reshape(-1, 1))),
+                args.n_local_heads * args.head_dim,
+                args.n_local_kv_heads * args.head_dim,
+                args.num_devices,
+            ).reshape(1, 1, 1, -1)
+            tw["qkv_bias"] = tpc.shard_small(bias.float(), mesh, c("bqkv_fused"), dim=-1)
+    elif fused_qkv:
         if qg_deint:
             fused = tpc.prepare_attn_qkv_deint(
                 state_dict["q_proj.weight"],
@@ -119,8 +157,9 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
         dtype=_wdt,
     )
     # QK norms: HF-correct zero-centered (1+weight), used uniformly at prefill AND decode
-    tw["q_norm"] = tpc.replicate(state_dict["q_norm.weight"].to(torch.float32) + 1.0, mesh, None)
-    tw["k_norm"] = tpc.replicate(state_dict["k_norm.weight"].to(torch.float32) + 1.0, mesh, None)
+    if qk_norm:
+        tw["q_norm"] = tpc.replicate(state_dict["q_norm.weight"].to(torch.float32) + 1.0, mesh, None)
+        tw["k_norm"] = tpc.replicate(state_dict["k_norm.weight"].to(torch.float32) + 1.0, mesh, None)
     return tw
 
 
@@ -149,11 +188,17 @@ class TPAttention:
         self._wo_sharded = getattr(args, "attn_wo_weight_memcfg", None) is not None
         self._fused_qkv = getattr(args, "attn_qkv_fused_weight_memcfg", None) is not None
         self._qg_deint = self._fused_qkv
+        # architecture flags (must match load_attention_weights_tp): output gate / q-k norm / fused q|k|v bias
+        self._gated = getattr(args, "attn_gated", True)
+        self._qk_norm = "q_norm" in tw
+        self._qkv_bias = tw.get("qkv_bias")
         # Fuse prefill norm-allgather + fused-QKV in-proj (all_gather_minimal_matmul_async).
         # Norm's prefill post-AG disabled in layer.py; decode path unchanged.
         self._fuse_agmm = self._fused_qkv and tpc.prefill_norm_agmm_enabled(args)
         # Decode head split/merge via nlp_create/concat_heads_decode (the batched-decode idiom).
-        self._use_nlp_decode_heads = True
+        # nlp_create_qkv_heads_decode / nlp_concat_heads_decode hold one 32-row tile of heads per user: more local q heads
+        # (GLM-4.5-Air at TP2 = 48) take the slice/reshape split below.
+        self._use_nlp_decode_heads = self.NH <= 32
         self.k_caches = None
         self.v_caches = None
         # External paged KV cache (vLLM/contract path); internal caches kept for demo fallback
@@ -203,6 +248,14 @@ class TPAttention:
             )
         else:
             qkv = self._col_proj(x, tw["wqkv_fused"], self.args.attn_qkv_fused_progcfg)
+        if self._qkv_bias is not None:
+            qkv_b = ttnn.add(qkv, self._qkv_bias, memory_config=qkv.memory_config())
+            ttnn.deallocate(qkv)
+            qkv = qkv_b
+        if not self._gated:
+            # [q|k|v] per device, no gate block: the whole output is the contiguous q|k|v block (_make_heads*: vp=None
+            # sentinel, gate None)
+            return qkv, None, None
         # Fused weight is [q|k|v|gate] (prepare_attn_qkv_deint): the q|k|v block is contiguous, so
         # return it whole (no gate wedged between q and k → no re-concat in _make_heads*). Gate is
         # the trailing block. Sentinel: vp=None flags the fused/contiguous layout to _make_heads*.
@@ -330,6 +383,21 @@ class TPAttention:
         ttnn.deallocate(kv)
         return q, gate_flat, k, v
 
+    def _apply_gate_prefill(self, attn, gate_flat):
+        """Post-concat output gate of the prefill paths: sigmoid(gate) * attn, emitted to DRAM (feeds the wo matmul +
+        reduce-scatter). Ungated attention (``gate_flat`` None): the concat output itself, moved to DRAM."""
+        if gate_flat is None:
+            out = ttnn.to_memory_config(attn, ttnn.DRAM_MEMORY_CONFIG)
+            if out is not attn:
+                ttnn.deallocate(attn)
+            return out
+        gated = ttnn.multiply(
+            attn, ttnn.sigmoid(gate_flat, memory_config=ttnn.L1_MEMORY_CONFIG), memory_config=ttnn.DRAM_MEMORY_CONFIG
+        )
+        ttnn.deallocate(attn)
+        ttnn.deallocate(gate_flat)
+        return gated
+
     def _concat_heads(self, gated):
         """Prefill concat-heads via nlp_concat_heads (post-gate). L1 output: short-lived post-SDPA temp,
         no kernel-CB clash."""
@@ -377,6 +445,8 @@ class TPAttention:
         q = ttnn.sharded_to_interleaved(q, _L1)
         k = ttnn.sharded_to_interleaved(k, _L1)
         v = ttnn.sharded_to_interleaved(v, _L1)
+        if gate_flat is None:  # ungated attention
+            return q, None, k, v
         gate = ttnn.reshape(gate_flat, (1, B, NH, HD), memory_config=_L1)
         ttnn.deallocate(gate_flat)
         return q, gate, k, v
@@ -445,16 +515,17 @@ class TPAttention:
 
         q, gate_flat, k, v = self._make_heads(qg, kp, vp, S)
 
-        q = ttnn.multiply(
-            ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["q_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
-        k = ttnn.multiply(
-            ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["k_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        if self._qk_norm:
+            q = ttnn.multiply(
+                ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["q_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
+            k = ttnn.multiply(
+                ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["k_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
 
@@ -488,11 +559,7 @@ class TPAttention:
         attn = self._concat_heads(attn)
         # concat(attn)+sigmoid(gate) in L1; gated stays DRAM (feeds the wo matmul_reduce_scatter — an L1
         # CCL activation risks clashing with its CBs).
-        gated = ttnn.multiply(
-            attn, ttnn.sigmoid(gate_flat, memory_config=ttnn.L1_MEMORY_CONFIG), memory_config=ttnn.DRAM_MEMORY_CONFIG
-        )
-        ttnn.deallocate(attn)
-        ttnn.deallocate(gate_flat)
+        gated = self._apply_gate_prefill(attn, gate_flat)
         partial = self._wo_proj(gated, tw["wo"])
         ttnn.deallocate(gated)
         return tt_all_reduce(
@@ -574,8 +641,11 @@ class TPAttention:
                 memory_config=_L1,
             )
             ttnn.deallocate(qg)
-            gate = ttnn.reshape(kp, (1, B, NH, HD), memory_config=_L1)
-            ttnn.deallocate(kp)
+            if kp is None:  # ungated attention
+                gate = None
+            else:
+                gate = ttnn.reshape(kp, (1, B, NH, HD), memory_config=_L1)
+                ttnn.deallocate(kp)
         else:
             qg_r = ttnn.reshape(qg, (1, B, NH, HD * 2), memory_config=_L1)
             ttnn.deallocate(qg)
@@ -588,8 +658,9 @@ class TPAttention:
             ttnn.deallocate(vp)
 
         # QK norm — (1+w), matching prefill/HF (the prior "flat" no-+1 decode band-aided the reshape scramble).
-        q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=_L1), tw["q_norm"], memory_config=_L1)
-        k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=_L1), tw["k_norm"], memory_config=_L1)
+        if self._qk_norm:
+            q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=_L1), tw["q_norm"], memory_config=_L1)
+            k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=_L1), tw["k_norm"], memory_config=_L1)
 
         q = apply_partial_rope_decode(q, cos_tt, sin_tt, NH, B, self.rope_dim)
         k = apply_partial_rope_decode(k, cos_tt, sin_tt, NKV, B, self.rope_dim)
@@ -676,7 +747,8 @@ class TPAttention:
                 # MTP head bookkeeping inside a plain decode step: only the K/V rows of this step's (token, hidden) pairs
                 # are needed (the head's SDPA / output projection / MoE run in the MTP step itself)
                 ttnn.deallocate(q)
-                ttnn.deallocate(gate)
+                if gate is not None:
+                    ttnn.deallocate(gate)
                 return None
             attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
@@ -738,9 +810,12 @@ class TPAttention:
             )
             ttnn.deallocate(q)
 
-        gated = ttnn.multiply(attn_out, ttnn.sigmoid(gate, memory_config=_L1), memory_config=_L1)
-        ttnn.deallocate(attn_out)
-        ttnn.deallocate(gate)
+        if gate is None:  # ungated attention
+            gated = attn_out
+        else:
+            gated = ttnn.multiply(attn_out, ttnn.sigmoid(gate, memory_config=_L1), memory_config=_L1)
+            ttnn.deallocate(attn_out)
+            ttnn.deallocate(gate)
 
         if self._use_nlp_decode_heads:
             gated_flat = self._concat_heads_decode(gated, B)  # consumes + deallocates gated
@@ -782,16 +857,17 @@ class TPAttention:
         user_ids = user_ids if user_ids is not None else [0] * B
         qg, kp, vp = self._qkv(x)
         q, gate_flat, k, v = self._make_heads(qg, kp, vp, S)
-        q = ttnn.multiply(
-            ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["q_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
-        k = ttnn.multiply(
-            ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["k_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        if self._qk_norm:
+            q = ttnn.multiply(
+                ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["q_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
+            k = ttnn.multiply(
+                ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["k_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
         if self._sdpa_bf8:
@@ -869,11 +945,7 @@ class TPAttention:
             for t in outs:
                 ttnn.deallocate(t)
         attn = self._concat_heads(attn)
-        gated = ttnn.multiply(
-            attn, ttnn.sigmoid(gate_flat, memory_config=ttnn.L1_MEMORY_CONFIG), memory_config=ttnn.DRAM_MEMORY_CONFIG
-        )
-        ttnn.deallocate(attn)
-        ttnn.deallocate(gate_flat)
+        gated = self._apply_gate_prefill(attn, gate_flat)
         partial = self._wo_proj(gated, tw["wo"])
         ttnn.deallocate(gated)
         return tt_all_reduce(
@@ -913,16 +985,17 @@ class TPAttention:
 
         q, gate_flat, k, v = self._make_heads(qg, kp, vp, S)
 
-        q = ttnn.multiply(
-            ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["q_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
-        k = ttnn.multiply(
-            ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
-            tw["k_norm"],
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        if self._qk_norm:
+            q = ttnn.multiply(
+                ttnn.rms_norm(q, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["q_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
+            k = ttnn.multiply(
+                ttnn.rms_norm(k, epsilon=1e-6, memory_config=ttnn.L1_MEMORY_CONFIG),
+                tw["k_norm"],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
 
@@ -1020,11 +1093,7 @@ class TPAttention:
         attn = self._concat_heads(attn)
         # concat(attn)+sigmoid(gate) in L1; gated stays DRAM (feeds the wo matmul_reduce_scatter — an L1
         # CCL activation risks clashing with its CBs).
-        gated = ttnn.multiply(
-            attn, ttnn.sigmoid(gate_flat, memory_config=ttnn.L1_MEMORY_CONFIG), memory_config=ttnn.DRAM_MEMORY_CONFIG
-        )
-        ttnn.deallocate(attn)
-        ttnn.deallocate(gate_flat)
+        gated = self._apply_gate_prefill(attn, gate_flat)
         partial = self._wo_proj(gated, tw["wo"])
         ttnn.deallocate(gated)
         return tt_all_reduce(

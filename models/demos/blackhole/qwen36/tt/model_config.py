@@ -139,17 +139,19 @@ class Qwen36ModelArgs(ModelArgs):
         self.gdn_key_dim_tp = self.gdn_key_dim // tp
         self.attn_out_dim_tp = (self.n_heads * self.head_dim) // tp
         kv_dim_per_device = self.n_local_kv_heads * self.head_dim
+        # q projection width multiplier: 2 = [q | output gate] (Qwen3.5 gated attention), 1 = plain q (attn_gated False)
+        q_mult = 2 if getattr(self, "attn_gated", True) else 1
 
         # DRAM-sharded weights: column-parallel [hidden, out_tp]
         self.gdn_qkvz_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.gdn_qkvz_dim_tp)
         self.gdn_qkvzab_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.gdn_qkvzab_dim_tp)
         self.attn_qg_weight_memcfg = tpc.create_dram_sharded_mem_config(
-            self.dim, self.n_local_heads * self.head_dim * 2
+            self.dim, self.n_local_heads * self.head_dim * q_mult
         )
         self.attn_k_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, kv_dim_per_device)
         self.attn_v_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, kv_dim_per_device)
         # Fused [q+gate | k | v] in-projection (P4: QWEN36_FUSED_QKV) — one column-parallel matmul.
-        self.attn_qkv_fused_dim_tp = self.n_local_heads * self.head_dim * 2 + 2 * kv_dim_per_device
+        self.attn_qkv_fused_dim_tp = self.n_local_heads * self.head_dim * q_mult + 2 * kv_dim_per_device
         self.attn_qkv_fused_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.attn_qkv_fused_dim_tp)
         self.mlp_w1_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.hidden_dim // tp)
         self.mlp_w3_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.hidden_dim // tp)
@@ -164,7 +166,7 @@ class Qwen36ModelArgs(ModelArgs):
         self.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, self.gdn_qkvzab_dim_tp)
         self.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.gdn_value_dim_tp, self.dim)
         self.attn_qg_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.n_local_heads * self.head_dim * 2
+            M, self.dim, self.n_local_heads * self.head_dim * q_mult
         )
         self.attn_k_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, kv_dim_per_device)
         self.attn_v_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, kv_dim_per_device)

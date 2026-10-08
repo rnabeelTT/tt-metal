@@ -1,0 +1,55 @@
+{
+  "config_id": "glm_routed_gu_bfp4_down_bfp8_mixers_bfp8",
+  "description": "routed gate/up bfp4 + down bfp8, attention / shared bfp8, bfp8 LM head",
+  "weight_groups": {
+    "embedding": {
+      "dtype": "bf16"
+    },
+    "norms": {
+      "dtype": "bf16"
+    },
+    "attention": {
+      "dtype": "bfp8"
+    },
+    "linear_attention": {
+      "dtype": "bfp8"
+    },
+    "router": {
+      "dtype": "bf16"
+    },
+    "shared_moe": {
+      "dtype": "bfp8"
+    },
+    "routed_moe": {
+      "gate_up": "bfp4",
+      "down": "bfp8"
+    },
+    "lm_head": {
+      "dtype": "bfp8"
+    }
+  },
+  "layer_exceptions": {},
+  "compute_fidelities": {
+    "attention": "hifi2",
+    "linear_attention": "hifi2",
+    "router": "hifi4",
+    "shared_moe": "hifi2",
+    "routed_moe": "hifi2",
+    "lm_head": "ttnn_default"
+  },
+  "activation_dtype": "bf16",
+  "residual_dtype": "bf16",
+  "ccl_dtype": "bfp8",
+  "kv_cache_dtype": "bfp8",
+  "linear_state_dtype": "bf16",
+  "logits_dtype": "bf16",
+  "sampling_dtype": "uint32",
+  "accuracy_gate": {
+    "teacher_forcing_top1_min": 0.9,
+    "teacher_forcing_top5_min": 0.98,
+    "teacher_forcing_top100_min": 1.0
+  },
+  "selected_from_config_id": "glm_routed_gu_bfp4_down_bfp8_mixers_bfp8",
+  "mesh": "(1,4) P300x2 / P150x4 (TP4)",
+  "selection_rule": "4-die sweep 2026-10-08 (teacher forcing vs HF bf16, 100 tokens, top-1/5/100): bfp4 experts code 0.98/1.00/1.00, book p2048 0.96/1.00/1.00, 18.3 GiB/die; gate/up bfp4 + down bfp8 0.99/1.00/1.00, 0.98/1.00/1.00, 22.2 GiB/die; bfp8 1.00/1.00/1.00, 0.98/1.00/1.00, 29.9 GiB/die (no KV pool left). Token-out 31.4 ms/step for all three (decode is op-overhead bound): the mixed policy matches bfp8 on the long prompt and keeps ~8 GiB/die for KV."
+}

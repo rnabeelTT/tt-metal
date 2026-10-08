@@ -108,7 +108,7 @@ class Qwen36Model:
             weight_key="norm",
             weight_cache_path=tensor_cache_path,
             weight_dtype=ttnn.bfloat16,
-            add_unit_offset=True,
+            add_unit_offset=getattr(args, "norm_unit_offset", True),
             eps=args.norm_eps,
             **(
                 dict(is_distributed=args.is_distributed_norm, ccl_topology=args.ccl_topology(), tt_ccl=self.tt_ccl)
