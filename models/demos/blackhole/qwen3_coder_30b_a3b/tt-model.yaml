@@ -211,7 +211,10 @@ serve:
 #
 # p300x2 stays the default: it is the box every number in this file was measured on.
 # `tt-model serve --profile p150x4` selects the other; `tt-model profiles` lists both.
-default_profile: p300x2
+# Default = the best balance of hardware and performance: two chips keep the full 256000-token context and the 4-chip
+# accuracy at ~80 % of its throughput (peak 460 vs 585 tok/s, TTFT 1K 0.34 vs 0.33 s) on half the hardware; one chip caps
+# the context at 98304 tokens and decodes a single user 1.8x slower.
+default_profile: p300
 serve_profiles:
   - name: p300x2
     description: Two p300 boards (4 dies, experts 32 per die), 32 sequences, 256000 context.
@@ -272,7 +275,8 @@ card:
     v1 -> v2 on the same four dies (p300x2): TTFT at 4K tokens 4.1 -> 0.79 s, 16K 22.4 -> 2.84 s, 32K 53.9 -> 6.48 s;
     TPOT at 32 concurrent users 260 -> 37 ms; peak aggregate output 127 -> 585 tok/s. Single-user decode is unchanged
     (~20 ms). Teacher forcing against the Hugging Face bf16 model is unchanged by the new prefill (8192-token book prompt:
-    top-1 / top-5 / top-100 0.86 / 0.96 / 1.00 with either path; 2048 tokens 0.91 vs 0.92 top-1).
+    top-1 / top-5 / top-100 0.86 / 0.96 / 1.00 with either path; 2048 tokens 0.91 vs 0.92 top-1). On two dies (the default
+    profile): 0.85 / 0.96 / 1.00 at 8192 tokens and 0.90 / 1.00 / 1.00 at 2048.
 
     ### Use with your client
     Point any OpenAI client at the address `tt-model serve` prints (port 20000 unless it was busy), with model id
@@ -281,8 +285,9 @@ card:
 
     ### Profiles
     `tt-model serve raahemnabeel/qwen3-coder-30b-a3b-v2 --profile <name>`:
-    - `p300x2` (default) / `p150x4` - four dies (32 experts per die), 256000-token context.
-    - `p300` / `p150x2` - two dies (64 experts per die), 256000-token context.
+    - `p300` (default) / `p150x2` - two dies (64 experts per die), 256000-token context: ~80 % of the 4-die throughput
+      on half the hardware.
+    - `p300x2` / `p150x4` - four dies (32 experts per die), 256000-token context: the fastest profile.
     - `p150` - one die (all 128 experts), 98304-token context (the bf16 KV cache is 96 KiB per token on one die).
 
     All profiles: 32 concurrent sequences, prefix caching, bfp4 routed experts.

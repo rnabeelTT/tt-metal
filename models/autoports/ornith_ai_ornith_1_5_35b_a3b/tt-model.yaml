@@ -105,7 +105,10 @@ serve_profiles:
     additional_config: {tt: {fabric_config: DISABLED}}
     env: {QWEN35_VISION: "0"}   # one die keeps its DRAM for the KV pool
     args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
-default_profile: p300x2
+# Default = the best balance of hardware and performance: two chips keep the 4-chip accuracy (bfp8 routed experts;
+# teacher forcing 0.96 / 0.91 top-1 vs 0.97 / 0.89) and vision, at ~80 % of the 4-chip throughput (peak 275 vs 351 tok/s,
+# TTFT 4K 0.89 vs 0.72 s) on half the hardware; one chip needs bfp4 experts (book top-1 0.84) and drops vision.
+default_profile: p300
 
 verify:
   - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
@@ -139,8 +142,9 @@ card:
 
     ### Profiles
     `tt-model serve raahemnabeel/ornith-1.5-35b-a3b-v2 --profile <name>`:
-    - `p300x2` (default) / `p150x4` - four dies, bfp8 routed experts, text + images.
-    - `p300` / `p150x2` - two dies, bfp8 routed experts, text + images.
+    - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images: the 4-die accuracy at ~80 % of its
+      throughput on half the hardware.
+    - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
     - `p150` - one die, bfp4 routed experts (bfp8 does not fit one die), text only.
 
     Every profile: 32 concurrent sequences, 262144-token context, MTP speculative decoding while one request is live.
