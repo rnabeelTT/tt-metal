@@ -3,11 +3,13 @@
 # v2 = the Qwen3.5-122B-A10B / Qwen3-Coder-Next autoport code (same qwen3_5_moe architecture): tensor-parallel Gated
 # DeltaNet + gated attention, routed experts sharded on the intermediate dimension, expert-sorted MoE prefill,
 # on-device sampling, per-width decode traces, MTP speculative decoding. The v1 package (one die replicated per lane,
-# batch 1, host sampling) stays at raahemnabeel/ornith-1.5-35b-a3b.
+# batch 1, host sampling) lives at raahemnabeel/ornith-1.5-35b-a3b-v1 (the Hub repos were renamed 2026-10-08: v2 took
+# the base name). `name` stays ornith-1.5-35b-a3b-v2: it is the host cache dir (~/.cache/tt-model/<name>, which
+# `tt-model rm` deletes) and the container name, and the v1 package already owns ornith-1.5-35b-a3b.
 # Authoring interface of `tt-model package --container models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt-model.yaml`.
 schema: "5.1"
 
-repo: raahemnabeel/ornith-1.5-35b-a3b-v2
+repo: raahemnabeel/ornith-1.5-35b-a3b
 name: ornith-1.5-35b-a3b-v2
 # weights stay a pointer: the exact HF snapshot every check of this port ran against
 weights: {repo: ornith-ai/Ornith-1.5-35B-A3B, revision: 10fbf86fed7ecee4a061f8b499a618f46001cac1}
@@ -127,7 +129,7 @@ card:
     `qwen3_5_moe` architecture): tensor-parallel Gated DeltaNet and gated attention, routed experts sharded on the
     intermediate dimension, expert-sorted MoE prefill, on-device sampling, decode traces for 1-32 users, multi-token
     prediction from the checkpoint's own MTP head, and the vision tower. The v1 package
-    ([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)) served one die per vLLM
+    ([raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1)) served one die per vLLM
     process at batch 1 with host sampling and a ~400 tok/s MoE prefill.
 
     Same single p150, v1 -> v2: TTFT at 4K tokens 9.9 -> 1.5 s, 16K 40.4 -> 5.9 s, 64K 166 -> 27.3 s, 128K not runnable ->
@@ -141,7 +143,7 @@ card:
     `image_url` parts on the multi-die profiles.
 
     ### Profiles
-    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b-v2 --profile <name>`:
+    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile <name>`:
     - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images: the 4-die accuracy at ~80 % of its
       throughput on half the hardware.
     - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
