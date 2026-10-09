@@ -379,12 +379,13 @@ class Glm4MoeForCausalLM(Qwen36ForCausalLM):
         trace_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
         cls._budget_trace_region_mib = trace_mib
         trace_extra_gib = (trace_mib - cls._CONTRACT_TRACE_REGION_MIB) / 1024
-        pool_gib = float(c["dram_total_gib_per_device"]) - trace_extra_gib - nonkv - cls._TRANSIENT_HEADROOM_GIB
+        headroom = float(c.get("transient_headroom_gib", cls._TRANSIENT_HEADROOM_GIB))
+        pool_gib = float(c["dram_total_gib_per_device"]) - trace_extra_gib - nonkv - headroom
         tokens = int(pool_gib * 2**30 / kv_bytes_per_token)
         tokens = max(tokens // BLOCK_SIZE * BLOCK_SIZE, BLOCK_SIZE * B)
         logger.info(
             f"KV token pool for {B} slots: {pool_gib:.3f} GiB = {tokens} tokens ({tokens / max(B, 1):.0f} per user at full "
-            f"occupancy; non-KV footprint {nonkv:.3f} GiB incl. slots, headroom {cls._TRANSIENT_HEADROOM_GIB} GiB, trace region "
+            f"occupancy; non-KV footprint {nonkv:.3f} GiB incl. slots, headroom {headroom} GiB, trace region "
             f"{trace_mib} MiB = {trace_extra_gib:+.3f} GiB vs the contract's {cls._CONTRACT_TRACE_REGION_MIB} MiB)"
         )
         return tokens

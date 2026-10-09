@@ -33,14 +33,15 @@
     "per_slot_gib": 0.017
   },
   "serving_tp2": {
-    "status": "ESTIMATE 2026-10-08 (bfp4 everything: routed experts ~26.1 GiB per die); to be replaced by the measured MEMORY_REPORT",
+    "status": "MEASURED 2026-10-08 (46-layer teacher-forcing build, B=1, 4096-token KV, MEMORY_REPORT): 28.96 GiB allocated per device with every large weight bfp4 (routed experts ~26.1 GiB); 0.29 GiB of it KV -> 28.67 GiB non-KV; budgeted at 28.75 GiB. The 2-die profile serves without MTP, with a 512 MiB trace region and 1024-token prefill segments (prefill transient headroom 0.75 GiB)",
     "selected_policy": "glm_tp2_routed_bfp4_mixers_bfp4",
     "kv_cache_dtype": "bfloat8_b",
     "kv_bytes_per_token_per_device": 50048,
     "dram_total_gib_per_device": 31.331,
-    "non_kv_footprint_gib": 29.5,
+    "non_kv_footprint_gib": 28.75,
     "trace_region_reserved_mib": 512,
-    "current_supported_context": 131072,
-    "per_slot_gib": 0.017
+    "current_supported_context": 32768,
+    "per_slot_gib": 0.017,
+    "transient_headroom_gib": 0.75
   }
 }

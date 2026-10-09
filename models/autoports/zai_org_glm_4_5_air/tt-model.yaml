@@ -75,15 +75,25 @@ serve_profiles:
     hardware: p150x4
     mesh_device: P150x4
   - name: p300
-    description: One p300 board (2 dies, tensor parallel 2), bfp4 weights, reduced KV pool.
+    description: One p300 board (2 dies, tensor parallel 2), bfp4 weights, 8 sequences, 32768 context, no MTP.
     hardware: p300
     mesh_device: P300
-    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+    max_num_seqs: 8
+    max_model_len: 32768
+    additional_config: {tt: {trace_region_size: 536870912}}
+    # the 2-die build holds 28.7 GiB of bfp4 weights per die: no MTP head, 512 MiB trace region, 1024-token prefill
+    # segments (smaller prefill transients) -> a ~36K-token KV pool shared by 8 sequences
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_MTP: "0", QWEN35_TRACE_REGION_MIB: "512", QWEN35_PREFILL_SEGMENT: "1024"}
   - name: p150x2
     description: Two p150 boards (2 dies), same configuration as p300. Not run on hardware (the identical (1,2) mesh).
     hardware: p150x2
     mesh_device: P150x2
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    max_num_seqs: 8
+    max_model_len: 32768
+    additional_config: {tt: {trace_region_size: 536870912}}
+    # the 2-die build holds 28.7 GiB of bfp4 weights per die: no MTP head, 512 MiB trace region, 1024-token prefill
+    # segments (smaller prefill transients) -> a ~36K-token KV pool shared by 8 sequences
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_MTP: "0", QWEN35_TRACE_REGION_MIB: "512", QWEN35_PREFILL_SEGMENT: "1024"}
 default_profile: p300x2
 
 verify:

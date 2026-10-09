@@ -10,11 +10,71 @@ Weights interleaved per device; x replicated in, output reduce-scattered on dim=
 import os
 
 import torch
+from loguru import logger
 
 import ttnn
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
 from models.tt_transformers.tt.ccl import tt_all_reduce
+
+# --- prefill-SDPA knobs (long-context A/B, GLM-4.5-Air 2026-10-08). Unset = the current behaviour, bit for bit. ------
+# Read once per TPAttention (process-constant), so the generator's warm-up compiles exactly the programs a traced bucket
+# replays. They apply to every prefill SDPA call site (forward_prefill, forward_prefill_paged legacy + flexible,
+# forward_prefill_paged_batched); decode SDPA is untouched.
+#   QWEN35_SDPA_PREFILL_Q_CHUNK / _K_CHUNK = 32..2048 (power of 2): replaces the 128 of every flexible (bucket) pass and
+#     of every >=2048-row pass; clamped to the largest power of 2 <= the pass length (bucket), and in the legacy int
+#     path to the largest power of 2 dividing chunk_start (the op's chunk_start % q/k_chunk == 0 rule, tt-metal
+#     #35225). The flexible path's runtime chunk_start is a multiple of the PREFILL_SEGMENT (generator._prefill_single
+#     asserts it), so any chunk <= the bucket divides it. Causal chunked SDPA re-reads the whole K/V prefix from
+#     DRAM once per q chunk: a 2x q chunk halves that traffic (the long-context bound); k chunk only sizes the
+#     per-iteration block.
+#   QWEN35_SDPA_PREFILL_EXP_APPROX = 0 | 1: SDPAProgramConfig.exp_approx_mode (current: 0).
+#   QWEN35_SDPA_PREFILL_FIDELITY = lofi | hifi2 | hifi3 | hifi4: math fidelity of the prefill SDPA only (current: the
+#     mixer compute config's, hifi2 in the selected policy).
+#   QWEN35_SDPA_PREFILL_FP32_ACC = 0 | 1: fp32_dest_acc_en of the prefill SDPA only (current: the mixer config's, 1).
+#     0 selects the op's streaming compute kernel (sdpa_program_factory: use_streaming_compute = !fp32_dest_acc_en; the
+#     ttnn default when no compute config is passed) with bf16 intermediates and 8-tile dest subblocks.
+_SDPA_PF_LOGGED = False
+_SDPA_FIDELITIES = {
+    "lofi": ttnn.MathFidelity.LoFi,
+    "hifi2": ttnn.MathFidelity.HiFi2,
+    "hifi3": ttnn.MathFidelity.HiFi3,
+    "hifi4": ttnn.MathFidelity.HiFi4,
+}
+
+
+def _env_sdpa_chunk(name):
+    v = os.environ.get(name, "").strip()
+    if not v:
+        return None
+    c = int(v)
+    if c < 32 or c > 2048 or c & (c - 1):
+        raise ValueError(f"{name}={v}: must be a power of 2 in [32, 2048]")
+    return c
+
+
+def _pow2_floor(n):
+    return 1 << (max(int(n), 1).bit_length() - 1)
+
+
+def _sdpa_prefill_compute_cfg(base):
+    """The prefill SDPA compute config: ``base`` (the mixer config) unless QWEN35_SDPA_PREFILL_FIDELITY /
+    QWEN35_SDPA_PREFILL_FP32_ACC override a field (then a copy with those fields replaced)."""
+    fid = os.environ.get("QWEN35_SDPA_PREFILL_FIDELITY", "").strip().lower()
+    acc = os.environ.get("QWEN35_SDPA_PREFILL_FP32_ACC", "").strip()
+    if fid in ("", "inherit") and acc == "":
+        return base
+    if fid not in ("", "inherit") and fid not in _SDPA_FIDELITIES:
+        raise ValueError(f"QWEN35_SDPA_PREFILL_FIDELITY={fid!r}: one of {sorted(_SDPA_FIDELITIES)}")
+    if acc not in ("", "0", "1"):
+        raise ValueError(f"QWEN35_SDPA_PREFILL_FP32_ACC={acc!r}: 0 or 1")
+    return ttnn.WormholeComputeKernelConfig(
+        math_fidelity=_SDPA_FIDELITIES[fid] if fid not in ("", "inherit") else base.math_fidelity,
+        math_approx_mode=base.math_approx_mode,
+        fp32_dest_acc_en=(acc == "1") if acc else base.fp32_dest_acc_en,
+        packer_l1_acc=base.packer_l1_acc,
+        dst_full_sync_en=base.dst_full_sync_en,
+    )
 
 
 def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
@@ -183,6 +243,22 @@ class TPAttention:
         # bf8 SDPA follows the KV-cache dtype from args (the paged cache is filled with a typecast copy); the former
         # QWEN_SDPA_BF8=1 knob is args.kv_dtype == bfloat8_b
         self._sdpa_bf8 = getattr(args, "kv_dtype", None) == ttnn.bfloat8_b
+        # prefill-SDPA knobs (module header); None / False / compute_cfg = the current behaviour
+        self._sdpa_pf_q = _env_sdpa_chunk("QWEN35_SDPA_PREFILL_Q_CHUNK")
+        self._sdpa_pf_k = _env_sdpa_chunk("QWEN35_SDPA_PREFILL_K_CHUNK")
+        self._sdpa_pf_exp_approx = os.environ.get("QWEN35_SDPA_PREFILL_EXP_APPROX", "0").strip() == "1"
+        self._sdpa_pf_ckc = _sdpa_prefill_compute_cfg(self.compute_cfg)
+        self._sdpa_pf_ckc_overridden = self._sdpa_pf_ckc is not self.compute_cfg
+        global _SDPA_PF_LOGGED
+        if not _SDPA_PF_LOGGED and (
+            self._sdpa_pf_q or self._sdpa_pf_k or self._sdpa_pf_exp_approx or self._sdpa_pf_ckc_overridden
+        ):
+            _SDPA_PF_LOGGED = True
+            c = self._sdpa_pf_ckc
+            logger.info(
+                f"prefill SDPA knobs: q_chunk={self._sdpa_pf_q} k_chunk={self._sdpa_pf_k} "
+                f"exp_approx={self._sdpa_pf_exp_approx} fidelity={c.math_fidelity} fp32_dest_acc={c.fp32_dest_acc_en}"
+            )
         # Must match load_attention_weights_tp gates
         self._dram_sharded = getattr(args, "attn_qg_weight_memcfg", None) is not None
         self._wo_sharded = getattr(args, "attn_wo_weight_memcfg", None) is not None
@@ -198,13 +274,34 @@ class TPAttention:
         # Decode head split/merge via nlp_create/concat_heads_decode (the batched-decode idiom).
         # nlp_create_qkv_heads_decode / nlp_concat_heads_decode hold one 32-row tile of heads per user: more local q heads
         # (GLM-4.5-Air at TP2 = 48) take the slice/reshape split below.
-        self._use_nlp_decode_heads = self.NH <= 32
+        self._use_nlp_decode_heads = self.NH <= 32 and os.environ.get("QWEN35_NLP_DECODE_HEADS", "1") == "1"
         self.k_caches = None
         self.v_caches = None
         # External paged KV cache (vLLM/contract path); internal caches kept for demo fallback
         self.paged_k = None
         self.paged_v = None
         self.use_paged = False
+
+    def _prefill_sdpa_cfg(self, S, current, chunk_start_idx=0, flexible=False, grid=None):
+        """SDPAProgramConfig of one prefill SDPA call. ``current`` = the q/k chunk the call site uses today (128 / 64);
+        the QWEN35_SDPA_PREFILL_Q_CHUNK / _K_CHUNK knobs replace it on flexible passes and on >=2048-row passes,
+        clamped to the largest power of 2 <= S and, for a legacy int chunk_start, to the largest power of 2 dividing
+        it."""
+
+        def pick(knob):
+            if knob is None or not (flexible or S >= 2048):
+                return current
+            c = min(knob, _pow2_floor(S))
+            if not flexible and chunk_start_idx:
+                c = min(c, chunk_start_idx & -chunk_start_idx)
+            return max(32, c)
+
+        return ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=grid or self.mesh.compute_with_storage_grid_size(),
+            exp_approx_mode=self._sdpa_pf_exp_approx,
+            q_chunk_size=pick(self._sdpa_pf_q),
+            k_chunk_size=pick(self._sdpa_pf_k),
+        )
 
     def set_paged_kv_cache(self, k_cache, v_cache):
         """Attach an externally-allocated paged KV cache (one call after allocate_kv_caches)."""
@@ -544,11 +641,16 @@ class TPAttention:
         # program.cpp "circular buffers ... clash with L1 buffers"). Production serving chunks
         # prefill at <=2048, so this path never sees S>2048 and 256 has no reachable win.)
         ch = min(128 if S >= 2048 else 64, padded)
-        sdpa_cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=(8, 8), exp_approx_mode=False, q_chunk_size=ch, k_chunk_size=ch
-        )
+        sdpa_cfg = self._prefill_sdpa_cfg(S, ch, grid=(8, 8))
         attn = ttnn.transformer.scaled_dot_product_attention(
-            q8, k8, v8, is_causal=True, scale=self.scale, memory_config=ttnn.DRAM_MEMORY_CONFIG, program_config=sdpa_cfg
+            q8,
+            k8,
+            v8,
+            is_causal=True,
+            scale=self.scale,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            program_config=sdpa_cfg,
+            compute_kernel_config=self._sdpa_pf_ckc if self._sdpa_pf_ckc_overridden else None,
         )
         ttnn.deallocate(q8)
         ttnn.deallocate(k8)
@@ -690,8 +792,9 @@ class TPAttention:
             keys, values = self.paged_k, self.paged_v
             k_p = ttnn.pad(k, [1, B, 32, HD], [0, 0, 0, 0], 0.0, memory_config=_L1)
             v_p = ttnn.pad(v, [1, B, 32, HD], [0, 0, 0, 0], 0.0, memory_config=_L1)
-            ttnn.deallocate(k)
-            ttnn.deallocate(v)
+            # ttnn.pad returns its INPUT when the logical rows already fit the padded tile ([1,B,NKV,HD] -> 32 rows), so
+            # k / v must outlive the reshards below: freeing them first let the K shard allocation reuse the V rows of
+            # some users (GLM-4.5-Air, 2 local KV heads: garbage V rows for 7 of 16 users at width 16, 2026-10-09)
             _kv_cfg = self._kv_shard_cfg(B)
             k_sh = ttnn.to_memory_config(k_p, _kv_cfg)
             v_sh = ttnn.to_memory_config(v_p, _kv_cfg)
@@ -699,6 +802,9 @@ class TPAttention:
             if not _rows_mode:
                 ttnn.deallocate(k_p)
                 ttnn.deallocate(v_p)
+                for t in (k, v):  # already freed through k_p / v_p when pad aliased them
+                    if t.is_allocated():
+                        ttnn.deallocate(t)
             # paged_update_cache takes bf16/fp32 and casts to bf8 cache; decode K/V stay bf16 (prefill fill needs bf8)
             if getattr(self, "rows_kv_write", False) and B > 1:
                 # MTP verify "rows" mode: the B rows are consecutive positions of ONE user (same page-table row). The
@@ -738,6 +844,9 @@ class TPAttention:
                         ttnn.deallocate(pt_b)
                 ttnn.deallocate(k_p)
                 ttnn.deallocate(v_p)
+                for t in (k, v):
+                    if t.is_allocated():
+                        ttnn.deallocate(t)
             else:
                 ttnn.experimental.paged_update_cache(keys, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
                 ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
@@ -884,12 +993,7 @@ class TPAttention:
         k_paged, v_paged = self.paged_k, self.paged_v
         block_size = k_paged.shape[2]
         qk_chunk = 128 if T >= 2048 else 64
-        sdpa_cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(),
-            exp_approx_mode=False,
-            q_chunk_size=qk_chunk,
-            k_chunk_size=qk_chunk,
-        )
+        sdpa_cfg = self._prefill_sdpa_cfg(T, qk_chunk)
         outs = []
         for u in range(B):
             pt = page_tables[u]
@@ -930,7 +1034,7 @@ class TPAttention:
                 input_tensor_v=v_paged,
                 page_table_tensor=sdpa_pt,
                 chunk_start_idx=0,
-                compute_kernel_config=self.compute_cfg,
+                compute_kernel_config=self._sdpa_pf_ckc,
                 program_config=sdpa_cfg,
             )
             if sdpa_pt is not pt:
@@ -1042,11 +1146,8 @@ class TPAttention:
             cap = 128 if S >= 2048 else 64  # 128 beats 256
             qk_chunk = cap if not chunk_start_idx else min(cap, chunk_start_idx & -chunk_start_idx)
         # Full BH grid for SDPA perf (bit-identical to 8×8; see test_tp_chunked_prefill_pcc_sweep)
-        sdpa_cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(),
-            exp_approx_mode=False,
-            q_chunk_size=qk_chunk,
-            k_chunk_size=qk_chunk,
+        sdpa_cfg = self._prefill_sdpa_cfg(
+            S, qk_chunk, chunk_start_idx=chunk_start_idx, flexible=chunk_start_idx_tensor is not None
         )
 
         # Pad page table to cover Q+offset and satisfy stick-size % 32 (extra blocks masked by causality)
@@ -1072,7 +1173,7 @@ class TPAttention:
                 input_tensor_v=v_paged,
                 page_table_tensor=sdpa_page_table,
                 chunk_start_idx_tensor=chunk_start_idx_tensor,
-                compute_kernel_config=self.compute_cfg,
+                compute_kernel_config=self._sdpa_pf_ckc,
                 program_config=sdpa_cfg,
             )
         else:
@@ -1082,7 +1183,7 @@ class TPAttention:
                 input_tensor_v=v_paged,
                 page_table_tensor=sdpa_page_table,
                 chunk_start_idx=chunk_start_idx,
-                compute_kernel_config=self.compute_cfg,
+                compute_kernel_config=self._sdpa_pf_ckc,
                 program_config=sdpa_cfg,
             )
         if sdpa_page_table is not page_table:

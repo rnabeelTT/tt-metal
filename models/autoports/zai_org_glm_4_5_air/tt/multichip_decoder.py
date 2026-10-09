@@ -352,6 +352,11 @@ class MultichipDecoder(OptimizedDecoder):
             args.tp_modules_single_device = True
             # full-width 2D prefill matmuls overflow L1 above ~512 rows on one die (measured: 513 runs, 1000 does not)
             tpc.PREFILL_MAX_ROWS = 512
+        elif nd == 2 and int(args.n_heads) // nd > 32:
+            # two dies of a wide-attention model (GLM-4.5-Air: 48 q heads per die, fused QKV N = 7168): the 2048-row 2D
+            # prefill QKV matmul overflows L1 by ~14 KB (static CBs end 1559552 vs an L1 buffer at 1545984, 2026-10-08);
+            # 1024-row slices keep the TP4 per-core block
+            tpc.PREFILL_MAX_ROWS = 1024
         assert args.n_heads % nd == 0, f"n_heads {args.n_heads} not divisible by TP={nd}"
         assert nd % args.n_kv_heads == 0 or args.n_kv_heads % nd == 0, (args.n_kv_heads, nd)
         assert args.moe_intermediate_size % (nd * 32) == 0, (args.moe_intermediate_size, nd)

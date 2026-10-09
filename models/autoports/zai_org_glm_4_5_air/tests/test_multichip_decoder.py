@@ -703,6 +703,76 @@ def test_mc_batched_decode_b32(mesh_device, layer_idx, batch):
 
 
 @mesh_tp()
+@pytest.mark.parametrize("batch", [2, 4, 8, 16, 32], ids=["w2", "w4", "w8", "w16", "w32"])
+def test_mc_batched_decode_widths_delta(mesh_device, batch):
+    """GLM batched decode per decode width: per-user RESIDUAL-FREE layer contribution (out - x) vs HF on the dense layer
+    (attention + dense MLP; the MLP is row-independent, so a row-specific error is the attention's). Real weights."""
+    seq_len = 37
+    h = _mc(mesh_device, L0, batch=batch, max_seq_len=1024, real=True)
+    hidden = _hidden(batch, seq_len, h.H, seed=300 + batch)
+    _prefill_users(h, hidden)
+    dec = _hidden(batch, 1, h.H, seed=400 + batch)
+    pos = torch.full((batch,), seq_len)
+    got = h.tt_decode(dec, pos)
+    exp = h.hf_decode(dec, pos)
+    vals = [comp_pcc(exp[u : u + 1] - dec[u : u + 1], got[u : u + 1] - dec[u : u + 1], 0.0)[1] for u in range(batch)]
+    print(f"WIDTHDELTA B={batch} per-user delta PCC " + " ".join(f"{u}:{v:.4f}" for u, v in enumerate(vals)))
+    assert (
+        min(vals) > DELTA_BAR
+    ), f"B={batch}: users {[u for u, v in enumerate(vals) if v <= DELTA_BAR]} below {DELTA_BAR}"
+
+
+@mesh_tp()
+@pytest.mark.parametrize("batch", [16], ids=["w16"])
+def test_mc_batched_kv_contents(mesh_device, batch):
+    """GLM batched decode diagnosis: every user's paged K/V (both local KV heads of every die) vs the HF cache after the
+    per-user prefills and after one batched decode step (dense layer 0, real weights)."""
+    seq_len = 37
+    h = _mc(mesh_device, L0, batch=batch, max_seq_len=1024, real=True)
+    hidden = _hidden(batch, seq_len, h.H, seed=300 + batch)
+    _prefill_users(h, hidden)
+    nkv_local = h.text.num_key_value_heads // h.tp
+    bs = h.tt.kv_cache["block_size"]
+
+    def check(total, label):
+        layer = h.hf_cache.layers[h.layer_idx]
+        hk, hv = layer.keys, layer.values  # [B, n_kv, T, D]
+        kd, vd = _per_device(h.tt.kv_cache["k"]), _per_device(h.tt.kv_cache["v"])
+        bad = []
+        for u in range(batch):
+            blocks = h.page_table[u, : -(-total // bs)].to(torch.long)
+            for d in range(h.tp):
+                for j in range(nkv_local):
+                    for name, cache, ref_ in (("K", kd[d], hk), ("V", vd[d], hv)):
+                        tt_rows = cache[blocks, j].reshape(-1, cache.shape[-1])[:total].float()
+                        p = comp_pcc(ref_[u, d * nkv_local + j, :total].float(), tt_rows, 0.0)[1]
+                        if p < 0.99:
+                            bad.append((u, d, j, name, round(float(p), 3)))
+        print(f"KVCONTENTS {label} B={batch} bad (user, die, local head, K/V, pcc): {bad[:40]}")
+
+    check(seq_len, "after-prefill")
+    v_before = [t.clone() for t in _per_device(h.tt.kv_cache["v"])]
+    k_before = [t.clone() for t in _per_device(h.tt.kv_cache["k"])]
+    dec = _hidden(batch, 1, h.H, seed=400 + batch)
+    pos = torch.full((batch,), seq_len)
+    got = h.tt_decode(dec, pos)
+    for name, before, after in (
+        ("V", v_before, _per_device(h.tt.kv_cache["v"])),
+        ("K", k_before, _per_device(h.tt.kv_cache["k"])),
+    ):
+        d = 0
+        changed = (before[d].float() - after[d].float()).abs().amax(dim=(1, 3))  # [blocks, block_size]
+        rows = changed.nonzero().tolist()
+        owner = {int(b): (u, i) for u in range(batch) for i, b in enumerate(h.page_table[u].tolist())}
+        desc = sorted({(owner.get(b, ("?", "?"))[0], owner.get(b, ("?", "?"))[1], r) for b, r in rows})
+        print(f"KVDIFF {name} die0 changed (user, user-block, row): {len(desc)} rows: {desc[:60]}")
+    exp = h.hf_decode(dec, pos)
+    check(seq_len + 1, "after-decode")
+    vals = [comp_pcc(exp[u : u + 1] - dec[u : u + 1], got[u : u + 1] - dec[u : u + 1], 0.0)[1] for u in range(batch)]
+    print(f"KVCONTENTS delta per user " + " ".join(f"{u}:{v:.3f}" for u, v in enumerate(vals)))
+
+
+@mesh_tp()
 @pytest.mark.parametrize("layer_idx", [L0, L3], ids=["gdn", "attn"])
 def test_mc_batched_decode_distinct_positions(mesh_device, layer_idx):
     """4 users with prompt lengths (5, 37, 129, 300); one batched decode at their own positions (per-user HF reference)."""
