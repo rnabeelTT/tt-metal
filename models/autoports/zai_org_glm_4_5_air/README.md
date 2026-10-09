@@ -26,19 +26,52 @@ on-device sampling with the lockstep multi-die sampler, MTP speculative decoding
 
 ## Meshes and precision
 
-| profile | mesh | routed experts | attention / shared / LM head | policy file |
-| --- | --- | --- | --- | --- |
-| p300x2 / p150x4 | (1,4) | gate/up bfp4, down bfp8 | bfp8 | `doc/datatype_sweep/selected_precision_config.json` |
-| p300 / p150x2 | (1,2) | bfp4 | bfp4 | `doc/datatype_sweep/selected_precision_config_tp2.json` |
+| profile | mesh | routed experts | attention / shared / LM head | serving | policy file |
+| --- | --- | --- | --- | --- | --- |
+| p300x2 / p150x4 | (1,4) | gate/up bfp4, down bfp8 | bfp8 / bfp8 / bfp8 | 32 seqs, 131072 context, KV pool 348,672 tokens, adaptive MTP | `doc/datatype_sweep/selected_precision_config.json` |
+| p300 / p150x2 | (1,2) | bfp4 | bfp4 / bfp4 / bfp4 | 8 seqs, 32768 context, KV pool 36,672 tokens, no MTP | `doc/datatype_sweep/selected_precision_config_tp2.json` |
 
-4-die datatype sweep (teacher forcing against HF bf16, 100 greedy tokens, top-1 / top-5 / top-100; token-out = traced
-single-user decode step before the decode tuning):
+The 2-die build holds 28.7 GiB of weights per die (31.3 GiB DRAM), so its profile drops the MTP head, uses a 512 MiB trace
+region and 1024-token prefill segments (`tt-model.yaml` profile env; budget in `doc/context_contract.json` `serving_tp2`).
+
+Teacher forcing against HF bf16 (100 greedy tokens unless noted, top-1 / top-5 / top-100) and the single-user traced
+decode step (token-out bench, plain decode, no MTP), final configuration:
+
+| mesh | code chat | book p2048 | book p32768 (32 tokens) | decode step |
+| --- | --- | --- | --- | --- |
+| 4 dies | 0.99 / 1.00 / 1.00 | 0.99 / 1.00 / 1.00 | 0.875 / 1.00 / 1.00 | 26.9 ms (37 tok/s) |
+| 2 dies | 0.99 / 1.00 / 1.00 | 0.98 / 1.00 / 1.00 | - | 31.4 ms (32 tok/s) |
+
+4-die datatype sweep (before the decode tuning; the token-out step is identical for all three, decode is op-overhead
+bound):
 
 | routed experts | code chat | book p2048 | DRAM / die (B = 1, 131K KV) | token-out |
 | --- | --- | --- | --- | --- |
 | bfp4 | 0.98 / 1.00 / 1.00 | 0.96 / 1.00 / 1.00 | 18.3 GiB | 31.4 ms |
 | gate/up bfp4 + down bfp8 (selected) | 0.99 / 1.00 / 1.00 | 0.98 / 1.00 / 1.00 | 22.2 GiB | 31.4 ms |
-| bfp8 | 1.00 / 1.00 / 1.00 | 0.98 / 1.00 / 1.00 | 29.9 GiB | 31.4 ms |
+| bfp8 | 1.00 / 1.00 / 1.00 | 0.98 / 1.00 / 1.00 | 29.9 GiB (no KV room) | 31.4 ms |
+
+MTP (checkpoint layer 46, k = 3, exact vs greedy): 3.28 tokens per pass on code (56 tok/s single user), 2.21 on prose
+(38 tok/s), traced offline; served single-user rows use it automatically (adaptive: plain decode when several requests
+are live).
+
+## Tuning that changed defaults
+
+- Decode 31.4 -> 26.9 ms per step (4 dies): the router chain in fp32 with a plain top-8 (no k = 80 route), a one-hot
+  weight select for decode rows instead of a single-core `ttnn.gather`, and expert matmul geometry for the 352-wide
+  per-die expert shard (gate/up one output tile per core, down K = 11 tiles in one block: the Qwen value collapsed it
+  to 1 tile and the down projection ran 98 us instead of 28 us).
+- Long prompts: prefill SDPA q / k chunks 256 and the streaming kernel (`QWEN35_SDPA_PREFILL_*`, defaults set in
+  `tt/model_config.py`): served 130K-token TTFT 108 -> 84.5 s, 32K teacher forcing unchanged.
+
+## Defects found and fixed
+
+- Batched decode wrote garbage V rows for some users (7 of 16 at width 16): `TPAttention.forward_decode` freed the
+  unpadded K / V before resharding the padded copies, and `ttnn.pad` returns its input when the rows fit the tile, so
+  the K shard allocation reused V rows. Latent with Qwen's one local KV head; fixed in the shared qwen36 code.
+- A lone request admitted after a concurrent batch could enter the MTP phase one position late (stale device row of the
+  slot's previous occupant): fixed in `generator_vllm._authoritative`. The same code is in the Qwen3.5-122B, Ornith v2
+  and Qwen3-Coder-Next adapters.
 
 ## Run
 

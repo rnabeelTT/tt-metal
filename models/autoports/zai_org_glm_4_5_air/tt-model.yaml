@@ -67,7 +67,7 @@ serve:
 
 serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 131072 context.
+    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 131072 context, MTP while one request is live.
     hardware: p300x2
     mesh_device: P300x2
   - name: p150x4
@@ -103,6 +103,113 @@ verify:
 card:
   description: >
     GLM-4.5-Air (106B total / 12B active MoE: 128 experts top-8 + shared expert, 46 GQA attention layers, MTP layer)
-    served on Blackhole through vLLM and the Tenstorrent plugin on four or two dies.
+    served on Blackhole through vLLM and the Tenstorrent plugin on four or two dies: tensor-parallel attention, experts
+    sharded on the intermediate dimension, expert-sorted MoE prefill and decode, on-device sampling, single-user
+    multi-token prediction, tool calling and reasoning (glm45 parsers), 131072-token context, up to 32 concurrent
+    sequences.
   quickstart: |
-    (filled in after the measurements)
+    ### What this is
+    `zai-org/GLM-4.5-Air` served through the Blackhole autoport code of the Qwen3.5-122B-A10B / Qwen3-Coder-Next / Ornith
+    v2 ports, adapted to `glm4_moe`: GQA attention with q/k/v biases and partial RoPE, plain RMSNorm, the sigmoid +
+    correction-bias router (fp32), a dense first layer, routed experts sharded on the intermediate dimension (all 128
+    experts on every die), expert-sorted MoE prefill and decode (from 16 rows), on-device sampling, decode traces for 1-32
+    users, and speculative decoding from the checkpoint's own MTP layer (layer 46) when one request is live.
+
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `zai-org/GLM-4.5-Air`. Thinking is ON by default (reasoning in the message's `reasoning` field, answer in `content`);
+    turn it off per request with `"chat_template_kwargs": {"enable_thinking": false}`. Give thinking requests a large
+    `max_tokens`. Tool calls use the `glm45` parser.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/glm-4.5-air-blackhole --profile <name>`:
+    - `p300x2` (default) / `p150x4` - four dies: gate/up bfp4 + down bfp8 routed experts, bfp8 attention / shared expert /
+      LM head; 32 sequences, 131072 context (KV pool 348,672 tokens), MTP while one request is live.
+    - `p300` / `p150x2` - two dies: every large weight bfp4 (the model needs 28.7 GiB per die even so); 8 sequences sharing
+      a 36,672-token KV pool, 32768 context, no MTP.
+
+    ### Accuracy
+    Teacher forcing against the Hugging Face bf16 model on CPU (top-1 / top-5 / top-100 agreement; 100 greedy tokens
+    unless noted):
+
+    | profile | code chat prompt | 2048-token book prompt | 32768-token book prompt (32 tokens) |
+    | --- | --- | --- | --- |
+    | 4 dies | 0.99 / 1.00 / 1.00 | 0.99 / 1.00 / 1.00 | 0.875 / 1.00 / 1.00 |
+    | 2 dies | 0.99 / 1.00 / 1.00 | 0.98 / 1.00 / 1.00 | - |
+
+    vLLM sampling-parameter conformance (vllm-tt-plugin suite) on 4 dies: 71 passed; the 2 failures are the
+    thinking-on-by-default artefact the other Blackhole bundles share (`content` is empty while the model is still
+    thinking). Benchmark evals were not run.
+
+    ### Performance
+    Measured 2026-10-09 on a QuietBox 2 (4 Blackhole p300c dies; the 2-die rows on two of them) through vLLM 0.26 with the
+    code this package ships, served from the source tree. Random-token prompts of exactly the input length, output pinned
+    with ignore_eos, greedy, streamed; users are concurrent requests in a closed loop; TTFT = time to first streamed token;
+    TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per input length. Single-user rows on 4 dies run MTP
+    speculative decoding, whose speed-up depends on how predictable the text is (random-token prompts make it vary from
+    row to row; 3.3 tokens per pass on code in the offline check); concurrent rows run plain decode. The 4-die 16-user rows
+    were measured in the same harness for the decode-path A/B that set the shipped default.
+
+    #### p300x2 (4 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 226 | 567 | 20.5 | 48.7 | 2.84 |
+    | 1,024 | 256 | 465 | 2,203 | 24.6 | 40.7 | 6.74 |
+    | 4,096 | 256 | 1,441 | 2,842 | 16.4 | 61.0 | 5.62 |
+    | 16,384 | 256 | 5,949 | 2,754 | 17.9 | 55.8 | 10.52 |
+    | 32,768 | 256 | 12,870 | 2,546 | 18.8 | 53.3 | 17.65 |
+    | 65,536 | 256 | 29,936 | 2,189 | 20.9 | 47.8 | 35.27 |
+    | 130,816 | 256 | 77,539 | 1,687 | 34.2 | 29.2 | 86.26 |
+
+    Concurrency (peak aggregate output: 218.3 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 226 | 20.5 | 48.7 | 46.6 | 2.84 |
+    | 128 | 128 | 2 | 8 | 325 | 37.9 | 26.4 | 49.8 | 5.14 |
+    | 128 | 128 | 4 | 16 | 654 | 50.7 | 19.7 | 72.2 | 7.09 |
+    | 128 | 128 | 8 | 32 | 1,286 | 76.8 | 13.0 | 92.7 | 11.04 |
+    | 128 | 128 | 16 | 64 | 2,584 | 91.5 | 10.9 | 144.1 | 14.19 |
+    | 128 | 128 | 32 | 128 | 5,165 | 106.8 | 9.4 | 218.3 | 18.72 |
+    | 1,024 | 256 | 1 | 4 | 465 | 24.6 | 40.7 | 39.1 | 6.74 |
+    | 1,024 | 256 | 2 | 8 | 802 | 38.1 | 26.2 | 48.6 | 10.53 |
+    | 1,024 | 256 | 4 | 16 | 1,600 | 51.1 | 19.6 | 69.9 | 14.64 |
+    | 1,024 | 256 | 8 | 32 | 3,174 | 77.4 | 12.9 | 89.3 | 22.92 |
+    | 1,024 | 256 | 16 | 64 | 6,402 | 93.1 | 10.7 | 136.2 | 30.10 |
+    | 1,024 | 256 | 32 | 128 | 12,691 | 107.2 | 9.3 | 204.2 | 40.01 |
+
+    #### p300 (2 dies)
+
+    Latency, batch 1 (single user)
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 217 | 589 | 31.4 | 31.9 | 4.20 |
+    | 1,024 | 256 | 550 | 1,861 | 32.1 | 31.1 | 8.75 |
+    | 4,096 | 256 | 2,208 | 1,855 | 33.3 | 30.0 | 10.70 |
+    | 16,384 | 256 | 9,504 | 1,724 | 35.0 | 28.6 | 18.42 |
+
+    Concurrency (peak aggregate output: 68.2 tok/s at 128 input / 128 output tokens, 8 concurrent users)
+
+    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 1 | 4 | 217 | 31.4 | 31.9 | 30.5 | 4.20 |
+    | 128 | 128 | 2 | 8 | 436 | 46.4 | 21.6 | 40.5 | 6.33 |
+    | 128 | 128 | 4 | 16 | 861 | 67.4 | 14.8 | 54.4 | 9.42 |
+    | 128 | 128 | 8 | 32 | 1,691 | 104.8 | 9.5 | 68.2 | 15.01 |
+    | 1,024 | 256 | 1 | 4 | 550 | 32.1 | 31.1 | 29.3 | 8.75 |
+    | 1,024 | 256 | 2 | 8 | 1,094 | 47.1 | 21.2 | 39.1 | 13.10 |
+    | 1,024 | 256 | 4 | 16 | 2,178 | 68.3 | 14.6 | 52.3 | 19.59 |
+    | 1,024 | 256 | 8 | 32 | 4,344 | 106.5 | 9.4 | 65.0 | 31.51 |
+
+    Note: skipped: 32768 input / 256 output, users 1 (> max_model_len 32768).
+    Note: skipped: 65536 input / 256 output, users 1 (> max_model_len 32768).
+    Note: skipped: 130816 input / 256 output, users 1 (> max_model_len 32768).
+
+    ### Limitations
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
+    - Two dies: 32768-token context and 8 sequences (weights fill 28.7 of 31.3 GiB per die); no MTP.
+    - The device sampler supports `top_k` up to 32.

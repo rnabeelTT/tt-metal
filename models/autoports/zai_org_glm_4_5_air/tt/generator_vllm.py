@@ -779,7 +779,11 @@ class Glm4MoeForCausalLM(Qwen36ForCausalLM):
             self.model[0]._remap_gdn_slots(slot_remap)
             mtp.remap(slot_remap)
         sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
-        if len(live) == 1 and self._mtp_eligible(sp, live[0]) and live[0] not in mtp.no_head_slots:
+        # an MTP pass writes k + 1 rows (and the model may already be k + 1 ahead of the host position): near the end of
+        # the context those rows run past the last page-table block and the pass hangs the device (130,816-token prompt +
+        # 256 output tokens = max_model_len, 2026-10-09) -> plain decode for the last 2 (k + 1) positions
+        _room = len(live) == 1 and int(pos[live[0]]) + 2 * (mtp.k + 1) < int(self._context)
+        if _room and self._mtp_eligible(sp, live[0]) and live[0] not in mtp.no_head_slots:
             s = live[0]
             pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
             row = pt[s]

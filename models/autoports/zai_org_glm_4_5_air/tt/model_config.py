@@ -32,6 +32,10 @@ for _k, _v in (
     ("QWEN35_SDPA_PREFILL_Q_CHUNK", "256"),
     ("QWEN35_SDPA_PREFILL_K_CHUNK", "256"),
     ("QWEN35_SDPA_PREFILL_FP32_ACC", "0"),
+    # decode MoE: the expert-sorted path from 16 rows (128 experts: many users share experts, the sorted path reads each
+    # once). Served A/B on 4 dies, TPOT at 8 / 16 / 32 users (128-token prompts): from 32 rows 76.8 / 127.2 / 106.8 ms,
+    # from 16 rows 76.8 / 91.5 / 107.3 ms, from 8 rows 76.4 / - / - ms (2026-10-09)
+    ("QWEN35_DECODE_SORTED_MIN_ROWS", "16"),
 ):
     os.environ.setdefault(_k, _v)
 
