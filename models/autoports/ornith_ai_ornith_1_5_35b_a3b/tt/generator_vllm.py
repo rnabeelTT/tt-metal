@@ -814,7 +814,12 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             self.model[0]._remap_gdn_slots(slot_remap)
             mtp.remap(slot_remap)
         sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
-        if len(live) == 1 and self._mtp_eligible(sp, live[0]) and live[0] not in mtp.no_head_slots:
+        # an MTP pass writes k + 1 rows (and the model may already be k + 1 ahead of the host position): near the end of
+        # the context those rows run past the last page-table block and the pass can hang the device (found on
+        # GLM-4.5-Air, reproduced on this bundle with a max_model_len - 256 prompt + 256 output tokens, 2026-10-09)
+        # -> plain decode for the last 2 (k + 1) positions
+        _room = len(live) == 1 and int(pos[live[0]]) + 2 * (mtp.k + 1) < int(self._context)
+        if _room and self._mtp_eligible(sp, live[0]) and live[0] not in mtp.no_head_slots:
             s = live[0]
             pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
             row = pt[s]
@@ -896,7 +901,16 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
 
     def _authoritative(self, s, host_tok, host_pos):
         """The token / position of slot `s` to enter an MTP phase with: the device decode inputs when the device is one
-        step ahead of the host view (async scheduling feeds the sampled token back on device), else the host's."""
+        step ahead of the host view (async scheduling feeds the sampled token back on device), else the host's.
+
+        A slot prefilled since the last plain decode always enters with the host's values (its prefill token and
+        position), as the base Generator's own merge does: the device row may still hold the PREVIOUS occupant's last
+        (token, position), and the trace inputs read here are those of whichever decode bucket ran last. A stale row at
+        exactly position + 1 started the phase one position late, after a token that was never emitted (a lone greedy
+        request whose prompt length was one less than where the slot's previous, plain-decoded request stopped;
+        reproduced on the Ornith-1.5-35B bundle 2026-10-09)."""
+        if s in (getattr(self._gen._tt, "_slots_prefilled_since_decode", None) or ()):
+            return host_tok, host_pos
         try:
             trace_in = self._gen._tt.trace_inputs_decode[True][0]
             dev_tok = int(ttnn.to_torch(ttnn.get_device_tensors(trace_in[0])[0]).reshape(-1)[s])
