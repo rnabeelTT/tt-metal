@@ -24,6 +24,17 @@ from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 
 HF_MODEL_ID = "zai-org/GLM-4.5-Air"
 
+# Prefill SDPA of this model (qwen36 attention/tp.py knobs; an explicit env value still wins): q / k chunks 256 and the
+# streaming (bf16-dest) SDPA kernel. 46 full-attention layers make long prompts SDPA-bound: served TTFT at 130K tokens
+# 108 -> 84.5 s (q256 + fp32-acc off; q256 + k256 alone 93.4 s), 32K-token teacher forcing vs HF bf16 unchanged (top-1
+# 0.84 base / 0.84 q256k256 / 0.875 q256k256acc0, top-5 1.00 all) - 2026-10-09 A/B.
+for _k, _v in (
+    ("QWEN35_SDPA_PREFILL_Q_CHUNK", "256"),
+    ("QWEN35_SDPA_PREFILL_K_CHUNK", "256"),
+    ("QWEN35_SDPA_PREFILL_FP32_ACC", "0"),
+):
+    os.environ.setdefault(_k, _v)
+
 # Supported meshes: (1,4) = P300x2 / P150x4 (TP4), (1,2) = P300 / P150x2 (TP2), (1,1) = P150 (one die, TP modules at degree 1).
 SUPPORTED_MESH_SHAPES = ((1, 4), (1, 2), (1, 1))
 _TWO_CHIP_MESH_NAMES = (

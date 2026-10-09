@@ -861,7 +861,16 @@ class Glm4MoeForCausalLM(Qwen36ForCausalLM):
 
     def _authoritative(self, s, host_tok, host_pos):
         """The token / position of slot `s` to enter an MTP phase with: the device decode inputs when the device is one
-        step ahead of the host view (async scheduling feeds the sampled token back on device), else the host's."""
+        step ahead of the host view (async scheduling feeds the sampled token back on device), else the host's.
+
+        A slot prefilled since the last plain decode always enters with the host's values (its prefill token and
+        position), as the base Generator's own merge does: the device row may still hold the PREVIOUS occupant's last
+        (token, position), and the trace inputs read here are those of whichever decode bucket ran last. A stale row at
+        exactly position + 1 used to start the phase one position late, after a token that was never emitted (GLM-4.5-Air
+        served chat after a concurrent penalized batch: "Of most common and Pythonic way..." for "Of course! Here are...",
+        2026-10-09)."""
+        if s in (getattr(self._gen._tt, "_slots_prefilled_since_decode", None) or ()):
+            return host_tok, host_pos
         try:
             trace_in = self._gen._tt.trace_inputs_decode[True][0]
             dev_tok = int(ttnn.to_torch(ttnn.get_device_tensors(trace_in[0])[0]).reshape(-1)[s])
