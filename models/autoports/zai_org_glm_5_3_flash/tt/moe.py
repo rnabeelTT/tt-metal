@@ -69,7 +69,15 @@ def _largest_divisor_at_most(n: int, cap: int) -> int:
 
 
 def sparse_matmul_program_config(
-    m: int, n: int, k: int, *, target_cores: int, in0_block_w_cap: int, grid_y: int = 8, tile_w: int = TILE
+    m: int,
+    n: int,
+    k: int,
+    *,
+    target_cores: int,
+    in0_block_w_cap: int,
+    grid_y: int = 8,
+    tile_w: int = TILE,
+    dest_tiles: int = 4,
 ):
     """1D-mcast config for ``ttnn.sparse_matmul``: cores must divide Nt, ``Kt % in0_block_w == 0``."""
     n_tiles = max(1, math.ceil(n / tile_w))
@@ -79,8 +87,9 @@ def sparse_matmul_program_config(
     per_core_n = n_tiles // cores
     cy = _largest_divisor_at_most(cores, grid_y)
     cx = cores // cy
-    sub_w = _largest_divisor_at_most(per_core_n, 8)
-    sub_h = _largest_divisor_at_most(m_tiles, max(1, 8 // sub_w))
+    # fp32 destination accumulation halves the DST register: an output subblock holds at most `dest_tiles` tiles
+    sub_w = _largest_divisor_at_most(per_core_n, dest_tiles)
+    sub_h = _largest_divisor_at_most(m_tiles, max(1, dest_tiles // sub_w))
     in0_block_w = _largest_divisor_at_most(k_tiles, max(1, in0_block_w_cap))
     return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
         compute_with_storage_grid_size=ttnn.CoreCoord(cx, cy),
@@ -316,7 +325,10 @@ class Qwen35MoE:
             mesh_device.arch(),
             math_fidelity=self.prec.routed_fidelity,
             math_approx_mode=False,
-            fp32_dest_acc_en=False,  # tt-metal #49068: fp32 dest halves the matmul dest and corrupts expert output on BH
+            # fp32 accumulation: a bf16 DST accumulator biases the K = 4096 expert projections UP by ~5 % (K = 2048: ~3 %)
+            # on Blackhole, and the routed output by ~12-14 % after SwiGLU (tools/sparse_mm_probe.py, 2026-10-14). The
+            # subblocks are capped at 4 tiles (half DST) in sparse_matmul_program_config, the condition of tt-metal #49068.
+            fp32_dest_acc_en=True,
             packer_l1_acc=False,
         )
         self.shared_ckc = ttnn.init_device_compute_kernel_config(

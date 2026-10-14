@@ -167,6 +167,29 @@ def run(req: dict) -> dict:
 
     mod = build_layer(tc, layer, layer_weights(req["weights"], layer, rd))
     block_type = tc.layer_types[layer]
+    taps = {}
+    if req.get("taps"):  # sub-block inputs / outputs of the FIRST segment (diagnostics)
+
+        def tap(name, which):
+            def hook(m, args, out):
+                if name in taps:
+                    return
+                o = out[0] if isinstance(out, tuple) and which == "out0" else out
+                if which == "in0":
+                    o = args[0] if args else None
+                if which == "hc":
+                    o = out[2]  # (post, comb, collapsed)
+                taps[name] = o.detach().clone() if torch.is_tensor(o) else o
+
+            return hook
+
+        mod.attn_hc.register_forward_hook(tap("attn_collapsed", "hc"))
+        mod.input_layernorm.register_forward_hook(tap("attn_in", "out"))
+        mod.self_attn.register_forward_hook(tap("attn_out", "out0"))
+        mod.ffn_hc.register_forward_hook(tap("X1", "in0"))
+        mod.ffn_hc.register_forward_hook(tap("ffn_collapsed", "hc"))
+        mod.post_attention_layernorm.register_forward_hook(tap("ffn_in", "out"))
+        mod.mlp.register_forward_hook(tap("ffn_out", "out"))
     B, S_total = x.shape[:2]
     segments = list(req.get("segments") or [S_total])
     assert sum(segments) == S_total, (segments, S_total)
@@ -187,6 +210,8 @@ def run(req: dict) -> dict:
     if req.get("capture"):
         result["states"] = states
         result["topk"] = topks
+    if taps:
+        result["taps"] = taps
     result["seconds"] = time.time() - t0
     result["block_type"] = block_type
     return result

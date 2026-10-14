@@ -64,8 +64,7 @@ def main():
         dsa = dec.attn_kind == "dsa"
         print(f"build {time.time() - t0:.1f} s", flush=True)
         n = args.bucket
-        if dsa:
-            dec.allocate_decode_state(args.batch)
+        dec.allocate_decode_state(args.batch)
         st = None
         yts = []
         for c0 in range(0, args.prefill, n):
@@ -73,10 +72,8 @@ def main():
             xp = torch.zeros(1, 1, n, H4)
             xp[0, 0, :ln] = x[0, c0 : c0 + ln].reshape(ln, H4)
             X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
-            if dsa:
-                Y, st = dec.prefill_forward(X, length=ln, start=c0, slot=args.slot)
-            else:
-                Y, st = dec.prefill_forward(X, length=ln, start=c0, attn_state=st)
+            inputs = dec.prefill_inputs(n, start=c0, length=ln, slot=args.slot)
+            Y, st = dec.prefill_forward(X, inputs=inputs, attn_state=st)
             yts.append(ttnn.to_torch(Y)[0, 0, :ln])
         yt = torch.cat(yts, dim=0)
         xr = x[0, : args.prefill].reshape(args.prefill, H4)
@@ -85,8 +82,6 @@ def main():
         if args.prefill > n:
             tl = slice(args.prefill - min(n, args.prefill), args.prefill)
             print(f"prefill last-chunk delta PCC {pcc(yt[tl] - xr[tl], yr[tl] - xr[tl]):.6f}", flush=True)
-        if not dsa:
-            dec.allocate_decode_state(args.batch)
         dec.commit_prefill(args.slot, st)
         for i in range(args.decode):
             xd = torch.zeros(1, 1, args.batch, H4)
@@ -95,7 +90,11 @@ def main():
             if dsa:
                 positions = [-1] * args.batch
                 positions[args.slot] = args.prefill + i
-                Yd = dec.decode_forward(Xd, inputs=dec.attn.decode_inputs(positions))
+                if i == 0:
+                    bufs = dec.attn.decode_inputs(positions)
+                else:
+                    dec.attn.update_decode_inputs(bufs, positions)
+                Yd = dec.decode_forward(Xd, inputs=bufs)
             else:
                 Yd = dec.decode_forward(Xd)
             yd = ttnn.to_torch(Yd)[0, 0, args.slot]

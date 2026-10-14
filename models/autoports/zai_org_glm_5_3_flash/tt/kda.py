@@ -199,25 +199,20 @@ class GlmKDA(LightweightModule):
     def new_prefill_state(self) -> KdaState:
         return self._prefill[self.prefill_lengths[0]].allocate_state(1)
 
-    def prefill_forward(self, x: ttnn.Tensor, state: KdaState, start: int, length: int, bounds=None):
-        """One user's chunk: x [1,1,n,hidden] (n = a constructed bucket >= length), state carried from the previous
-        chunk (or new_prefill_state()). Returns (y [1,1,n,hidden], new KdaState). Rows >= length are padding.
+    def prefill_inputs(self, start: int, length: int):
+        """Runtime bounds of one chunk: (actual_start, actual_end) device scalars (input construction, outside the pass)."""
+        return uint32_scalar(self.mesh, start), uint32_scalar(self.mesh, start + length)
 
-        `bounds` = (actual_start, actual_end) device scalars to use instead of fresh ones (trace / reuse)."""
+    def prefill_forward(self, x: ttnn.Tensor, state: KdaState, bounds):
+        """One user's chunk: x [1,1,n,hidden] (n = a constructed bucket), state carried from the previous chunk (or
+        new_prefill_state()), bounds = prefill_inputs(start, length). Returns (y [1,1,n,hidden], new KdaState);
+        rows past the chunk's length are padding (unspecified output)."""
         n = x.shape[-2]
         layer = self._prefill[n]
-        if bounds is None:
-            a0 = uint32_scalar(self.mesh, start)
-            a1 = uint32_scalar(self.mesh, start + length)
-        else:
-            a0, a1 = bounds
+        a0, a1 = bounds
         h3 = ttnn.reshape(x, (1, n, x.shape[-1]))
         y, new_state = layer.forward(h3, state, actual_start=a0, actual_end=a1)
-        y = ttnn.reshape(y, (1, 1, n, y.shape[-1]))
-        if bounds is None:
-            ttnn.deallocate(a0)
-            ttnn.deallocate(a1)
-        return y, new_state
+        return ttnn.reshape(y, (1, 1, n, y.shape[-1])), new_state
 
     # ---------------------------------------------------------------------------------------------------- decode
     def allocate_decode_state(self, batch: int | None = None) -> KdaDecodeState:
@@ -284,8 +279,20 @@ class GlmKDA(LightweightModule):
         v = ttnn.slice(qkv, (0, 0, 0, 2 * H * K), (1, 1, B, W), memory_config=DRAM)
         ttnn.deallocate(qkv)
         # per-head l2 norm as rms_norm on [1,1,B*H,K] rows: x/||x|| = rms_norm(x, eps/K) * K**-0.5 (q: * K**-0.5 more)
-        q = ttnn.rms_norm(ttnn.reshape(q, (1, 1, B * H, K)), epsilon=1e-6 / K, weight=self.q_norm_w, memory_config=DRAM)
-        k = ttnn.rms_norm(ttnn.reshape(k, (1, 1, B * H, K)), epsilon=1e-6 / K, weight=self.k_norm_w, memory_config=DRAM)
+        q = ttnn.rms_norm(
+            ttnn.reshape(q, (1, 1, B * H, K)),
+            epsilon=1e-6 / K,
+            weight=self.q_norm_w,
+            memory_config=DRAM,
+            compute_kernel_config=self.ckc,
+        )
+        k = ttnn.rms_norm(
+            ttnn.reshape(k, (1, 1, B * H, K)),
+            epsilon=1e-6 / K,
+            weight=self.k_norm_w,
+            memory_config=DRAM,
+            compute_kernel_config=self.ckc,
+        )
 
         # ---- gates
         rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
@@ -330,7 +337,9 @@ class GlmKDA(LightweightModule):
 
         # ---- gated RMSNorm over V per head (fp32) and output projection
         o = ttnn.reshape(o, (1, 1, B * H, V))
-        o = ttnn.rms_norm(o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM)
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
         og = ttnn.sigmoid(ttnn.typecast(ttnn.reshape(ogate, (1, 1, B * H, V)), ttnn.float32), memory_config=DRAM)
         o = ttnn.multiply(o, og, memory_config=DRAM)
         ttnn.deallocate(og)

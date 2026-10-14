@@ -27,7 +27,17 @@ from models.common.lightweightmodule import LightweightModule
 from .kda import GlmKDA
 from .mhc import HyperConnection, hc_config
 from .mlp import DenseMLP
-from .moe import Qwen35MoE
+from .moe_opt import OptimizationConfig, Qwen35MoEOptimized
+
+# MoE policy of the functional decoder: bfp8 experts (accuracy first; the datatype sweep chooses the shipped policy),
+# every prefill chunk on the expert-sorted path (the masked path's sparse matmul is biased, see tt/moe_opt.py)
+FUNCTIONAL_MOE = OptimizationConfig(
+    routed_gate_up_dtype=ttnn.bfloat8_b,
+    routed_down_dtype=ttnn.bfloat8_b,
+    routed_fidelity=ttnn.MathFidelity.HiFi4,  # HiFi2 truncates the activation mantissa: routed output -3.3 % (probe)
+    shared_fidelity=ttnn.MathFidelity.HiFi4,
+    sorted_min_tokens=1,
+)
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
@@ -38,8 +48,9 @@ def layer_kind(tc: dict, layer_idx: int) -> tuple[str, str]:
     return attn, mlp
 
 
-def moe_args(tc: dict, tp: int, num_experts: int = 192):
+def moe_args(tc: dict, tp: int, num_experts: int = 192, opt: OptimizationConfig = FUNCTIONAL_MOE):
     return SimpleNamespace(
+        opt=opt,
         dim=tc["hidden_size"],
         num_experts=num_experts,
         num_experts_per_tok=tc["num_experts_per_tok"],
@@ -98,6 +109,7 @@ class FunctionalDecoder(LightweightModule):
         self.layer_idx = layer_idx
         self.tp = tuple(mesh_device.shape)[1]
         self.attn_kind, self.mlp_kind = layer_kind(tc, layer_idx)
+        self.prefill_lengths = tuple(prefill_lengths)
         self.hidden = tc["hidden_size"]
         self.eps = tc["rms_norm_eps"]
         hcfg = hc_config(tc)
@@ -111,6 +123,15 @@ class FunctionalDecoder(LightweightModule):
             layout=ttnn.ROW_MAJOR_LAYOUT,
             device=mesh_device,
             mesh_mapper=rep,
+        )
+        # fp32 accumulation: the collapsed stream is small (rms ~3e-3 early on, mean(x^2) ~ eps), so a bf16 sum of squares
+        # shifts the normalized scale by percents (and the MoE routing with it)
+        self.norm_ckc = ttnn.init_device_compute_kernel_config(
+            mesh_device.arch(),
+            math_fidelity=ttnn.MathFidelity.HiFi4,
+            math_approx_mode=False,
+            fp32_dest_acc_en=True,
+            packer_l1_acc=False,
         )
         self.input_norm_w = norm_w(sd["input_layernorm.weight"])
         self.post_norm_w = norm_w(sd["post_attention_layernorm.weight"])
@@ -143,7 +164,7 @@ class FunctionalDecoder(LightweightModule):
             )
         else:
             num_experts = sd["mlp.gate.weight"].shape[0]
-            self.mlp = Qwen35MoE(
+            self.mlp = Qwen35MoEOptimized(
                 mesh_device,
                 moe_args(tc, self.tp, num_experts),
                 moe_state_dict(sd, num_experts),
@@ -157,7 +178,7 @@ class FunctionalDecoder(LightweightModule):
     def _norm(self, h: ttnn.Tensor, w) -> ttnn.Tensor:
         hb = ttnn.typecast(h, ttnn.bfloat16)
         ttnn.deallocate(h)
-        out = ttnn.rms_norm(hb, epsilon=self.eps, weight=w, memory_config=DRAM)
+        out = ttnn.rms_norm(hb, epsilon=self.eps, weight=w, memory_config=DRAM, compute_kernel_config=self.norm_ckc)
         ttnn.deallocate(hb)
         return out
 
@@ -175,17 +196,24 @@ class FunctionalDecoder(LightweightModule):
         return X2
 
     # ------------------------------------------------------------------------------------------------- prefill
-    def prefill_forward(self, X: ttnn.Tensor, *, length: int, start: int = 0, attn_state=None, **attn_kwargs):
-        """One user's chunk. X [1,1,n,4*hidden] fp32 with n a constructed prefill length >= length.
-        attn_state: KDA -> the KdaState carried from the previous chunk (None = fresh sequence); DSA -> the
-        paged-cache arguments (see GlmDSA.prefill_forward). Returns (X', new attention state)."""
+    def prefill_inputs(self, n: int, *, start: int, length: int, slot: int = 0):
+        """Device inputs of one prefill chunk (n = constructed chunk rows, start % 128 == 0, length <= n valid rows,
+        decode slot of the user). Host -> device input construction happens here, never inside prefill_forward."""
+        if self.attn_kind == "kda":
+            return {"attn": self.attn.prefill_inputs(start, length)}
+        return {"attn": self.attn.prefill_inputs(n, start, length, slot)}
+
+    def prefill_forward(self, X: ttnn.Tensor, *, inputs, attn_state=None):
+        """One user's chunk. X [1,1,n,4*hidden] fp32 with n a constructed prefill length; inputs = prefill_inputs().
+        attn_state: KDA -> the KdaState carried from the previous chunk (None = fresh sequence); DSA -> unused (its
+        caches are device state of the layer). Returns (X', new attention state)."""
         h, post, comb = self.attn_hc.pre(X)
         x = self._norm(h, self.input_norm_w)
         if self.attn_kind == "kda":
             state = attn_state if attn_state is not None else self.attn.new_prefill_state()
-            y, new_state = self.attn.prefill_forward(x, state, start, length)
+            y, new_state = self.attn.prefill_forward(x, state, inputs["attn"])
         else:
-            y, new_state = self.attn.prefill_forward(x, start=start, length=length, **attn_kwargs)
+            y, new_state = self.attn.prefill_forward(x, inputs=inputs["attn"])
         ttnn.deallocate(x)
         X1 = self.attn_hc.post(y, X, post, comb)
         for t in (y, post, comb):
@@ -196,7 +224,11 @@ class FunctionalDecoder(LightweightModule):
 
     # -------------------------------------------------------------------------------------------------- decode
     def allocate_decode_state(self, batch: int | None = None):
+        """Allocate the layer's decode state (and every constant of its passes) before any trace capture. DSA layers
+        need this before their first prefill (prefill writes the caches)."""
         self.decode_state = self.attn.allocate_decode_state(batch)
+        if self.attn_kind == "dsa":
+            self.attn.prepare_constants(self.prefill_lengths)
         return self.decode_state
 
     def commit_prefill(self, slot: int, prefill_state):

@@ -159,9 +159,10 @@ class GlmDSA(LightweightModule):
         return self.latent
 
     # ------------------------------------------------------------------------------------------- constants
-    def _const(self, key, fn):
+    def _const(self, key, fn=None):
         t = self._const_cache.get(key)
         if t is None:
+            assert fn is not None, f"DSA constant {key} was not created by prepare_constants()"
             t = fn()
             self._const_cache[key] = t
         return t
@@ -171,7 +172,7 @@ class GlmDSA(LightweightModule):
 
     # ------------------------------------------------------------------------------------------ projections
     def _rms(self, x, w):
-        return ttnn.rms_norm(x, epsilon=self.eps, weight=w, memory_config=DRAM)
+        return ttnn.rms_norm(x, epsilon=self.eps, weight=w, memory_config=DRAM, compute_kernel_config=self.ckc)
 
     def _mm(self, x, w, **kw):
         return ttnn.linear(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
@@ -190,7 +191,13 @@ class GlmDSA(LightweightModule):
 
     def _index_k(self, x):
         """kI = LayerNorm(wk x) [1,1,rows,128] (bf16), gate logits gl = x Wg^T [1,1,rows,128] (fp32)."""
-        k = ttnn.layer_norm(self._mm(x, self.w_ik), epsilon=1e-6, weight=self.ik_norm_w, bias=self.ik_norm_b)
+        k = ttnn.layer_norm(
+            self._mm(x, self.w_ik),
+            epsilon=1e-6,
+            weight=self.ik_norm_w,
+            bias=self.ik_norm_b,
+            compute_kernel_config=self.ckc,
+        )
         gl = self._mm(x, self.w_ig, dtype=ttnn.float32)
         return k, gl
 
@@ -201,17 +208,12 @@ class GlmDSA(LightweightModule):
         return self._mm(o, self.w_o)
 
     # ---------------------------------------------------------------------------------------- pooled keys
-    def _pool_chunk(self, k, gl, n: int, valid: int):
+    def _pool_chunk(self, k, gl, n: int, vmask):
         """Pools of one prefill chunk (n rows, pools aligned to the chunk start, rows >= valid are padding).
         Returns (poolK [1,1,n/4,128] bf16, den, num [1,1,n/4,128] fp32, m [1,1,1,128] fp32): poolK = num / den with
         a per-channel shift m shared by the chunk (every exp argument <= 0)."""
-        npool = n // KPOOL
-        Sm = self._const(
-            ("poolsum", n),
-            lambda: self._dev(torch.kron(torch.eye(npool), torch.ones(1, KPOOL)).reshape(1, 1, npool, n)),
-        )
-        ape_rows = self._const(("ape_rows", n), lambda: self._dev(self.ape.repeat(npool, 1).reshape(1, 1, n, self.ID)))
-        vmask = self._dev((torch.arange(n) < valid).float().reshape(1, 1, n, 1))
+        Sm = self._const(("poolsum", n))
+        ape_rows = self._const(("ape_rows", n))
         L = ttnn.add(gl, ape_rows, memory_config=DRAM)
         Lm = ttnn.add(ttnn.multiply(L, vmask), ttnn.multiply(ttnn.rsub(vmask, 1.0), NEG))  # padding rows -> -1e30
         m = ttnn.max(Lm, dim=-2, keepdim=True)  # [1,1,1,128]
@@ -221,40 +223,24 @@ class GlmDSA(LightweightModule):
         num = ttnn.matmul(Sm, ek, compute_kernel_config=self.ckc, memory_config=DRAM, dtype=ttnn.float32)
         den_safe = ttnn.add(den, 1e-30)
         poolK = ttnn.typecast(ttnn.divide(num, den_safe), ttnn.bfloat16)
-        for t in (L, Lm, e, ek, vmask, den_safe):
+        for t in (L, Lm, e, ek, den_safe):
             ttnn.deallocate(t)
         return poolK, den, num, m
 
     # --------------------------------------------------------------------------------------- index lists
-    def _dense_rows(self, pos_first: int, rows: int, flat_base: int):
-        """Index rows [0..t] (+ sentinels) for query positions t = pos_first + r -> fp32 [1,1,rows,IDX_WIDTH]."""
-        col = torch.arange(IDX_WIDTH).float().reshape(1, IDX_WIDTH)
-        pos = (pos_first + torch.arange(rows)).float().reshape(rows, 1)
-        idx = torch.where(col <= pos, col + flat_base, torch.full_like(col, SENTINEL_F))
-        return self._dev(idx.reshape(1, 1, rows, IDX_WIDTH))
-
     def _sparse_rows(self, top_pools, pos_dev, flat_base_dev, rows: int):
         """top_pools TILE [1,1,rows,512] pool ids; pos_dev fp32 [1,1,rows,1] query positions; flat_base_dev fp32
         [1,1,rows,1] row offset of the user's cache -> fp32 [1,1,rows,IDX_WIDTH] (sentinels at the end)."""
         n_tok = TOPK_POOLS * KPOOL
-        offs = self._const(
-            "pool_offs", lambda: self._dev(torch.arange(KPOOL).float().repeat(TOPK_POOLS).reshape(1, 1, 1, n_tok))
-        )
-        exp_mat = self._const(
-            "pool_expand",
-            lambda: self._dev(
-                torch.kron(torch.eye(TOPK_POOLS), torch.full((1, KPOOL), float(KPOOL))).reshape(1, 1, TOPK_POOLS, n_tok)
-            ),
-        )
+        offs = self._const("pool_offs")
+        exp_mat = self._const("pool_expand")
         p = ttnn.typecast(top_pools, ttnn.float32)
         # tokens of every selected pool: 4p + j (a [512 -> 2048] expansion matmul; exact for ids < 2**22 in fp32)
         tok = ttnn.add(ttnn.matmul(p, exp_mat, compute_kernel_config=self.ckc, dtype=ttnn.float32), offs)
         ttnn.deallocate(p)
         # tail: tokens 4*floor((t+1)/4) .. t (0-3 of them), then sentinels up to IDX_WIDTH
         tail_cols = IDX_WIDTH - n_tok
-        j = self._const(
-            ("tail_j", tail_cols), lambda: self._dev(torch.arange(tail_cols).float().reshape(1, 1, 1, tail_cols))
-        )
+        j = self._const(("tail_j", tail_cols))
         start = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(pos_dev, 1.0), 1.0 / KPOOL)), float(KPOOL))
         tail_tok = ttnn.add(start, j)  # [1,1,rows,tail_cols]
         tail_ok = ttnn.le(tail_tok, pos_dev)
@@ -269,7 +255,7 @@ class GlmDSA(LightweightModule):
         """scores [1,1,rows,P'] ; limit_dev fp32 [1,1,rows,1] = #complete visible pools of each row
         -> top-512 pool ids (TILE) [1,1,rows,512]."""
         Pw = scores.shape[-1]
-        iota = self._const(("iota", Pw), lambda: self._dev(torch.arange(Pw).float().reshape(1, 1, 1, Pw)))
+        iota = self._const(("iota", Pw))
         if scores.layout != ttnn.TILE_LAYOUT:
             scores = ttnn.to_layout(scores, ttnn.TILE_LAYOUT)
         if scores.dtype != ttnn.bfloat16:
@@ -305,37 +291,90 @@ class GlmDSA(LightweightModule):
         return ttnn.reshape(self.pooled, (self.S, 1, self.P_alloc, self.ID))
 
     # ---------------------------------------------------------------------------------------------- prefill
-    def prefill_forward(self, x, *, start: int, length: int, slot: int = 0, page_table=None):
-        """One user's chunk x [1,1,n,hidden] at absolute positions [start, start+n) (start % 128 == 0; rows >= length
-        are padding); the user owns decode slot `slot`. Writes the latent rows, the chunk's pool keys and (for a
-        chunk ending inside a pool) the slot's open-pool state. Returns (y [1,1,n,hidden], None)."""
-        n = x.shape[-2]
+    def prepare_constants(self, prefill_lengths):
+        """Every constant a prefill / decode pass reads, created at setup (never inside a measured or traced pass)."""
+        n_tok = TOPK_POOLS * KPOOL
+        tail_cols = IDX_WIDTH - n_tok
+        self._const(
+            "pool_offs", lambda: self._dev(torch.arange(KPOOL).float().repeat(TOPK_POOLS).reshape(1, 1, 1, n_tok))
+        )
+        self._const(
+            "pool_expand",
+            lambda: self._dev(
+                torch.kron(torch.eye(TOPK_POOLS), torch.full((1, KPOOL), float(KPOOL))).reshape(1, 1, TOPK_POOLS, n_tok)
+            ),
+        )
+        self._const(
+            ("tail_j", tail_cols), lambda: self._dev(torch.arange(tail_cols).float().reshape(1, 1, 1, tail_cols))
+        )
+        self._const(
+            ("iota", self.P_alloc), lambda: self._dev(torch.arange(self.P_alloc).float().reshape(1, 1, 1, self.P_alloc))
+        )
+        for n in prefill_lengths:
+            npool = n // KPOOL
+            self._const(
+                ("poolsum", n),
+                lambda: self._dev(torch.kron(torch.eye(npool), torch.ones(1, KPOOL)).reshape(1, 1, npool, n)),
+            )
+            self._const(("ape_rows", n), lambda: self._dev(self.ape.repeat(npool, 1).reshape(1, 1, n, self.ID)))
+
+    def prefill_inputs(self, n: int, start: int, length: int, slot: int) -> dict:
+        """Device inputs of one prefill chunk (host -> device input construction, outside the pass)."""
         assert start % 128 == 0 and n % 128 == 0 and start + n <= self.T, (start, n, self.T)
-        q_abs, qr = self._q_abs(x, n)
-        c = self._latent(x)  # [1,1,n,512] bf16 TILE
-        # latent rows -> the slot's cache rows (padding rows skipped)
-        rows = torch.where(
-            torch.arange(n) < length,
-            slot * self.T + start + torch.arange(n),
-            torch.full((n,), 0xFFFFFFFF),
-        ).reshape(1, n)
-        row_idx = self._dev(rows.to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
-        c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
-        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (n, self.R)), row_idx)
-        ttnn.deallocate(c_rm)
-        ttnn.deallocate(row_idx)
-        # pool keys of this chunk: pools start at the chunk start (start % 4 == 0)
-        k, gl = self._index_k(x)
-        poolK, den, num, m = self._pool_chunk(k, gl, n, length)
+        ar = torch.arange(n)
+        rows = torch.where(ar < length, slot * self.T + start + ar, torch.full((n,), 0xFFFFFFFF)).reshape(1, n)
+        pos = (start + ar).float().reshape(1, 1, n, 1)
         first_blk = start // KPOOL // 32
         nblk = n // KPOOL // 32
-        chunk_pt = self._dev(
-            self._pool_pt_host[slot : slot + 1, first_blk : first_blk + nblk].contiguous(),
-            ttnn.int32,
-            ttnn.ROW_MAJOR_LAYOUT,
+        inp = {
+            "n": n,
+            "start": start,
+            "length": length,
+            "slot": slot,
+            "row_idx": self._dev(rows.to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
+            "vmask": self._dev((ar < length).float().reshape(1, 1, n, 1)),
+            "chunk_pt": self._dev(
+                self._pool_pt_host[slot : slot + 1, first_blk : first_blk + nblk].contiguous(),
+                ttnn.int32,
+                ttnn.ROW_MAJOR_LAYOUT,
+            ),
+        }
+        last = start + length - 1
+        inp["path"] = (
+            "flash"
+            if (start == 0 and last <= DENSE_MAX_POSITION)
+            else ("sparse" if last > DENSE_MAX_POSITION else "dense")
         )
-        ttnn.experimental.paged_fill_cache(self.pooled, poolK, page_table=chunk_pt, batch_idx=0)
-        ttnn.deallocate(chunk_pt)
+        if inp["path"] != "flash":
+            col = torch.arange(IDX_WIDTH).float().reshape(1, IDX_WIDTH)
+            # sparse_sdpa with cache_batch_idx = slot: indices are rows WITHIN the slot (no slot offset)
+            inp["dense_idx"] = self._dev(
+                torch.where(col <= pos.reshape(n, 1), col, torch.full_like(col, SENTINEL_F)).reshape(1, 1, n, IDX_WIDTH)
+            )
+        if inp["path"] == "sparse":
+            inp["pos"] = self._dev(pos)
+            inp["limit"] = self._dev(torch.floor((pos + 1) / KPOOL))
+            inp["zero_base"] = self._dev(torch.zeros(1, 1, n, 1))
+            inp["is_dense"] = self._dev((pos <= DENSE_MAX_POSITION).float())
+        return inp
+
+    def prefill_forward(self, x, *, inputs):
+        """One user's chunk x [1,1,n,hidden] at absolute positions [start, start+n) (start % 128 == 0; rows >= length
+        are padding; inputs = prefill_inputs(...)); the user owns decode slot `slot`. Writes the latent rows, the
+        chunk's pool keys and (for a chunk ending inside a pool) the slot's open-pool state.
+        Returns (y [1,1,n,hidden], None)."""
+        n = x.shape[-2]
+        assert n == inputs["n"]
+        length, slot = inputs["length"], inputs["slot"]
+        q_abs, qr = self._q_abs(x, n)
+        c = self._latent(x)  # [1,1,n,512] bf16 TILE
+        c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
+        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (n, self.R)), inputs["row_idx"])
+        ttnn.deallocate(c_rm)
+        # pool keys of this chunk: pools start at the chunk start (start % 4 == 0)
+        k, gl = self._index_k(x)
+        poolK, den, num, m = self._pool_chunk(k, gl, n, inputs["vmask"])
+        ttnn.experimental.paged_fill_cache(self.pooled, poolK, page_table=inputs["chunk_pt"], batch_idx=0)
         if length % KPOOL:  # this chunk ends inside a pool: hand its partial state to the decode slot
             p_last = length // KPOOL
             d_row = ttnn.slice(den, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
@@ -345,8 +384,7 @@ class GlmDSA(LightweightModule):
         for t in (poolK, den, num, m, k, gl):
             ttnn.deallocate(t)
 
-        last = start + length - 1
-        if start == 0 and last <= DENSE_MAX_POSITION:
+        if inputs["path"] == "flash":
             o_lat = ttnn.transformer.flash_mla_prefill(
                 q_abs,
                 c,
@@ -357,9 +395,9 @@ class GlmDSA(LightweightModule):
                 memory_config=DRAM,
             )
         else:
-            # sparse_sdpa with cache_batch_idx = slot: indices are rows WITHIN the slot (no slot offset)
-            dense = self._dense_rows(start, n, 0)
-            if last > DENSE_MAX_POSITION:
+            index = inputs["dense_idx"]
+            owned = False
+            if inputs["path"] == "sparse":
                 # indexer scores over every pool slot of the user; rows that are still dense keep the dense list
                 qi = self._mm(qr, self.w_iq)  # [1,1,n,32*128]
                 qi = ttnn.permute(ttnn.reshape(qi, (1, n, self.IH, self.ID)), (0, 2, 1, 3), memory_config=DRAM)
@@ -367,20 +405,15 @@ class GlmDSA(LightweightModule):
                 scores = ttnn.experimental.indexer_score_dsa(
                     qi, self.pooled_view(), wi, chunk_start_idx=self.P, cache_batch_idx=slot
                 )  # [1,1,n,P_alloc] bf16 ROW_MAJOR
-                pos = (start + torch.arange(n)).float().reshape(1, 1, n, 1)
-                pos_dev = self._dev(pos)
-                limit = self._dev(torch.floor((pos + 1) / KPOOL))
-                ids = self._select_pools(scores, limit)
-                base = self._dev(torch.zeros(1, 1, n, 1))
-                sparse = self._sparse_rows(ids, pos_dev, base, n)
-                is_dense = self._dev((pos <= DENSE_MAX_POSITION).float())
-                index = ttnn.where(is_dense, dense, sparse)
-                for t in (qi, wi, scores, pos_dev, limit, ids, base, sparse, is_dense, dense):
+                ids = self._select_pools(scores, inputs["limit"])
+                sparse = self._sparse_rows(ids, inputs["pos"], inputs["zero_base"], n)
+                index = ttnn.where(inputs["is_dense"], inputs["dense_idx"], sparse)
+                owned = True
+                for t in (qi, wi, scores, ids, sparse):
                     ttnn.deallocate(t)
-            else:
-                index = dense
             o_lat = self._sparse_attend(q_abs, index, self.latent, cache_batch_idx=slot)
-            ttnn.deallocate(index)
+            if owned:
+                ttnn.deallocate(index)
         ttnn.deallocate(q_abs)
         ttnn.deallocate(qr)
         ttnn.deallocate(c)
@@ -389,9 +422,9 @@ class GlmDSA(LightweightModule):
         return y, None
 
     # ----------------------------------------------------------------------------------------------- decode
-    def decode_inputs(self, positions):
-        """Host -> device per-step decode inputs (positions: S ints, the position of the token being decoded in
-        each slot, -1 = inactive slot)."""
+    def _decode_host_inputs(self, positions):
+        """Host torch tensors of the per-step decode inputs (positions: S ints, the position of the token being
+        decoded in each slot, -1 = inactive slot)."""
         S = self.S
         active = torch.tensor([p >= 0 for p in positions])
         pos = torch.tensor([max(p, 0) for p in positions], dtype=torch.float32)
@@ -403,20 +436,29 @@ class GlmDSA(LightweightModule):
             (col <= pos.reshape(S, 1)) & active.reshape(S, 1), col + base, torch.full((S, IDX_WIDTH), SENTINEL_F)
         )
         return {
-            "row_idx": self._dev(rows.reshape(1, S).to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
-            "pool_pos": self._dev(
+            "row_idx": (rows.reshape(1, S).to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
+            "pool_pos": (
                 torch.where(active, pos.long() // KPOOL, torch.full((S,), -1)).to(torch.int32),
                 ttnn.int32,
                 ttnn.ROW_MAJOR_LAYOUT,
             ),
-            "reset": self._dev((j == 0).float().reshape(1, 1, S, 1)),
-            "ape_sel": self._dev(self.ape[j].reshape(1, 1, S, self.ID)),
-            "pos": self._dev(pos.reshape(1, 1, S, 1)),
-            "limit": self._dev(torch.floor((pos + 1) / KPOOL).reshape(1, 1, S, 1)),
-            "dense": self._dev((pos <= DENSE_MAX_POSITION).float().reshape(1, 1, S, 1)),
-            "flat_base": self._dev(base.reshape(1, 1, S, 1)),
-            "dense_idx": self._dev(dense_idx.reshape(1, 1, S, IDX_WIDTH)),
+            "reset": ((j == 0).float().reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            "ape_sel": (self.ape[j].reshape(1, 1, S, self.ID), ttnn.float32, ttnn.TILE_LAYOUT),
+            "pos": (pos.reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            "limit": (torch.floor((pos + 1) / KPOOL).reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            "dense": ((pos <= DENSE_MAX_POSITION).float().reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            "flat_base": (base.reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            "dense_idx": (dense_idx.reshape(1, 1, S, IDX_WIDTH), ttnn.float32, ttnn.TILE_LAYOUT),
         }
+
+    def decode_inputs(self, positions):
+        """Allocate the fixed-address device buffers of the per-step decode inputs (before any trace capture)."""
+        return {k: self._dev(t, dt, lay) for k, (t, dt, lay) in self._decode_host_inputs(positions).items()}
+
+    def update_decode_inputs(self, bufs, positions):
+        """Refresh the decode input buffers in place (host -> device copies; between trace replays)."""
+        for k, (t, dt, lay) in self._decode_host_inputs(positions).items():
+            ttnn.copy_host_to_device_tensor(ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=self._rep), bufs[k])
 
     def decode_forward(self, x, state=None, *, inputs):
         """x [1,1,S,hidden] (one row per slot); inputs = decode_inputs(...) device tensors."""

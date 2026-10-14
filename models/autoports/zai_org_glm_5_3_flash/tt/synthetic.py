@@ -9,6 +9,7 @@ base/scale) are stored verbatim, because their exact values set the operating po
 
 from __future__ import annotations
 
+import base64
 import hashlib
 
 import torch
@@ -31,8 +32,8 @@ def stats_layer_for(layer: int) -> int:
 def tensor_stats(t: torch.Tensor) -> dict:
     f = t.float()
     rec = {"shape": list(t.shape), "mean": float(f.mean()), "std": float(f.std()) if f.numel() > 1 else 0.0}
-    if t.numel() <= SMALL:
-        rec["values"] = f.flatten().tolist()
+    if t.numel() <= SMALL:  # exact values, native bytes (bf16 / fp32) base64-encoded
+        rec["b64"] = base64.b64encode(t.contiguous().flatten().view(torch.uint8).numpy().tobytes()).decode()
     return rec
 
 
@@ -42,10 +43,11 @@ def collect_stats(rd, layers=STATS_LAYERS, expert_sample: int = 8) -> dict:
     for layer in layers:
         rec = {}
         for suffix in rd.layer_names(layer):
-            raw = rd.raw(f"model.language_model.layers.{layer}.{suffix}")
-            t = raw if raw.dtype == torch.float32 else rd.layer_tensor(layer, suffix)
+            name = f"model.language_model.layers.{layer}.{suffix}"
+            fp32 = rd.raw(name).dtype == torch.float32
+            t = rd.get(name, dtype=torch.float32 if fp32 else torch.bfloat16)  # router rows masked to the E192 set
             rec[suffix] = tensor_stats(t)
-            rec[suffix]["dtype"] = "float32" if raw.dtype == torch.float32 else "bfloat16"
+            rec[suffix]["dtype"] = "float32" if fp32 else "bfloat16"
         if layer_kind(layer).endswith("moe"):
             for proj in ("gate_proj", "up_proj", "down_proj"):
                 ts = [rd.expert(layer, e, proj) for e in range(0, rd.num_experts, rd.num_experts // expert_sample)]
@@ -65,8 +67,9 @@ def _generator(seed: int, layer: int, name: str) -> torch.Generator:
 
 def _make(rec: dict, seed: int, layer: int, name: str) -> torch.Tensor:
     dtype = torch.float32 if rec.get("dtype") == "float32" else torch.bfloat16
-    if "values" in rec:
-        return torch.tensor(rec["values"], dtype=torch.float32).reshape(rec["shape"]).to(dtype)
+    if "b64" in rec:
+        raw = bytearray(base64.b64decode(rec["b64"]))
+        return torch.frombuffer(raw, dtype=dtype).clone().reshape(rec["shape"])
     g = _generator(seed, layer, name)
     t = torch.randn(rec["shape"], generator=g, dtype=torch.float32) * rec["std"] + rec["mean"]
     return t.to(dtype)
