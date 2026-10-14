@@ -51,7 +51,7 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1), l1_small_size=24576, trace_region_size=0)
     try:
         t0 = time.time()
-        bs, mbu = 64, 8  # block size, blocks per user (512 tokens per slot in this smoke)
+        max_ctx = ((S + 127) // 128) * 128 + 128
         dec = FunctionalDecoder.from_state_dict(
             rd.layer_state(args.layer),
             hf_config=tc,
@@ -59,29 +59,32 @@ def main():
             mesh_device=mesh,
             prefill_lengths=(args.bucket,),
             max_batch=args.batch,
-            dsa_kwargs={"num_blocks": args.batch * mbu, "block_size": bs},
-        )
-        perm = torch.randperm(args.batch * mbu, generator=torch.Generator().manual_seed(1))
-        pt_host = perm.reshape(args.batch, mbu).to(torch.int32)
-        page_table = ttnn.from_torch(pt_host, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh)
-        user_pt = ttnn.from_torch(
-            pt_host[args.slot : args.slot + 1], dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh
+            dsa_kwargs={"max_context": max_ctx},
         )
         dsa = dec.attn_kind == "dsa"
         print(f"build {time.time() - t0:.1f} s", flush=True)
         n = args.bucket
-        xp = torch.zeros(1, 1, n, H4)
-        xp[0, 0, : args.prefill] = x[0, : args.prefill].reshape(args.prefill, H4)
-        X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
         if dsa:
             dec.allocate_decode_state(args.batch)
-            Y, st = dec.prefill_forward(X, length=args.prefill, page_table=user_pt)
-        else:
-            Y, st = dec.prefill_forward(X, length=args.prefill)
-        yt = ttnn.to_torch(Y)[0, 0, : args.prefill]
+        st = None
+        yts = []
+        for c0 in range(0, args.prefill, n):
+            ln = min(n, args.prefill - c0)
+            xp = torch.zeros(1, 1, n, H4)
+            xp[0, 0, :ln] = x[0, c0 : c0 + ln].reshape(ln, H4)
+            X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+            if dsa:
+                Y, st = dec.prefill_forward(X, length=ln, start=c0, slot=args.slot)
+            else:
+                Y, st = dec.prefill_forward(X, length=ln, start=c0, attn_state=st)
+            yts.append(ttnn.to_torch(Y)[0, 0, :ln])
+        yt = torch.cat(yts, dim=0)
         xr = x[0, : args.prefill].reshape(args.prefill, H4)
         yr = y[0, : args.prefill].reshape(args.prefill, H4)
         print(f"prefill PCC {pcc(yt, yr):.6f} delta PCC {pcc(yt - xr, yr - xr):.6f}", flush=True)
+        if args.prefill > n:
+            tl = slice(args.prefill - min(n, args.prefill), args.prefill)
+            print(f"prefill last-chunk delta PCC {pcc(yt[tl] - xr[tl], yr[tl] - xr[tl]):.6f}", flush=True)
         if not dsa:
             dec.allocate_decode_state(args.batch)
         dec.commit_prefill(args.slot, st)
@@ -90,10 +93,9 @@ def main():
             xd[0, 0, args.slot] = x[0, args.prefill + i].reshape(H4)
             Xd = ttnn.from_torch(xd, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
             if dsa:
-                pos = torch.full((args.batch,), -1, dtype=torch.int32)
-                pos[args.slot] = args.prefill + i
-                cur = ttnn.from_torch(pos, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh)
-                Yd = dec.decode_forward(Xd, cur_pos=cur, page_table=page_table)
+                positions = [-1] * args.batch
+                positions[args.slot] = args.prefill + i
+                Yd = dec.decode_forward(Xd, inputs=dec.attn.decode_inputs(positions))
             else:
                 Yd = dec.decode_forward(Xd)
             yd = ttnn.to_torch(Yd)[0, 0, args.slot]

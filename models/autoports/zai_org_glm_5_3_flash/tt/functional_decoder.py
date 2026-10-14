@@ -211,7 +211,7 @@ class FunctionalDecoder(LightweightModule):
         if self.attn_kind == "kda":
             y = self.attn.decode_forward(x, self.decode_state)
         else:
-            y = self.attn.decode_forward(x, self.decode_state, **attn_kwargs)
+            y = self.attn.decode_forward(x, **attn_kwargs)
         ttnn.deallocate(x)
         X1 = self.attn_hc.post(y, X, post, comb)
         for t in (y, post, comb):
