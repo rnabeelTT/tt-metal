@@ -216,14 +216,13 @@ inline void reciprocal_tiles(DataflowBuffer& in, DataflowBuffer& o, uint32_t n) 
     reconfig_data_format_srca(in_id);
     copy_init(in_id);
     // Precise regardless of the op's approx mode: exp(a - G) replaces an exact exponential.
-    constexpr auto recip_dest = DST_ACCUM_MODE ? ReciprocalDestAcc::FP32 : ReciprocalDestAcc::BF16;
-    recip_tile_init<recip_dest, ReciprocalApproxMode::Precise>();
+    recip_tile_init</*legacy_compat=*/false, DST_ACCUM_MODE>();
     for (uint32_t block_start = 0; block_start < n; block_start += max_dst_tiles) {
         const uint32_t block_tiles = (n - block_start < max_dst_tiles) ? n - block_start : max_dst_tiles;
         tile_regs_acquire();
         for (uint32_t tile = 0; tile < block_tiles; ++tile) {
             copy_tile(in_id, block_start + tile, tile);
-            recip_tile<recip_dest, ReciprocalApproxMode::Precise>(tile);
+            recip_tile</*legacy_compat=*/false, DST_ACCUM_MODE>(tile);
         }
         tile_regs_commit();
         tile_regs_wait();
