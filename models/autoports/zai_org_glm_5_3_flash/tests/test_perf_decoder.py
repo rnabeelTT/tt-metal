@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Stage 1 perf windows (run under Tracy: python -m tracy -r -p -v -m pytest <this file>::<case>).
+
+Warmed prefill of one chunk (128 or 2048 rows, start 0) and a traced decode step (3 replays) of one layer per kind,
+on one die, real weights. Signposts PERF_PREFILL / PERF_PREFILL_END and PERF_DECODE / PERF_DECODE_END delimit the
+measured windows for tt-perf-report.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+import pytest
+import torch
+
+import ttnn
+from models.autoports.zai_org_glm_5_3_flash.tests.harness import H4, DecodeRunner, build_layer, open_mesh
+from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
+
+try:
+    from tracy import signpost
+except ImportError:  # perf windows are optional outside Tracy
+
+    def signpost(name):
+        pass
+
+
+KINDS = {"kda_dense": 0, "dsa_moe": 3, "kda_moe": 4}
+pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
+
+
+def _flush(mesh):
+    if os.environ.get("TT_METAL_DEVICE_PROFILER") == "1" and hasattr(ttnn, "ReadDeviceProfiler"):
+        ttnn.synchronize_device(mesh)
+        ttnn.ReadDeviceProfiler(mesh)
+
+
+def _x(n, seed):
+    g = torch.Generator().manual_seed(seed)
+    return (torch.randn(1, 1, n, H4, generator=g) * 0.02).float()
+
+
+@pytest.mark.parametrize("rows", [128, 2048])
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_perf_prefill(kind, rows):
+    rd = CheckpointReader()
+    mesh = open_mesh()
+    try:
+        dec = build_layer(mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4224)
+        X = ttnn.from_torch(_x(rows, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+        inputs = dec.prefill_inputs(rows, start=0, length=rows, slot=0)
+        Y, _ = dec.prefill_forward(X, inputs=inputs)  # compile
+        ttnn.deallocate(Y)
+        ttnn.synchronize_device(mesh)
+        _flush(mesh)
+        signpost("PERF_PREFILL")
+        t0 = time.time()
+        Y, _ = dec.prefill_forward(X, inputs=inputs)
+        ttnn.synchronize_device(mesh)
+        dt = time.time() - t0
+        signpost("PERF_PREFILL_END")
+        print(f"PERF {kind} prefill {rows} rows: {dt * 1e3:.2f} ms host wall (warmed)")
+    finally:
+        ttnn.close_mesh_device(mesh)
+
+
+@pytest.mark.parametrize("batch", [1, 32])
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_perf_traced_decode(kind, batch):
+    rd = CheckpointReader()
+    mesh = open_mesh()
+    try:
+        dec = build_layer(mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4224)
+        runner = DecodeRunner(dec, mesh, batch)
+        rows = {s: torch.randn(H4) * 0.02 for s in range(batch)}
+        pos = [128] * batch
+        runner.eager_step(rows, pos)  # compile
+        runner.capture(rows, [129] * batch)
+        runner.traced_step(rows, [129] * batch)  # warm replay
+        ttnn.synchronize_device(mesh)
+        _flush(mesh)
+        signpost("PERF_DECODE")
+        t0 = time.time()
+        iters = 3
+        for i in range(iters):
+            runner.traced_step(rows, [130 + i] * batch, sync=False)
+        ttnn.synchronize_device(mesh)
+        dt = (time.time() - t0) / iters
+        signpost("PERF_DECODE_END")
+        print(
+            f"PERF {kind} traced decode batch {batch}: {dt * 1e3:.3f} ms/step host wall ({iters} replays, incl. input copies)"
+        )
+        runner.release()
+    finally:
+        ttnn.close_mesh_device(mesh)

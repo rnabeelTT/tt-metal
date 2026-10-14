@@ -149,11 +149,55 @@ def test_real_weights(mesh, rd, kind):
 
 
 # ---------------------------------------------------------------------------------------- synthetic weights
+# Synthetic MoE layers route in a near-tie regime that real activations do not reach: on the synthetic stream 12-14 % of
+# tokens have a top-8 vs 9th selection margin < 1e-3 (real stream: 8.7 %), so the ~6e-5 relative difference between
+# the TT and HF FFN inputs flips experts of a few tokens (doc/functional_decoder/README.md, "Synthetic MoE"). For those
+# layers the MoE block is checked strictly on the HF FFN input, and the layer update with a routing-sensitive bar.
+SYNTH_MOE_LAYER_BAR = 0.98
+
+
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_synthetic_weights(mesh, rd, kind):
     layer = KINDS[kind]
-    dec = get_layer(mesh, rd, layer, {"synthetic": 0})
-    run_user(mesh, dec, layer, {"synthetic": 0}, seed=2, prefill_len=200, decode_steps=3, slot=3)
+    weights = {"synthetic": 0}
+    dec = get_layer(mesh, rd, layer, weights)
+    moe = kind.endswith("moe")
+    if moe:
+        from models.autoports.zai_org_glm_5_3_flash.tests.harness import STATS
+
+        n = 200
+        r = hf_layer_reference(
+            {
+                "layer": layer,
+                "weights": {"synthetic": 0, "stats": str(STATS)},
+                "x": synthetic_stream(layer, 2, n + 3),
+                "segments": [n, 1, 1, 1],
+                "taps": True,
+            }
+        )
+        fin = r["taps"]["ffn_in"].reshape(n, -1)
+        fout = r["taps"]["ffn_out"].float().reshape(n, -1)
+        rows = 256
+        t_in = ttnn.from_torch(
+            torch.nn.functional.pad(fin.float(), (0, 0, 0, rows - n)).reshape(1, 1, rows, -1).bfloat16(),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+        )
+        got = ttnn.to_torch(dec.mlp.forward(t_in, mode="prefill"))[0, 0, :n].float()
+        p = pcc(got, fout)
+        print(f"L{layer} synthetic MoE on the HF FFN input: PCC {p:.6f}")
+        assert p >= DELTA_BAR, p
+    bar = SYNTH_MOE_LAYER_BAR if moe else DELTA_BAR
+    x, y = reference(layer, weights, 2, 200, 3)
+    out = prefill_user(dec, mesh, x, 200, 3)
+    check(f"L{layer} slot 3 prefill 200", out, x[:200], y[:200], delta_bar=bar)
+    runner = DecodeRunner(dec, mesh, BATCH)
+    for i in range(3):
+        pos = [-1] * BATCH
+        pos[3] = 200 + i
+        o = runner.eager_step({3: x[200 + i]}, pos)[3]
+        check(f"L{layer} slot 3 decode pos {200 + i}", o, x[200 + i], y[200 + i], delta_bar=bar)
 
 
 # ------------------------------------------------------------------------------ non-aligned logical lengths

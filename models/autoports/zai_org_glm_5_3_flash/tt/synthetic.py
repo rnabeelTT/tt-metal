@@ -88,3 +88,33 @@ def synthetic_layer_state(stats: dict, layer: int, seed: int = 0) -> dict[str, t
             continue
         sd[suffix] = _make(st, seed, layer, suffix)
     return sd
+
+
+def stream_stats(stats: dict, layer: int):
+    """Per stream-channel (mean, std) [4, hidden] of the real input stream of this layer kind (weight_stats "stream")."""
+    rec = stats["stream"][str(stats_layer_for(layer))]
+    dec = lambda k: torch.frombuffer(bytearray(base64.b64decode(rec[k])), dtype=torch.float16).float()
+    return dec("mean_b64").reshape(4, -1), dec("std_b64").reshape(4, -1)
+
+
+def synthetic_stream_segment(stats: dict, layer: int, seed: int, start: int, n: int) -> torch.Tensor:
+    """Rows [start, start+n) of a deterministic synthetic input stream [n, 4, hidden] bf16 for decoder layer `layer`.
+    Every 128-row block is drawn from its own generator, so any segmentation of the sequence yields the same rows
+    (the long-context tests generate the stream chunk by chunk on both sides)."""
+    mean, std = stream_stats(stats, layer)
+    hidden = mean.shape[-1]
+    out = torch.empty(n, 4, hidden, dtype=torch.bfloat16)
+    pos = start
+    while pos < start + n:
+        blk = pos // 128
+        g = torch.Generator().manual_seed(hash((seed, layer, blk)) & ((1 << 62) - 1))
+        if layer == 0:
+            z = torch.randn(128, 1, hidden, generator=g).expand(128, 4, hidden)
+        else:
+            z = torch.randn(128, 4, hidden, generator=g)
+        rows = (mean + std * z).to(torch.bfloat16)
+        a = pos - blk * 128
+        take = min(128 - a, start + n - pos)
+        out[pos - start : pos - start + take] = rows[a : a + take]
+        pos += take
+    return out

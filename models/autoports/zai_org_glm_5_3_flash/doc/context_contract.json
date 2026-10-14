@@ -1,0 +1,25 @@
+{
+  "hf_model": "zai-org/GLM-5.3-Flash",
+  "expert_set": "E192 (192 of 288 routed experts per MoE layer; mask from autotrust/GLM5.3-Flash-E192-DGX-Spark)",
+  "advertised_context": 1048576,
+  "advertised_source": "config.json text_config.max_position_embeddings",
+  "positional_encoding": "none (NoPE in KDA, MLA and the indexer); no RoPE scaling limits apply",
+  "functional_decoder": {
+    "hardware": "one Blackhole die (mesh 1x1)",
+    "supported_context": 1048576,
+    "tested_prefill_tokens": 1048000,
+    "tested_decode_positions": [1048000, 1048001, 1048002],
+    "test": "tests/test_long_context.py (every layer kind; HF reference in tests/hf_ref long mode)",
+    "per_layer_device_state_at_1M": {
+      "dsa_latent_bytes": 1073741824,
+      "dsa_pool_keys_bytes": 67117056,
+      "kda_state_bytes_per_slot": 4194304,
+      "note": "one slot; KDA state is context-independent"
+    },
+    "capability_reduction": null
+  },
+  "full_model": {
+    "status": "to be measured in stage 6 (45 layers, 4 dies)",
+    "dram_budget_note": "E192 weights at bfp4 experts are ~28.5 GiB of the 31.9 GiB per die; the 11 DSA layers' latent cache (512 x 2 B per token per layer) and the 34 KDA states per slot share the remainder. Any reduction below the advertised context will be recorded here with the byte calculation and a capacity probe."
+  }
+}

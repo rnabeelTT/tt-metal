@@ -286,6 +286,13 @@ class GlmDSA(LightweightModule):
         ttnn.deallocate(q_rm)
         return ttnn.to_layout(o, ttnn.TILE_LAYOUT)
 
+    def index_row_block(self, n: int) -> int:
+        """Rows per indexer block of a prefill chunk: [rows, P_alloc] bf16 scores near 128 MB (multiple of 32, divides n)."""
+        rb = max(32, min(n, (128 << 20) // (2 * self.P_alloc) // 32 * 32))
+        while n % rb:
+            rb -= 32
+        return rb
+
     def pooled_view(self):
         """The pool-key cache as [S, 1, P_alloc, 128] (slot-contiguous blocks)."""
         return ttnn.reshape(self.pooled, (self.S, 1, self.P_alloc, self.ID))
@@ -398,18 +405,30 @@ class GlmDSA(LightweightModule):
             index = inputs["dense_idx"]
             owned = False
             if inputs["path"] == "sparse":
-                # indexer scores over every pool slot of the user; rows that are still dense keep the dense list
-                qi = self._mm(qr, self.w_iq)  # [1,1,n,32*128]
-                qi = ttnn.permute(ttnn.reshape(qi, (1, n, self.IH, self.ID)), (0, 2, 1, 3), memory_config=DRAM)
-                wi = self._mm(x, self.w_iw)  # [1,1,n,32]
-                scores = ttnn.experimental.indexer_score_dsa(
-                    qi, self.pooled_view(), wi, chunk_start_idx=self.P, cache_batch_idx=slot
-                )  # [1,1,n,P_alloc] bf16 ROW_MAJOR
-                ids = self._select_pools(scores, inputs["limit"])
-                sparse = self._sparse_rows(ids, inputs["pos"], inputs["zero_base"], n)
+                # indexer scores over every pool slot of the user; rows that are still dense keep the dense list. Rows go
+                # through the indexer in blocks that keep the [rows, P_alloc] score matrix near 128 MB (long contexts).
+                qi_all = self._mm(qr, self.w_iq)  # [1,1,n,32*128]
+                wi_all = self._mm(x, self.w_iw)  # [1,1,n,32]
+                rb = self.index_row_block(n)
+                parts = []
+                for r0 in range(0, n, rb):
+                    sl = lambda t, w: ttnn.slice(t, (0, 0, r0, 0), (1, 1, r0 + rb, w)) if rb < n else t
+                    qi = sl(qi_all, self.IH * self.ID)
+                    qi = ttnn.permute(ttnn.reshape(qi, (1, rb, self.IH, self.ID)), (0, 2, 1, 3), memory_config=DRAM)
+                    wi = sl(wi_all, self.IH)
+                    scores = ttnn.experimental.indexer_score_dsa(
+                        qi, self.pooled_view(), wi, chunk_start_idx=self.P, cache_batch_idx=slot
+                    )  # [1,1,rb,P_alloc] bf16 ROW_MAJOR
+                    ids = self._select_pools(scores, sl(inputs["limit"], 1))
+                    parts.append(self._sparse_rows(ids, sl(inputs["pos"], 1), sl(inputs["zero_base"], 1), rb))
+                    for t in (qi, scores, ids):
+                        ttnn.deallocate(t)
+                    if rb < n:
+                        ttnn.deallocate(wi)
+                sparse = parts[0] if len(parts) == 1 else ttnn.concat(parts, dim=2)
                 index = ttnn.where(inputs["is_dense"], inputs["dense_idx"], sparse)
                 owned = True
-                for t in (qi, wi, scores, ids, sparse):
+                for t in [qi_all, wi_all, sparse] + (parts if len(parts) > 1 else []):
                     ttnn.deallocate(t)
             o_lat = self._sparse_attend(q_abs, index, self.latent, cache_batch_idx=slot)
             if owned:

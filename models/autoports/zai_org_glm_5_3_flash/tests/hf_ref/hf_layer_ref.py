@@ -131,6 +131,59 @@ def layer_weights(spec, layer: int, rd):
     return synth.synthetic_layer_state(stats, layer, seed=int(spec["synthetic"]))
 
 
+@torch.no_grad()
+def run_long(req: dict, rd, tc, layer: int, mod) -> dict:
+    """Long-context reference without materializing the stream: the prompt's first n_prompt - tail rows only fill the
+    layer cache (DSA: latent + indexer rows through the HF submodules, no attention / MLP; KDA: the full layer forward,
+    output discarded - the recurrence needs it), then the HF layer runs on the last `tail` prompt rows and `decode`
+    single-token steps. Input rows come from synthetic.synthetic_stream_segment (same generator as the TT test)."""
+    spec = req["long"]
+    stats = json.loads(Path(spec["stats"]).read_text())
+    N, tail, D, seg = int(spec["n_prompt"]), int(spec["tail"]), int(spec["decode"]), int(spec.get("seg", 2048))
+    seed = int(spec["seed"])
+    gen = lambda a, n: synth.synthetic_stream_segment(stats, layer, seed, a, n).unsqueeze(0)  # [1, n, 4, H]
+    cache = DynamicCache(config=tc)
+    block = tc.layer_types[layer]
+    fill_end = N - tail
+    a = 0
+    t0 = time.time()
+    while a < fill_end:
+        n = min(seg, fill_end - a)
+        x = gen(a, n)
+        m = torch.ones(1, n, dtype=torch.bool)
+        if block == "linear_attention":  # the recurrence needs the attention block; the MLP does not touch the cache
+            _, _, h = mod.attn_hc(x)
+            mod.self_attn(hidden_states=mod.input_layernorm(h), cache_params=cache, attention_mask=m)
+        else:
+            _, _, h = mod.attn_hc(x)
+            h = mod.input_layernorm(h)
+            at = mod.self_attn
+            c = at.kv_a_layernorm(at.kv_a_proj_with_mqa(h))
+            cache.update(c.view(1, 1, n, -1), c.new_zeros(1, 1, n, 0), layer)
+            ix = at.indexer
+            k = ix.k_norm(ix.wk(h))
+            gsc = torch.nn.functional.linear(h, ix.index_kpool_compress_gate)
+            cache.update_indexer(torch.cat([k, gsc, m.to(k.dtype)[..., None]], dim=-1), layer)
+        a += n
+        if (a // seg) % 32 == 0:
+            print(f"fill {a}/{fill_end} {time.time() - t0:.0f} s", flush=True)
+    xt = gen(fill_end, tail + D)
+    ys = []
+    y, _ = mod(
+        xt[:, :tail], attention_mask=torch.ones(1, tail, dtype=torch.bool), past_key_values=cache, use_cache=True
+    )
+    ys.append(y)
+    for i in range(D):
+        y, _ = mod(
+            xt[:, tail + i : tail + i + 1],
+            attention_mask=torch.ones(1, 1, dtype=torch.bool),
+            past_key_values=cache,
+            use_cache=True,
+        )
+        ys.append(y)
+    return {"x": xt, "y": torch.cat(ys, dim=1), "fill_seconds": time.time() - t0}
+
+
 def capture_state(cache, layer: int, block_type: str) -> dict:
     lay = cache.layers[layer]
     if block_type == "linear_attention":
@@ -151,6 +204,12 @@ def run(req: dict) -> dict:
     torch.manual_seed(0)
 
     result = {}
+    if "long" in req:
+        mod = build_layer(tc, layer, layer_weights(req["weights"], layer, rd))
+        res = run_long(req, rd, tc, layer, mod)
+        res["seconds"] = time.time() - t0
+        res["block_type"] = tc.layer_types[layer]
+        return res
     if "x" in req:
         x = req["x"].to(torch.bfloat16)
     else:  # real-token input stream: embedding + layers 0..layer-1 (real weights), full prefill
