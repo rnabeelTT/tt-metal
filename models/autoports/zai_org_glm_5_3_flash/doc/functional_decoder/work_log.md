@@ -45,3 +45,14 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
      round-to-nearest pre-quantization in the datatype stage.
 - 18:40 HF reference "long" mode (cache fill segment by segment, HF layer on the tail rows + decode steps), bit-exact
   against the full forward at 4K for a DSA and a KDA layer; 1M references started (CPU).
+- 18:45-19:40 Test suite completed (35 tests: real / synthetic weights, lengths around tile / page / chunk / pool /
+  dense-sparse boundaries, 4 users in mixed slots, determinism, host-fallback audit, decode from an empty state): all
+  pass. Tracy perf of 12 cases (`scripts/01-tracy.sh`, `doc/functional_decoder/tracy/`). Watcher: DSA + MoE and every
+  decode path clean; KDA prefill program exceeds the kernel config buffer under the watcher (environment limit).
+- 19:50 1M long-context test: kda_dense pass (0.99994); dsa_moe fail (0.9877).
+- 20:00-20:30 CPU experiments: bf16 rounding of the selection scores changes 10-32 of 512 pools per row at 1M, but the
+  HF layer with bf16 selection stays at update PCC 0.99876 -> selection precision is not the cause.
+- 20:35 Root cause (`tools/index_expand_probe.py`): the matmul pool-id expansion in `_sparse_rows` is not exact for pool
+  ids >= 2**11 (TF32 operands; max error 508 tokens at HiFi4). Fixed with repeat_interleave + multiply-add; added the
+  `max_batch * max_context <= 2**24` assert. 1M dsa_moe: 0.99768 / decode >= 0.99969 (pass); kda_moe 0.99855 / >= 0.99936
+  (pass). DSA functional tests rerun after the fix: 13/13 pass (`logs/t1_dsa_regress.log`).

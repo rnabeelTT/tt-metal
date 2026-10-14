@@ -1,0 +1,936 @@
+- mesh_workload_created:
+    mesh_workload_id: 0
+    timestamp_ns: 1792007401880289426
+- mesh_workload_add_program:
+    mesh_workload_id: 0
+    program_id: 2
+    timestamp_ns: 1792007401880605018
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 0
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007402537110372
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 0
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007402537407820
+- mesh_workload_created:
+    mesh_workload_id: 1
+    timestamp_ns: 1792007402538472742
+- mesh_workload_add_program:
+    mesh_workload_id: 1
+    program_id: 4
+    timestamp_ns: 1792007402538642576
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 1
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007402982918161
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 1
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007402983052828
+- mesh_workload_created:
+    mesh_workload_id: 2
+    timestamp_ns: 1792007402983887180
+- mesh_workload_add_program:
+    mesh_workload_id: 2
+    program_id: 6
+    timestamp_ns: 1792007402984099265
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 2
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007402984561267
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 2
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007402984672780
+- mesh_workload_created:
+    mesh_workload_id: 3
+    timestamp_ns: 1792007403847972338
+- mesh_workload_add_program:
+    mesh_workload_id: 3
+    program_id: 8
+    timestamp_ns: 1792007403848495997
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 3
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007404545472528
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 3
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007404545624688
+- mesh_workload_created:
+    mesh_workload_id: 4
+    timestamp_ns: 1792007404545819730
+- mesh_workload_add_program:
+    mesh_workload_id: 4
+    program_id: 10
+    timestamp_ns: 1792007404546127117
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 4
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007405288896991
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 4
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007405289045003
+- mesh_workload_created:
+    mesh_workload_id: 5
+    timestamp_ns: 1792007405289153650
+- mesh_workload_add_program:
+    mesh_workload_id: 5
+    program_id: 12
+    timestamp_ns: 1792007405289484462
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 5
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007405981337253
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 5
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007405981496267
+- mesh_workload_created:
+    mesh_workload_id: 6
+    timestamp_ns: 1792007405981675669
+- mesh_workload_add_program:
+    mesh_workload_id: 6
+    program_id: 14
+    timestamp_ns: 1792007405981994237
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 6
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007406695886860
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 6
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007406696022619
+- mesh_workload_created:
+    mesh_workload_id: 7
+    timestamp_ns: 1792007406696166924
+- mesh_workload_add_program:
+    mesh_workload_id: 7
+    program_id: 16
+    timestamp_ns: 1792007406696433764
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 7
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007407535813922
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 7
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007407536202684
+- mesh_workload_created:
+    mesh_workload_id: 8
+    timestamp_ns: 1792007407536677120
+- mesh_workload_add_program:
+    mesh_workload_id: 8
+    program_id: 18
+    timestamp_ns: 1792007407537290831
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 8
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007408085816530
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 8
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007408086054184
+- mesh_workload_created:
+    mesh_workload_id: 9
+    timestamp_ns: 1792007408104781734
+- mesh_workload_add_program:
+    mesh_workload_id: 9
+    program_id: 20
+    timestamp_ns: 1792007408105028375
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 9
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007408622831312
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 9
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007408622998070
+- mesh_workload_created:
+    mesh_workload_id: 10
+    timestamp_ns: 1792007409620679295
+- mesh_workload_add_program:
+    mesh_workload_id: 10
+    program_id: 22
+    timestamp_ns: 1792007409620926988
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 10
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007410286393953
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 10
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007410286454899
+- mesh_workload_created:
+    mesh_workload_id: 11
+    timestamp_ns: 1792007410286692493
+- mesh_workload_add_program:
+    mesh_workload_id: 11
+    program_id: 24
+    timestamp_ns: 1792007410286857708
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 11
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007411388437417
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 11
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007411388501179
+- mesh_workload_created:
+    mesh_workload_id: 12
+    timestamp_ns: 1792007411388627420
+- mesh_workload_add_program:
+    mesh_workload_id: 12
+    program_id: 26
+    timestamp_ns: 1792007411388911372
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 12
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007411915944052
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 12
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007411916361549
+- mesh_workload_created:
+    mesh_workload_id: 13
+    timestamp_ns: 1792007411916647825
+- mesh_workload_add_program:
+    mesh_workload_id: 13
+    program_id: 28
+    timestamp_ns: 1792007411917180832
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 13
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007412656668641
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 13
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007412657057212
+- mesh_workload_created:
+    mesh_workload_id: 14
+    timestamp_ns: 1792007412657348168
+- mesh_workload_add_program:
+    mesh_workload_id: 14
+    program_id: 30
+    timestamp_ns: 1792007412658007847
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 14
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007413563746745
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 14
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007413563955363
+- mesh_workload_created:
+    mesh_workload_id: 15
+    timestamp_ns: 1792007413564120849
+- mesh_workload_add_program:
+    mesh_workload_id: 15
+    program_id: 32
+    timestamp_ns: 1792007413564269423
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 15
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007415693176533
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 15
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007415693238591
+- mesh_workload_created:
+    mesh_workload_id: 16
+    timestamp_ns: 1792007415693380773
+- mesh_workload_add_program:
+    mesh_workload_id: 16
+    program_id: 34
+    timestamp_ns: 1792007415693555867
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 16
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416199059520
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 16
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416199443202
+- mesh_workload_created:
+    mesh_workload_id: 17
+    timestamp_ns: 1792007416199692097
+- mesh_workload_add_program:
+    mesh_workload_id: 17
+    program_id: 36
+    timestamp_ns: 1792007416199948807
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 17
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416200363428
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 17
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416200471054
+- mesh_workload_created:
+    mesh_workload_id: 18
+    timestamp_ns: 1792007416200566656
+- mesh_workload_add_program:
+    mesh_workload_id: 18
+    program_id: 38
+    timestamp_ns: 1792007416200744987
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 18
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416201186369
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 18
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416201437749
+- mesh_workload_created:
+    mesh_workload_id: 19
+    timestamp_ns: 1792007416201696562
+- mesh_workload_add_program:
+    mesh_workload_id: 19
+    program_id: 40
+    timestamp_ns: 1792007416202104591
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 19
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416202538359
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 19
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416202646185
+- mesh_workload_created:
+    mesh_workload_id: 20
+    timestamp_ns: 1792007416202822652
+- mesh_workload_add_program:
+    mesh_workload_id: 20
+    program_id: 42
+    timestamp_ns: 1792007416202919106
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 20
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416203379805
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 20
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416203500796
+- mesh_workload_created:
+    mesh_workload_id: 21
+    timestamp_ns: 1792007416203732177
+- mesh_workload_add_program:
+    mesh_workload_id: 21
+    program_id: 44
+    timestamp_ns: 1792007416203973067
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 21
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007416839137239
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 21
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007416839194108
+- mesh_workload_created:
+    mesh_workload_id: 22
+    timestamp_ns: 1792007416839257338
+- mesh_workload_add_program:
+    mesh_workload_id: 22
+    program_id: 46
+    timestamp_ns: 1792007416839420069
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 22
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007417251767248
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 22
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007417251911744
+- mesh_workload_created:
+    mesh_workload_id: 23
+    timestamp_ns: 1792007417252030571
+- mesh_workload_add_program:
+    mesh_workload_id: 23
+    program_id: 48
+    timestamp_ns: 1792007417252162833
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 23
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007417788504722
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 23
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007417788580626
+- mesh_workload_created:
+    mesh_workload_id: 24
+    timestamp_ns: 1792007417788814903
+- mesh_workload_add_program:
+    mesh_workload_id: 24
+    program_id: 50
+    timestamp_ns: 1792007417789060783
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 24
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007417789653644
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 24
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007417789846993
+- mesh_workload_created:
+    mesh_workload_id: 25
+    timestamp_ns: 1792007417790054690
+- mesh_workload_add_program:
+    mesh_workload_id: 25
+    program_id: 52
+    timestamp_ns: 1792007417790306240
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 25
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007417790650577
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 25
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007417790796185
+- mesh_workload_created:
+    mesh_workload_id: 26
+    timestamp_ns: 1792007417790947734
+- mesh_workload_add_program:
+    mesh_workload_id: 26
+    program_id: 54
+    timestamp_ns: 1792007417791412040
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 26
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007418564590344
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 26
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007418564869066
+- mesh_workload_created:
+    mesh_workload_id: 27
+    timestamp_ns: 1792007418565060822
+- mesh_workload_add_program:
+    mesh_workload_id: 27
+    program_id: 56
+    timestamp_ns: 1792007418565401672
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 27
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007419234865803
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 27
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007419235021561
+- mesh_workload_created:
+    mesh_workload_id: 28
+    timestamp_ns: 1792007419235333065
+- mesh_workload_add_program:
+    mesh_workload_id: 28
+    program_id: 58
+    timestamp_ns: 1792007419235624792
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 28
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007419854208371
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 28
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007419854383104
+- mesh_workload_created:
+    mesh_workload_id: 29
+    timestamp_ns: 1792007419854597604
+- mesh_workload_add_program:
+    mesh_workload_id: 29
+    program_id: 60
+    timestamp_ns: 1792007419854787626
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 29
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007420980092911
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 29
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007420980161021
+- mesh_workload_created:
+    mesh_workload_id: 30
+    timestamp_ns: 1792007420981028407
+- mesh_workload_add_program:
+    mesh_workload_id: 30
+    program_id: 62
+    timestamp_ns: 1792007420981115393
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 30
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007421378410225
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 30
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007421378458497
+- mesh_workload_created:
+    mesh_workload_id: 31
+    timestamp_ns: 1792007421378596751
+- mesh_workload_add_program:
+    mesh_workload_id: 31
+    program_id: 64
+    timestamp_ns: 1792007421378880763
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 31
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007422229387200
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 31
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007422229537627
+- mesh_workload_created:
+    mesh_workload_id: 32
+    timestamp_ns: 1792007422229698224
+- mesh_workload_add_program:
+    mesh_workload_id: 32
+    program_id: 66
+    timestamp_ns: 1792007422229887485
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 32
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007422699439426
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 32
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007422699916396
+- mesh_workload_created:
+    mesh_workload_id: 33
+    timestamp_ns: 1792007422700382676
+- mesh_workload_add_program:
+    mesh_workload_id: 33
+    program_id: 68
+    timestamp_ns: 1792007422701085357
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 33
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007423139067428
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 33
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007423139201484
+- mesh_workload_created:
+    mesh_workload_id: 34
+    timestamp_ns: 1792007423139390244
+- mesh_workload_add_program:
+    mesh_workload_id: 34
+    program_id: 70
+    timestamp_ns: 1792007423139555810
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 34
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007423583578228
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 34
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007423583655175
+- mesh_workload_created:
+    mesh_workload_id: 35
+    timestamp_ns: 1792007423583904511
+- mesh_workload_add_program:
+    mesh_workload_id: 35
+    program_id: 72
+    timestamp_ns: 1792007423584101577
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 35
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007424036581537
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 35
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007424036783272
+- mesh_workload_created:
+    mesh_workload_id: 36
+    timestamp_ns: 1792007424037141936
+- mesh_workload_add_program:
+    mesh_workload_id: 36
+    program_id: 74
+    timestamp_ns: 1792007424037406611
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 36
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007424726509140
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 36
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007424726563463
+- mesh_workload_created:
+    mesh_workload_id: 37
+    timestamp_ns: 1792007424726700024
+- mesh_workload_add_program:
+    mesh_workload_id: 37
+    program_id: 76
+    timestamp_ns: 1792007424726777842
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 37
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007424726940202
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 37
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007424726975800
+- mesh_workload_created:
+    mesh_workload_id: 38
+    timestamp_ns: 1792007424727082133
+- mesh_workload_add_program:
+    mesh_workload_id: 38
+    program_id: 78
+    timestamp_ns: 1792007424727181262
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 38
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007424727322462
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 38
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007424727355725
+- mesh_workload_created:
+    mesh_workload_id: 39
+    timestamp_ns: 1792007424727529216
+- mesh_workload_add_program:
+    mesh_workload_id: 39
+    program_id: 80
+    timestamp_ns: 1792007424727842825
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 39
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007425565526330
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 39
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007425565665285
+- mesh_workload_created:
+    mesh_workload_id: 40
+    timestamp_ns: 1792007425565815231
+- mesh_workload_add_program:
+    mesh_workload_id: 40
+    program_id: 82
+    timestamp_ns: 1792007425565920011
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 40
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007425566267675
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 40
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007425566308753
+- mesh_workload_created:
+    mesh_workload_id: 41
+    timestamp_ns: 1792007425566398234
+- mesh_workload_add_program:
+    mesh_workload_id: 41
+    program_id: 84
+    timestamp_ns: 1792007425566638633
+    coordinates:
+      - [0, 0]
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 41
+    mesh_id: 0
+    status: InFlight
+    timestamp_ns: 1792007426777318067
+- mesh_workload_set_program_binary_status:
+    mesh_workload_id: 41
+    mesh_id: 0
+    status: Committed
+    timestamp_ns: 1792007426777417036
+- mesh_workload_created:
+    mesh_workload_id: 42
+    timestamp_ns: 1792007426777792853
+- mesh_workload_add_program:
+    mesh_workload_id: 42
+    program_id: 86
+    timestamp_ns: 1792007426778732707
+    coordinates:
+      - [0, 0]
+- mesh_workload_destroyed:
+    mesh_workload_id: 42
+    timestamp_ns: 1792007428660680662
+- mesh_workload_destroyed:
+    mesh_workload_id: 41
+    timestamp_ns: 1792007431006753879
+- mesh_workload_destroyed:
+    mesh_workload_id: 40
+    timestamp_ns: 1792007431006911891
+- mesh_workload_destroyed:
+    mesh_workload_id: 36
+    timestamp_ns: 1792007431006953410
+- mesh_workload_destroyed:
+    mesh_workload_id: 34
+    timestamp_ns: 1792007431006988517
+- mesh_workload_destroyed:
+    mesh_workload_id: 32
+    timestamp_ns: 1792007431007013434
+- mesh_workload_destroyed:
+    mesh_workload_id: 31
+    timestamp_ns: 1792007431007101843
+- mesh_workload_destroyed:
+    mesh_workload_id: 33
+    timestamp_ns: 1792007431007203758
+- mesh_workload_destroyed:
+    mesh_workload_id: 29
+    timestamp_ns: 1792007431007287778
+- mesh_workload_destroyed:
+    mesh_workload_id: 37
+    timestamp_ns: 1792007431007338515
+- mesh_workload_destroyed:
+    mesh_workload_id: 10
+    timestamp_ns: 1792007431007360126
+- mesh_workload_destroyed:
+    mesh_workload_id: 27
+    timestamp_ns: 1792007431007406725
+- mesh_workload_destroyed:
+    mesh_workload_id: 39
+    timestamp_ns: 1792007431007510563
+- mesh_workload_destroyed:
+    mesh_workload_id: 7
+    timestamp_ns: 1792007431007634630
+- mesh_workload_destroyed:
+    mesh_workload_id: 6
+    timestamp_ns: 1792007431007781630
+- mesh_workload_destroyed:
+    mesh_workload_id: 17
+    timestamp_ns: 1792007431007900537
+- mesh_workload_destroyed:
+    mesh_workload_id: 4
+    timestamp_ns: 1792007431007981542
+- mesh_workload_destroyed:
+    mesh_workload_id: 5
+    timestamp_ns: 1792007431008084669
+- mesh_workload_destroyed:
+    mesh_workload_id: 35
+    timestamp_ns: 1792007431008187575
+- mesh_workload_destroyed:
+    mesh_workload_id: 20
+    timestamp_ns: 1792007431008214466
+- mesh_workload_destroyed:
+    mesh_workload_id: 38
+    timestamp_ns: 1792007431008242750
+- mesh_workload_destroyed:
+    mesh_workload_id: 30
+    timestamp_ns: 1792007431008270083
+- mesh_workload_destroyed:
+    mesh_workload_id: 12
+    timestamp_ns: 1792007431008290421
+- mesh_workload_destroyed:
+    mesh_workload_id: 3
+    timestamp_ns: 1792007431008397476
+- mesh_workload_destroyed:
+    mesh_workload_id: 22
+    timestamp_ns: 1792007431008496725
+- mesh_workload_destroyed:
+    mesh_workload_id: 11
+    timestamp_ns: 1792007431008565767
+- mesh_workload_destroyed:
+    mesh_workload_id: 8
+    timestamp_ns: 1792007431008598389
+- mesh_workload_destroyed:
+    mesh_workload_id: 2
+    timestamp_ns: 1792007431008689012
+- mesh_workload_destroyed:
+    mesh_workload_id: 13
+    timestamp_ns: 1792007431008731764
+- mesh_workload_destroyed:
+    mesh_workload_id: 14
+    timestamp_ns: 1792007431008824821
+- mesh_workload_destroyed:
+    mesh_workload_id: 16
+    timestamp_ns: 1792007431008917248
+- mesh_workload_destroyed:
+    mesh_workload_id: 18
+    timestamp_ns: 1792007431008997220
+- mesh_workload_destroyed:
+    mesh_workload_id: 1
+    timestamp_ns: 1792007431009064920
+- mesh_workload_destroyed:
+    mesh_workload_id: 19
+    timestamp_ns: 1792007431009091781
+- mesh_workload_destroyed:
+    mesh_workload_id: 21
+    timestamp_ns: 1792007431009158498
+- mesh_workload_destroyed:
+    mesh_workload_id: 23
+    timestamp_ns: 1792007431009184388
+- mesh_workload_destroyed:
+    mesh_workload_id: 24
+    timestamp_ns: 1792007431009213954
+- mesh_workload_destroyed:
+    mesh_workload_id: 0
+    timestamp_ns: 1792007431009279770
+- mesh_workload_destroyed:
+    mesh_workload_id: 26
+    timestamp_ns: 1792007431009358770
+- mesh_workload_destroyed:
+    mesh_workload_id: 15
+    timestamp_ns: 1792007431009447249
+- mesh_workload_destroyed:
+    mesh_workload_id: 28
+    timestamp_ns: 1792007431009475072
+- mesh_workload_destroyed:
+    mesh_workload_id: 9
+    timestamp_ns: 1792007431009559113
+- mesh_workload_destroyed:
+    mesh_workload_id: 25
+    timestamp_ns: 1792007431009582507

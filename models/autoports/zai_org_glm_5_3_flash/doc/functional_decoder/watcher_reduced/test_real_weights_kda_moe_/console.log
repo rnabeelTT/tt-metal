@@ -1,0 +1,303 @@
+2026-10-14 19:47:10.677 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe] 2026-10-14 19:47:12.041 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-14 19:47:12.041 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-14 19:47:12.041 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-14 19:47:12.041 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-14 19:47:12.049 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-14 19:47:12.049 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-14 19:47:12.244 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-14 19:47:12.244 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-14 19:47:12.244 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-14 19:47:12.244 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-14 19:47:12.246 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-14 19:47:12.442 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-14 19:47:12.632 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-14 19:47:12.632 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-14 19:47:12.633 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-14 19:47:12.633 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-14 19:47:12.633 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-14 19:47:12.727 | info     |       LLRuntime | Watcher log file: models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/watcher_reduced/test_real_weights_kda_moe_/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-14 19:47:12.727 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-14 19:47:12.727 | info     |       LLRuntime | Watcher server initialized, disabled features: PAUSE,RING_BUFFER,STACK_USAGE,WAYPOINT (watcher_server.cpp:568)
+2026-10-14 19:47:12.727 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:12.735 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:12.742 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:12.750 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:22.777 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:22.786 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:22.794 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:22.803 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:27.087 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-14 19:47:32.850 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:32.860 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:32.870 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:32.879 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:42.900 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:42.909 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:42.919 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:42.928 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:50.558 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:358 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-14 19:47:52.019 | critical |          Always | TT_FATAL: Program size (72208) too large for kernel config buffer (70656) on TENSIX (assert.hpp:104)
+FAILED
+
+=================================== FAILURES ===================================
+__________________________ test_real_weights[kda_moe] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7edda85e66c0>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_real_weights(mesh, rd, kind):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1, prefill_len=100, decode_steps=3, slot=5)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:148:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:121: in run_user
+    out = prefill_user(dec, mesh, x, prefill_len, slot)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:68: in prefill_user
+    Y, st = dec.prefill_forward(X, inputs=inputs, attn_state=st)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:214: in prefill_forward
+    y, new_state = self.attn.prefill_forward(x, state, inputs["attn"])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/kda.py:214: in prefill_forward
+    y, new_state = layer.forward(h3, state, actual_start=a0, actual_end=a1)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/demos/deepseek_v3_d_p/tt/kda/kda.py:503: in forward
+    result = self.recurrence(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:667: in __call__
+    prepared, state, geometry = self._prepare(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:618: in _prepare
+    prepared = _prepare_chunk_terms(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:121: in _prepare_chunk_terms
+    outputs = ttnn.experimental.kda.prepare_chunk_recurrence(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = FastOperation(python_fully_qualified_name='ttnn.experimental.kda.prepare_chunk_recurrence', function=<ttnn._ttnn.operations.experimental.kda.prepare_chunk_recurrence_t object at 0x7edd6b1431d0>, preprocess_golden_function_inputs=None, golden_function=None, postprocess_golden_function_outputs=None, is_cpp_operation=True, is_experimental=False)
+function_args = (ttnn.Tensor([[[ 3.5400e-03,  2.8992e-03,  ...,  5.1270e-03,  1.7212e-02],
+              [-3.8910e-04, -2.1210e-03,  ...,  1.5015e-02,  2.0874e-02],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[ 1.8921e-03,  2.0599e-03,  ...,  1.6928e-05, -4.6387e-03],
+              [ 6.8970e-03,  2.7618e-03,  ..., -1.2436e-03, -1.7578e-02],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[-4.7913e-03,  3.0670e-03,  ...,  3.5095e-04, -7.0930e-06],
+              [ 7.3547e-03, -2.3193e-03,  ...,  2.6550e-03,  6.3782e-03],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[ 4.6680e-01,  1.7090e-02,  ...,  3.5547e-01,  2.0898e-01],
+              [ 2.2656e-01,  1.1536e-02,  ...,  2.7734e-01,  2.8906e-01],
+              ...,
+              [ 2.8076e-03,  1.1368e-03,  ...,  1.6968e-02,  5.1025e-02],
+              [ 2.8076e-03,  1.1368e-03,  ...,  1.6968e-02,  5.1025e-02]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[ 4.1797e-01, -1.8457e-01,  ...,  3.6406e+00,  1.2969e+00],
+              [-2.5195e-01, -4.4556e-03,  ...,  2.3594e+00,  1.5156e+00],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 32960]), dtype=DataType::BFLOAT16, layout=Layout::TILE), 64)
+function_kwargs = {'actual_end': ttnn.Tensor([  100], shape=Shape([1]), dtype=DataType::UINT32, layout=Layout::ROW_MAJOR), 'actual_start': ttnn.Tensor([    0], shape=Shape([1]), dtype=DataType::UINT32, layout=Layout::ROW_MAJOR), 'beta_logits_column_offset': 32896, 'compute_kernel_config': <ttnn._ttnn.operations.core.WormholeComputeKernelConfig object at 0x7edda85e5830>, ...}
+cq_id = None, recording = False, started = False, python_io_record = None
+
+    def __call__(self, *function_args, **function_kwargs):
+        if self._requires_slow_runtime():
+            return self._slow_operation_instance()(*function_args, **function_kwargs)
+
+        cq_id = None
+        if "queue_id" in function_kwargs:
+            cq_id = function_kwargs.pop("queue_id")
+        elif "cq_id" in function_kwargs:
+            cq_id = function_kwargs.pop("cq_id")
+
+        recording = ttnn.graph.is_python_io_recording_enabled()
+        started = False
+        python_io_record = None
+        try:
+            if recording:
+                ttnn.graph.track_function_start(self.python_fully_qualified_name)
+                started = True
+                python_io_record = ttnn.graph.append_python_io_record(self.python_fully_qualified_name)
+                ttnn.graph.record_python_operation(
+                    self.python_fully_qualified_name,
+                    function_args,
+                    function_kwargs,
+                    record=python_io_record,
+                )
+                input_tensors = get_all_tensors((function_args, function_kwargs))
+                set_tensor_id(input_tensors)
+
+            if cq_id is None:
+>               result = self.function(*function_args, **function_kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:3197: state.offset <= max_size
+E               info:
+E               Program size (72208) too large for kernel config buffer (70656) on TENSIX
+E               backtrace:
+E                --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fde6a) [0x7eddba5fde6a]
+E                --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal6detail11ProgramImpl24finalize_program_offsetsEN4ttsl10StrongTypeIiNS0_12ContextIdTagEEEPNS0_7IDeviceERKSt8functionIFRSt13unordered_mapIjSt10shared_ptrINS0_6KernelEESt4hashIjESt8equal_toIjESaISt4pairIKjSD_EEEjEERKS9_IFRSt6vectorISB_INS0_11KernelGroupEESaISU_EEjEERKS9_IFRKSS_INS0_9SemaphoreESaIS12_EEvEESt4spanIPS2_Lm18446744073709551615EE+0xafc) [0x7eddba5f377c]
+E                --- tt::tt_metal::distributed::MeshWorkloadImpl::finalize_offsets(tt::tt_metal::distributed::MeshDevice*)
+E                --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+E                --- tt::tt_metal::experimental::MakeMeshWorkloadFromSpecs(tt::tt_metal::distributed::MeshDevice&, std::unordered_map<tt::tt_metal::distributed::MeshCoordinateRange, tt::tt_metal::experimental::ProgramSpec, std::hash<tt::tt_metal::distributed::MeshCoordinateRange>, std::equal_to<tt::tt_metal::distributed::MeshCoordinateRange>, std::allocator<std::pair<tt::tt_metal::distributed::MeshCoordinateRange const, tt::tt_metal::experimental::ProgramSpec> > > const&, bool)
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f31de) [0x7eddbd2f31de]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f2619) [0x7eddbd2f2619]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_12experimental4prim31PrepareChunkRecurrenceOperationEEEEEvRKNT_22operation_attributes_tERKNS8_13tensor_args_tERNS8_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x286) [0x7eddbd2e87a6]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_12experimental4prim31PrepareChunkRecurrenceOperationEEENT_21tensor_return_value_tERKNS6_22operation_attributes_tERKNS6_13tensor_args_tE+0x416) [0x7eddbd2e80d6]
+E                --- ttnn::experimental::prim::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, tt::tt_metal::MemoryConfig const&, ttnn::ComputeKernelConfig const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+E                --- ttnn::experimental::kda::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, std::optional<tt::tt_metal::MemoryConfig> const&, std::optional<ttnn::ComputeKernelConfig> const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x494068) [0x7eddbe294068]
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x397a54) [0x7eddbe197a54]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(PyEval_EvalCode+0xde) [0x18a54ba]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18a5c9d]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e9605]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_SimpleFileObject+0x106) [0x19e93c6]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_AnyFileObject+0x4a) [0x19e914a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e90d0]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e8fdd]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1ad9763]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f61f]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f42c]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7ede04e2a1ca]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7ede04e2a28b]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_start+0x29) [0x19a78a9]
+
+ttnn/ttnn/decorators.py:1106: RuntimeError
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+38.11s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+1.87s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe] - RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:3197: state.offset <= max_size
+info:
+Program size (72208) too large for kernel config buffer (70656) on TENSIX
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fde6a) [0x7eddba5fde6a]
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal6detail11ProgramImpl24finalize_program_offsetsEN4ttsl10StrongTypeIiNS0_12ContextIdTagEEEPNS0_7IDeviceERKSt8functionIFRSt13unordered_mapIjSt10shared_ptrINS0_6KernelEESt4hashIjESt8equal_toIjESaISt4pairIKjSD_EEEjEERKS9_IFRSt6vectorISB_INS0_11KernelGroupEESaISU_EEjEERKS9_IFRKSS_INS0_9SemaphoreESaIS12_EEvEESt4spanIPS2_Lm18446744073709551615EE+0xafc) [0x7eddba5f377c]
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::finalize_offsets(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::experimental::MakeMeshWorkloadFromSpecs(tt::tt_metal::distributed::MeshDevice&, std::unordered_map<tt::tt_metal::distributed::MeshCoordinateRange, tt::tt_metal::experimental::ProgramSpec, std::hash<tt::tt_metal::distributed::MeshCoordinateRange>, std::equal_to<tt::tt_metal::distributed::MeshCoordinateRange>, std::allocator<std::pair<tt::tt_metal::distributed::MeshCoordinateRange const, tt::tt_metal::experimental::ProgramSpec> > > const&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f31de) [0x7eddbd2f31de]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f2619) [0x7eddbd2f2619]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_12experimental4prim31PrepareChunkRecurrenceOperationEEEEEvRKNT_22operation_attributes_tERKNS8_13tensor_args_tERNS8_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x286) [0x7eddbd2e87a6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_12experimental4prim31PrepareChunkRecurrenceOperationEEENT_21tensor_return_value_tERKNS6_22operation_attributes_tERKNS6_13tensor_args_tE+0x416) [0x7eddbd2e80d6]
+ --- ttnn::experimental::prim::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, tt::tt_metal::MemoryConfig const&, ttnn::ComputeKernelConfig const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+ --- ttnn::experimental::kda::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, std::optional<tt::tt_metal::MemoryConfig> const&, std::optional<ttnn::ComputeKernelConfig> const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x494068) [0x7eddbe294068]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x397a54) [0x7eddbe197a54]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18a5c9d]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e9605]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_SimpleFileObject+0x106) [0x19e93c6]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_AnyFileObject+0x4a) [0x19e914a]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e90d0]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e8fdd]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1ad9763]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7ede04e2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7ede04e2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_start+0x29) [0x19a78a9]2026-10-14 19:47:52.948 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:52.956 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:52.964 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:47:52.972 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+
+============================== 1 failed in 40.09s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7edd6ad10768 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7edd6b22f588 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function "pad_to_tile"
+ - leaked function "create_matmul_attributes"
+ - leaked function "get_current_command_queue_id_for_thread"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-14 19:47:54.722 | info     |    BuildKernels | JIT cache stats: 176/176 hits (100.0%) [176 cached, 34 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-14 19:47:54.722 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-14 19:47:54.723 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-14 19:47:54.739 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-14 19:47:54.739 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-14 19:47:55.361 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-14 19:47:55.361 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-14 19:47:55.362 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)

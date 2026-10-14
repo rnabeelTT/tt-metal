@@ -59,7 +59,7 @@ def test_long_context(kind):
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
-        max_ctx = ((N_PROMPT + DECODE + 127) // 128) * 128
+        max_ctx = ((N_PROMPT + DECODE + CHUNK - 1) // CHUNK) * CHUNK  # whole prefill chunks (1,048,576 here)
         dec = build_layer(mesh, rd, layer, "real", batch=1, prefill_lengths=(CHUNK,), max_context=max_ctx)
         t0 = time.time()
         st, last = None, None

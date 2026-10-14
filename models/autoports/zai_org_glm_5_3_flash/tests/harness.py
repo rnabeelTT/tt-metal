@@ -39,7 +39,7 @@ def layer_weights(rd: CheckpointReader, layer: int, weights) -> dict:
     return synthetic_layer_state(json.loads(STATS.read_text()), layer, seed=int(weights["synthetic"]))
 
 
-def build_layer(mesh, rd, layer: int, weights="real", *, batch=8, prefill_lengths=(128, 2048), max_context=4224):
+def build_layer(mesh, rd, layer: int, weights="real", *, batch=8, prefill_lengths=(128, 2048), max_context=4096):
     dec = FunctionalDecoder.from_state_dict(
         layer_weights(rd, layer, weights),
         hf_config=rd.text_config,

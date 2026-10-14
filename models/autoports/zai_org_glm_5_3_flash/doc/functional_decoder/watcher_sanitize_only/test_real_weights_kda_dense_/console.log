@@ -1,0 +1,409 @@
+2026-10-14 19:49:55.777 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_dense] 2026-10-14 19:49:56.837 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-14 19:49:56.837 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-14 19:49:56.838 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-14 19:49:56.838 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-14 19:49:56.844 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-14 19:49:56.845 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-14 19:49:56.927 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-14 19:49:56.927 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-14 19:49:56.927 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-14 19:49:56.927 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-14 19:49:56.929 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-14 19:49:57.136 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-14 19:49:57.434 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-14 19:49:57.435 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-14 19:49:57.435 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-14 19:49:57.435 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-14 19:49:57.436 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-14 19:49:58.400 | info     |       LLRuntime | Watcher log file: models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/watcher_sanitize_only/test_real_weights_kda_dense_/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-14 19:49:58.401 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-14 19:49:58.401 | info     |       LLRuntime | Watcher server initialized, disabled features: ASSERT,PAUSE,RING_BUFFER,STACK_USAGE,WAYPOINT (watcher_server.cpp:568)
+2026-10-14 19:49:58.401 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:49:58.408 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:49:58.416 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:49:58.426 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:08.103 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-14 19:50:08.472 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:08.479 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:08.486 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:08.492 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_split_sinkhorn_compute/10520339414322085566/" -DKERNEL_COMPILE_TIME_ARGS=20,897988541 -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc0/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc0/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_unpack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::add_bias(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:74:19: warning: 'void ckernel::add_tiles_init(uint32_t, uint32_t, bool, uint32_t)' is deprecated: Renamed to add_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   74 |     add_tiles_init(a, CB_CONSTS);
+      |     ~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:18:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:562:101: note: declared here
+  562 | [[deprecated("Renamed to add_init(). This will be removed after September 15th, 2026.")]] ALWI void add_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::mul(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:92:19: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   92 |     mul_tiles_init(a, b);
+      |     ~~~~~~~~~~~~~~^~~~~~
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::unary(uint32_t, uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:113:32: warning: 'void ckernel::copy_tile_to_dst_init_short(uint32_t, uint32_t, uint32_t, uint32_t) [with bool is_fp32_dest_acc_en = true; uint32_t = long unsigned int]' is deprecated: Renamed to copy_init(). This will be removed after 20-09-2026. [-Wdeprecated-declarations]
+  113 |     copy_tile_to_dst_init_short(a);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:16:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/tile_move_copy.h:220:92: note: declared here
+  220 | [[deprecated("Renamed to copy_init(). This will be removed after 20-09-2026.")]] ALWI void copy_tile_to_dst_init_short(
+      |                                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_split_sinkhorn_compute/10520339414322085566/" -DKERNEL_COMPILE_TIME_ARGS=20,897988541 -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc2/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc2/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_pack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::add_bias(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:74:19: warning: 'void ckernel::add_tiles_init(uint32_t, uint32_t, bool, uint32_t)' is deprecated: Renamed to add_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   74 |     add_tiles_init(a, CB_CONSTS);
+      |     ~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:18:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:562:101: note: declared here
+  562 | [[deprecated("Renamed to add_init(). This will be removed after September 15th, 2026.")]] ALWI void add_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::mul(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:92:19: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   92 |     mul_tiles_init(a, b);
+      |     ~~~~~~~~~~~~~~^~~~~~
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::unary(uint32_t, uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:113:32: warning: 'void ckernel::copy_tile_to_dst_init_short(uint32_t, uint32_t, uint32_t, uint32_t) [with bool is_fp32_dest_acc_en = true; uint32_t = long unsigned int]' is deprecated: Renamed to copy_init(). This will be removed after 20-09-2026. [-Wdeprecated-declarations]
+  113 |     copy_tile_to_dst_init_short(a);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:16:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/tile_move_copy.h:220:92: note: declared here
+  220 | [[deprecated("Renamed to copy_init(). This will be removed after 20-09-2026.")]] ALWI void copy_tile_to_dst_init_short(
+      |                                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_split_sinkhorn_compute/10520339414322085566/" -DKERNEL_COMPILE_TIME_ARGS=20,897988541 -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc1/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/mhc_split_sinkhorn_compute/10520339414322085566/trisc1/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_math.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::add_bias(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:74:19: warning: 'void ckernel::add_tiles_init(uint32_t, uint32_t, bool, uint32_t)' is deprecated: Renamed to add_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   74 |     add_tiles_init(a, CB_CONSTS);
+      |     ~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:18:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:562:101: note: declared here
+  562 | [[deprecated("Renamed to add_init(). This will be removed after September 15th, 2026.")]] ALWI void add_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::mul(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:92:19: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   92 |     mul_tiles_init(a, b);
+      |     ~~~~~~~~~~~~~~^~~~~~
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void {anonymous}::unary(uint32_t, uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:113:32: warning: 'void ckernel::copy_tile_to_dst_init_short(uint32_t, uint32_t, uint32_t, uint32_t) [with bool is_fp32_dest_acc_en = true; uint32_t = long unsigned int]' is deprecated: Renamed to copy_init(). This will be removed after 20-09-2026. [-Wdeprecated-declarations]
+  113 |     copy_tile_to_dst_init_short(a);
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:16:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/tile_move_copy.h:220:92: note: declared here
+  220 | [[deprecated("Renamed to copy_init(). This will be removed after 20-09-2026.")]] ALWI void copy_tile_to_dst_init_short(
+      |                                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2026-10-14 19:50:18.513 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:18.522 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:18.531 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:18.539 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/13892011548352869837/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc0/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc0/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_unpack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/13892011548352869837/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc2/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc2/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_pack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ASSERT -DWATCHER_DISABLE_PAUSE -DWATCHER_DISABLE_RING_BUFFER -DWATCHER_DISABLE_STACK_USAGE -DWATCHER_DISABLE_WAYPOINT -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/13892011548352869837/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc1/trisck.15942766425915325204_2178605.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/6988174260969144950/kernels/layernorm/13892011548352869837/trisc1/trisck.15942766425915325204_2178605.d
+In file included from ../chlkc_math.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+2026-10-14 19:50:28.559 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:28.566 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:28.573 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:28.580 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 19:50:28.659 | critical |          Always | TT_FATAL: Program size (72144) too large for kernel config buffer (70656) on TENSIX (assert.hpp:104)
+FAILED
+
+=================================== FAILURES ===================================
+_________________________ test_real_weights[kda_dense] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7f151353b2f0>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_real_weights(mesh, rd, kind):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1, prefill_len=100, decode_steps=3, slot=5)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:148:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:121: in run_user
+    out = prefill_user(dec, mesh, x, prefill_len, slot)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:68: in prefill_user
+    Y, st = dec.prefill_forward(X, inputs=inputs, attn_state=st)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:214: in prefill_forward
+    y, new_state = self.attn.prefill_forward(x, state, inputs["attn"])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/kda.py:214: in prefill_forward
+    y, new_state = layer.forward(h3, state, actual_start=a0, actual_end=a1)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/demos/deepseek_v3_d_p/tt/kda/kda.py:503: in forward
+    result = self.recurrence(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:667: in __call__
+    prepared, state, geometry = self._prepare(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:618: in _prepare
+    prepared = _prepare_chunk_terms(
+models/demos/deepseek_v3_d_p/tt/kda/recurrence.py:121: in _prepare_chunk_terms
+    outputs = ttnn.experimental.kda.prepare_chunk_recurrence(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = FastOperation(python_fully_qualified_name='ttnn.experimental.kda.prepare_chunk_recurrence', function=<ttnn._ttnn.operations.experimental.kda.prepare_chunk_recurrence_t object at 0x7f14e11531b0>, preprocess_golden_function_inputs=None, golden_function=None, postprocess_golden_function_outputs=None, is_cpp_operation=True, is_experimental=False)
+function_args = (ttnn.Tensor([[[-3.7689e-03,  3.8452e-03,  ..., -5.7220e-04, -1.6022e-03],
+              [-7.6294e-03, -2.4872e-03,  ..., -3.7994e-03, -1.0681e-04],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[ 3.1710e-05,  2.4033e-04,  ..., -1.3351e-04, -3.9864e-04],
+              [-4.6349e-04, -5.0049e-03,  ..., -2.6512e-04,  4.7913e-03],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[-2.1667e-03, -7.6675e-04,  ...,  1.3638e-04, -2.0218e-04],
+              [-2.0294e-03,  6.6223e-03,  ..., -2.4261e-03, -8.9264e-04],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[ 1.4355e-01,  2.4902e-01,  ...,  3.4766e-01,  4.5508e-01],
+              [ 1.7090e-01,  3.0469e-01,  ...,  3.5742e-01,  2.9102e-01],
+              ...,
+              [ 1.5430e-01,  2.7734e-01,  ...,  3.5938e-01,  2.6758e-01],
+              [ 1.5430e-01,  2.7734e-01,  ...,  3.5938e-01,  2.6758e-01]]], shape=Shape([1, 128, 8192]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[-2.2754e-01,  1.9336e-01,  ..., -1.7480e-01, -2.1777e-01],
+              [-4.5508e-01, -1.3379e-01,  ..., -3.9844e-01, -7.6562e-01],
+              ...,
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+              [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]], shape=Shape([1, 128, 32960]), dtype=DataType::BFLOAT16, layout=Layout::TILE), 64)
+function_kwargs = {'actual_end': ttnn.Tensor([  100], shape=Shape([1]), dtype=DataType::UINT32, layout=Layout::ROW_MAJOR), 'actual_start': ttnn.Tensor([    0], shape=Shape([1]), dtype=DataType::UINT32, layout=Layout::ROW_MAJOR), 'beta_logits_column_offset': 32896, 'compute_kernel_config': <ttnn._ttnn.operations.core.WormholeComputeKernelConfig object at 0x7f14d21f9950>, ...}
+cq_id = None, recording = False, started = False, python_io_record = None
+
+    def __call__(self, *function_args, **function_kwargs):
+        if self._requires_slow_runtime():
+            return self._slow_operation_instance()(*function_args, **function_kwargs)
+
+        cq_id = None
+        if "queue_id" in function_kwargs:
+            cq_id = function_kwargs.pop("queue_id")
+        elif "cq_id" in function_kwargs:
+            cq_id = function_kwargs.pop("cq_id")
+
+        recording = ttnn.graph.is_python_io_recording_enabled()
+        started = False
+        python_io_record = None
+        try:
+            if recording:
+                ttnn.graph.track_function_start(self.python_fully_qualified_name)
+                started = True
+                python_io_record = ttnn.graph.append_python_io_record(self.python_fully_qualified_name)
+                ttnn.graph.record_python_operation(
+                    self.python_fully_qualified_name,
+                    function_args,
+                    function_kwargs,
+                    record=python_io_record,
+                )
+                input_tensors = get_all_tensors((function_args, function_kwargs))
+                set_tensor_id(input_tensors)
+
+            if cq_id is None:
+>               result = self.function(*function_args, **function_kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:3197: state.offset <= max_size
+E               info:
+E               Program size (72144) too large for kernel config buffer (70656) on TENSIX
+E               backtrace:
+E                --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fde6a) [0x7f15301fde6a]
+E                --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal6detail11ProgramImpl24finalize_program_offsetsEN4ttsl10StrongTypeIiNS0_12ContextIdTagEEEPNS0_7IDeviceERKSt8functionIFRSt13unordered_mapIjSt10shared_ptrINS0_6KernelEESt4hashIjESt8equal_toIjESaISt4pairIKjSD_EEEjEERKS9_IFRSt6vectorISB_INS0_11KernelGroupEESaISU_EEjEERKS9_IFRKSS_INS0_9SemaphoreESaIS12_EEvEESt4spanIPS2_Lm18446744073709551615EE+0xafc) [0x7f15301f377c]
+E                --- tt::tt_metal::distributed::MeshWorkloadImpl::finalize_offsets(tt::tt_metal::distributed::MeshDevice*)
+E                --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+E                --- tt::tt_metal::experimental::MakeMeshWorkloadFromSpecs(tt::tt_metal::distributed::MeshDevice&, std::unordered_map<tt::tt_metal::distributed::MeshCoordinateRange, tt::tt_metal::experimental::ProgramSpec, std::hash<tt::tt_metal::distributed::MeshCoordinateRange>, std::equal_to<tt::tt_metal::distributed::MeshCoordinateRange>, std::allocator<std::pair<tt::tt_metal::distributed::MeshCoordinateRange const, tt::tt_metal::experimental::ProgramSpec> > > const&, bool)
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f31de) [0x7f1532ef31de]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f2619) [0x7f1532ef2619]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_12experimental4prim31PrepareChunkRecurrenceOperationEEEEEvRKNT_22operation_attributes_tERKNS8_13tensor_args_tERNS8_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x286) [0x7f1532ee87a6]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_12experimental4prim31PrepareChunkRecurrenceOperationEEENT_21tensor_return_value_tERKNS6_22operation_attributes_tERKNS6_13tensor_args_tE+0x416) [0x7f1532ee80d6]
+E                --- ttnn::experimental::prim::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, tt::tt_metal::MemoryConfig const&, ttnn::ComputeKernelConfig const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+E                --- ttnn::experimental::kda::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, std::optional<tt::tt_metal::MemoryConfig> const&, std::optional<ttnn::ComputeKernelConfig> const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x494068) [0x7f1533e94068]
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x397a54) [0x7f1533d97a54]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(PyEval_EvalCode+0xde) [0x18a54ba]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18a5c9d]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e9605]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_SimpleFileObject+0x106) [0x19e93c6]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_AnyFileObject+0x4a) [0x19e914a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e90d0]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e8fdd]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1ad9763]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f61f]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f42c]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7f157ae2a1ca]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7f157ae2a28b]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_start+0x29) [0x19a78a9]
+
+ttnn/ttnn/decorators.py:1106: RuntimeError
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+27.10s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_dense]
+4.72s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_dense]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_dense]
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_dense] - RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:3197: state.offset <= max_size
+info:
+Program size (72144) too large for kernel config buffer (70656) on TENSIX
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fde6a) [0x7f15301fde6a]
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal6detail11ProgramImpl24finalize_program_offsetsEN4ttsl10StrongTypeIiNS0_12ContextIdTagEEEPNS0_7IDeviceERKSt8functionIFRSt13unordered_mapIjSt10shared_ptrINS0_6KernelEESt4hashIjESt8equal_toIjESaISt4pairIKjSD_EEEjEERKS9_IFRSt6vectorISB_INS0_11KernelGroupEESaISU_EEjEERKS9_IFRKSS_INS0_9SemaphoreESaIS12_EEvEESt4spanIPS2_Lm18446744073709551615EE+0xafc) [0x7f15301f377c]
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::finalize_offsets(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::experimental::MakeMeshWorkloadFromSpecs(tt::tt_metal::distributed::MeshDevice&, std::unordered_map<tt::tt_metal::distributed::MeshCoordinateRange, tt::tt_metal::experimental::ProgramSpec, std::hash<tt::tt_metal::distributed::MeshCoordinateRange>, std::equal_to<tt::tt_metal::distributed::MeshCoordinateRange>, std::allocator<std::pair<tt::tt_metal::distributed::MeshCoordinateRange const, tt::tt_metal::experimental::ProgramSpec> > > const&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f31de) [0x7f1532ef31de]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x20f2619) [0x7f1532ef2619]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_12experimental4prim31PrepareChunkRecurrenceOperationEEEEEvRKNT_22operation_attributes_tERKNS8_13tensor_args_tERNS8_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x286) [0x7f1532ee87a6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_12experimental4prim31PrepareChunkRecurrenceOperationEEENT_21tensor_return_value_tERKNS6_22operation_attributes_tERKNS6_13tensor_args_tE+0x416) [0x7f1532ee80d6]
+ --- ttnn::experimental::prim::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, tt::tt_metal::MemoryConfig const&, ttnn::ComputeKernelConfig const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+ --- ttnn::experimental::kda::prepare_chunk_recurrence(ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, ttnn::Tensor const&, unsigned int, std::optional<tt::tt_metal::MemoryConfig> const&, std::optional<ttnn::ComputeKernelConfig> const&, unsigned int, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, unsigned int, float, unsigned int)
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x494068) [0x7f1533e94068]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x397a54) [0x7f1533d97a54]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python3(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x18a5c9d]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e9605]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_SimpleFileObject+0x106) [0x19e93c6]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_AnyFileObject+0x4a) [0x19e914a]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e90d0]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e8fdd]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x1ad9763]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7f157ae2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7f157ae2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python3(_start+0x29) [0x19a78a9]
+============================== 1 failed in 31.93s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7f14e0b28748 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7f14e1243528 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "size"
+ - leaked function "default_core_range"
+ - leaked function "experimental_set_per_core_allocation"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-14 19:50:31.793 | info     |    BuildKernels | JIT cache stats: 0/176 hits (0.0%) [0 cached, 34 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-14 19:50:31.793 | info     |    BuildKernels | JIT telemetry: 2 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-14 19:50:31.794 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-14 19:50:31.813 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-14 19:50:31.814 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-14 19:50:32.368 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-14 19:50:32.368 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-14 19:50:32.368 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)

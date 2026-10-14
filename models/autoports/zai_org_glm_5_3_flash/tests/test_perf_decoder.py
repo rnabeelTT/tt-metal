@@ -48,7 +48,7 @@ def test_perf_prefill(kind, rows):
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
-        dec = build_layer(mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4224)
+        dec = build_layer(mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4096)
         X = ttnn.from_torch(_x(rows, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
         inputs = dec.prefill_inputs(rows, start=0, length=rows, slot=0)
         Y, _ = dec.prefill_forward(X, inputs=inputs)  # compile
@@ -72,7 +72,7 @@ def test_perf_traced_decode(kind, batch):
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
-        dec = build_layer(mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4224)
+        dec = build_layer(mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4096)
         runner = DecodeRunner(dec, mesh, batch)
         rows = {s: torch.randn(H4) * 0.02 for s in range(batch)}
         pos = [128] * batch

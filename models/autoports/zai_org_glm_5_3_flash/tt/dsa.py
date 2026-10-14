@@ -74,6 +74,8 @@ class GlmDSA(LightweightModule):
         self.S = max_batch
         assert max_context % 128 == 0
         self.T = max_context
+        # decode token indices are flat cache rows slot * T + t carried in fp32 (integers exact below 2**24)
+        assert self.S * self.T <= 1 << 24, f"max_batch * max_context = {self.S * self.T} > 2**24"
         self.P = max_context // KPOOL  # pool slots per user
         self.P_alloc = self.P + 32  # + one tile: indexer_score_dsa causal start sits at P (all real pools visible)
         rep = ttnn.ReplicateTensorToMesh(mesh_device)
@@ -233,11 +235,13 @@ class GlmDSA(LightweightModule):
         [1,1,rows,1] row offset of the user's cache -> fp32 [1,1,rows,IDX_WIDTH] (sentinels at the end)."""
         n_tok = TOPK_POOLS * KPOOL
         offs = self._const("pool_offs")
-        exp_mat = self._const("pool_expand")
         p = ttnn.typecast(top_pools, ttnn.float32)
-        # tokens of every selected pool: 4p + j (a [512 -> 2048] expansion matmul; exact for ids < 2**22 in fp32)
-        tok = ttnn.add(ttnn.matmul(p, exp_mat, compute_kernel_config=self.ckc, dtype=ttnn.float32), offs)
+        # tokens of every selected pool: 4p + j. Elementwise (exact in fp32); a [512 -> 2048] expansion matmul is not:
+        # the matmul unit reads fp32 operands at TF32 precision (pool ids >= 2**11 off by up to 508 tokens at HiFi4)
+        p4 = ttnn.repeat_interleave(p, KPOOL, dim=3)
         ttnn.deallocate(p)
+        tok = ttnn.add(ttnn.multiply(p4, float(KPOOL)), offs)
+        ttnn.deallocate(p4)
         # tail: tokens 4*floor((t+1)/4) .. t (0-3 of them), then sentinels up to IDX_WIDTH
         tail_cols = IDX_WIDTH - n_tok
         j = self._const(("tail_j", tail_cols))
@@ -304,12 +308,6 @@ class GlmDSA(LightweightModule):
         tail_cols = IDX_WIDTH - n_tok
         self._const(
             "pool_offs", lambda: self._dev(torch.arange(KPOOL).float().repeat(TOPK_POOLS).reshape(1, 1, 1, n_tok))
-        )
-        self._const(
-            "pool_expand",
-            lambda: self._dev(
-                torch.kron(torch.eye(TOPK_POOLS), torch.full((1, KPOOL), float(KPOOL))).reshape(1, 1, TOPK_POOLS, n_tok)
-            ),
         )
         self._const(
             ("tail_j", tail_cols), lambda: self._dev(torch.arange(tail_cols).float().reshape(1, 1, 1, tail_cols))

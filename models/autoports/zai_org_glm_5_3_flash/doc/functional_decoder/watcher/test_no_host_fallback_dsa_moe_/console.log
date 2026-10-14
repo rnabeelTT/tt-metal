@@ -1,0 +1,109 @@
+2026-10-14 20:01:55.539 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_no_host_fallback[dsa_moe] 2026-10-14 20:01:56.770 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-14 20:01:56.770 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-14 20:01:56.770 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-14 20:01:56.770 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-14 20:01:56.778 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-14 20:01:56.778 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-14 20:01:56.886 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-14 20:01:56.886 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-14 20:01:56.886 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-14 20:01:56.886 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-14 20:01:56.889 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-14 20:01:57.125 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-14 20:01:57.337 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-14 20:01:57.337 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-14 20:01:57.337 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-14 20:01:57.337 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-14 20:01:57.337 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-14 20:01:57.420 | info     |       LLRuntime | Watcher log file: models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/watcher/test_no_host_fallback_dsa_moe_/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-14 20:01:57.420 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-14 20:01:57.420 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-14 20:01:57.420 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:01:57.427 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:01:57.434 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:01:57.440 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:07.464 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:07.483 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:07.502 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:07.522 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:17.555 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:17.563 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:17.571 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:17.579 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:27.598 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:27.608 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:27.615 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:27.622 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:35.549 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:358 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-14 20:02:37.645 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:37.656 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:37.667 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:37.678 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:47.702 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:47.710 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:47.719 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:47.726 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:57.754 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:57.764 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:57.773 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-14 20:02:57.782 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+60.70s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_no_host_fallback[dsa_moe]
+1.67s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_no_host_fallback[dsa_moe]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_no_host_fallback[dsa_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_no_host_fallback[dsa_moe]
+========================= 1 passed in 62.53s (0:01:02) =========================
+nanobind: leaked 2 instances!
+ - leaked instance 0x797f179b0748 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x797f180e7678 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "is_allocated"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "merge"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-14 20:03:02.515 | info     |    BuildKernels | JIT cache stats: 764/764 hits (100.0%) [764 cached, 248 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-14 20:03:02.516 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-14 20:03:02.517 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-14 20:03:02.531 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-14 20:03:02.531 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-14 20:03:03.468 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-14 20:03:03.469 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-14 20:03:03.469 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)

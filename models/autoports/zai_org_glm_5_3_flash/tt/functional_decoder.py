@@ -151,6 +151,10 @@ class FunctionalDecoder(LightweightModule):
         else:
             from .dsa import GlmDSA
 
+            T = (dsa_kwargs or {}).get("max_context")
+            if T is not None:  # every prefill chunk occupies a whole constructed length of the per-slot caches
+                assert T % max(prefill_lengths) == 0, f"max_context {T} must be a multiple of {max(prefill_lengths)}"
+
             self.attn = GlmDSA(mesh_device, tc, sd, layer_idx, max_batch=max_batch, **(dsa_kwargs or {}))
 
         if self.mlp_kind == "dense":

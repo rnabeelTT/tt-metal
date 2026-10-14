@@ -273,3 +273,71 @@ def test_determinism(mesh, rd, kind):
     assert torch.equal(a_pre, b_pre), "prefill output differs between identical runs"
     for i, (a, b) in enumerate(zip(a_dec, b_dec)):
         assert torch.equal(a, b), f"decode step {i} differs between identical runs"
+
+
+# ------------------------------------------------------------------------------------- host fallback audit
+class _HostCall(RuntimeError):
+    pass
+
+
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_no_host_fallback(mesh, rd, kind, monkeypatch):
+    """One prefill pass (prefill_forward) and one decode pass (decode_forward) with every host <-> device transfer entry
+    point patched to raise: inputs are prepared before the pass, outputs read after it."""
+    layer = KINDS[kind]
+    dec = get_layer(mesh, rd, layer)
+    x, _ = reference(layer, "real", 1, 100, 1)
+    n = 128
+    xp = torch.zeros(1, 1, n, H4)
+    xp[0, 0, :100] = x[:100]
+    X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+    inputs = dec.prefill_inputs(n, start=0, length=100, slot=4)
+    runner = DecodeRunner(dec, mesh, BATCH)
+    pos = [-1] * BATCH
+    pos[4] = 100
+    runner._set_inputs({4: x[100]}, pos)
+
+    def boom(*a, **k):
+        raise _HostCall("host transfer inside a pass")
+
+    real = {name: getattr(ttnn, name) for name in ("from_torch", "to_torch", "copy_host_to_device_tensor")}
+    for name in real:
+        monkeypatch.setattr(ttnn, name, boom)
+    try:
+        Y, st = dec.prefill_forward(X, inputs=inputs)
+        kw = {"inputs": runner.dsa_bufs} if dec.attn_kind == "dsa" else {}
+        dec.commit_prefill(4, st)
+        Yd = dec.decode_forward(runner.x_buf, **kw)
+    finally:
+        for name, fn in real.items():
+            monkeypatch.setattr(ttnn, name, fn)
+    assert torch.isfinite(ttnn.to_torch(Y)[0, 0, :100]).all()
+    assert torch.isfinite(ttnn.to_torch(Yd)[0, 0, 4]).all()
+
+
+# ------------------------------------------------------------------------------- decode from an empty state
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_decode_only(mesh, rd, kind):
+    """Decode positions 0..3 of a fresh sequence (no prefill: zero KDA state and conv history, empty DSA cache), eager
+    first step then traced. Also the watcher case of the KDA layers (whose prefill kernel does not fit the kernel
+    config buffer once watcher-instrumented; doc/functional_decoder/README.md)."""
+    layer = KINDS[kind]
+    dec = get_layer(mesh, rd, layer)
+    steps, slot = 4, 6
+    r = hf_layer_reference({"layer": layer, "weights": "real", "tokens": tokens(77, steps), "segments": [1] * steps})
+    x = r["x"].float().reshape(steps, H4)
+    y = r["y"].float().reshape(steps, H4)
+    if dec.attn_kind == "kda":  # fresh sequence: zero carry in the slot
+        st = dec.attn.new_prefill_state()
+        dec.commit_prefill(slot, st)
+    runner = DecodeRunner(dec, mesh, BATCH)
+    for i in range(steps):
+        pos = [-1] * BATCH
+        pos[slot] = i
+        if i == 0:
+            o = runner.eager_step({slot: x[0]}, pos)[slot]
+            runner.capture({slot: x[1]}, [p + 1 if p >= 0 else -1 for p in pos])
+        else:
+            o = runner.traced_step({slot: x[i]}, pos)[slot]
+        check(f"L{layer} slot {slot} decode-only pos {i}", o, x[i], y[i])
+    runner.release()

@@ -30,19 +30,27 @@ def _cache_dir() -> Path:
     return d
 
 
+# Cache key = the request + this version. Bump it when the HF reference semantics change (hf_layer_ref.py, the
+# synthetic generators in tt/synthetic.py): file contents are not hashed, so formatting edits keep the cache.
+REF_VERSION = "glm53-ref-1"
+
+
 def _digest(req: dict) -> str:
     buf = io.BytesIO()
     torch.save({k: req[k] for k in sorted(req)}, buf)
     h = hashlib.sha256(buf.getvalue())
-    h.update(SCRIPT.read_bytes())
-    h.update((HERE.parent.parent / "tt" / "synthetic.py").read_bytes())
+    h.update(REF_VERSION.encode())
     return h.hexdigest()[:24]
+
+
+def cache_path(req: dict) -> Path:
+    return _cache_dir() / f"{_digest(req)}.pt"
 
 
 def hf_layer_reference(req: dict, timeout: int = 7200) -> dict:
     """req: see hf_layer_ref.py. Returns the result dict (cached)."""
     key = _digest(req)
-    out = _cache_dir() / f"{key}.pt"
+    out = cache_path(req)
     if not out.exists():
         req_path = _cache_dir() / f"{key}.req.pt"
         torch.save(req, req_path)
