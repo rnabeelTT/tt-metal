@@ -54,6 +54,7 @@
 #include "ttnn/operations/experimental/moe_sorted_dispatch/moe_sorted_dispatch_nanobind.hpp"
 #include "ttnn/operations/experimental/moe_gather_add_rows/moe_gather_add_rows_nanobind.hpp"
 #include "ttnn/operations/experimental/moe_gather_rows/moe_gather_rows_nanobind.hpp"
+#include "ttnn/operations/experimental/scatter_rows/scatter_rows_nanobind.hpp"
 #include "ttnn/operations/experimental/fft/fft_nanobind.hpp"
 #include "ttnn/operations/experimental/quasar/quasar_nanobind.hpp"
 #include "ttnn/operations/experimental/dropout/dropout_nanobind.hpp"
@@ -188,6 +189,7 @@ void py_module(nb::module_& mod) {
     moe_dispatch_nb::detail::bind_experimental_moe_sorted_dispatch_operation(mod);
     moe_gather_nb::detail::bind_experimental_moe_gather_add_rows_operation(mod);
     moe_gather_rows_nb::detail::bind_experimental_moe_gather_rows_operation(mod);
+    scatter_rows_nb::detail::bind_experimental_scatter_rows_operation(mod);
     fft_binding::detail::bind_experimental_fft_operation(mod);
 
     // Quasar (metal 2.0) ops — creates the ttnn.experimental.quasar submodule.

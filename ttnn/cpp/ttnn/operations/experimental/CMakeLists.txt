@@ -69,6 +69,7 @@ add_subdirectory(plusone)
 add_subdirectory(moe_sorted_dispatch)
 add_subdirectory(moe_gather_add_rows)
 add_subdirectory(moe_gather_rows)
+add_subdirectory(scatter_rows)
 add_subdirectory(reshape)
 add_subdirectory(ssm)
 add_subdirectory(tensor_prefetcher)
@@ -119,6 +120,7 @@ target_link_libraries(
         TTNN::Ops::Experimental::MoeSortedDispatch
         TTNN::Ops::Experimental::MoeGatherAddRows
         TTNN::Ops::Experimental::MoeGatherRows
+        TTNN::Ops::Experimental::ScatterRows
         TTNN::Ops::Experimental::Reshape
         TTNN::Ops::Experimental::SSM
         TTNN::Ops::Experimental::TensorPrefetcher
@@ -174,6 +176,7 @@ target_sources(
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::MoeSortedDispatch>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::MoeGatherAddRows>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::MoeGatherRows>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::ScatterRows>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::Reshape>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::SSM>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::TensorPrefetcher>
