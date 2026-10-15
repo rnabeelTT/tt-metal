@@ -5,7 +5,7 @@
 A 1,048,000-token prompt (not a multiple of the 2048 chunk, the 128 page or the 4-token pool) is prefilled in 2048-row
 chunks into decode slot 0 of a 1-slot layer, then 3 decode steps run at positions 1,048,000..1,048,002. The input
 stream is generated chunk by chunk (synthetic.synthetic_stream_segment: per-channel statistics of the real stream of
-the layer kind) on both sides; the HF reference (tests/hf_ref/hf_layer_ref.py "long" mode, checked bit-exact against the
+the layer kind) on both sides; the HF reference (tests/hf_ref/hf_layer_ref.py "long" mode, checked against the
 full forward at 4K) fills the layer cache segment by segment and runs the HF layer on the last 64 prompt rows and the
 decode steps. Compared: the last 64 prompt rows and the 3 decode rows.
 """

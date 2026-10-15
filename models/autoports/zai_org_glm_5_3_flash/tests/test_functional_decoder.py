@@ -41,6 +41,9 @@ FULL_BAR = 0.99
 # update PCC 0.983-0.9957 (scripts/route_margin.py). Such a token is held to NEAR_TIE_BAR and logged in NEAR_TIES.
 NEAR_TIE = 5e-3
 NEAR_TIE_BAR = 0.98
+# update scale |X' - X| TT / HF: a systematic scale error is invisible to PCC (review #1: routed experts were 0.976 before
+# the sparse_matmul fp32-partials fix)
+UPDATE_RMS_RANGE = (0.95, 1.05)
 NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
@@ -145,14 +148,18 @@ def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
     expert differently and is held to NEAR_TIE_BAR (recorded in NEAR_TIES)."""
     d = pcc(got - x, y - x)
     f = pcc(got, y)
+    r = float((got - x).norm() / (y - x).norm())  # update scale vs HF (PCC is scale-blind)
     note = f" (HF router margin {margin:.1e})" if margin is not None else ""
-    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f}{note}")
+    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
     if d < delta_bar and margin is not None and margin < NEAR_TIE:
         assert d >= NEAR_TIE_BAR, f"{tag}: delta PCC {d:.6f} < {NEAR_TIE_BAR} (router near-tie, margin {margin:.1e})"
         NEAR_TIES.append((tag, d, margin))
         print(f"{tag}: accepted as a router near-tie")
         return d, f
     assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
+    assert (
+        UPDATE_RMS_RANGE[0] <= r <= UPDATE_RMS_RANGE[1]
+    ), f"{tag}: update rms ratio {r:.4f} outside {UPDATE_RMS_RANGE}"
     assert f >= full_bar, f"{tag}: full PCC {f:.6f} < {full_bar}"
     return d, f
 
@@ -495,7 +502,7 @@ def test_batch32_all_active(mesh, rd, kind):
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_inactive_slot_state(mesh, rd, kind):
     """User B (slot 2, prompt 102: its last pool is open) is prefilled; user A (slot 5) then decodes 4 steps while B is
-    inactive (position -1). B then decodes 2 steps together with A and must match HF: decode leaves an inactive slot's
+    inactive (position -1) with a NaN input row. B then decodes 2 steps together with A and must match HF: decode leaves an inactive slot's
     KDA state / conv history and DSA open-pool state and caches untouched."""
     layer = KINDS[kind]
     dec = get_layer(mesh, rd, layer)
@@ -506,10 +513,12 @@ def test_inactive_slot_state(mesh, rd, kind):
     prefill_user(dec, mesh, xb, nb, 2)
     prefill_user(dec, mesh, xa, na, 5)
     runner = DecodeRunner(dec, mesh, BATCH)
+    nan_row = torch.full_like(xa[0], float("nan"))
     for i in range(4):
         pos = [-1] * BATCH
         pos[5] = na + i
-        o = runner.eager_step({5: xa[na + i]}, pos)
+        # the idle slot B gets a non-finite row (as a stacked model's idle rows may carry): its state must not change
+        o = runner.eager_step({5: xa[na + i], 2: nan_row}, pos)
         check(f"L{layer} A alone pos {na + i}", o[5], xa[na + i], ya[na + i], margin=ra.row_margin(na + i))
     for i in range(2):
         pos = [-1] * BATCH

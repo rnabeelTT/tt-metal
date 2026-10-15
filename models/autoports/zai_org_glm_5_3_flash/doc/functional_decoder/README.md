@@ -52,29 +52,31 @@ sentinel rows, MoE rows computed and dropped).
 
 PCC of the layer update `X' - X` >= 0.995 (prefill rows and decode steps) and of the full stream `X'` >= 0.99. The
 HF reference rounds the 4-stream residual to bf16 at every mix while the port keeps fp32, so the full-stream PCC has a
-floor below 1 that is not a port error; the update PCC is the stricter measure.
+floor below 1 that is not a port error; the update PCC is the stricter measure. The full-stream bar (0.99) is a coarse
+sanity bar; measured minimum 0.99934 outside the router near-tie tokens (0.99731 with them). The tests also bound the
+update scale: |X' - X| TT / HF within [0.95, 1.05] (PCC is scale-blind; review #1).
 
 ## Results (tests/test_functional_decoder.py, real weights unless noted)
 
 Command: `pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py` (one die; log
-`~/glm53-flash-bringup/logs/s1_functional.log`, 2026-10-15, after the paging / masking / sparse_matmul fixes; references
-recomputed with the code-hashed cache key). 42 tests: 40 passed in that run; the two near-tie cases (`test_lengths[dsa_moe-2051]`, `test_paged_permuted_blocks`) failed under the first threshold (1e-3) and pass under the evidence-based rule (rerun log `s1_functional_rerun.log`). Minimum update / full-stream PCC per case: one PCC over all prefill
+`~/glm53-flash-bringup/logs/s1_functional3.log`, 2026-10-15, final code: paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
+recomputed with the code-hashed cache key). 42 tests, 42 passed (the two near-tie cases `test_lengths[dsa_moe-2051]` and `test_paged_permuted_blocks` pass under the evidence-based near-tie rule below). Minimum update / full-stream PCC per case: one PCC over all prefill
 rows of a case (flattened) and one per decode step (single token):
 
 | case | checks | min update PCC | min full PCC |
 |---|---|---|---|
-| real weights kda_dense / dsa_moe / kda_moe (prefill 100 at slot 5 of 8, 3 decode steps: eager, then traced) | 4 each | 0.99996 / 0.99979 / 0.99925 | 0.99987 / 0.99990 / 0.99998 |
-| lengths kda_dense 1, 31, 33, 128, 129, 2047, 2049, 4000 | 4 each | >= 0.99993 | >= 0.99984 |
+| real weights kda_dense / dsa_moe / kda_moe (prefill 100 at slot 5 of 8, 3 decode steps: eager, then traced) | 4 each | 0.99997 / 0.99979 / 0.99915 | 0.99995 / 0.99990 / 0.99997 |
+| lengths kda_dense 1, 31, 33, 128, 129, 2047, 2049, 4000 | 4 each | >= 0.99996 | >= 0.99993 |
 | lengths dsa_moe 1, 33, 129, 2049, 2177, 4000 | 4 each | >= 0.99961 | >= 0.99977 |
 | lengths dsa_moe 2051 (dense -> sparse switch) | 4 | 0.98969 (decode pos 2052: router near-tie, see below); others >= 0.99980 | 0.99758 |
-| lengths kda_moe 33, 2049 | 4 each | 0.99969 / 0.99924 | >= 0.99998 |
-| 4 users in slots 1, 3, 4, 6 (lengths 37, 100, 300 or 2100 for DSA, 64), prefilled one by one, decoded together | 16 per kind | 0.99995 / 0.99878 / 0.99919 | >= 0.99934 |
-| 32 users, all slots active, mixed positions (DSA: two lengths past 2051), eager then traced | 96 per kind | 0.99990 / 0.98292* / 0.99437* | >= 0.99749 |
+| lengths kda_moe 33, 2049 | 4 each | 0.99969 / 0.99870 | >= 0.99997 |
+| 4 users in slots 1, 3, 4, 6 (lengths 37, 100, 300 or 2100 for DSA, 64), prefilled one by one, decoded together | 16 per kind | 0.99997 / 0.99877 / 0.99911 | >= 0.99933 |
+| 32 users, all slots active, mixed positions (DSA: two lengths past 2051), eager then traced | 96 per kind | 0.99993 / 0.98292* / 0.99437* | >= 0.99749 |
 | paged caches through a shuffled, interleaved block table (users 4000 / 2100 / 129) | 10 | 0.99189* (pos 4002); others >= 0.99974 | 0.99731 |
-| inactive slots keep their state (B decodes after idling 4 steps) | 8 per kind | 0.99995 / 0.99989 / 0.99942 | >= 0.99988 |
-| determinism (same sequence twice: prefill and traced decode bit-identical) | 10 per kind | 0.99996 / 0.99983 / 0.99880 | >= 0.99987 |
-| decode from an empty state (positions 0-3) | 4 per kind | 0.99997 / 0.99993 / 0.99974 | >= 0.99943 |
-| synthetic weights kda_dense / dsa_moe / kda_moe | 4 each | 0.99955 / 0.99797 / 0.98775 (prefill, see below) | >= 0.99799 |
+| inactive slots keep their state (B decodes after idling 4 steps) | 8 per kind | 0.99997 / 0.99989 / 0.99941 | >= 0.99996 |
+| determinism (same sequence twice: prefill and traced decode bit-identical) | 10 per kind | 0.99997 / 0.99983 / 0.99914 | >= 0.99991 |
+| decode from an empty state (positions 0-3) | 4 per kind | 0.99997 / 0.99993 / 0.99974 | >= 0.99996 |
+| synthetic weights kda_dense / dsa_moe / kda_moe | 4 each | 0.99957 / 0.99797 / 0.99206 (prefill, see below) | >= 0.99799 |
 
 \* Router near-ties (MoE layers, single decode tokens). The port's FFN input differs from HF's by ~1 % relative (HF
 rounds its 4-stream residual to bf16 at every mix; the port keeps fp32), so the router's selection scores move by up to
@@ -98,7 +100,7 @@ expert-selection margin below 1e-3 (real stream: 8.7 %; real router on the synth
 relative difference between the TT and HF FFN inputs (after mHC and RMSNorm) flips experts of a few prefill tokens.
 Measured on layer 4 (`tools/layer_stage_probe.py`): every stage up to the FFN input at PCC >= 0.99994; FFN output
 on the TT input 0.987, on the HF input 0.9998. The synthetic MoE tests therefore assert (a) the MoE block on the HF
-FFN input >= 0.995 (0.9983 / 0.9998) and (b) the layer update >= 0.98 (prefill 0.99796 / 0.98772, decode >= 0.9995).
+FFN input >= 0.995 (0.9984 / 0.9999) and (b) the layer update >= 0.98 (prefill 0.99797 / 0.99206, decode >= 0.9996).
 Real-weight cases keep the 0.995 bar throughout.
 
 ## Context contract
@@ -109,14 +111,14 @@ Functional decoder: the full advertised context, no capability reduction (`doc/c
 `tests/test_long_context.py`: a 1,048,000-token prompt (not a multiple of the chunk, the page or the pool) is prefilled
 in 2048-row chunks into decode slot 0 of a one-slot layer with `max_context` 1,048,576, then 3 decode steps run at
 positions 1,048,000-1,048,002. The input rows come from the per-channel statistics of the real stream of the layer
-kind; the HF reference (`tests/hf_ref` long mode, bit-exact against the full HF forward at 4K) fills its layer cache
-segment by segment. Logs `~/glm53-flash-bringup/logs/s1_long_{kda_dense,dsa_moe,kda_moe}.log` (2026-10-15, paged caches).
+kind; the HF reference (`tests/hf_ref` long mode; vs the plain full HF forward at 4K: bit-identical for the KDA layer, max |diff| 4.9e-4 = bf16 rounding of the segment-wise cache fill for the DSA layer, `scripts/long_mode_check.py`, log `long_mode_check.log` here) fills its layer cache
+segment by segment. Logs `~/glm53-flash-bringup/logs/s1_long3_{kda_dense,kda_moe}.log` (2026-10-15, final code) and `s1_long_dsa_moe.log` (2026-10-15, paged caches; the later KDA / dense-MLP fidelity changes do not touch this layer).
 
 | kind | prefill 1,048,000 tokens (one die) | update PCC, last 64 prompt rows | update PCC, decode at 1,048,000..002 |
 |---|---|---|---|
-| kda_dense (layer 0) | 75 s | 0.99994 | >= 0.99995 |
+| kda_dense (layer 0) | 76 s | 0.99997 | >= 0.99997 |
 | dsa_moe (layer 3, paged caches) | 210 s | 0.99733 | >= 0.99975 |
-| kda_moe (layer 4) | 99 s | 0.99857 | >= 0.99936 |
+| kda_moe (layer 4) | 98 s | 0.99923 | >= 0.99936 |
 
 Device state per layer and slot at 1M: DSA latent 1 GiB (512 x bf16 per token), pool keys 64 MiB; KDA state 4 MiB
 (context-independent). With the paged caches the DSA memory is a shared block pool: the 1M sequence occupies 8192
@@ -141,20 +143,23 @@ PCC 0.9877 at 1M). It is now `repeat_interleave` + an elementwise multiply-add (
 `doc/functional_decoder/tracy/<case>/`. Device time = sum of `Device Time` (us) over the ops of one pass in the
 signposted window (decode: one of the 3 traced replays).
 
-| case | ops / pass | device time (us) | op-to-op gaps (us) | host wall (Tracy run) |
+Refreshed 2026-10-15 on the final stage-1 code (paged DSA caches, sparse_matmul fix; `scripts/s2_tracy.sh`, functional
+pass; table by `tools/perf_tables.py doc/functional_decoder`):
+
+| case | ops / pass | device time (us) | op-to-op gaps (us) | host wall |
 |---|---|---|---|---|
-| prefill kda_dense 128 rows | 80 | 3874 | 3916 | 8.28 ms |
-| prefill kda_dense 2048 rows | 80 | 41009 | 2504 | 44.85 ms |
-| prefill dsa_moe 128 rows | 137 | 20696 | 918 | 22.10 ms |
-| prefill dsa_moe 2048 rows | 137 | 128848 | 77 | 129.92 ms |
-| prefill kda_moe 128 rows | 118 | 19997 | 1824 | 22.23 ms |
-| prefill kda_moe 2048 rows | 118 | 81801 | 628 | 83.38 ms |
-| traced decode kda_dense, 1 user | 124 | 3404 | 88 | 4.10 ms |
-| traced decode kda_dense, 32 users | 122 | 16391 | 81 | 19.81 ms |
-| traced decode dsa_moe, 1 user | 178 | 3882 | 148 | 4.70 ms |
-| traced decode dsa_moe, 32 users | 185 | 16856 | 132 | 20.67 ms |
-| traced decode kda_moe, 1 user | 160 | 3948 | 120 | 4.71 ms |
-| traced decode kda_moe, 32 users | 166 | 29270 | 115 | 29.98 ms |
+| test_perf_prefill_dsa_moe-128 | 148 | 21987 | 1387 | 24.19 ms |
+| test_perf_prefill_dsa_moe-2048 | 148 | 130998 | 89 | 132.07 ms |
+| test_perf_prefill_kda_dense-128 | 80 | 4043 | 1819 | 6.08 ms |
+| test_perf_prefill_kda_dense-2048 | 80 | 43349 | 607 | 44.78 ms |
+| test_perf_prefill_kda_moe-128 | 118 | 21294 | 1744 | 23.32 ms |
+| test_perf_prefill_kda_moe-2048 | 118 | 84292 | 627 | 85.89 ms |
+| test_perf_traced_decode_dsa_moe-1 | 181 | 3900 | 156 | 4.709 ms/step |
+| test_perf_traced_decode_dsa_moe-32 | 187 | 17143 | 129 | 22.540 ms/step |
+| test_perf_traced_decode_kda_dense-1 | 130 | 3510 | 91 | 4.229 ms/step |
+| test_perf_traced_decode_kda_dense-32 | 128 | 16492 | 85 | 17.212 ms/step |
+| test_perf_traced_decode_kda_moe-1 | 166 | 4041 | 122 | 4.871 ms/step |
+| test_perf_traced_decode_kda_moe-32 | 172 | 29760 | 118 | 30.506 ms/step |
 
 Conclusions (inputs to stages 2-5): one die holds every weight of the layer (bf16 KDA projections: the 32 x 4096 x
 32960 input projection alone is 717 us at decode); mHC costs ~25 % of a decode step (the 16384-wide projection runs
@@ -178,6 +183,9 @@ reshape / transpose at 2048 rows.
   feature on) runs `test_perf_prefill[kda_dense-2048]`, `[kda_moe-2048]`, `[kda_moe-128]` and
   `test_perf_traced_decode[kda_moe-32]` clean (`scripts/01-watcher-kda-l1.sh`, logs `watcher_kda_l1/`). The earlier
   attempts with reduced watcher features (`watcher_reduced/` etc.) are kept for reference.
+- Watcher on the final code (2026-10-15, paged caches, inactive-slot masking, HiFi4 fidelities; logs `watcher_final/<case>/`,
+  worker_l1_size 1,444,864): `test_real_weights[dsa_moe]`, `test_lengths[dsa_moe-4000]`, `test_batch32_all_active[dsa_moe]`,
+  `test_real_weights[kda_moe]`, `test_lengths[kda_dense-4000]` pass, 0 error / assert / sanitize lines.
 
 ## Limitations
 
@@ -189,4 +197,7 @@ reshape / transpose at 2048 rows.
   SwiGLU are exact; the sparse_matmul factories (grouped, 1d) reloaded the fp32 partial sums through SrcA (TF32) at every
   K block. With the partials CB marked UnpackToDestFp32 (as the dense 1d matmul factory does): 1.0036 / PCC 0.99998.
   bfp4 expert weights (datatype stage) cost 0.9826 PCC / 1.0275 scale on their own (same probe).
+- KDA attention output scale: 0.9954 of HF on real weights (layer 0, after the HiFi2 -> HiFi4 recurrence fix; PCC 0.99998);
+  the remaining -0.47 % is not root-caused (projections, norm epsilon and fused sigmoid ruled out). Bounded by the tests'
+  update-scale check.
 - The MTP layer and the vision tower are not part of the decoder stages (full-model / vLLM stages).

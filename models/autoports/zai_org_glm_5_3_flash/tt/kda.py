@@ -26,13 +26,23 @@ import torch
 import ttnn
 from models.common.lightweightmodule import LightweightModule
 from models.demos.deepseek_v3_d_p.reference.kda.config import KDAConfig
-from models.demos.deepseek_v3_d_p.tt.kda.config import KDAProgramConfig
+from models.demos.deepseek_v3_d_p.tt.kda.config import KDAProgramConfig, KDARecurrenceProgramConfig
 from models.demos.deepseek_v3_d_p.tt.kda.kda import KdaState, ttKDA
 from models.demos.deepseek_v3_d_p.tt.kda.weights import load_kda_weights
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 KDA_CHUNK = 32
 GATE_LOWER_BOUND = -5.0
+
+
+def _EXACT_DECAY_CKC(mesh_device):
+    return ttnn.init_device_compute_kernel_config(
+        mesh_device.arch(),
+        math_fidelity=ttnn.MathFidelity.HiFi4,
+        math_approx_mode=False,
+        fp32_dest_acc_en=True,
+        packer_l1_acc=True,
+    )
 
 
 def kda_config(tc: dict) -> KDAConfig:
@@ -90,7 +100,8 @@ class _GlmPrefillKDA(ttKDA):
             bias=self.weights.decay_bias_flat,
             program_config=self.decay_program_config,
             memory_config=self.decay_memory_config,
-            compute_kernel_config=self.compute_config,
+            # exact (math_approx_mode=False) fused sigmoid: ttKDA's compute_config leaves approx mode at its default
+            compute_kernel_config=_EXACT_DECAY_CKC(self.device),
         )
         ttnn.deallocate(rank_in)
         return gate
@@ -145,7 +156,13 @@ class GlmKDA(LightweightModule):
                 tt_ccl=tt_ccl,
                 sp_axis=0,
                 tp_axis=1,
-                program_config=KDAProgramConfig(),
+                program_config=KDAProgramConfig(
+                    # the chunk-recurrence matmuls at HiFi4 (default HiFi2 truncates: attn output ~0.9 % low, review #2)
+                    recurrence=KDARecurrenceProgramConfig(
+                        affine_prefix_math_fidelity=ttnn.MathFidelity.HiFi4,
+                        scan_math_fidelity=ttnn.MathFidelity.HiFi4,
+                    ),
+                ),
                 active_seq_len=n,
             )
             for n in self.prefill_lengths
@@ -300,6 +317,10 @@ class GlmKDA(LightweightModule):
                 memory_config=DRAM,
             )
         qkv = ttnn.silu(acc, memory_config=DRAM)
+        # inactive slots: zero q / k / v (a select, so non-finite rows of an idle slot cannot reach its state)
+        qkv_all = qkv
+        qkv = ttnn.where(inputs["active"], qkv_all, 0.0, memory_config=DRAM)
+        ttnn.deallocate(qkv_all)
         ttnn.deallocate(acc)
         self.shift_conv_history(dstate, cur, inputs["active_bf"])
         ttnn.deallocate(cur)

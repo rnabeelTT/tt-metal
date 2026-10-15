@@ -24,9 +24,9 @@
     "long_context_results": {
       "kda_dense": {
         "layer": 0,
-        "prefill_seconds": 75,
-        "prefill_update_pcc_last64": 0.999944,
-        "decode_update_pcc_min": 0.99995
+        "prefill_seconds": 76,
+        "prefill_update_pcc_last64": 0.999969,
+        "decode_update_pcc_min": 0.999969
       },
       "dsa_moe": {
         "layer": 3,
@@ -36,9 +36,9 @@
       },
       "kda_moe": {
         "layer": 4,
-        "prefill_seconds": 99,
-        "prefill_update_pcc_last64": 0.998573,
-        "decode_update_pcc_min": 0.999364
+        "prefill_seconds": 98,
+        "prefill_update_pcc_last64": 0.99923,
+        "decode_update_pcc_min": 0.999361
       }
     },
     "dsa_cache": "paged: shared block pool of 128-token blocks, block table [S, T/128 + 1]; any mix of sequence lengths up to the pool size"

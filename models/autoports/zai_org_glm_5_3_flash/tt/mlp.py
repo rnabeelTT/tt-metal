@@ -51,7 +51,8 @@ class DenseMLP(LightweightModule):
         self.wd = up_(down.T, row, "down")
         self.ckc = ttnn.init_device_compute_kernel_config(
             mesh_device.arch(),
-            math_fidelity=ttnn.MathFidelity.HiFi2,
+            # HiFi4: HiFi2 truncates the activation mantissa -> the MLP output ~0.8 % low on real weights (stage review #2)
+            math_fidelity=ttnn.MathFidelity.HiFi4,
             math_approx_mode=False,
             fp32_dest_acc_en=True,
             packer_l1_acc=False,

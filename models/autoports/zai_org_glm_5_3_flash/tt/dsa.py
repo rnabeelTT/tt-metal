@@ -193,9 +193,13 @@ class GlmDSA(LightweightModule):
             self.page_table,
         )
 
-    def _phys_rows(self, slot_of_row: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
-        """Physical latent rows of logical (slot, position) pairs."""
+    def _phys_rows(self, slot_of_row: torch.Tensor, pos: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        """Physical latent rows of logical (slot, position) pairs. Every position written / attended must sit in a block
+        the slot owns (never the shared dummy block, which only absorbs the indexer's overrun reads)."""
         blk = self.page_table_host[slot_of_row, pos // BLOCK].long()
+        assert not bool(
+            (valid & (blk == self.dummy_block)).any()
+        ), "a cache position maps to the dummy block (page table)"
         return blk * BLOCK + pos % BLOCK
 
     def _const(self, key, fn=None):
@@ -380,7 +384,7 @@ class GlmDSA(LightweightModule):
         """Device inputs of one prefill chunk (host -> device input construction, outside the pass)."""
         assert start % 128 == 0 and n % 128 == 0 and start + n <= self.T, (start, n, self.T)
         ar = torch.arange(n)
-        phys = self._phys_rows(torch.full((n,), slot), start + ar)
+        phys = self._phys_rows(torch.full((n,), slot), start + ar, ar < length)
         rows = torch.where(ar < length, phys, torch.full((n,), 0xFFFFFFFF)).reshape(1, n)
         pos = (start + ar).float().reshape(1, 1, n, 1)
         first_blk = start // KPOOL // 32
@@ -506,13 +510,13 @@ class GlmDSA(LightweightModule):
         active = torch.tensor([p >= 0 for p in positions])
         assert all(p < self.T for p in positions), f"decode position past max_context {self.T}"
         pos = torch.tensor([max(p, 0) for p in positions], dtype=torch.float32)
-        phys = self._phys_rows(torch.arange(S), pos.long())
+        phys = self._phys_rows(torch.arange(S), pos.long(), active)
         rows = torch.where(active, phys, torch.full((S,), 0xFFFFFFFF))
         j = pos.long() % KPOOL
         col = torch.arange(IDX_WIDTH).float().reshape(1, IDX_WIDTH)
-        dense_idx = torch.where(
-            (col <= pos.reshape(S, 1)) & active.reshape(S, 1), col, torch.full((S, IDX_WIDTH), SENTINEL_F)
-        )
+        # inactive slots (pos -> 0) keep index 0 (row 0 of their own first block): every index row needs one valid entry
+        # (sparse_sdpa gathers at least one key per row; an all-sentinel row would address before the cache)
+        dense_idx = torch.where(col <= pos.reshape(S, 1), col, torch.full((S, IDX_WIDTH), SENTINEL_F))
         limit = torch.where(active, torch.floor((pos + 1) / KPOOL), torch.zeros(S))
         return {
             "row_idx": (rows.reshape(1, S).to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),

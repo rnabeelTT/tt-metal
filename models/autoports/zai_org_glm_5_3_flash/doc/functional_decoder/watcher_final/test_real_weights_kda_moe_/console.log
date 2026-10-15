@@ -1,0 +1,62 @@
+=== start Thu Oct 15 07:35:58 PM UTC 2026 : timeout 3600 python_env/bin/pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe] -p no:cacheprovider
+2026-10-15 19:36:00.653 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe] 2026-10-15 19:36:11.101 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-15 19:36:27.584 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:360 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 slot 5 prefill 100: delta PCC 0.999250 full PCC 0.999977 update rms ratio 1.0027
+L4 slot 5 decode pos 100: delta PCC 0.999717 full PCC 0.999994 update rms ratio 1.0090 (HF router margin 3.3e-03)
+L4 slot 5 decode pos 101: delta PCC 0.999703 full PCC 0.999995 update rms ratio 0.9998 (HF router margin 2.6e-03)
+L4 slot 5 decode pos 102: delta PCC 0.999626 full PCC 0.999993 update rms ratio 1.0048 (HF router margin 2.0e-03)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+27.16s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+1.36s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[kda_moe]
+============================== 1 passed in 28.70s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x70c57fe32f58 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x70c57f6f0868 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "buffer_unique_id"
+ - leaked function "__ne__"
+ - leaked function "update_tensor_topology"
+ - leaked function "empty"
+ - leaked function "get_current_command_queue_id_for_thread"
+ - leaked function "devices"
+ - leaked function "get_num_devices"
+ - leaked function ""
+ - leaked function "enable_program_cache"
+ - leaked function "create_sub_device_manager"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Thu Oct 15 07:36:32 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

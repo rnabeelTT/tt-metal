@@ -79,3 +79,23 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
   (emulated bfp8 weights: routed rms 0.9995); TT vs the bfp8-emulated reference 0.9756 at PCC 0.99993, routing exact,
   dense matmuls / SwiGLU exact -> the grouped / 1d sparse_matmul factories reload the fp32 partials through SrcA (TF32
   rounding at every K block). Fix ported from matmul_multicore_reuse_mcast_1d: c_5 UnpackToDestFp32.
+- 2026-10-15 19:45 Stage review #2 (`artifacts/stage1_review_2.md`): more-work-needed, 4 x P2. Remediation:
+  1. DSA watcher evidence refreshed on the final code: test_real_weights[dsa_moe], test_lengths[dsa_moe-4000] (sparse
+     prefill), test_batch32_all_active[dsa_moe] (32-row decode), test_real_weights[kda_moe] (KDA prefill, worker_l1_size
+     1,444,864): all pass, 0 suspicious watcher lines (`watcher_final/`).
+  2. README perf table regenerated from the refreshed Tracy CSVs; stale 10-14 console.log.gz removed.
+  3. Inactive decode rows: an idle slot's index row now keeps index 0 (no all-sentinel row: sparse_sdpa gathered a
+     wrapped address before the cache); KDA idle rows of q / k / v zeroed by a select before the recurrence;
+     test_inactive_slot_state now feeds the idle slot a NaN row (passes).
+  4. Output scale on real weights (`tools/layer_stage_probe.py --weights real`, layers 0 / 4): dense matmuls exact
+     (`tools/matmul_scale_probe.py`: 1.00003); dense MLP ran at HiFi2 (activation mantissa truncation): ffn_out on the HF
+     input 0.9907 -> 0.9989 at HiFi4 (bfp8 weights alone: 0.9987); KDA chunk-recurrence matmuls (KDARecurrenceProgramConfig
+     affine prefix / scan) HiFi2 -> HiFi4: attn_out 0.9911 -> 0.9954. Residual KDA attn_out -0.47 % at PCC 0.99998 not
+     resolved (projections exact at HiFi4, norm eps equal, fused sigmoid exact); bounded by the new test metric.
+     Tests now also check the update scale |X' - X| TT / HF in [0.95, 1.05] (observed 0.984 - 1.045).
+  Other: HF long mode vs full forward at 4K checked (`scripts/long_mode_check.py`: KDA layer bit-identical, DSA layer
+  max |diff| 4.9e-4); dummy-block guard in the DSA page mapping.
+  Evidence after the fidelity change (2026-10-15, `scripts/review2_evidence_b.sh`): functional suite 42/42
+  (`s1_functional3.log`, results table regenerated), fused suite 43/43; 1M kda_dense 76 s / 0.99997 / decode >= 0.99997,
+  kda_moe 98 s / 0.99923 / decode >= 0.99936 (`s1_long3_*.log`, contract updated); KDA watcher case rerun; KDA Tracy
+  (functional and fused) refreshed.

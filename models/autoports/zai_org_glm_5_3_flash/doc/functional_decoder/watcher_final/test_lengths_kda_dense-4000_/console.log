@@ -1,5 +1,5 @@
-=== start Thu Oct 15 06:52:32 PM UTC 2026 : timeout 7200 python_env/bin/pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py -k kda_moe -p no:cacheprovider
-2026-10-15 18:52:34.441 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+=== start Thu Oct 15 08:30:05 PM UTC 2026 : timeout 3600 python_env/bin/pytest -sv /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000] -p no:cacheprovider
+2026-10-15 20:30:07.602 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
 Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
 ============================= test session starts ==============================
 platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
@@ -10,28 +10,27 @@ plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0,
 timeout: 300.0s
 timeout method: signal
 timeout func_only: False
-collecting ... collected 3 items / 2 deselected / 1 selected
+collecting ... collected 1 item
 
-models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py::test_long_context[kda_moe] 2026-10-15 18:52:45.021 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
-2026-10-15 18:52:57.725 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:360 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
-L4 prefill 1048000 tokens in 99 s; last 64 rows delta PCC 0.998573
-L4 decode position 1048000: delta PCC 0.999754
-L4 decode position 1048001: delta PCC 0.999364
-L4 decode position 1048002: delta PCC 0.999707
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000] 2026-10-15 20:30:10.518 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 0 prefill 4000: delta PCC 0.999972 full PCC 0.999944 update rms ratio 0.9967
+L0 slot 0 decode pos 4000: delta PCC 0.999979 full PCC 0.999957 update rms ratio 0.9983
+L0 slot 0 decode pos 4001: delta PCC 0.999973 full PCC 0.999949 update rms ratio 0.9990
+L0 slot 0 decode pos 4002: delta PCC 0.999969 full PCC 0.999939 update rms ratio 0.9984
 PASSED
 
 ==================================== PASSES ====================================
 - generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
 ============================= slowest 25 durations =============================
-122.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py::test_long_context[kda_moe]
-0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py::test_long_context[kda_moe]
-0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py::test_long_context[kda_moe]
+3.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000]
+1.38s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000]
 =========================== short test summary info ============================
-PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_long_context.py::test_long_context[kda_moe]
-================= 1 passed, 2 deselected in 122.23s (0:02:02) ==================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_lengths[kda_dense-4000]
+============================== 1 passed in 4.45s ===============================
 nanobind: leaked 2 instances!
- - leaked instance 0x71971b3fef28 of type "ttnn._ttnn.tensor.CoreRangeSet"
- - leaked instance 0x71971acd8868 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x72ec92206f28 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x72ec91ae0868 of type "ttnn._ttnn.tensor.MemoryConfig"
 nanobind: leaked 20 types!
  - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
  - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
@@ -45,18 +44,18 @@ nanobind: leaked 20 types!
  - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
  - ... skipped remainder
 nanobind: leaked 257 functions!
- - leaked function "ranges"
- - leaked function "device"
- - leaked function ""
- - leaked function "disable_and_clear_program_cache"
  - leaked function ""
  - leaked function ""
  - leaked function ""
- - leaked function "is_sharded"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "buffer_page_size"
+ - leaked function "storage_type"
  - leaked function ""
  - leaked function ""
  - ... skipped remainder
 nanobind: this is likely caused by a reference counting issue in the binding code.
-See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Thu Oct 15 06:54:39 PM UTC 2026
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Thu Oct 15 08:30:14 PM UTC 2026
 Resetting all PCI devices: [0, 1, 2, 3]
 [95m Re-initializing boards after reset.... [0m
