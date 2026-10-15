@@ -15,7 +15,9 @@ Request (torch.save dict, --request):
              (length 1 = decode step, longer = chunked continuation)
   mask:      optional [B, S_total] bool padding mask (True = real token)
   capture:   bool, also return layer state (KDA conv/recurrent state, DSA latent / indexer rows, top-k indices)
-Result (torch.save dict, --out): y [B, S_total, 4, 4096] bf16, per-segment state when capture is set.
+Result (torch.save dict, --out): y [B, S_total, 4, 4096] bf16, per-segment state when capture is set; MoE layers also
+  route_margin [B, rows] fp32: per token, the 8th minus the 9th expert selection score (sigmoid(logit) + correction
+  bias) of the router, for the rows the layer was run on (near-tie classification of single-token deviations).
 """
 
 from __future__ import annotations
@@ -168,6 +170,7 @@ def run_long(req: dict, rd, tc, layer: int, mod) -> dict:
         if (a // seg) % 32 == 0:
             print(f"fill {a}/{fill_end} {time.time() - t0:.0f} s", flush=True)
     xt = gen(fill_end, tail + D)
+    margins = route_margin_hook(mod)
     ys = []
     y, _ = mod(
         xt[:, :tail], attention_mask=torch.ones(1, tail, dtype=torch.bool), past_key_values=cache, use_cache=True
@@ -181,7 +184,30 @@ def run_long(req: dict, rd, tc, layer: int, mod) -> dict:
             use_cache=True,
         )
         ys.append(y)
-    return {"x": xt, "y": torch.cat(ys, dim=1), "fill_seconds": time.time() - t0}
+    res = {"x": xt, "y": torch.cat(ys, dim=1), "fill_seconds": time.time() - t0}
+    if margins:
+        res["route_margin"] = torch.cat(margins, dim=1)
+    return res
+
+
+def route_margin_hook(mod):
+    """Record the router's top-k vs (k+1)-th selection-score margin of every token the layer runs on; returns the list
+    the hook appends [B, rows] tensors to (empty for dense-MLP layers)."""
+    margins = []
+    gate = getattr(mod.mlp, "gate", None)
+    if gate is None or not hasattr(gate, "e_score_correction_bias"):
+        return margins
+    k = gate.top_k
+
+    def hook(m, args, out):
+        logits = out[0].detach().float()
+        B = args[0].shape[0] if args and args[0].dim() == 3 else 1
+        s = torch.sigmoid(logits) + m.e_score_correction_bias.detach().float()
+        top = s.topk(k + 1, dim=-1).values
+        margins.append((top[..., k - 1] - top[..., k]).reshape(B, -1))
+
+    gate.register_forward_hook(hook)
+    return margins
 
 
 def capture_state(cache, layer: int, block_type: str) -> dict:
@@ -226,6 +252,7 @@ def run(req: dict) -> dict:
 
     mod = build_layer(tc, layer, layer_weights(req["weights"], layer, rd))
     block_type = tc.layer_types[layer]
+    margins = route_margin_hook(mod)
     taps = {}
     if req.get("taps"):  # sub-block inputs / outputs of the FIRST segment (diagnostics)
 
@@ -271,6 +298,8 @@ def run(req: dict) -> dict:
         result["topk"] = topks
     if taps:
         result["taps"] = taps
+    if margins:
+        result["route_margin"] = torch.cat(margins, dim=1)
     result["seconds"] = time.time() - t0
     result["block_type"] = block_type
     return result

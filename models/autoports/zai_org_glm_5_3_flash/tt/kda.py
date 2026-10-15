@@ -248,7 +248,40 @@ class GlmKDA(LightweightModule):
             ttnn.deallocate(row)
         ttnn.deallocate(conv)
 
-    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState) -> ttnn.Tensor:
+    def _decode_host_inputs(self, positions):
+        """Per-step decode inputs: positions[s] = position of slot s's token, -1 = inactive (state left unchanged)."""
+        active = torch.tensor([p >= 0 for p in positions]).float().reshape(1, 1, len(positions), 1)
+        return {
+            "active": (active, ttnn.float32, ttnn.TILE_LAYOUT),
+            "active_bf": (active, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+        }
+
+    def decode_inputs(self, positions):
+        rep = ttnn.ReplicateTensorToMesh(self.mesh)
+        return {
+            k: ttnn.from_torch(t, dtype=dt, layout=lay, device=self.mesh, mesh_mapper=rep)
+            for k, (t, dt, lay) in self._decode_host_inputs(positions).items()
+        }
+
+    def update_decode_inputs(self, bufs, positions):
+        rep = ttnn.ReplicateTensorToMesh(self.mesh)
+        for k, (t, dt, lay) in self._decode_host_inputs(positions).items():
+            ttnn.copy_host_to_device_tensor(ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=rep), bufs[k])
+
+    @staticmethod
+    def shift_conv_history(dstate: KdaDecodeState, cur: ttnn.Tensor, active_bf: ttnn.Tensor):
+        """h0 <- h1, h1 <- h2, h2 <- current for active slots; inactive slots keep their history (fixed addresses)."""
+        h0, h1, h2 = dstate.conv
+        new = [
+            ttnn.where(active_bf, h1, h0, memory_config=DRAM),
+            ttnn.where(active_bf, h2, h1, memory_config=DRAM),
+            ttnn.where(active_bf, cur, h2, memory_config=DRAM),
+        ]
+        for n, buf in zip(new, dstate.conv):
+            ttnn.copy(n, buf)
+            ttnn.deallocate(n)
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
         """x [1,1,B,hidden] (B = the state's batch) -> y [1,1,B,hidden]; updates dstate in place (trace-safe)."""
         B = x.shape[-2]
         H, K, V, W = self.H, self.K, self.V, self.W
@@ -268,10 +301,7 @@ class GlmKDA(LightweightModule):
             )
         qkv = ttnn.silu(acc, memory_config=DRAM)
         ttnn.deallocate(acc)
-        # shift the history: h0 <- h1, h1 <- h2, h2 <- current (in place, fixed addresses)
-        ttnn.copy(dstate.conv[1], dstate.conv[0])
-        ttnn.copy(dstate.conv[2], dstate.conv[1])
-        ttnn.copy(cur, dstate.conv[2])
+        self.shift_conv_history(dstate, cur, inputs["active_bf"])
         ttnn.deallocate(cur)
 
         q = ttnn.slice(qkv, (0, 0, 0, 0), (1, 1, B, H * K), memory_config=DRAM)
@@ -309,7 +339,13 @@ class GlmKDA(LightweightModule):
         eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)
         ttnn.deallocate(sg)
         beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
-        beta = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.multiply(beta_all, inputs["active"], memory_config=DRAM)
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
         ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
         ttnn.deallocate(proj)
 

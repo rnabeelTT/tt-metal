@@ -96,6 +96,10 @@ void bind_indexer_score(nb::module_& mod) {
                 across ALL sp*tp devices (linear chip = sp_coord*tp + tp_coord), so only the invP key
                 remap moves to (sp*tp, block_cyclic_chunk_local/tp) -- the causal geometry is unchanged.
                 Needs block_cyclic_chunk_local divisible by tp with a tile-aligned quotient.
+            page_table: optional [rows, max_blocks] int32/uint32 ROW_MAJOR DRAM tensor. Paged K: k is a pool
+                of 32-key blocks (one tile row each, any [B',1,T',D] shape whose T is the scored key length);
+                key tile row t of the scored sequence is read from block page_table[cache_batch_idx][t].
+                Requires cache_batch_idx (the page-table row); classic (non-fused, contiguous) layout only.
 
         Returns: score [B, 1, Sq, T] bf16 row-major; future/pad columns -inf.
         )doc",
@@ -112,7 +116,8 @@ void bind_indexer_score(nb::module_& mod) {
         nb::arg("seq_shard_axes") = std::nullopt,
         nb::arg("block_cyclic_sp_axis") = std::nullopt,
         nb::arg("block_cyclic_chunk_local") = std::nullopt,
-        nb::arg("block_cyclic_cache_tp_sharded") = false);
+        nb::arg("block_cyclic_cache_tp_sharded") = false,
+        nb::arg("page_table") = nb::none());
 
     ttnn::bind_function<"indexer_score_msa", "ttnn.experimental.">(
         mod,

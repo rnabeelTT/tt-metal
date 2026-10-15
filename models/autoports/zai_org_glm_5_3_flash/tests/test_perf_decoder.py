@@ -19,6 +19,38 @@ import ttnn
 from models.autoports.zai_org_glm_5_3_flash.tests.harness import H4, DecodeRunner, build_layer, open_mesh
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
 
+
+def _decoder_cls():
+    """GLM53_DECODER=fused: tt/fused_decoder.FusedDecoder (FusedFlags from GLM53_FUSED_OFF=comma list of flags to turn
+    off, for before / after measurements); default the functional decoder."""
+    kind = os.environ.get("GLM53_DECODER", "functional")
+    if kind == "optimized":
+        from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES, SELECTED, OptimizedDecoder
+
+        opt = CANDIDATES[os.environ["GLM53_OPT"]] if os.environ.get("GLM53_OPT") else SELECTED
+        print(f"optimized decoder policy: {opt.describe()}")
+
+        class _Opt(OptimizedDecoder):
+            @classmethod
+            def from_state_dict(cls, *a, **kw):
+                return OptimizedDecoder.from_state_dict(*a, opt=opt, **kw)
+
+        return _Opt
+    if kind != "fused":
+        return None
+    from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import FusedDecoder, FusedFlags
+
+    off = [f for f in os.environ.get("GLM53_FUSED_OFF", "").split(",") if f]
+    flags = FusedFlags(**{f: False for f in off})
+
+    class _Fused(FusedDecoder):
+        @classmethod
+        def from_state_dict(cls, *a, **kw):
+            return FusedDecoder.from_state_dict(*a, flags=flags, **kw)
+
+    return _Fused
+
+
 try:
     from tracy import signpost
 except ImportError:  # perf windows are optional outside Tracy
@@ -48,7 +80,9 @@ def test_perf_prefill(kind, rows):
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
-        dec = build_layer(mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4096)
+        dec = build_layer(
+            mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4096, decoder_cls=_decoder_cls()
+        )
         X = ttnn.from_torch(_x(rows, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
         inputs = dec.prefill_inputs(rows, start=0, length=rows, slot=0)
         Y, _ = dec.prefill_forward(X, inputs=inputs)  # compile
@@ -72,7 +106,9 @@ def test_perf_traced_decode(kind, batch):
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
-        dec = build_layer(mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4096)
+        dec = build_layer(
+            mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4096, decoder_cls=_decoder_cls()
+        )
         runner = DecodeRunner(dec, mesh, batch)
         rows = {s: torch.randn(H4) * 0.02 for s in range(batch)}
         pos = [128] * batch

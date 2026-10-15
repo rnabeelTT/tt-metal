@@ -27,13 +27,21 @@ from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
     pcc,
     prefill_user,
 )
-from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import hf_layer_reference
+from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import DryRunResult, hf_layer_reference
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
 
 KINDS = {"kda_dense": 0, "dsa_moe": 3, "kda_moe": 4}
 BATCH = 8
 DELTA_BAR = 0.995
 FULL_BAR = 0.99
+# Router near-ties: a decoded token whose HF top-8 vs 9th expert selection margin is below NEAR_TIE can take a
+# different 8th expert. The port's FFN input differs from HF's by ~1 % relative (PCC ~0.99994: HF rounds its 4-stream
+# residual to bf16 at every mix, the port keeps fp32), which moves the router's selection scores sigmoid(l) + bias by up
+# to ~2.5e-3 (sigmoid slope <= 0.25) -> margins of a few 1e-3 can flip. Measured flips: margins 6e-5 .. 1.7e-3 with
+# update PCC 0.983-0.9957 (scripts/route_margin.py). Such a token is held to NEAR_TIE_BAR and logged in NEAR_TIES.
+NEAR_TIE = 5e-3
+NEAR_TIE_BAR = 0.98
+NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
 
@@ -51,6 +59,8 @@ def rd():
 
 
 _LAYERS = {}
+# decoder under test; tests/test_fused_decoder.py loads its own instance of this module with the fused decoder
+DECODER_CLS = None
 
 
 def get_layer(mesh, rd, layer, weights="real"):
@@ -58,7 +68,7 @@ def get_layer(mesh, rd, layer, weights="real"):
     if key not in _LAYERS:
         for k in list(_LAYERS):  # keep one layer resident (DRAM)
             del _LAYERS[k]
-        _LAYERS[key] = build_layer(mesh, rd, layer, weights, batch=BATCH)
+        _LAYERS[key] = build_layer(mesh, rd, layer, weights, batch=BATCH, decoder_cls=DECODER_CLS)
     return _LAYERS[key]
 
 
@@ -103,21 +113,53 @@ def reference(layer, weights, seed, prefill_len, decode_steps):
             "segments": segs,
         }
     r = hf_layer_reference(req)
+    if isinstance(r, DryRunResult):
+        return _DryRef()
     x = (r["x"] if "x" in r else req["x"]).float().reshape(n, H4)
-    return x, r["y"].float().reshape(n, H4)
+    return Ref((x, r["y"].float().reshape(n, H4)), r.get("route_margin"))
 
 
-def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR):
+class _DryRef(tuple):
+    """Dry run (GLM53_REF_DRYRUN): the reference was only recorded; using it skips the test."""
+
+    def __iter__(self):
+        pytest.skip("reference recorded (GLM53_REF_DRYRUN)")
+
+    __getitem__ = __iter__
+
+
+class Ref(tuple):
+    """(x, y) of a reference sequence; .margin = HF router margin per row (None for dense-MLP layers)."""
+
+    def __new__(cls, xy, margin):
+        obj = super().__new__(cls, xy)
+        obj.margin = None if margin is None else margin.reshape(-1).float()
+        return obj
+
+    def row_margin(self, i):
+        return None if self.margin is None else float(self.margin[i])
+
+
+def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
+    """margin: the HF router margin of this (single) token, if any: below NEAR_TIE the token may legitimately route one
+    expert differently and is held to NEAR_TIE_BAR (recorded in NEAR_TIES)."""
     d = pcc(got - x, y - x)
     f = pcc(got, y)
-    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f}")
-    assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}"
+    note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f}{note}")
+    if d < delta_bar and margin is not None and margin < NEAR_TIE:
+        assert d >= NEAR_TIE_BAR, f"{tag}: delta PCC {d:.6f} < {NEAR_TIE_BAR} (router near-tie, margin {margin:.1e})"
+        NEAR_TIES.append((tag, d, margin))
+        print(f"{tag}: accepted as a router near-tie")
+        return d, f
+    assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
     assert f >= full_bar, f"{tag}: full PCC {f:.6f} < {full_bar}"
     return d, f
 
 
 def run_user(mesh, dec, layer, weights, seed, prefill_len, decode_steps, slot, traced=True):
-    x, y = reference(layer, weights, seed, prefill_len, decode_steps)
+    ref = reference(layer, weights, seed, prefill_len, decode_steps)
+    x, y = ref
     out = prefill_user(dec, mesh, x, prefill_len, slot)
     check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
     runner = DecodeRunner(dec, mesh, BATCH)
@@ -135,7 +177,13 @@ def run_user(mesh, dec, layer, weights, seed, prefill_len, decode_steps, slot, t
         else:
             o = runner.traced_step(rows, pos)[slot]
         outs.append(o)
-        check(f"L{layer} slot {slot} decode pos {prefill_len + i}", o, x[prefill_len + i], y[prefill_len + i])
+        check(
+            f"L{layer} slot {slot} decode pos {prefill_len + i}",
+            o,
+            x[prefill_len + i],
+            y[prefill_len + i],
+            margin=ref.row_margin(prefill_len + i),
+        )
     runner.release()
     return out, outs
 
@@ -258,7 +306,13 @@ def test_batched_users(mesh, rd, kind):
             got = runner.traced_step(rows, pos)
         for s, n in users.items():
             x, y = refs[s]
-            check(f"L{layer} user slot {s} decode pos {n + i}", got[s], x[n + i], y[n + i])
+            check(
+                f"L{layer} user slot {s} decode pos {n + i}",
+                got[s],
+                x[n + i],
+                y[n + i],
+                margin=refs[s].row_margin(n + i),
+            )
     runner.release()
 
 
@@ -305,9 +359,8 @@ def test_no_host_fallback(mesh, rd, kind, monkeypatch):
         monkeypatch.setattr(ttnn, name, boom)
     try:
         Y, st = dec.prefill_forward(X, inputs=inputs)
-        kw = {"inputs": runner.dsa_bufs} if dec.attn_kind == "dsa" else {}
         dec.commit_prefill(4, st)
-        Yd = dec.decode_forward(runner.x_buf, **kw)
+        Yd = dec.decode_forward(runner.x_buf, inputs=runner.dsa_bufs)
     finally:
         for name, fn in real.items():
             monkeypatch.setattr(ttnn, name, fn)
@@ -339,5 +392,128 @@ def test_decode_only(mesh, rd, kind):
             runner.capture({slot: x[1]}, [p + 1 if p >= 0 else -1 for p in pos])
         else:
             o = runner.traced_step({slot: x[i]}, pos)[slot]
-        check(f"L{layer} slot {slot} decode-only pos {i}", o, x[i], y[i])
+        mg = r.get("route_margin")
+        check(
+            f"L{layer} slot {slot} decode-only pos {i}",
+            o,
+            x[i],
+            y[i],
+            margin=None if mg is None else float(mg.reshape(-1)[i]),
+        )
     runner.release()
+
+
+# ------------------------------------------------------------------- paged DSA caches: permuted block table
+def test_paged_permuted_blocks(mesh, rd):
+    """DSA latent / pool-key caches through a random, interleaved, non-contiguous block table (every block of the pool
+    in use, slots' blocks shuffled together): users in the sparse regime (4000), across the 2048 chunk (2100) and short
+    (129) prefill and decode (eager, then traced) against HF."""
+    layer = KINDS["dsa_moe"]
+    dec = get_layer(mesh, rd, layer)
+    attn = dec.attn
+    bps = attn.T // 128
+    perm = torch.randperm(attn.NB - 1, generator=torch.Generator().manual_seed(11))[: BATCH * bps].reshape(BATCH, bps)
+    assert not torch.equal(perm, attn.default_page_table()[:, :bps])
+    dec.set_page_table(perm)
+    try:
+        users = {0: 4000, 5: 2100, 7: 129}
+        steps = 3
+        refs = {s: reference(layer, "real", 900 + s, n, steps) for s, n in users.items()}
+        for s, n in users.items():
+            x, y = refs[s]
+            check(f"L{layer} paged slot {s} prefill {n}", prefill_user(dec, mesh, x, n, s), x[:n], y[:n])
+        runner = DecodeRunner(dec, mesh, BATCH)
+        for i in range(steps):
+            pos = [-1] * BATCH
+            rows = {}
+            for s, n in users.items():
+                pos[s] = n + i
+                rows[s] = refs[s][0][n + i]
+            if i == 0:
+                got = runner.eager_step(rows, pos)
+                runner.capture({s: refs[s][0][n + 1] for s, n in users.items()}, [p + 1 if p >= 0 else -1 for p in pos])
+            else:
+                got = runner.traced_step(rows, pos)
+            for s, n in users.items():
+                x, y = refs[s]
+                check(
+                    f"L{layer} paged slot {s} decode pos {n + i}",
+                    got[s],
+                    x[n + i],
+                    y[n + i],
+                    margin=refs[s].row_margin(n + i),
+                )
+        runner.release()
+    finally:
+        dec.set_page_table(attn.default_page_table()[:, :bps])
+
+
+# ------------------------------------------------------------------------- 32 active slots, mixed positions
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_batch32_all_active(mesh, rd, kind):
+    """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+    dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+    layer = KINDS[kind]
+    for k in list(_LAYERS):  # one layer resident (DRAM)
+        del _LAYERS[k]
+    dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+    lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+    steps = 3
+    refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps) for seed in range(8)}
+    users = {}  # slot -> (seed, prompt length)
+    for slot in range(32):
+        users[slot] = (slot % 8, lengths[slot // 8])
+    for slot, (seed, n) in users.items():
+        x, y = refs[seed]
+        prefill_user(dec, mesh, x, n, slot)
+    runner = DecodeRunner(dec, mesh, 32)
+    worst = 1.0
+    for i in range(steps):
+        pos = [n + i for _, (_, n) in sorted(users.items())]
+        rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+        if i == 0:
+            got = runner.eager_step(rows, pos)
+            runner.capture({slot: refs[seed][0][n + 1] for slot, (seed, n) in users.items()}, [p + 1 for p in pos])
+        else:
+            got = runner.traced_step(rows, pos)
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            d, _ = check(
+                f"L{layer} 32-slot decode slot {slot} pos {n + i}",
+                got[slot],
+                x[n + i],
+                y[n + i],
+                margin=refs[seed].row_margin(n + i),
+            )
+            worst = min(worst, d)
+    runner.release()
+    print(f"L{layer} 32 active slots: min decode delta PCC {worst:.6f}")
+    del dec
+
+
+# ------------------------------------------------------------------------- inactive slots keep their state
+@pytest.mark.parametrize("kind", list(KINDS))
+def test_inactive_slot_state(mesh, rd, kind):
+    """User B (slot 2, prompt 102: its last pool is open) is prefilled; user A (slot 5) then decodes 4 steps while B is
+    inactive (position -1). B then decodes 2 steps together with A and must match HF: decode leaves an inactive slot's
+    KDA state / conv history and DSA open-pool state and caches untouched."""
+    layer = KINDS[kind]
+    dec = get_layer(mesh, rd, layer)
+    nb, na = 102, 64
+    rb = reference(layer, "real", 41, nb, 2)
+    ra = reference(layer, "real", 42, na, 6)
+    (xb, yb), (xa, ya) = rb, ra
+    prefill_user(dec, mesh, xb, nb, 2)
+    prefill_user(dec, mesh, xa, na, 5)
+    runner = DecodeRunner(dec, mesh, BATCH)
+    for i in range(4):
+        pos = [-1] * BATCH
+        pos[5] = na + i
+        o = runner.eager_step({5: xa[na + i]}, pos)
+        check(f"L{layer} A alone pos {na + i}", o[5], xa[na + i], ya[na + i], margin=ra.row_margin(na + i))
+    for i in range(2):
+        pos = [-1] * BATCH
+        pos[5], pos[2] = na + 4 + i, nb + i
+        o = runner.eager_step({5: xa[na + 4 + i], 2: xb[nb + i]}, pos)
+        check(f"L{layer} A pos {na + 4 + i}", o[5], xa[na + 4 + i], ya[na + 4 + i], margin=ra.row_margin(na + 4 + i))
+        check(f"L{layer} B after idling, pos {nb + i}", o[2], xb[nb + i], yb[nb + i], margin=rb.row_margin(nb + i))

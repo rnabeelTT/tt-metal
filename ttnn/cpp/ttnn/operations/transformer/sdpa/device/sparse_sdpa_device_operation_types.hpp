@@ -28,12 +28,17 @@ struct SparseSDPAParams {
     std::optional<BlockCyclicLayout> block_cyclic = std::nullopt;
     bool has_block_cyclic() const { return block_cyclic.has_value(); }
     bool has_scaled_kv() const { return kv_format == transformer::SparseKVFormat::SCALED_FP8; }
+    // Paged KV cache: kv is a pool of page blocks [1,1,num_blocks*page_block_size,K_DIM]; indices are logical
+    // token positions, remapped in the reader through page_table row (cache_batch_idx, else the query row).
+    std::optional<uint32_t> page_block_size = std::nullopt;
+    bool has_page_table() const { return page_block_size.has_value(); }
 };
 
 struct SparseSDPAInputs {
     Tensor q;        // [1, H, S, K_DIM] bf16/fp8_e4m3 ROW_MAJOR  (K_DIM = head dim, e.g. 576)
     Tensor kv;       // Plain [B,1,T,K_DIM] or packed scaled-FP8 rows; format is explicit in SparseSDPAParams
     Tensor indices;  // [1, 1, S, TOPK] uint32 ROW_MAJOR  (0xFFFFFFFF = masked)
+    std::optional<Tensor> page_table = std::nullopt;  // [R, max_blocks] int32/uint32 ROW_MAJOR (paged kv)
 };
 
 }  // namespace ttnn::prim

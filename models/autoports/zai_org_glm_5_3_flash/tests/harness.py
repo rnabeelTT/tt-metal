@@ -6,6 +6,7 @@ slot, run decode steps eagerly or as a captured trace (fixed-address inputs refr
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,7 +31,13 @@ def pcc(a: torch.Tensor, b: torch.Tensor) -> float:
 
 
 def open_mesh(trace_region_size: int = 256 << 20):
-    return ttnn.open_mesh_device(ttnn.MeshShape(1, 1), l1_small_size=24576, trace_region_size=trace_region_size)
+    """GLM53_WORKER_L1_SIZE: optional smaller worker L1 (bytes); the kernel-config ring buffer grows by the difference
+    (watcher-instrumented KDA prefill programs need ~75.6 KB of it; default ring 70,656 B, default worker L1 1,461,248 B).
+    """
+    kw = {}
+    if os.environ.get("GLM53_WORKER_L1_SIZE"):
+        kw["worker_l1_size"] = int(os.environ["GLM53_WORKER_L1_SIZE"])
+    return ttnn.open_mesh_device(ttnn.MeshShape(1, 1), l1_small_size=24576, trace_region_size=trace_region_size, **kw)
 
 
 def layer_weights(rd: CheckpointReader, layer: int, weights) -> dict:
@@ -39,8 +46,11 @@ def layer_weights(rd: CheckpointReader, layer: int, weights) -> dict:
     return synthetic_layer_state(json.loads(STATS.read_text()), layer, seed=int(weights["synthetic"]))
 
 
-def build_layer(mesh, rd, layer: int, weights="real", *, batch=8, prefill_lengths=(128, 2048), max_context=4096):
-    dec = FunctionalDecoder.from_state_dict(
+def build_layer(
+    mesh, rd, layer: int, weights="real", *, batch=8, prefill_lengths=(128, 2048), max_context=4096, decoder_cls=None
+):
+    """decoder_cls: FunctionalDecoder (default) or a subclass with the same contract (e.g. tt/fused_decoder.FusedDecoder)."""
+    dec = (decoder_cls or FunctionalDecoder).from_state_dict(
         layer_weights(rd, layer, weights),
         hf_config=rd.text_config,
         layer_idx=layer,
@@ -97,15 +107,13 @@ class DecodeRunner:
         for s, v in rows.items():
             xd[0, 0, s] = v
         ttnn.copy_host_to_device_tensor(ttnn.from_torch(xd, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT), self.x_buf)
-        if self.dec.attn_kind == "dsa":
-            if self.dsa_bufs is None:
-                self.dsa_bufs = self.dec.attn.decode_inputs(positions)
-            else:
-                self.dec.attn.update_decode_inputs(self.dsa_bufs, positions)
+        if self.dsa_bufs is None:
+            self.dsa_bufs = self.dec.decode_inputs(positions)
+        else:
+            self.dec.update_decode_inputs(self.dsa_bufs, positions)
 
     def _forward(self):
-        kw = {"inputs": self.dsa_bufs} if self.dec.attn_kind == "dsa" else {}
-        return self.dec.decode_forward(self.x_buf, **kw)
+        return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
 
     def eager_step(self, rows: dict, positions: list) -> torch.Tensor:
         self._set_inputs(rows, positions)

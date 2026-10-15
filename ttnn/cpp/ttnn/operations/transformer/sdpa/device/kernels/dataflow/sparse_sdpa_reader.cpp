@@ -61,6 +61,11 @@ void kernel_main() {
     constexpr uint32_t packed_row_bytes = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::PACKED_ROW_BYTES);
     constexpr uint32_t cb_kreq = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_KREQ);
     constexpr uint32_t cb_kack = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_KACK);
+    // Paged kv: indices are logical positions; idx -> page_table[row][idx >> log2] << log2 | idx & (bs - 1).
+    constexpr bool paged = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::PAGED) != 0;
+    constexpr uint32_t page_block_log2 = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::PAGE_BLOCK_LOG2);
+    constexpr uint32_t pt_row_bytes = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::PT_ROW_BYTES);
+    constexpr uint32_t cb_pt = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_PT);
 
     // kv carries a RUNTIME tensor shape (its T dim is common runtime args, not compile-time), so its accessor
     // spans both the compile-time AND common-runtime arg streams. Thread both offsets through all three.
@@ -69,6 +74,8 @@ void kernel_main() {
         TensorAccessorArgs<q_args.next_compile_time_args_offset(), q_args.next_common_runtime_args_offset()>();
     constexpr auto idx_args =
         TensorAccessorArgs<kv_args.next_compile_time_args_offset(), kv_args.next_common_runtime_args_offset()>();
+    constexpr auto pt_args =
+        TensorAccessorArgs<idx_args.next_compile_time_args_offset(), idx_args.next_common_runtime_args_offset()>();
 
     const uint32_t q_addr = get_arg_val<uint32_t>(0);
     const uint32_t kv_addr = get_arg_val<uint32_t>(1);
@@ -77,6 +84,9 @@ void kernel_main() {
     const uint32_t tok_count = get_arg_val<uint32_t>(4);
     // Indexed KV cache: page offset (cache_batch_idx * T) selecting the cache's batch slot; 0 if not indexed.
     const uint32_t kv_batch_page_offset = get_arg_val<uint32_t>(5);
+    // Paged kv: page-table address and the row serving every query row (0xFFFFFFFF: the query row's own row).
+    const uint32_t pt_addr = get_arg_val<uint32_t>(6);
+    const uint32_t pt_fixed_row = get_arg_val<uint32_t>(7);
 
     constexpr uint32_t q_row_bytes = k_dim * q_elem_bytes;   // Q row (bf16)
     constexpr uint32_t k_row_bytes = k_dim * kv_elem_bytes;  // K row (native dtype: fp8 or bf16)
@@ -95,6 +105,14 @@ void kernel_main() {
     idx_cb.reserve_back(1);
     const uint32_t idx_l1 = idx_cb.get_write_ptr();
     volatile tt_l1_ptr uint32_t* idx_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(idx_l1);
+    const auto pt = TensorAccessor(pt_args, pt_addr);
+    volatile tt_l1_ptr uint32_t* pt_ptr = nullptr;
+    uint32_t pt_cached_row = 0xFFFFFFFFu;
+    if constexpr (paged) {
+        experimental::CB pt_cb(cb_pt);
+        pt_cb.reserve_back(1);
+        pt_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(pt_cb.get_write_ptr());
+    }
 
     for (uint32_t tok = tok_start; tok < tok_start + tok_count; ++tok) {
         // Q: H head-rows -> cb_q_rm.  Q is [1,H,S,576] row-major: row (h,tok) = page h*S+tok.
@@ -124,6 +142,24 @@ void kernel_main() {
             nv = lo == 0 ? 1 : lo;  // contract guarantees >=1 valid; guard anyway
         }
         const uint32_t n_active = (nv + k_chunk - 1) / k_chunk;
+
+        // paged kv: logical -> physical rows, in place, before either NoC half gathers from idx_ptr
+        if constexpr (paged) {
+            const uint32_t row = pt_fixed_row != 0xFFFFFFFFu ? pt_fixed_row : tok;
+            if (row != pt_cached_row) {
+                experimental::CB pt_cb(cb_pt);
+                noc.async_read(pt, pt_cb, pt_row_bytes, {.page_id = row}, {.offset_bytes = 0});
+                noc.async_read_barrier();
+                pt_cached_row = row;
+            }
+            constexpr uint32_t block_mask = (1u << page_block_log2) - 1u;
+            for (uint32_t i = 0; i < nv; ++i) {
+                const uint32_t x = idx_ptr[i];
+                if (x != sentinel) {
+                    idx_ptr[i] = (pt_ptr[x >> page_block_log2] << page_block_log2) | (x & block_mask);
+                }
+            }
+        }
 
         // hand the active chunk count + valid-key count to compute (it can't issue DRAM reads to derive
         // them). nv lets compute place the boundary mask (which key tiles of the last chunk to -inf).

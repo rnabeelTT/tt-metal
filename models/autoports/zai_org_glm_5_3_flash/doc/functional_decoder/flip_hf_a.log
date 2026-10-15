@@ -1,0 +1,7 @@
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `chunk_kda` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+[transformers] You tried to access the `ExpertsInterface` with a `config._experts_implementation` set to `None`. This is expected if you use an Expert Module as a standalone Module. If this is not the case, something went wrong with the dispatch of `config._experts_implementation`
+layer 3 seed 3051: tokens with margin < 1e-3: 0.204, < 1e-4: 0.028
+pos 2051: 8th-9th margin 4.32e-03 (rank among 2054: 1235); HF top-8 [2, 6, 57, 58, 119, 121, 159, 185] 9th 190
+pos 2052: 8th-9th margin 1.68e-03 (rank among 2054: 644); HF top-8 [25, 68, 98, 115, 147, 158, 162, 191] 9th 95
+pos 2053: 8th-9th margin 6.30e-03 (rank among 2054: 1476); HF top-8 [5, 33, 49, 72, 76, 87, 120, 174] 9th 102

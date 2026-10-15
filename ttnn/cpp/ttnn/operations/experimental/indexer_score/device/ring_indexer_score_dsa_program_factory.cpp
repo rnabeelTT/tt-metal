@@ -402,6 +402,8 @@ ProgramDescriptor build_ring_program_descriptor(
     reader_ct.push_back(rank_mapping.mesh_cols);
     reader_ct.push_back(static_cast<uint32_t>(partial_readiness_enabled));
     reader_ct.push_back(ring_size);  // physical SP shard count for shard-major specialization
+    reader_ct.insert(reader_ct.end(), {0u, 0u, 0u});  // paged K off (classic path only)
+    tt::tt_metal::TensorAccessorArgs(*k.buffer()).append_to(reader_ct);
 
     std::vector<uint32_t> writer_ct = common_ct;
     writer_ct.push_back(1u);  // fused_ring on

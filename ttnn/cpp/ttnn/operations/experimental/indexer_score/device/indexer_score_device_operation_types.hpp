@@ -104,6 +104,9 @@ struct operation_attributes_t {
     // cache_batch_idx * Tt * Dt). NOT hashed, re-applied each dispatch, so switching slots does NOT recompile.
     std::optional<uint32_t> cache_batch_idx{std::nullopt};
     bool has_indexed_kv_cache() const { return cache_batch_idx.has_value(); }
+    // Paged K cache: k is a pool of 32-key blocks (one tile row each); the K tile row t of the scored sequence
+    // is read from block page_table[cache_batch_idx][t]. Hashed (CB + compile-time remap).
+    bool paged{false};
     // Runtime KV length: the valid prefix this dispatch (rest masked). NOT hashed, so growing kv_len <= T
     // reuses ONE program. grid/work-split/output width stay keyed on the hashed T. nullopt == T.
     std::optional<uint32_t> kv_len{std::nullopt};
@@ -134,6 +137,7 @@ struct tensor_args_t {
     const Tensor& weights;
     // Fused only: per-chip LOCAL K [B,1,sll,D], interleaved or ND-sharded. nullopt unfused.
     std::optional<Tensor> k_local{std::nullopt};
+    std::optional<Tensor> page_table{std::nullopt};  // [rows, max_blocks] int32/uint32 ROW_MAJOR (paged)
 };
 
 using tensor_return_value_t = Tensor;

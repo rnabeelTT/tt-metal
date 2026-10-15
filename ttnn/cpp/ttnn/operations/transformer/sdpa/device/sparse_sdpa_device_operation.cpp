@@ -21,7 +21,38 @@ namespace {
 // ROW_MAJOR, unpadded, DRAM, interleaved q/indices, so a cache hit with a tiled/padded/L1/sharded/off-device tensor
 // would otherwise run on wrong assumptions. K_DIM comes from q, whose shape IS hashed, so it is pinned. Shared by
 // validate_on_program_cache_miss and _hit.
+void validate_paged(const SparseSDPAParams& attrs, const SparseSDPAInputs& t) {
+    if (!attrs.has_page_table()) {
+        TT_FATAL(!t.page_table.has_value(), "sparse_sdpa: page_table requires page_block_size");
+        return;
+    }
+    TT_FATAL(t.page_table.has_value(), "sparse_sdpa: page_block_size requires page_table");
+    const auto& pt = t.page_table.value();
+    const uint32_t bs = attrs.page_block_size.value();
+    TT_FATAL(bs > 0 && (bs & (bs - 1)) == 0, "sparse_sdpa: page_block_size ({}) must be a power of two", bs);
+    TT_FATAL(!attrs.has_block_cyclic(), "sparse_sdpa: page_table and block-cyclic layouts are exclusive");
+    TT_FATAL(
+        pt.dtype() == DataType::INT32 || pt.dtype() == DataType::UINT32,
+        "sparse_sdpa: page_table must be int32/uint32");
+    TT_FATAL(pt.layout() == Layout::ROW_MAJOR, "sparse_sdpa: page_table must be ROW_MAJOR");
+    TT_FATAL(
+        pt.memory_config().buffer_type() == BufferType::DRAM && !pt.memory_config().is_sharded(),
+        "sparse_sdpa: page_table must be DRAM interleaved");
+    TT_FATAL(pt.logical_shape().rank() == 2, "sparse_sdpa: page_table must be [rows, max_blocks]");
+    TT_FATAL(pt.device() == t.q.device(), "sparse_sdpa: page_table must be on the q device");
+    const uint32_t rows = pt.logical_shape()[0];
+    if (attrs.cache_batch_idx.has_value()) {
+        TT_FATAL(attrs.cache_batch_idx.value() < rows, "sparse_sdpa: cache_batch_idx >= page_table rows");
+    } else {
+        TT_FATAL(t.q.logical_shape()[2] <= rows, "sparse_sdpa: paged decode needs one page_table row per query row");
+    }
+    TT_FATAL(
+        t.kv.logical_shape()[0] == 1 && t.kv.logical_shape()[2] % bs == 0,
+        "sparse_sdpa: paged kv must be [1, 1, num_blocks * page_block_size, K_DIM]");
+}
+
 void validate_non_hashed(const SparseSDPAParams& attrs, const SparseSDPAInputs& t) {
+    validate_paged(attrs, t);
     const auto& q = t.q;
     const auto& kv = t.kv;
     const auto& idx = t.indices;
@@ -53,7 +84,9 @@ void validate_non_hashed(const SparseSDPAParams& attrs, const SparseSDPAInputs& 
         kvs);
     TT_FATAL(kvs[2] > 0, "kv T (cache length) must be > 0");
     const uint32_t B = kvs[0];
-    if (attrs.cache_batch_idx.has_value()) {
+    if (attrs.has_page_table()) {
+        // paged: cache_batch_idx selects the page-table row (checked in validate_paged), not a kv batch slot
+    } else if (attrs.cache_batch_idx.has_value()) {
         TT_FATAL(
             attrs.cache_batch_idx.value() < B,
             "cache_batch_idx ({}) must be < kv batch slots ({})",
@@ -250,7 +283,11 @@ ttsl::hash::hash_t SparseSDPAOperation::compute_program_hash(const SparseSDPAPar
         attrs.block_cyclic.has_value() ? attrs.block_cyclic->sp : 0u,
         attrs.block_cyclic.has_value() ? attrs.block_cyclic->chunk_local : 0u,
         t.indices.logical_shape(),
-        t.indices.dtype());
+        t.indices.dtype(),
+        // paged kv: block size and the page-table row width are compile-time (CB size, shift); the table's
+        // address and the fixed row are runtime args
+        attrs.page_block_size.value_or(0u),
+        t.page_table.has_value() ? t.page_table->logical_shape()[-1] : 0u);
 }
 
 Tensor sparse_sdpa(
@@ -263,7 +300,9 @@ Tensor sparse_sdpa(
     uint32_t k_chunk_size,
     ttnn::DeviceComputeKernelConfig compute_kernel_config,
     std::optional<uint32_t> cache_batch_idx,
-    std::optional<BlockCyclicLayout> block_cyclic) {
+    std::optional<BlockCyclicLayout> block_cyclic,
+    const std::optional<Tensor>& page_table,
+    std::optional<uint32_t> page_block_size) {
     using OperationType = ttnn::prim::SparseSDPAOperation;
     return ttnn::device_operation::launch<OperationType>(
         OperationType::operation_attributes_t{
@@ -274,11 +313,13 @@ Tensor sparse_sdpa(
             .compute_kernel_config = compute_kernel_config,
             .cache_batch_idx = cache_batch_idx,
             .block_cyclic = block_cyclic,
+            .page_block_size = page_table.has_value() ? page_block_size : std::nullopt,
         },
         OperationType::tensor_args_t{
             .q = q,
             .kv = kv,
             .indices = indices,
+            .page_table = page_table,
         });
 }
 

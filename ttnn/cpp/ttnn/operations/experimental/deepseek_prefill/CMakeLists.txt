@@ -10,6 +10,8 @@ add_subdirectory(inbound_socket_service_sync)
 add_subdirectory(insert)
 add_subdirectory(masked_bincount)
 add_subdirectory(mhc_post)
+add_subdirectory(mhc_pre)
+add_subdirectory(mhc_mix)
 add_subdirectory(mhc_split_sinkhorn)
 add_subdirectory(moe_grouped_topk)
 add_subdirectory(moe_hash_gate)
@@ -42,6 +44,8 @@ target_link_libraries(
         TTNN::Ops::Experimental::DeepSeekPrefill::Insert
         TTNN::Ops::Experimental::DeepSeekPrefill::MaskedBincount
         TTNN::Ops::Experimental::DeepSeekPrefill::MhcPost
+        TTNN::Ops::Experimental::DeepSeekPrefill::MhcPre
+        TTNN::Ops::Experimental::DeepSeekPrefill::MhcMix
         TTNN::Ops::Experimental::DeepSeekPrefill::MhcSplitSinkhorn
         TTNN::Ops::Experimental::DeepSeekPrefill::MoeGroupedTopk
         TTNN::Ops::Experimental::DeepSeekPrefill::MoeHashGate
@@ -81,6 +85,8 @@ target_sources(
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::Insert>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MaskedBincount>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MhcPost>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MhcPre>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MhcMix>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MhcSplitSinkhorn>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MoeGroupedTopk>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MoeHashGate>

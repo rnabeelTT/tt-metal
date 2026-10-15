@@ -103,12 +103,14 @@ class FunctionalDecoder(LightweightModule):
         dsa_kwargs: dict | None = None,
         weight_cache_path=None,
         tt_ccl=None,
+        moe_opt=None,
     ):
         self.mesh = mesh_device
         self.tc = tc
         self.layer_idx = layer_idx
         self.tp = tuple(mesh_device.shape)[1]
         self.attn_kind, self.mlp_kind = layer_kind(tc, layer_idx)
+        self.max_batch = max_batch
         self.prefill_lengths = tuple(prefill_lengths)
         self.hidden = tc["hidden_size"]
         self.eps = tc["rms_norm_eps"]
@@ -170,7 +172,7 @@ class FunctionalDecoder(LightweightModule):
             num_experts = sd["mlp.gate.weight"].shape[0]
             self.mlp = Qwen35MoEOptimized(
                 mesh_device,
-                moe_args(tc, self.tp, num_experts),
+                moe_args(tc, self.tp, num_experts, opt=moe_opt or FUNCTIONAL_MOE),
                 moe_state_dict(sd, num_experts),
                 tensor_cache_path=None,
                 tt_ccl=tt_ccl,
@@ -233,6 +235,8 @@ class FunctionalDecoder(LightweightModule):
         self.decode_state = self.attn.allocate_decode_state(batch)
         if self.attn_kind == "dsa":
             self.attn.prepare_constants(self.prefill_lengths)
+        if self.mlp_kind == "moe":  # sorted-dispatch constants of every prefill chunk length and the decode batch
+            self.mlp.prepare_dispatch(list(self.prefill_lengths) + [batch or self.max_batch])
         return self.decode_state
 
     def commit_prefill(self, slot: int, prefill_state):
@@ -240,14 +244,28 @@ class FunctionalDecoder(LightweightModule):
         if self.attn_kind == "kda":
             self.attn.write_slot(self.decode_state, slot, prefill_state)
 
-    def decode_forward(self, X: ttnn.Tensor, **attn_kwargs) -> ttnn.Tensor:
-        """X [1,1,B,4*hidden] fp32, one token per user -> X'."""
+    def decode_inputs(self, positions):
+        """Fixed-address device buffers of the per-step decode inputs (allocate before any trace capture).
+        positions[s] = position of slot s's token this step; -1 = inactive slot (its state is left unchanged)."""
+        return self.attn.decode_inputs(positions)
+
+    def update_decode_inputs(self, bufs, positions):
+        """Refresh the decode input buffers in place (host -> device; between trace replays)."""
+        self.attn.update_decode_inputs(bufs, positions)
+
+    def set_page_table(self, page_table):
+        """DSA layers: install the [S, <= max_context/128] block table of the paged latent / pool-key caches."""
+        if self.attn_kind == "dsa":
+            self.attn.set_page_table(page_table)
+
+    def decode_forward(self, X: ttnn.Tensor, *, inputs) -> ttnn.Tensor:
+        """X [1,1,B,4*hidden] fp32, one token per user -> X'; inputs = decode_inputs(...)."""
         h, post, comb = self.attn_hc.pre(X)
         x = self._norm(h, self.input_norm_w)
         if self.attn_kind == "kda":
-            y = self.attn.decode_forward(x, self.decode_state)
+            y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
         else:
-            y = self.attn.decode_forward(x, **attn_kwargs)
+            y = self.attn.decode_forward(x, inputs=inputs)
         ttnn.deallocate(x)
         X1 = self.attn_hc.post(y, X, post, comb)
         for t in (y, post, comb):

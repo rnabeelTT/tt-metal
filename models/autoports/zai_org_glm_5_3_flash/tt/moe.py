@@ -43,6 +43,8 @@ from loguru import logger
 
 import ttnn
 
+_MOE_DEBUG = __import__("os").environ.get("GLM53_MOE_DEBUG") == "1"
+
 TILE = 32
 # functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
 ROUTER_TOPK_FIRST = os.environ.get("QWEN35_ROUTER_TOPK_FIRST", "1") == "1"  # default since the perf pass (2026-09-29)
@@ -369,6 +371,8 @@ class Qwen35MoE:
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
         scores, ids = self._route(x4)
+        if _MOE_DEBUG:  # diagnostics: keep the last routing decision on device (read after the pass)
+            self.last_ids = ttnn.clone(ids)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
             if T <= self.GATHER_MAX_TOKENS:
                 routed = self._routed_gather(x4, scores, ids, T)

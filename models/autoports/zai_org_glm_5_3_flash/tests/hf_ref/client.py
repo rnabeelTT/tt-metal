@@ -4,10 +4,13 @@
 
 GLM53_HF_PYTHON: interpreter of the HF venv (default ~/glm53-flash-bringup/.venv_hf/bin/python).
 GLM53_REF_CACHE: result cache directory (default ~/glm53-flash-bringup/refs/layer_cache).
+GLM53_REF_DRYRUN: a directory: record every missing request there (<key>.req.pt) and skip the test instead of
+    computing it; tools/compute_refs.py then computes the recorded requests in parallel (CPU) without the device.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import os
@@ -30,9 +33,27 @@ def _cache_dir() -> Path:
     return d
 
 
-# Cache key = the request + this version. Bump it when the HF reference semantics change (hf_layer_ref.py, the
-# synthetic generators in tt/synthetic.py): file contents are not hashed, so formatting edits keep the cache.
-REF_VERSION = "glm53-ref-1"
+# Cache key = the request + REF_VERSION + the code of the reference (hf_layer_ref.py and the modules it runs:
+# tt/ckpt.py, tt/synthetic.py) as an AST dump without docstrings: formatting / comment edits keep the cache, any
+# semantic edit of the reference code invalidates it (no stale reference can be served after a code change).
+REF_VERSION = "glm53-ref-2"
+REF_CODE = [SCRIPT, HERE.parents[1] / "tt" / "ckpt.py", HERE.parents[1] / "tt" / "synthetic.py"]
+
+
+def _code_digest() -> str:
+    h = hashlib.sha256()
+    for path in REF_CODE:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if isinstance(body, list) and body and isinstance(body[0], ast.Expr):
+                if isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+                    node.body = body[1:] or [ast.Pass()]
+        h.update(ast.dump(tree, annotate_fields=False).encode())
+    return h.hexdigest()
+
+
+_CODE_DIGEST = _code_digest()
 
 
 def _digest(req: dict) -> str:
@@ -40,7 +61,24 @@ def _digest(req: dict) -> str:
     torch.save({k: req[k] for k in sorted(req)}, buf)
     h = hashlib.sha256(buf.getvalue())
     h.update(REF_VERSION.encode())
+    h.update(_CODE_DIGEST.encode())
     return h.hexdigest()[:24]
+
+
+class DryRunResult(dict):
+    """Placeholder of a recorded (not computed) reference: any use skips the test, so a test that requests several
+    references records all of them before skipping."""
+
+    def __init__(self, key):
+        super().__init__()
+        self.key = key
+
+    def _skip(self, *a, **k):
+        import pytest
+
+        pytest.skip(f"reference {self.key} recorded for tools/compute_refs.py (GLM53_REF_DRYRUN)")
+
+    __getitem__ = get = _skip
 
 
 def cache_path(req: dict) -> Path:
@@ -51,6 +89,11 @@ def hf_layer_reference(req: dict, timeout: int = 7200) -> dict:
     """req: see hf_layer_ref.py. Returns the result dict (cached)."""
     key = _digest(req)
     out = cache_path(req)
+    dry = os.environ.get("GLM53_REF_DRYRUN")
+    if not out.exists() and dry:
+        Path(dry).mkdir(parents=True, exist_ok=True)
+        torch.save(req, Path(dry) / f"{key}.req.pt")
+        return DryRunResult(key)
     if not out.exists():
         req_path = _cache_dir() / f"{key}.req.pt"
         torch.save(req, req_path)

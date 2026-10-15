@@ -55,6 +55,7 @@
 #include "ttnn/operations/experimental/moe_gather_add_rows/moe_gather_add_rows_nanobind.hpp"
 #include "ttnn/operations/experimental/moe_gather_rows/moe_gather_rows_nanobind.hpp"
 #include "ttnn/operations/experimental/scatter_rows/scatter_rows_nanobind.hpp"
+#include "ttnn/operations/experimental/dsa_decode_scores/dsa_decode_scores_nanobind.hpp"
 #include "ttnn/operations/experimental/fft/fft_nanobind.hpp"
 #include "ttnn/operations/experimental/quasar/quasar_nanobind.hpp"
 #include "ttnn/operations/experimental/dropout/dropout_nanobind.hpp"
@@ -94,6 +95,8 @@
 #include "ttnn/operations/experimental/deepseek_prefill/moe_padding_config/moe_padding_config_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/outbound_socket_service_sync/outbound_socket_service_sync_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/mhc_post/mhc_post_nanobind.hpp"
+#include "ttnn/operations/experimental/deepseek_prefill/mhc_pre/mhc_pre_nanobind.hpp"
+#include "ttnn/operations/experimental/deepseek_prefill/mhc_mix/mhc_mix_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/mhc_split_sinkhorn_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/per_token_cast_to_fp8/per_token_cast_to_fp8_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/pack_scaled_fp8_kv_cache/pack_scaled_fp8_kv_cache_nanobind.hpp"
@@ -175,6 +178,8 @@ void py_module(nb::module_& mod) {
     deepseek_prefill::moe_padding_config::detail::bind_moe_padding_config(mod);
     deepseek_prefill::detail::bind_outbound_socket_service_sync(mod);
     deepseek_prefill::mhc_post::detail::bind_experimental_mhc_post_operation(mod);
+    deepseek_prefill::mhc_pre::detail::bind_experimental_mhc_pre_operation(mod);
+    deepseek_prefill::mhc_mix::detail::bind_experimental_mhc_mix_operation(mod);
     deepseek_prefill::mhc_split_sinkhorn::detail::bind_experimental_mhc_split_sinkhorn_operation(mod);
     deepseek_prefill::detail::bind_post_combine_reduce(mod);
     deepseek_prefill::moe_grouped_topk::detail::bind_moe_grouped_topk(mod);
@@ -190,6 +195,7 @@ void py_module(nb::module_& mod) {
     moe_gather_nb::detail::bind_experimental_moe_gather_add_rows_operation(mod);
     moe_gather_rows_nb::detail::bind_experimental_moe_gather_rows_operation(mod);
     scatter_rows_nb::detail::bind_experimental_scatter_rows_operation(mod);
+    dsa_decode_scores_nb::detail::bind_experimental_dsa_decode_scores_operation(mod);
     fft_binding::detail::bind_experimental_fft_operation(mod);
 
     // Quasar (metal 2.0) ops — creates the ttnn.experimental.quasar submodule.

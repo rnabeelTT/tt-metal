@@ -73,6 +73,21 @@ constexpr uint32_t rank_mapping_mesh_rows = get_compile_time_arg_val(bc_ct_base 
 constexpr uint32_t rank_mapping_mesh_cols = get_compile_time_arg_val(bc_ct_base + 8);
 constexpr bool partial_readiness_enabled = get_compile_time_arg_val(bc_ct_base + 9) != 0;
 constexpr uint32_t fused_physical_sp = get_compile_time_arg_val(bc_ct_base + 10);
+// Paged K (classic path): K tile row t is read from block pt_row[t] of the k pool (one 32-key tile row per block).
+constexpr bool paged_k = get_compile_time_arg_val(bc_ct_base + 11) != 0;
+constexpr uint32_t pt_row_bytes = get_compile_time_arg_val(bc_ct_base + 12);
+constexpr uint32_t cb_pt = get_compile_time_arg_val(bc_ct_base + 13);
+constexpr auto pt_args = TensorAccessorArgs<bc_ct_base + 14>();
+static_assert(!paged_k || !fused_ring_enabled, "paged K is classic-path only");
+// page-table row of the scored slot, loaded once in kernel_main (paged_k only)
+volatile tt_l1_ptr uint32_t* g_pt_row = nullptr;
+FORCE_INLINE uint32_t paged_ktile(uint32_t seq_tile) {
+    if constexpr (paged_k) {
+        return g_pt_row[seq_tile];
+    } else {
+        return seq_tile;
+    }
+}
 
 FORCE_INLINE constexpr uint32_t tensor_rank_from_transport_rank(uint32_t transport_rank) {
     return ttnn::ring_attention_all_gather::tensor_rank_from_transport_rank<full_mesh_rank_mapping>(
@@ -347,7 +362,7 @@ inline void read_k_chunk(
             uint32_t ptr = addr;
             for (uint32_t k_col = 0; k_col < k_tiles_in_unit; ++k_col) {
                 // bc_ktile: identity for contiguous K; invP(logical seq tile) for the per-SP-shard block-cyclic layout.
-                const uint32_t seq_tile = bc_ktile(k_tile_start + k_col);
+                const uint32_t seq_tile = paged_ktile(bc_ktile(k_tile_start + k_col));
                 read_ktile_dims(noc, k_acc, ptr, k_batch_page_offset + seq_tile * head_dim_tiles);
             }
         });
@@ -511,12 +526,12 @@ inline void read_k_chunk_streaming(
         uint32_t ptr = cb.get_write_ptr();
         for (uint32_t c = cbase; c < c_end; ++c) {
             if (c < k_tiles_in_unit) {
-                const uint32_t seq_tile = tt::block_cyclic::logical_to_physical_page<
-                    block_cyclic,
-                    bc_chunk_local,
-                    bc_sp,
-                    bc_shard_stride_gap,
-                    bc_slab_stride_gap>(k_tile_start + c);
+                const uint32_t seq_tile = paged_ktile(tt::block_cyclic::logical_to_physical_page<
+                                                      block_cyclic,
+                                                      bc_chunk_local,
+                                                      bc_sp,
+                                                      bc_shard_stride_gap,
+                                                      bc_slab_stride_gap>(k_tile_start + c));
                 for (uint32_t d = 0; d < head_dim_tiles; ++d) {
                     noc.async_read(
                         k_acc,
@@ -552,6 +567,16 @@ void kernel_main() {
 
     const auto q_acc = TensorAccessor(q_args, q_addr, q_tile_bytes);
     const auto k_acc = TensorAccessor(k_args, k_addr, k_tile_bytes);
+    if constexpr (paged_k) {
+        // page-table row (slots 27, 28 = address, row) -> L1, once; the K reads below map tile rows through it
+        CircularBuffer pt_cb(cb_pt);
+        pt_cb.reserve_back(1);
+        g_pt_row = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(pt_cb.get_write_ptr());
+        const auto pt_acc = TensorAccessor(pt_args, get_arg_val<uint32_t>(27));
+        Noc pt_noc;
+        pt_noc.async_read(pt_acc, pt_cb, pt_row_bytes, {.page_id = get_arg_val<uint32_t>(28)}, {.offset_bytes = 0});
+        pt_noc.async_read_barrier();
+    }
     const auto w_acc = TensorAccessor(w_args, w_addr, bf16_tile_bytes);
 
     Noc noc;

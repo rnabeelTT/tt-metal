@@ -47,6 +47,7 @@ enum SparseCB : uint32_t {
     cb_k_scale_bcast,  // scaled FP8 only: one FP32 per-row broadcast tile per scale block
     cb_k_latent_tile,  // scaled FP8 only: one TILE_HEIGHT-row BFP8 latent slab
     cb_k_rope_tile,    // scaled FP8 only: one K chunk's BF16 RoPE tiles
+    cb_pt,             // paged kv only: reader-internal page-table row (uint32)
     cb_count
 };
 
@@ -77,6 +78,12 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     const uint32_t k_row_bytes = k_dim * kv_elem_bytes;
     const uint32_t packed_page_bytes = scaled_kv ? t.kv.buffer()->aligned_page_size() : 0;
     const uint32_t scale_blocks = ::sparse_sdpa::scale_block_count(v_dim);
+    // Paged kv: one page-table row (max_blocks uint32) is cached in cb_pt; rounded to the DRAM read alignment.
+    const bool paged = attrs.has_page_table();
+    const uint32_t dram_align = tt::tt_metal::hal::get_dram_alignment();
+    const uint32_t pt_row_bytes =
+        paged ? ((t.page_table->logical_shape()[-1] * 4 + dram_align - 1) / dram_align) * dram_align : 0;
+    const uint32_t page_block_log2 = paged ? static_cast<uint32_t>(std::countr_zero(attrs.page_block_size.value())) : 0;
     constexpr tt::DataFormat bf = tt::DataFormat::Float16_b;
     constexpr tt::DataFormat fp32 = tt::DataFormat::Float32;
     constexpr uint32_t tile_bytes = tt::tile_size(bf);  // 2048
@@ -165,6 +172,9 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     cb(cb_recip_scratch, tile_bytes, 1, bf);
     cb(cb_kreq, ::sparse_sdpa::gather_request::PAGE_BYTES, ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, bf);
     cb(cb_kack, ::sparse_sdpa::ACK_PAGE_BYTES, ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, bf);
+    if (paged) {
+        cb(cb_pt, pt_row_bytes, 1, bf);
+    }
     if (scaled_kv) {
         cb(cb_k_scale_bcast, fp32_tile_bytes, scale_blocks * ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, fp32);
         cb(cb_k_latent_tile, k_in_tile_bytes, vDHt, tt::DataFormat::Bfp8_b);
@@ -204,6 +214,7 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     reader_ct.insert(
         reader_ct.end(),
         {static_cast<uint32_t>(scaled_kv), v_dim, cb_k_scale_bcast, packed_page_bytes, cb_kreq, cb_kack});
+    reader_ct.insert(reader_ct.end(), {static_cast<uint32_t>(paged), page_block_log2, pt_row_bytes, cb_pt});
     TT_FATAL(
         reader_ct.size() == ::sparse_sdpa::reader_ct_arg::END,
         "sparse_sdpa reader compile-time argument layout is out of sync");
@@ -216,6 +227,8 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     tt::tt_metal::TensorAccessorArgs(t.kv.buffer(), tensor_accessor::ArgConfig::RuntimeTensorShape)
         .append_to(reader_ct, reader_crt);
     tt::tt_metal::TensorAccessorArgs(t.indices.buffer()).append_to(reader_ct, reader_crt);
+    tt::tt_metal::TensorAccessorArgs(paged ? t.page_table->buffer() : t.indices.buffer())
+        .append_to(reader_ct, reader_crt);
     // The writer is the lighter dataflow kernel, so it builds the three persistent compute-input tiles.
     std::vector<uint32_t> writer_ct = {H, S, vDHt, cb_out_rm, cb_scale, cb_col_identity, cb_neginf, out_elem_bytes};
     writer_ct.insert(writer_ct.end(), block_cyclic_ct.begin(), block_cyclic_ct.end());
@@ -331,12 +344,16 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     // slot. Re-derived here from the current attrs/tensor T on every dispatch (this factory is the single
     // source of truth run by override_runtime_arguments on a hit). 0 when not indexed (single [1,1,T,K_DIM]).
     const uint32_t kv_T = t.kv.logical_shape()[2];
-    const uint32_t kv_batch_page_offset = attrs.cache_batch_idx.value_or(0) * kv_T;
+    const uint32_t kv_batch_page_offset = paged ? 0u : attrs.cache_batch_idx.value_or(0) * kv_T;
+    // paged: the page-table row of every query row (cache_batch_idx), or 0xFFFFFFFF = row of the query row
+    const uint32_t pt_fixed_row = attrs.cache_batch_idx.value_or(0xFFFFFFFFu);
+    auto* pt_buf = paged ? t.page_table->buffer() : idx_buf;
     for (uint32_t i = 0; i < num_cores; ++i) {
         tt::tt_metal::CoreCoord core = {i % grid.x, i / grid.x};
         uint32_t tok_start = i * base + std::min(i, extra);
         uint32_t tok_count = base + (i < extra ? 1u : 0u);
-        reader_desc.emplace_runtime_args(core, {q_buf, kv_buf, idx_buf, tok_start, tok_count, kv_batch_page_offset});
+        reader_desc.emplace_runtime_args(
+            core, {q_buf, kv_buf, idx_buf, tok_start, tok_count, kv_batch_page_offset, pt_buf, pt_fixed_row});
         writer_desc.emplace_runtime_args(core, {out_buf, tok_start, tok_count, kv_buf, kv_batch_page_offset});
         compute_desc.emplace_runtime_args(core, {tok_start, tok_count});
     }
@@ -357,7 +374,10 @@ void SparseSDPAOperation::SparseSDPAProgramFactory::override_runtime_arguments(
     // the hashed q shape); patch those slots in place instead of rebuilding the whole descriptor on every hit.
     const SparseSDPAInputs& t = tensor_args;
     const tt::tt_metal::CoreCoord grid = t.q.device()->compute_with_storage_grid_size();
-    const uint32_t offset = operation_attributes.cache_batch_idx.value_or(0) * t.kv.logical_shape()[2];
+    const bool paged = operation_attributes.has_page_table();
+    const uint32_t offset = paged ? 0u : operation_attributes.cache_batch_idx.value_or(0) * t.kv.logical_shape()[2];
+    const uint32_t pt_addr = paged ? t.page_table->buffer()->address() : t.indices.buffer()->address();
+    const uint32_t pt_fixed_row = operation_attributes.cache_batch_idx.value_or(0xFFFFFFFFu);
     const uint32_t q = t.q.buffer()->address(), kv = t.kv.buffer()->address(), idx = t.indices.buffer()->address(),
                    out = tensor_return_value.buffer()->address();
     for (uint32_t i = 0; i < grid.x * grid.y; ++i) {
@@ -368,6 +388,8 @@ void SparseSDPAOperation::SparseSDPAProgramFactory::override_runtime_arguments(
         r[1] = kv;
         r[2] = idx;
         r[5] = offset;
+        r[6] = pt_addr;
+        r[7] = pt_fixed_row;
         w[0] = out;
         w[3] = kv;
         w[4] = offset;

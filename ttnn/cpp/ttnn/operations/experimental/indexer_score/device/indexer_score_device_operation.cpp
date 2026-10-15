@@ -66,7 +66,7 @@ void validate_static(const operation_attributes_t& attrs, const tensor_args_t& t
         q.device() == k.device() && q.device() == w.device(), "indexer_score q, k, weights must be on the same device");
 
     // Non-indexed k must be single-slot [1,1,T,D] (the indexed slot < B check is runtime -> below).
-    if (!attrs.cache_batch_idx.has_value()) {
+    if (!attrs.cache_batch_idx.has_value() && !attrs.paged) {
         const uint32_t kB = k.logical_shape()[0];
         TT_FATAL(kB == 1, "indexer_score k batch must be 1 unless cache_batch_idx is set (got {})", kB);
     }
@@ -78,7 +78,25 @@ void validate_runtime_values(const operation_attributes_t& attrs, const tensor_a
 
     // Indexed KV cache: on the fused path the full multi-slot cache is k_local while k is the batch-1
     // gathered scratch. On the classic path k itself is the cache.
-    if (attrs.cache_batch_idx.has_value()) {
+    if (attrs.paged) {
+        // paged K: cache_batch_idx selects the page-table row; every block id must be < the k pool's 32-key tiles
+        TT_FATAL(t.page_table.has_value(), "indexer_score paged K requires page_table");
+        const auto& pt = *t.page_table;
+        TT_FATAL(attrs.cache_batch_idx.has_value(), "indexer_score paged K requires cache_batch_idx (page_table row)");
+        TT_FATAL(!attrs.has_fused_ring() && !attrs.has_block_cyclic(), "indexer_score paged K: classic layout only");
+        TT_FATAL(
+            pt.dtype() == DataType::INT32 || pt.dtype() == DataType::UINT32, "indexer_score page_table must be int32");
+        TT_FATAL(
+            pt.layout() == Layout::ROW_MAJOR && pt.logical_shape().rank() == 2, "page_table must be [rows, blocks] RM");
+        TT_FATAL(
+            pt.memory_config().buffer_type() == tt::tt_metal::BufferType::DRAM && !pt.is_sharded(),
+            "indexer_score page_table must be DRAM interleaved");
+        TT_FATAL(attrs.cache_batch_idx.value() < pt.logical_shape()[0], "cache_batch_idx >= page_table rows");
+        TT_FATAL(
+            pt.logical_shape()[-1] * tt::constants::TILE_WIDTH >= k.logical_shape()[2],
+            "indexer_score page_table row must cover the scored key length ({} keys)",
+            k.logical_shape()[2]);
+    } else if (attrs.cache_batch_idx.has_value()) {
         TT_FATAL(
             !attrs.has_fused_ring() || t.k_local.has_value(), "indexer_score fused indexed cache requires k_local");
         const auto& indexed_k = attrs.has_fused_ring() ? *t.k_local : k;
@@ -286,6 +304,9 @@ ttsl::hash::hash_t IndexerScoreDeviceOperation::compute_program_hash(
         attrs.tp_axis().value_or(0u),
         attrs.has_indexed_kv_cache(),
         attrs.has_runtime_kv_len(),
+        // paged K: the page-table row width sizes the reader's row buffer
+        attrs.paged,
+        tensor_args.page_table.has_value() ? tensor_args.page_table->logical_shape()[-1] : 0u,
         // The block-cyclic layout bakes invP divisors into the reader as compile-time arguments, so sp/chunk_local
         // must be hashed (a contiguous vs block-cyclic read, or a different layout shape, is a different binary).
         attrs.has_block_cyclic(),
@@ -728,7 +749,8 @@ ttnn::Tensor launch_indexer_score(
     // Fused ring (all-gather subsumed): k is the gathered [B,1,T,D] persistent output buffer, k_local is this
     // chip's SP shard = the all-gather INPUT, fused_ring carries the AG config. Both nullopt = the classic path.
     std::optional<ttnn::Tensor> k_local = std::nullopt,
-    std::optional<ttnn::operations::experimental::indexer_score::FusedRingConfig> fused_ring = std::nullopt) {
+    std::optional<ttnn::operations::experimental::indexer_score::FusedRingConfig> fused_ring = std::nullopt,
+    std::optional<ttnn::Tensor> page_table = std::nullopt) {
     // Decompose the seq-shard axes into the SP/TP roles the validation + causal geometry below reason about.
     const auto [cluster_axis, seq_subshard_axis] = split_seq_shard_axes(seq_shard_axes, allow_subshard);
     using OperationType = ttnn::operations::experimental::indexer_score::IndexerScoreDeviceOperation;
@@ -932,6 +954,8 @@ ttnn::Tensor launch_indexer_score(
     // Attach the fused-ring config + local shard (both nullopt on the classic path -> byte-identical behavior).
     operation_attributes.fused_ring = std::move(fused_ring);
     tensor_args.k_local = std::move(k_local);
+    operation_attributes.paged = page_table.has_value();
+    tensor_args.page_table = std::move(page_table);
     return ttnn::device_operation::launch<OperationType>(operation_attributes, tensor_args);
 }
 
@@ -949,7 +973,8 @@ ttnn::Tensor indexer_score_dsa(
     const std::optional<std::vector<uint32_t>>& seq_shard_axes,
     std::optional<uint32_t> block_cyclic_sp_axis,
     std::optional<uint32_t> block_cyclic_chunk_local,
-    bool block_cyclic_cache_tp_sharded) {
+    bool block_cyclic_cache_tp_sharded,
+    const std::optional<ttnn::Tensor>& page_table) {
     // DSA/GLM: relu, learned per-head gates, one head-summed plane, no pooling. Reads its real weights tensor.
     return launch_indexer_score(
         q,
@@ -969,7 +994,10 @@ ttnn::Tensor indexer_score_dsa(
         /*allow_subshard=*/true,
         block_cyclic_sp_axis,
         block_cyclic_chunk_local,
-        block_cyclic_cache_tp_sharded);
+        block_cyclic_cache_tp_sharded,
+        /*k_local=*/std::nullopt,
+        /*fused_ring=*/std::nullopt,
+        page_table);
 }
 
 ttnn::Tensor indexer_score_msa(

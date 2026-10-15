@@ -61,7 +61,6 @@ def main():
             max_batch=args.batch,
             dsa_kwargs={"max_context": max_ctx},
         )
-        dsa = dec.attn_kind == "dsa"
         print(f"build {time.time() - t0:.1f} s", flush=True)
         n = args.bucket
         dec.allocate_decode_state(args.batch)
@@ -87,16 +86,13 @@ def main():
             xd = torch.zeros(1, 1, args.batch, H4)
             xd[0, 0, args.slot] = x[0, args.prefill + i].reshape(H4)
             Xd = ttnn.from_torch(xd, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
-            if dsa:
-                positions = [-1] * args.batch
-                positions[args.slot] = args.prefill + i
-                if i == 0:
-                    bufs = dec.attn.decode_inputs(positions)
-                else:
-                    dec.attn.update_decode_inputs(bufs, positions)
-                Yd = dec.decode_forward(Xd, inputs=bufs)
+            positions = [-1] * args.batch
+            positions[args.slot] = args.prefill + i
+            if i == 0:
+                bufs = dec.decode_inputs(positions)
             else:
-                Yd = dec.decode_forward(Xd)
+                dec.update_decode_inputs(bufs, positions)
+            Yd = dec.decode_forward(Xd, inputs=bufs)
             yd = ttnn.to_torch(Yd)[0, 0, args.slot]
             xr = x[0, args.prefill + i].reshape(H4)
             yr = y[0, args.prefill + i].reshape(H4)

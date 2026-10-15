@@ -397,6 +397,11 @@ void bind_sdpa(nb::module_& mod) {
                 q_isl or tp*q_isl (tp = mesh_size/sp) — the only two values it can legally take.
             block_cyclic_cache_tp_sharded (bool): True = the cache is striped across ALL sp*tp devices (linear chip =
                 sp_coord*tp + tp_coord), so stripes = sp*tp and per-stripe chunk = block_cyclic_chunk_local/tp.
+            page_table (ttnn.Tensor, optional): [rows, max_blocks] int32/uint32 ROW_MAJOR DRAM. When set, kv is a pool of
+                page blocks [1, 1, num_blocks * page_block_size, K_DIM] and `indices` are LOGICAL token positions; the
+                reader maps each to page_table[row][idx // page_block_size] * page_block_size + idx % page_block_size,
+                with row = cache_batch_idx when set, else the query row (decode: one page-table row per query row).
+            page_block_size (int, optional): tokens per page block (power of two); required with page_table.
         Returns:
             ttnn.Tensor: [1, H, S, v_dim] ROW-MAJOR, DRAM interleaved; dtype matches q (bf16->bf16, fp8->fp8).
         )doc",
@@ -413,7 +418,9 @@ void bind_sdpa(nb::module_& mod) {
         nb::arg("cache_batch_idx") = nb::none(),
         nb::arg("block_cyclic_sp_axis") = nb::none(),
         nb::arg("block_cyclic_chunk_local") = nb::none(),
-        nb::arg("block_cyclic_cache_tp_sharded") = false);
+        nb::arg("block_cyclic_cache_tp_sharded") = false,
+        nb::arg("page_table") = nb::none(),
+        nb::arg("page_block_size") = nb::none());
 
     ttnn::bind_function<"sparse_sdpa_msa", "ttnn.transformer.">(
         mod,

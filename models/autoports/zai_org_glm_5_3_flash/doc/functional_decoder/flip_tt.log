@@ -1,0 +1,21 @@
+=== start Thu Oct 15 06:45:24 PM UTC 2026 : timeout 2400 python_env/bin/python models/autoports/zai_org_glm_5_3_flash/tools/route_flip_check.py --layer 3 --seed 3051 --prefill 2051 --steps 3 --slot 3
+2026-10-15 18:45:26.364 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-15 18:45:48.344 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:360 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+pos 2051: delta PCC 0.999882 TT top-8 [2, 6, 57, 58, 119, 121, 159, 185]
+pos 2052: delta PCC 0.989687 TT top-8 [25, 68, 95, 98, 115, 147, 158, 191]
+pos 2053: delta PCC 0.999936 TT top-8 [5, 33, 49, 72, 76, 87, 120, 174]
+=== exit code: 0 Thu Oct 15 06:45:52 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== start Thu Oct 15 06:51:20 PM UTC 2026 : timeout 2400 python_env/bin/python models/autoports/zai_org_glm_5_3_flash/tools/route_flip_check.py --layer 3 --seed 900 --prefill 4000 --steps 3 --slot 0
+2026-10-15 18:51:21.990 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-15 18:51:43.962 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:360 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+pos 4000: delta PCC 0.999886 TT top-8 [16, 47, 66, 112, 121, 166, 169, 185]
+pos 4001: delta PCC 0.999939 TT top-8 [25, 31, 58, 83, 91, 114, 159, 185]
+pos 4002: delta PCC 0.991893 TT top-8 [2, 6, 36, 45, 65, 110, 120, 145]
+=== exit code: 0 Thu Oct 15 06:51:48 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+ALLDONE

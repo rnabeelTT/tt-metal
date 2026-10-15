@@ -65,6 +65,8 @@ ttnn::Tensor sparse_sdpa(
     std::optional<uint32_t> cache_batch_idx = std::nullopt,
     std::optional<uint32_t> block_cyclic_sp_axis = std::nullopt,
     std::optional<uint32_t> block_cyclic_chunk_local = std::nullopt,
-    bool block_cyclic_cache_tp_sharded = false);
+    bool block_cyclic_cache_tp_sharded = false,
+    const std::optional<ttnn::Tensor>& page_table = std::nullopt,
+    std::optional<uint32_t> page_block_size = std::nullopt);
 
 }  // namespace ttnn::transformer

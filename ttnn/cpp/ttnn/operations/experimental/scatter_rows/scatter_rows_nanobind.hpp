@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include "ttnn-nanobind/nanobind_fwd.hpp"
+#include <nanobind/nanobind.h>
+namespace nb = nanobind;
 
 namespace ttnn::operations::experimental::scatter_rows_nb::detail {
 void bind_experimental_scatter_rows_operation(nb::module_& mod);

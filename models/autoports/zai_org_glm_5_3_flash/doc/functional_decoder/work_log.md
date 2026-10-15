@@ -56,3 +56,26 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
   ids >= 2**11 (TF32 operands; max error 508 tokens at HiFi4). Fixed with repeat_interleave + multiply-add; added the
   `max_batch * max_context <= 2**24` assert. 1M dsa_moe: 0.99768 / decode >= 0.99969 (pass); kda_moe 0.99855 / >= 0.99936
   (pass). DSA functional tests rerun after the fix: 13/13 pass (`logs/t1_dsa_regress.log`).
+- 2026-10-14 21:40 Stage review #1 (`~/glm53-flash-bringup/artifacts/stage1_review_1.md`): more-work-needed (P1 DSA caches
+  not paged; P2 stale DSA perf / watcher evidence, batch-32 decode untested, KDA-prefill watcher limit not hard,
+  output-scale deficits unexplained, inactive slots mutated). Remediation below.
+- 21:50-22:40 Paged DSA caches. New kernel support: `sparse_sdpa(page_table=, page_block_size=)` (reader remaps logical
+  indices in place), `indexer_score_dsa(page_table=)` (K tile rows through the table), new op
+  `ttnn.experimental.dsa_decode_scores` (paged decode indexer scores, per-slot limits, -inf past the limit). Unit tests
+  bit-exact / PCC >= 0.9999995 vs contiguous caches. Bug found on the way: custom compute kernels must call
+  `reconfig_data_format` explicitly (state_configure is a no-op without the sentinel build flag).
+  `tt/dsa.py`: block pool latent / pool keys, block table [S, T/128 + 1] with a dummy overrun block, logical index lists.
+  Decode inputs now also carry `active`: KDA (beta = 0, decay = 1, masked conv shift) and DSA (open-pool state kept)
+  leave inactive slots untouched. Prefill pool softmax shifted per pool (no underflow across a chunk). MoE sorted-
+  dispatch constants created at setup and frozen (no constant creation / eviction inside a pass).
+  New tests: `test_paged_permuted_blocks` (pass, >= 0.99974), `test_inactive_slot_state` (pass, all kinds),
+  `test_batch32_all_active` (kda_dense pass; MoE kinds: 3 single tokens 0.983-0.9957, all HF router near-ties with
+  margins 6e-5..8e-4 -> near-tie rule with HF margins in the reference, `scripts/route_margin.py`).
+- 22:30 KDA prefill under the FULL watcher with worker_l1_size 1,444,864 (kernel-config ring 87,040 B): clean
+  (`scripts/01-watcher-kda-l1.sh`).
+- 2026-10-15 Reference cache key now hashes the reference code (AST, no docstrings); references recomputed in parallel
+  (`GLM53_REF_DRYRUN` + `tools/compute_refs.py`, systemd user units: session end kills nohup / setsid jobs).
+- 2026-10-15 Routed-MoE scale deficit root-caused (`tools/moe_scale_probe.py`): bfp8 weight conversion is NOT the cause
+  (emulated bfp8 weights: routed rms 0.9995); TT vs the bfp8-emulated reference 0.9756 at PCC 0.99993, routing exact,
+  dense matmuls / SwiGLU exact -> the grouped / 1d sparse_matmul factories reload the fp32 partials through SrcA (TF32
+  rounding at every K block). Fix ported from matmul_multicore_reuse_mcast_1d: c_5 UnpackToDestFp32.

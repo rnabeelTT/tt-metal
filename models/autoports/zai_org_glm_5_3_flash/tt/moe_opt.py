@@ -906,6 +906,19 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         E, Nl, H, k = self.num_experts, self.inter_local, self.hidden, self.top_k
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
+        self._ensure_dispatch()
+        m = self._dispatch.build(ids, scores, T)
+        return self._routed_sorted_built(x4, scores, ids, T, m)
+
+    def prepare_dispatch(self, lengths):
+        """Create the sorted-dispatch constants of every row count (prefill chunk lengths, decode batch) at setup."""
+        self._ensure_dispatch()
+        self._dispatch.prepare(lengths)
+
+    def _ensure_dispatch(self):
+        E, Nl, H, k = self.num_experts, self.inter_local, self.hidden, self.top_k
+        opt = self.opt
+        gs = opt.sorted_group_rows
         if getattr(self, "_dispatch", None) is None:
             skip = self._skip_pad_groups_rule()
             self._dispatch = SortedDispatch(self.device, E, k, group=gs, pad_group_id=0xFFFF if skip else 0)
@@ -921,7 +934,11 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             self._cfg_sorted_dn = sparse_matmul_program_config(
                 gs, H, Nl, target_cores=opt.sorted_down_cores, in0_block_w_cap=opt.sorted_down_in0
             )
-        m = self._dispatch.build(ids, scores, T)
+
+    def _routed_sorted_built(self, x4, scores, ids, T, m):
+        E, Nl, H, k = self.num_experts, self.inter_local, self.hidden, self.top_k
+        opt, act = self.opt, self.prec.act_dtype
+        gs = opt.sorted_group_rows
         Rd, G = m["Rd"], m["G"]
         grouped = bool(getattr(opt, "sorted_grouped", False))
         # the kernel gather needs the skip-aware grouped matmul (padding groups' tiles are not written)

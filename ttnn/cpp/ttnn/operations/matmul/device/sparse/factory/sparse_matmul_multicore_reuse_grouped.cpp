@@ -6,6 +6,7 @@
 #include <string>
 #include "ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.hpp"
 
+#include <tt-metalium/circular_buffer_constants.h>
 #include <tt-metalium/hal.hpp>
 #include <tt-metalium/host_api.hpp>
 #include <tt-metalium/tensor_accessor_args.hpp>
@@ -310,6 +311,15 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             .defines = dm_defines,
             .named_compile_args = writer_named_args});
 
+    // fp32 DST accumulation with the K reduction split across blocks: the Float32 partials CB is reloaded into DEST
+    // between blocks. Unless that CB view is marked UnpackToDestFp32 the reload goes through SrcA and is rounded to
+    // TF32 on every block boundary (a systematic magnitude loss: GLM-5.3 routed experts -2.4 % at K = 4096 in 128-wide
+    // blocks), as fixed in matmul_multicore_reuse_mcast_1d_program_factory. No fused bias reads c_5 as an FPU operand.
+    std::vector<tt::tt_metal::UnpackToDestMode> unpack_to_dest_mode(
+        NUM_CIRCULAR_BUFFERS, tt::tt_metal::UnpackToDestMode::Default);
+    if (fp32_dest_acc_en && interm0_data_format == tt::DataFormat::Float32) {
+        unpack_to_dest_mode[tt::CBIndex::c_5] = tt::tt_metal::UnpackToDestMode::UnpackToDestFp32;
+    }
     std::map<std::string, std::string> mm_kernel_defines;
     mm_kernel_defines["FUSE_ACTIVATION"] = "0";
     if (untilize_out) {
@@ -373,6 +383,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             .math_fidelity = math_fidelity,
             .fp32_dest_acc_en = fp32_dest_acc_en,
             .dst_full_sync_en = dst_full_sync_en,
+            .unpack_to_dest_mode = unpack_to_dest_mode,
             .math_approx_mode = math_approx_mode,
             .compile_args = compute_args_for(groups_g1),
             .defines = mm_kernel_defines,
@@ -388,6 +399,7 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
                 .math_fidelity = math_fidelity,
                 .fp32_dest_acc_en = fp32_dest_acc_en,
                 .dst_full_sync_en = dst_full_sync_en,
+                .unpack_to_dest_mode = unpack_to_dest_mode,
                 .math_approx_mode = math_approx_mode,
                 .compile_args = compute_args_for(groups_g2),
                 .defines = mm_kernel_defines,

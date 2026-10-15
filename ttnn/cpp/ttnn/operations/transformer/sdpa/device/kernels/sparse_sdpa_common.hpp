@@ -82,6 +82,10 @@ enum : uint32_t {
     PACKED_ROW_BYTES,
     CB_KREQ,
     CB_KACK,
+    PAGED,            // 1: indices are logical positions remapped through a page table
+    PAGE_BLOCK_LOG2,  // log2(page block size in tokens)
+    PT_ROW_BYTES,     // bytes of one page-table row read into CB_PT (DRAM-aligned)
+    CB_PT,
     END,
 };
 }  // namespace reader_ct_arg

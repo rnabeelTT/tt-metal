@@ -24,24 +24,24 @@
     "long_context_results": {
       "kda_dense": {
         "layer": 0,
-        "prefill_seconds": 140,
-        "prefill_update_pcc_last64": 0.99994,
+        "prefill_seconds": 75,
+        "prefill_update_pcc_last64": 0.999944,
         "decode_update_pcc_min": 0.99995
       },
       "dsa_moe": {
         "layer": 3,
-        "prefill_seconds": 209,
-        "prefill_update_pcc_last64": 0.99768,
-        "decode_update_pcc_min": 0.99969
+        "prefill_seconds": 210,
+        "prefill_update_pcc_last64": 0.997333,
+        "decode_update_pcc_min": 0.999746
       },
       "kda_moe": {
         "layer": 4,
-        "prefill_seconds": 173,
-        "prefill_update_pcc_last64": 0.99855,
-        "decode_update_pcc_min": 0.99936
+        "prefill_seconds": 99,
+        "prefill_update_pcc_last64": 0.998573,
+        "decode_update_pcc_min": 0.999364
       }
     },
-    "index_limit": "max_batch * max_context <= 2**24 (fp32 flat cache-row indices in DSA decode; asserted in GlmDSA)"
+    "dsa_cache": "paged: shared block pool of 128-token blocks, block table [S, T/128 + 1]; any mix of sequence lengths up to the pool size"
   },
   "full_model": {
     "status": "to be measured in stage 6 (45 layers, 4 dies)",

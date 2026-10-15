@@ -22,7 +22,12 @@ ttnn::Tensor sparse_sdpa(
     std::optional<uint32_t> cache_batch_idx,
     std::optional<uint32_t> block_cyclic_sp_axis,
     std::optional<uint32_t> block_cyclic_chunk_local,
-    bool block_cyclic_cache_tp_sharded) {
+    bool block_cyclic_cache_tp_sharded,
+    const std::optional<ttnn::Tensor>& page_table,
+    std::optional<uint32_t> page_block_size) {
+    TT_FATAL(
+        page_table.has_value() == page_block_size.has_value(),
+        "sparse_sdpa: page_table and page_block_size must both be set or both unset");
     const uint32_t k_dim = q.logical_shape()[3];  // head dim, from the tensor
     const float resolved_scale = scale.value_or(1.0f / std::sqrt(static_cast<float>(k_dim)));
 
@@ -83,7 +88,18 @@ ttnn::Tensor sparse_sdpa(
         /*default_l1_acc=*/false);
 
     return ttnn::prim::sparse_sdpa(
-        q, kv, indices, resolved_scale, v_dim, kv_format, k_chunk_size, kernel_config, cache_batch_idx, block_cyclic);
+        q,
+        kv,
+        indices,
+        resolved_scale,
+        v_dim,
+        kv_format,
+        k_chunk_size,
+        kernel_config,
+        cache_batch_idx,
+        block_cyclic,
+        page_table,
+        page_block_size);
 }
 
 }  // namespace ttnn::transformer

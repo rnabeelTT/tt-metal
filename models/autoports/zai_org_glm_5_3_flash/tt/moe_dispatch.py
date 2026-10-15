@@ -78,9 +78,22 @@ class SortedDispatch:
         self.arange_E = ttnn.arange(0, E, 1, dtype=ttnn.float32, device=device, layout=ttnn.TILE_LAYOUT)
         self.arange_E = ttnn.reshape(self.arange_E, (1, 1, 1, E))
         self._const = {}  # per-T constant tensors (ones row, positions, zero templates): created once, reused
+        self._frozen = False  # after prepare(): every length's constants exist; a new length is an error
+
+    def prepare(self, lengths):
+        """Create the constants of every row count a pass will use (setup, before any measured pass or trace
+        capture), then freeze: no constant is created or evicted inside a pass afterwards."""
+        self._frozen = False
+        for T in sorted(set(int(t) for t in lengths)):
+            self._consts(T)
+        self._frozen = True
 
     def _consts(self, T):
         c = self._const.get(T)
+        if c is None and self._frozen:
+            raise RuntimeError(
+                f"SortedDispatch: constants for {T} rows were not prepared at setup ({sorted(self._const)})"
+            )
         if c is None:
             k, E, dev, gs = self.k, self.E, self.device, self.group
             R = T * k
@@ -115,7 +128,7 @@ class SortedDispatch:
                 c["L_tri"] = ttnn.from_torch(L.reshape(1, 1, Bk, Bk), dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
                 c["P_excl"] = ttnn.from_torch(P.reshape(1, 1, 32, 32), dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
                 c["ones_row_bk"] = ttnn.full((1, 1, TILE, Bk), 1.0, dtype=f32, layout=ttnn.TILE_LAYOUT, device=dev)
-            if len(self._const) >= CONST_CACHE_ENTRIES:  # bounded: drop the oldest length's constants
+            if not self._frozen and len(self._const) >= CONST_CACHE_ENTRIES:  # bounded (eager use only)
                 oldest = next(iter(self._const))
                 for t in self._const.pop(oldest).values():
                     if not isinstance(t, int):

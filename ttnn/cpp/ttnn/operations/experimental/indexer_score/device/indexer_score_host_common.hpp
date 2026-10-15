@@ -210,7 +210,7 @@ inline PersistentCacheArgs persistent_cache_args(const operation_attributes_t& a
     const uint32_t Tt = shape[2] / tt::constants::TILE_WIDTH;
     const uint32_t Dt = shape[3] / tt::constants::TILE_WIDTH;
     return {
-        .k_batch_page_offset = attrs.cache_batch_idx.value_or(0) * Tt * Dt,
+        .k_batch_page_offset = attrs.paged ? 0u : attrs.cache_batch_idx.value_or(0) * Tt * Dt,
         .kv_len_tiles = attrs.kv_len.value_or(shape[2]) / tt::constants::TILE_WIDTH};
 }
 
