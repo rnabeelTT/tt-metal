@@ -30,14 +30,91 @@ def pcc(a: torch.Tensor, b: torch.Tensor) -> float:
     return float((a @ b) / (a.norm() * b.norm() + 1e-30))
 
 
+def mesh_cols() -> int:
+    """GLM53_TP: devices of the (1, tp) mesh (default 1: one die)."""
+    return int(os.environ.get("GLM53_TP", "1"))
+
+
 def open_mesh(trace_region_size: int = 256 << 20):
     """GLM53_WORKER_L1_SIZE: optional smaller worker L1 (bytes); the kernel-config ring buffer grows by the difference
     (watcher-instrumented KDA prefill programs need ~75.6 KB of it; default ring 70,656 B, default worker L1 1,461,248 B).
-    """
+    GLM53_TP=4: a (1, 4) mesh with FABRIC_1D (the multichip decoder's CCLs)."""
     kw = {}
     if os.environ.get("GLM53_WORKER_L1_SIZE"):
         kw["worker_l1_size"] = int(os.environ["GLM53_WORKER_L1_SIZE"])
-    return ttnn.open_mesh_device(ttnn.MeshShape(1, 1), l1_small_size=24576, trace_region_size=trace_region_size, **kw)
+    tp = mesh_cols()
+    if tp > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    return ttnn.open_mesh_device(ttnn.MeshShape(1, tp), l1_small_size=24576, trace_region_size=trace_region_size, **kw)
+
+
+def close_mesh(mesh):
+    tp = tuple(mesh.shape)[1]
+    ttnn.close_mesh_device(mesh)
+    if tp > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+
+
+# ---- residual-stream I/O. One die: the [.., n*C] stream as is. A (1, tp) mesh: stream-interleaved, device d holds
+# columns [d*C/tp, (d+1)*C/tp) of every stream (tt/multichip_decoder.py), so the mHC ops stay column-local.
+def _interleave(x: torch.Tensor, tp: int) -> torch.Tensor:
+    lead = x.shape[:-1]
+    return x.reshape(*lead, HC, tp, HIDDEN // tp).transpose(-3, -2).reshape(*lead, H4)
+
+
+def _deinterleave(x: torch.Tensor, tp: int) -> torch.Tensor:
+    lead = x.shape[:-1]
+    return x.reshape(*lead, tp, HC, HIDDEN // tp).transpose(-3, -2).reshape(*lead, H4)
+
+
+def stream_host(mesh, x: torch.Tensor):
+    """Host tensor of a stream [1,1,T,H4] (fp32, TILE) laid out for the mesh (copy_host_to_device_tensor source)."""
+    tp = tuple(mesh.shape)[1]
+    if tp == 1:
+        return ttnn.from_torch(x, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT)
+    return ttnn.from_torch(
+        _interleave(x, tp),
+        dtype=ttnn.float32,
+        layout=ttnn.TILE_LAYOUT,
+        mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+    )
+
+
+def stream_in(mesh, x: torch.Tensor):
+    """Device stream [1,1,T,H4] fp32 from host rows."""
+    tp = tuple(mesh.shape)[1]
+    if tp == 1:
+        return ttnn.from_torch(x, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+    return ttnn.from_torch(
+        _interleave(x, tp),
+        dtype=ttnn.float32,
+        layout=ttnn.TILE_LAYOUT,
+        device=mesh,
+        mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+    )
+
+
+def stream_out(t) -> torch.Tensor:
+    """Host [.., T, H4] stream (HF column order) from a device stream."""
+    mesh = t.device()
+    tp = tuple(mesh.shape)[1]
+    if tp == 1:
+        return ttnn.to_torch(t)
+    return _deinterleave(ttnn.to_torch(t, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)), tp)
+
+
+def hidden_out(t) -> torch.Tensor:
+    """Host [.., T, hidden] of a sub-block output: hidden-sharded on a mesh (reduce-scatter output), else as is."""
+    mesh = t.device()
+    if tuple(mesh.shape)[1] == 1:
+        return ttnn.to_torch(t)
+    return ttnn.to_torch(t, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1))
+
+
+def replicated_in(mesh, x: torch.Tensor, dtype=ttnn.bfloat16):
+    return ttnn.from_torch(
+        x, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh)
+    )
 
 
 def layer_weights(rd: CheckpointReader, layer: int, weights) -> dict:
@@ -73,10 +150,10 @@ def prefill_user(dec, mesh, x: torch.Tensor, length: int, slot: int, bucket: int
         n = next(b for b in sorted(dec.prefill_lengths) if b >= ln)
         xp = torch.zeros(1, 1, n, H4)
         xp[0, 0, :ln] = x[c0 : c0 + ln]
-        X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+        X = stream_in(mesh, xp)
         inputs = dec.prefill_inputs(n, start=c0, length=ln, slot=slot)
         Y, st = dec.prefill_forward(X, inputs=inputs, attn_state=st)
-        outs.append(ttnn.to_torch(Y)[0, 0, :ln])
+        outs.append(stream_out(Y)[0, 0, :ln])
         ttnn.deallocate(X)
         ttnn.deallocate(Y)
         c0 += ln
@@ -98,15 +175,13 @@ class DecodeRunner:
     traced_steps: int = field(default=0)
 
     def __post_init__(self):
-        self.x_buf = ttnn.from_torch(
-            torch.zeros(1, 1, self.batch, H4), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh
-        )
+        self.x_buf = stream_in(self.mesh, torch.zeros(1, 1, self.batch, H4))
 
     def _set_inputs(self, rows: dict, positions: list):
         xd = torch.zeros(1, 1, self.batch, H4)
         for s, v in rows.items():
             xd[0, 0, s] = v
-        ttnn.copy_host_to_device_tensor(ttnn.from_torch(xd, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT), self.x_buf)
+        ttnn.copy_host_to_device_tensor(stream_host(self.mesh, xd), self.x_buf)
         if self.dsa_bufs is None:
             self.dsa_bufs = self.dec.decode_inputs(positions)
         else:
@@ -118,7 +193,7 @@ class DecodeRunner:
     def eager_step(self, rows: dict, positions: list) -> torch.Tensor:
         self._set_inputs(rows, positions)
         y = self._forward()
-        out = ttnn.to_torch(y)[0, 0]
+        out = stream_out(y)[0, 0]
         ttnn.deallocate(y)
         return out
 
@@ -137,7 +212,7 @@ class DecodeRunner:
         self.traced_steps += 1
         if not sync:
             return None
-        return ttnn.to_torch(self.y_out)[0, 0]
+        return stream_out(self.y_out)[0, 0]
 
     def release(self):
         if self.trace_id is not None:

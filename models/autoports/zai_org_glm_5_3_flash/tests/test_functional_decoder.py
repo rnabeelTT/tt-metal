@@ -23,9 +23,14 @@ from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
     H4,
     DecodeRunner,
     build_layer,
+    close_mesh,
+    hidden_out,
     open_mesh,
     pcc,
     prefill_user,
+    replicated_in,
+    stream_in,
+    stream_out,
 )
 from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import DryRunResult, hf_layer_reference
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
@@ -47,11 +52,15 @@ NEAR_TIE_BAR = 0.98
 # single token's update scale scatters around the fp32 result (tools/decode_stage_probe.py, layer 4: an fp32 host
 # recomputation of HF's own mHC on HF's inputs misses HF's update by 0.978 .. 1.019; the suite's tokens span 0.985 ..
 # 1.045). The mean over a test's decode tokens (at least MEAN_MIN_TOKENS, near-tie tokens included) is held to
-# 1 +- SEQ_RMS_TOL. Near-tie tokens skip the per-token bound: a different 8th expert changes the update by design.
+# 1 +- SEQ_RMS_TOL. Near-tie tokens are held to the same bounds (measured 0.988 .. 1.003).
 SEQ_RMS_TOL = 0.01
 TOKEN_RMS_TOL = 0.05
 MEAN_MIN_TOKENS = 8
 DECODE_RATIOS = []  # update rms ratio of every decode token of the running test
+# Per-layer bar overrides {layer: {"delta": bar, "seq": tol, "token": tol}}: a precision policy whose weights are
+# quantized below the checkpoint (bfp4 routed experts) is held to its measured quantization floor on the layers it
+# changes (tests/test_optimized_decoder.py). Empty here: the functional bars apply.
+BAR_OVERRIDES = {}
 NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
@@ -63,16 +72,17 @@ def decode_scale_mean():
     DECODE_RATIOS.clear()
     yield
     if len(DECODE_RATIOS) >= MEAN_MIN_TOKENS:
-        m = sum(DECODE_RATIOS) / len(DECODE_RATIOS)
+        m = sum(r for _, r in DECODE_RATIOS) / len(DECODE_RATIOS)
         print(f"decode update rms ratio mean {m:.4f} over {len(DECODE_RATIOS)} tokens")
-        assert abs(m - 1) <= SEQ_RMS_TOL, f"decode update rms ratio mean {m:.4f} outside 1 +- {SEQ_RMS_TOL}"
+        tol = max([SEQ_RMS_TOL] + [BAR_OVERRIDES[ly]["seq"] for ly, _ in DECODE_RATIOS if ly in BAR_OVERRIDES])
+        assert abs(m - 1) <= tol, f"decode update rms ratio mean {m:.4f} outside 1 +- {tol}"
 
 
 @pytest.fixture(scope="module")
 def mesh():
     m = open_mesh()
     yield m
-    ttnn.close_mesh_device(m)
+    close_mesh(m)
 
 
 @pytest.fixture(scope="module")
@@ -165,22 +175,28 @@ class Ref(tuple):
 def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
     """margin: the HF router margin of this (single) token, if any: below NEAR_TIE the token may legitimately route one
     expert differently and is held to NEAR_TIE_BAR (recorded in NEAR_TIES)."""
+    layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+    ov = BAR_OVERRIDES.get(layer)
+    if ov and delta_bar == DELTA_BAR:
+        delta_bar = ov["delta"]
     d = pcc(got - x, y - x)
     f = pcc(got, y)
     r = float((got - x).norm() / (y - x).norm())  # update scale vs HF (PCC is scale-blind)
     token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
     note = f" (HF router margin {margin:.1e})" if margin is not None else ""
     print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+    tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+    if ov:
+        tol = ov["token"] if token else ov["seq"]
+    assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
     if token:
-        DECODE_RATIOS.append(r)
+        DECODE_RATIOS.append((layer, r))
     if d < delta_bar and margin is not None and margin < NEAR_TIE:
         assert d >= NEAR_TIE_BAR, f"{tag}: delta PCC {d:.6f} < {NEAR_TIE_BAR} (router near-tie, margin {margin:.1e})"
         NEAR_TIES.append((tag, d, margin))
         print(f"{tag}: accepted as a router near-tie")
         return d, f
     assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
-    tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
-    assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}"
     assert f >= full_bar, f"{tag}: full PCC {f:.6f} < {full_bar}"
     return d, f
 
@@ -254,16 +270,13 @@ def test_synthetic_weights(mesh, rd, kind):
         fin = r["taps"]["ffn_in"].reshape(n, -1)
         fout = r["taps"]["ffn_out"].float().reshape(n, -1)
         rows = 256
-        t_in = ttnn.from_torch(
-            torch.nn.functional.pad(fin.float(), (0, 0, 0, rows - n)).reshape(1, 1, rows, -1).bfloat16(),
-            dtype=ttnn.bfloat16,
-            layout=ttnn.TILE_LAYOUT,
-            device=mesh,
+        t_in = replicated_in(
+            mesh, torch.nn.functional.pad(fin.float(), (0, 0, 0, rows - n)).reshape(1, 1, rows, -1).bfloat16()
         )
-        got = ttnn.to_torch(dec.mlp.forward(t_in, mode="prefill"))[0, 0, :n].float()
+        got = hidden_out(dec.mlp.forward(t_in, mode="prefill"))[0, 0, :n].float()
         p = pcc(got, fout)
         print(f"L{layer} synthetic MoE on the HF FFN input: PCC {p:.6f}")
-        assert p >= DELTA_BAR, p
+        assert p >= BAR_OVERRIDES.get(layer, {}).get("delta", DELTA_BAR), p
     bar = SYNTH_MOE_LAYER_BAR if moe else DELTA_BAR
     x, y = reference(layer, weights, 2, 200, 3)
     out = prefill_user(dec, mesh, x, 200, 3)
@@ -372,7 +385,7 @@ def test_no_host_fallback(mesh, rd, kind, monkeypatch):
     n = 128
     xp = torch.zeros(1, 1, n, H4)
     xp[0, 0, :100] = x[:100]
-    X = ttnn.from_torch(xp, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+    X = stream_in(mesh, xp)
     inputs = dec.prefill_inputs(n, start=0, length=100, slot=4)
     runner = DecodeRunner(dec, mesh, BATCH)
     pos = [-1] * BATCH
@@ -392,8 +405,8 @@ def test_no_host_fallback(mesh, rd, kind, monkeypatch):
     finally:
         for name, fn in real.items():
             monkeypatch.setattr(ttnn, name, fn)
-    assert torch.isfinite(ttnn.to_torch(Y)[0, 0, :100]).all()
-    assert torch.isfinite(ttnn.to_torch(Yd)[0, 0, 4]).all()
+    assert torch.isfinite(stream_out(Y)[0, 0, :100]).all()
+    assert torch.isfinite(stream_out(Yd)[0, 0, 4]).all()
 
 
 # ------------------------------------------------------------------------------- decode from an empty state

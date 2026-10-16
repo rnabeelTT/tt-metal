@@ -96,7 +96,7 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
   Other: HF long mode vs full forward at 4K checked (`scripts/long_mode_check.py`: KDA layer bit-identical, DSA layer
   max |diff| 4.9e-4); dummy-block guard in the DSA page mapping.
   Evidence after the fidelity change (2026-10-15, `scripts/review2_evidence_b.sh`): functional suite 42/42
-  (`s1_functional3.log`, results table regenerated; rerun 2026-10-16 as `s1_functional4.log`), fused suite 43/43; 1M kda_dense 76 s / 0.99997 / decode >= 0.99997,
+  (`s1_functional3.log`, results table regenerated; rerun 2026-10-16 as `s1_functional5.log`), fused suite 43/43; 1M kda_dense 76 s / 0.99997 / decode >= 0.99997,
   kda_moe 98 s / 0.99923 / decode >= 0.99936 (`s1_long3_*.log`, contract updated); KDA watcher case rerun; KDA Tracy
   (functional and fused) refreshed.
 
@@ -107,4 +107,4 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
   on HF's own inputs misses HF's update by the same amount, TF32 input rounding changes nothing: the scatter is the
   bf16 HF reference, not the port.
 - Gate: prefill sequence 1 +- 0.01, decode token 1 +- 0.05, mean of a test's decode tokens 1 +- 0.01.
-  Functional 42/42 (`s1_functional4.log`), fused 43/43 (`s2_fused_suite4.log`).
+  Functional 42/42 (`s1_functional5.log`), fused 43/43 (`s2_fused_suite4.log`).

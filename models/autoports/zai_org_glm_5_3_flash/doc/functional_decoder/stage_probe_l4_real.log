@@ -1,0 +1,15 @@
+=== start Thu Oct 15 09:15:11 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.layer_stage_probe --layer 4 --weights real
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-15 21:15:22.317 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+attn_collapsed   PCC 0.999997  rms tt 1.5577e-02 ref 1.5621e-02
+attn_in          PCC 0.999992  rms tt 1.8495e-01 ref 1.8512e-01
+attn_out         PCC 0.999971  rms tt 1.0829e-02 ref 1.0886e-02
+X1               PCC 0.999998  rms tt 4.9936e-02 ref 4.9994e-02
+X1 - X           PCC 0.999735  rms tt 5.2323e-03 ref 5.2181e-03
+ffn_collapsed    PCC 0.999989  rms tt 6.9069e-03 ref 6.9339e-03
+ffn_in           PCC 0.999984  rms tt 2.8391e-01 ref 2.8424e-01
+ffn_out          PCC 0.998970  rms tt 9.1712e-02 ref 9.1820e-02
+ffn_out(hf in)   PCC 0.999931  rms tt 9.1994e-02 ref 9.1820e-02
+=== exit code: 0 Thu Oct 15 09:15:37 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

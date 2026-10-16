@@ -57,7 +57,7 @@ sanity bar; measured minimum 0.99934 outside the router near-tie tokens (0.99731
 
 The tests also bound the update scale |X' - X| TT / HF, because PCC is scale-blind (review #1):
 
-| Measured over | Bound | Measured (s1_functional4.log) |
+| Measured over | Bound | Measured (s1_functional5.log; near-tie tokens under the same bounds) |
 |---|---|---|
 | One prefill sequence | 1 +- 0.01 | 0.9927 .. 1.0058 (42 sequences) |
 | One decode token | 1 +- 0.05 | 0.9851 .. 1.0445 (464 tokens) |
@@ -68,13 +68,14 @@ the reference itself scatters per token: HF runs the layer in bf16, and its mHC 
 `tools/decode_stage_probe.py` (layer 4, real weights, 8 decode steps), the attention and FFN outputs agree with HF
 within 0.5 % per token (FFN on the HF input: 0.999 .. 1.001). The residual updates scatter by up to 3.7 %, and an fp32
 host computation of HF's own mHC on HF's own inputs misses HF's update by the same amount (attention 0.991 .. 1.010,
-FFN 0.978 .. 1.019). Rounding the mixes input to TF32 does not change it. Near-tie tokens skip the per-token bound,
-because a different 8th expert changes the update by design; they stay in the mean.
+FFN 0.978 .. 1.019). Rounding the mixes input to TF32 does not change it. Router near-tie tokens are held to the
+same bounds (measured 0.988 .. 1.003). The layer-4 prefill probe on the final code (`stage_probe_l4_real.log`):
+attention output 0.995 of HF, FFN output 0.999 (1.002 on the HF FFN input), attention update X1 - X 1.003.
 
 ## Results (tests/test_functional_decoder.py, real weights unless noted)
 
 Command: `pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py` (one die; log
-`~/glm53-flash-bringup/logs/s1_functional4.log`, 2026-10-16, final code (same per-test minimum PCC as the 2026-10-15 run before the KDA idle-row select and the scale gate): paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
+`~/glm53-flash-bringup/logs/s1_functional5.log`, 2026-10-16, final code (same per-test minimum PCC as the 2026-10-15 run before the KDA idle-row select and the scale gate): paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
 recomputed with the code-hashed cache key). 42 tests, 42 passed. Four decode tokens pass under the evidence-based near-tie rule below (HF router margin < 5e-3): `test_lengths[dsa_moe-2051]` pos 2052 (0.98969), `test_paged_permuted_blocks` pos 4002 (0.99189), `test_batch32_all_active[dsa_moe]` slot 2 pos 38 (0.98292) and `[kda_moe]` slot 15 pos 130 (0.99437). Minimum update / full-stream PCC per case: one PCC over all prefill
 rows of a case (flattened) and one per decode step (single token):
 
