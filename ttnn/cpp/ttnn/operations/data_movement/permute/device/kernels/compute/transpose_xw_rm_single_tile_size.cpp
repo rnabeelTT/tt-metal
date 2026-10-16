@@ -25,6 +25,7 @@ void kernel_main() {
     constexpr auto cb_tilize = dfb::cb_tilize;
     constexpr auto cb_out = dfb::cb_out;
 
+    DataflowBuffer dfb_in_exp(cb_in);
     DataflowBuffer dfb_tilize_exp(cb_tilize);
     DataflowBuffer dfb_out_exp(cb_out);
 
@@ -47,7 +48,8 @@ void kernel_main() {
             cb_tilize,
             compute_kernel_lib::tilize_config::InitUninitMode::InitAndUninit,
             compute_kernel_lib::tilize_config::WaitMode::WaitBlock,
-            compute_kernel_lib::tilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(1, x_block_size);
+            compute_kernel_lib::tilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(
+            dfb_in_exp, dfb_tilize_exp, 1, x_block_size);
 
         // transpose input
         dfb_tilize_exp.wait_front(1);
