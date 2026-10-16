@@ -42,7 +42,9 @@ FORCE_INLINE void step_over_in1_blocks(DFB0& in1_dfb, uint32_t num_blocks, uint3
     }
 }
 
+template <typename MmPartialsDFB>
 FORCE_INLINE void reload_from_dfb_to_dst(
+    MmPartialsDFB& mm_partials_dfb,
     uint32_t in0_dfb_id,
     uint32_t in1_dfb_id,
     uint32_t mm_partials_dfb_id,
@@ -50,7 +52,6 @@ FORCE_INLINE void reload_from_dfb_to_dst(
     uint32_t out_subblock_w,
     uint32_t out_subblock_h,
     uint32_t in0_block_w) {
-    DataflowBuffer mm_partials_dfb(mm_partials_dfb_id);
     // Reconfigure input
     reconfig_data_format_srca(in1_dfb_id, mm_partials_dfb_id);
     copy_init(mm_partials_dfb_id);
@@ -115,6 +116,8 @@ void kernel_main() {
     // the token constructor re-aligns it to the pipe's durable read cursor (firmware resets the
     // buffer's pointers at every launch).
     DataflowBuffer in1_dfb(dfb::in1);
+    DataflowBuffer in0_dfb(in0_dfb_id);
+    DataflowBuffer in2_dfb(in2_dfb_id);
     DataflowBuffer mm_out_dfb(mm_out_dfb_id);
     DataflowBuffer mm_partials_dfb(mm_partials_dfb_id);
 
@@ -146,7 +149,7 @@ void kernel_main() {
         in1_dfb.wait_front(in1_block_num_tiles);
 
         const uint32_t input0_dfb_id = block == 0 ? in0_dfb_id : in2_dfb_id;
-        DataflowBuffer input0_dfb(static_cast<uint16_t>(input0_dfb_id));
+        auto& input0_dfb = block == 0 ? in0_dfb : in2_dfb;
         const bool last_out = block == (num_blocks - 1);
 // Configure packer once for pack out without Bias
 #if defined PACK_RELU
@@ -165,6 +168,7 @@ void kernel_main() {
                 tile_regs_acquire();
                 if (enable_reload) {
                     reload_from_dfb_to_dst(
+                        mm_partials_dfb,
                         input0_dfb_id,
                         in1_dfb_id,
                         mm_partials_dfb_id,
