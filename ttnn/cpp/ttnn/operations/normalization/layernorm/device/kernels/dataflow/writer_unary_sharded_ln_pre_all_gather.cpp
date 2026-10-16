@@ -13,10 +13,17 @@
 
 void kernel_main() {
     constexpr bool is_all_to_all_worker = get_arg(args::is_all_to_all_worker) == 1;
+    DataflowBuffer dfb_scaler_obj(dfb::scaler);
+#ifdef DO_COL_MASK
+    DataflowBuffer dfb_col_mask_obj(dfb::col_mask);
+#endif
+#ifndef USE_WELFORD
+    DataflowBuffer dfb_scaler_global_obj(dfb::scaler_global);
+#endif
     const uint32_t scalar_w_bits = get_arg(args::scalar_w);
     const float scalar_w_f = __builtin_bit_cast(float, scalar_w_bits);
     dataflow_kernel_lib::prepare_reduce_scaler<dfb::scaler, ckernel::PoolType::SUM, ckernel::ReduceDim::REDUCE_ROW>(
-        scalar_w_f);
+        dfb_scaler_obj, scalar_w_f);
 
 #ifdef DO_COL_MASK
     constexpr auto block_w = get_arg(args::block_w);
@@ -24,7 +31,7 @@ void kernel_main() {
     // This core's first tile index along the width (the normalized dimension): width_index * block_w,
     // the start of this core's width shard.
     const uint32_t width_shard_tile_start_id = get_arg(args::width_shard_tile_start_id);
-    generate_col_mask(dfb::col_mask, block_w, logical_K, width_shard_tile_start_id);
+    generate_col_mask(dfb_col_mask_obj, block_w, logical_K, width_shard_tile_start_id);
 #endif
 
 #ifndef USE_WELFORD
@@ -33,7 +40,7 @@ void kernel_main() {
         const float scalar_c_f = __builtin_bit_cast(float, scalar_c_bits);
         dataflow_kernel_lib::
             prepare_reduce_scaler<dfb::scaler_global, ckernel::PoolType::SUM, ckernel::ReduceDim::REDUCE_ROW>(
-                scalar_c_f);
+                dfb_scaler_global_obj, scalar_c_f);
     }
 #endif
 }

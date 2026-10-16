@@ -100,6 +100,7 @@ void kernel_main() {
 #endif
 
     // Generate constant tiles (scaler and epsilon) — shared between TILE and RM paths.
+    DataflowBuffer dfb_scaler(dfb::scaler);
     {
         constexpr uint32_t partial_last_tile_cols = W_logical % tt::constants::TILE_WIDTH;
 
@@ -107,14 +108,14 @@ void kernel_main() {
             dfb::scaler,
             ckernel::PoolType::SUM,
             ckernel::ReduceDim::REDUCE_ROW,
-            dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>();
+            dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>(dfb_scaler);
 
         if constexpr (partial_last_tile_cols > 0) {
             dataflow_kernel_lib::calculate_and_prepare_reduce_scaler<
                 dfb::scaler,
                 ckernel::PoolType::SUM,
                 ckernel::ReduceDim::REDUCE_ROW,
-                dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>(partial_last_tile_cols);
+                dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>(dfb_scaler, partial_last_tile_cols);
         }
     }
     const uint32_t eps = get_arg(args::eps);
