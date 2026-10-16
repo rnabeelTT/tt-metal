@@ -31,13 +31,14 @@
 #include "eltwise_utils_dfb.hpp"
 
 // The DataflowBuffer arguments are kernel_main's objects: an object built here would drain at every return.
+template <typename PreLhsDFB, typename PostLhsDFB, typename PreRhsDFB, typename PostRhsDFB, typename OutDFB>
 FORCE_INLINE void process_sfpu_tiles(
     uint32_t n,
-    DataflowBuffer& dfb_pre_lhs,
-    DataflowBuffer& dfb_post_lhs,
-    DataflowBuffer& dfb_pre_rhs,
-    DataflowBuffer& dfb_post_rhs,
-    DataflowBuffer& dfb_out ISCLOSE_RT_ARG_PARAMS) {
+    PreLhsDFB& dfb_pre_lhs,
+    PostLhsDFB& dfb_post_lhs,
+    PreRhsDFB& dfb_pre_rhs,
+    PostRhsDFB& dfb_post_rhs,
+    OutDFB& dfb_out ISCLOSE_RT_ARG_PARAMS) {
     const uint32_t dfb_post_lhs_id = dfb_post_lhs.get_id();
     const uint32_t dfb_post_rhs_id = dfb_post_rhs.get_id();
     const uint32_t dfb_out_id = dfb_out.get_id();
@@ -137,12 +138,12 @@ void kernel_main() {
 #if HAS_ACTIVATIONS(LHS)
     DataflowBuffer dfb_pre_lhs(dfb_pre_lhs_id);
 #else
-    DataflowBuffer& dfb_pre_lhs = dfb_post_lhs;
+    auto& dfb_pre_lhs = dfb_post_lhs;
 #endif
 #if HAS_ACTIVATIONS(RHS)
     DataflowBuffer dfb_pre_rhs(dfb_pre_rhs_id);
 #else
-    DataflowBuffer& dfb_pre_rhs = dfb_post_rhs;
+    auto& dfb_pre_rhs = dfb_post_rhs;
 #endif
 
     // Thread c of C consumes its own share, as in the native FPU kernel: the DFB hands consumer thread c the
