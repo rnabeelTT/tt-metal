@@ -29,6 +29,13 @@ void kernel_main() {
     constexpr auto Wt = get_arg(args::Wt);
     constexpr auto num_heads = get_arg(args::num_heads);
 
+    DataflowBuffer in_dfb(dfb::in);
+    DataflowBuffer untilized_in_dfb(dfb::untilized_in);
+    DataflowBuffer cache_dfb(dfb::cache);
+    DataflowBuffer untilized_cache_dfb(dfb::untilized_cache);
+    DataflowBuffer untilized_cache2_dfb(dfb::untilized_cache2);
+    DataflowBuffer out_dfb(dfb::out);
+
     compute_kernel_hw_startup(dfb::in, dfb::untilized_in);
 
     // Untilize input (standalone operation)
@@ -38,10 +45,11 @@ void kernel_main() {
         dfb::untilized_in,
         compute_kernel_lib::untilize_config::InitUninitMode::InitAndUninit,
         compute_kernel_lib::untilize_config::WaitMode::WaitBlock,
-        compute_kernel_lib::untilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(1);
+        compute_kernel_lib::untilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(
+        in_dfb, untilized_in_dfb, 1);
 
     for (uint32_t cur_head = 0; cur_head < num_heads; ++cur_head) {
-        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(1);
+        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(cache_dfb, untilized_cache_dfb, 1);
 
         // Wait on writer to update block, then tilize back
 #ifdef ARCH_QUASAR
@@ -51,6 +59,6 @@ void kernel_main() {
         // (all-zero cache block). Retarget the packer BFD before packing.
         pack_init(dfb::out);
 #endif
-        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(1);
+        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(untilized_cache2_dfb, out_dfb, 1);
     }
 }

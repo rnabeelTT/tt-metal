@@ -22,11 +22,16 @@ void kernel_main() {
 
     // Row-major input needs no untilize step, so this kernel never touches an input buffer; the
     // writer drains the resident shard directly.
+    DataflowBuffer cache_dfb(dfb::cache);
+    DataflowBuffer untilized_cache_dfb(dfb::untilized_cache);
+    DataflowBuffer untilized_cache2_dfb(dfb::untilized_cache2);
+    DataflowBuffer out_dfb(dfb::out);
+
     compute_kernel_hw_startup(dfb::cache, dfb::untilized_cache);
 
     for (uint32_t cur_head = 0; cur_head < num_heads; ++cur_head) {
         // Untilize a block from the cache with reconfiguration
-        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(1);
+        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(cache_dfb, untilized_cache_dfb, 1);
 
         // Wait on writer to update block. Tilize with reconfiguration
 #ifdef ARCH_QUASAR
@@ -36,6 +41,6 @@ void kernel_main() {
         // (all-zero cache block). Retarget the packer BFD before packing. Same fix as update_cache.cpp.
         pack_init(dfb::out);
 #endif
-        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(1);
+        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(untilized_cache2_dfb, out_dfb, 1);
     }
 }

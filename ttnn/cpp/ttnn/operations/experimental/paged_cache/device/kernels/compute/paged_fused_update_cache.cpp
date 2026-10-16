@@ -22,6 +22,13 @@ void kernel_main() {
 
     // Which of the two inputs this instance serves is structural: the factory places one compute
     // kernel per input shard grid, and each binds only its own input buffer.
+    DataflowBuffer in_dfb(dfb::in);
+    DataflowBuffer untilized_in_dfb(dfb::untilized_in);
+    DataflowBuffer cache_dfb(dfb::cache);
+    DataflowBuffer untilized_cache_dfb(dfb::untilized_cache);
+    DataflowBuffer untilized_cache2_dfb(dfb::untilized_cache2);
+    DataflowBuffer out_dfb(dfb::out);
+
     compute_kernel_hw_startup(dfb::in, dfb::untilized_in);
 
     // Untilize input (single block, init only - no uninit needed)
@@ -31,11 +38,12 @@ void kernel_main() {
         dfb::untilized_in,
         compute_kernel_lib::untilize_config::InitUninitMode::InitOnly,
         compute_kernel_lib::untilize_config::WaitMode::WaitBlock,
-        compute_kernel_lib::untilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(1);
+        compute_kernel_lib::untilize_config::ReconfigureRegisterDatatypeMode::NoReconfigure>(
+        in_dfb, untilized_in_dfb, 1);
 
     for (uint32_t cur_head = 0; cur_head < num_heads; ++cur_head) {
         // Untilize a block from the cache with reconfiguration from previous iteration
-        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(1);
+        compute_kernel_lib::untilize<Wt, dfb::cache, dfb::untilized_cache>(cache_dfb, untilized_cache_dfb, 1);
 
         // Wait on writer to update block. Tilize with reconfiguration
 #ifdef ARCH_QUASAR
@@ -45,6 +53,6 @@ void kernel_main() {
         // (all-zero cache block). Retarget the packer BFD before packing. Same fix as update_cache.cpp.
         pack_init(dfb::out);
 #endif
-        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(1);
+        compute_kernel_lib::tilize<Wt, dfb::untilized_cache2, dfb::out>(untilized_cache2_dfb, out_dfb, 1);
     }
 }
