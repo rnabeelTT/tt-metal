@@ -119,6 +119,8 @@ class GlmDSA(LightweightModule):
         self.w_uk = w(kvb[:, : self.Dn, :].reshape(1, self.H, self.Dn, self.R), ttnn.bfloat16)  # q_abs = q @ W_UK
         self.w_uv_t = w(kvb[:, self.Dn :, :].transpose(1, 2).reshape(1, self.H, self.R, self.Dv), ttnn.bfloat16)
         self.w_o = w(sd[a + "o_proj.weight"].T)  # [64*256, 4096]
+        self.bmm_reuse = False  # per-head matmuls on an explicit full-grid reuse config (optimized decoder)
+        self.decode_mm = None  # (x, w, role, ckc, mc) -> out | None: decode program-config hook (optimized decoder)
         # indexer (bf16 in the checkpoint; kept bf16)
         ix = a + "indexer."
         self.w_iq = w(sd[ix + "wq_b.weight"].T, ttnn.bfloat16)  # [1536, 32*128]
@@ -220,12 +222,29 @@ class GlmDSA(LightweightModule):
     def _mm(self, x, w, **kw):
         return ttnn.linear(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
 
+    def _bmm(self, x, w, rows: int):
+        """Per-head matmul [1,H,rows,K] x [1,H,K,N]. With bmm_reuse: one (head, M block) per core, the full N per core
+        (the default config puts 64 heads on 8 - 16 cores; tools/dsa_bmm_probe.py)."""
+        kw = {}
+        if self.bmm_reuse:
+            grid = self.mesh.compute_with_storage_grid_size()
+            Kt, Nt, Mt = w.shape[-2] // 32, w.shape[-1] // 32, -(-rows // 32)
+            kw["program_config"] = ttnn.MatmulMultiCoreReuseProgramConfig(
+                compute_with_storage_grid_size=(grid.x, grid.y),
+                in0_block_w=min(Kt, 8),
+                out_subblock_h=1,
+                out_subblock_w=max(d for d in (4, 2, 1) if Nt % d == 0),
+                per_core_M=max(d for d in (4, 2, 1) if Mt % d == 0),
+                per_core_N=Nt,
+            )
+        return ttnn.matmul(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
+
     def _q_abs(self, x, rows: int):
         """x [1,1,rows,hidden] -> (q_abs [1, H, rows, 512], q_r [1,1,rows,1536])."""
         qr = self._rms(self._mm(x, self.w_q_a), self.q_a_norm)
         q = self._mm(qr, self.w_q_b)  # [1,1,rows,H*256]
         q = ttnn.permute(ttnn.reshape(q, (1, rows, self.H, self.Dn)), (0, 2, 1, 3), memory_config=DRAM)
-        q_abs = ttnn.matmul(q, self.w_uk, compute_kernel_config=self.ckc, memory_config=DRAM)  # [1,H,rows,512]
+        q_abs = self._bmm(q, self.w_uk, rows)  # [1,H,rows,512]
         ttnn.deallocate(q)
         return q_abs, qr
 
@@ -246,9 +265,10 @@ class GlmDSA(LightweightModule):
 
     def _out(self, o_lat, rows: int):
         """o_lat [1, H, rows, 512] (TILE) -> [1,1,rows,hidden]."""
-        o = ttnn.matmul(o_lat, self.w_uv_t, compute_kernel_config=self.ckc, memory_config=DRAM)  # [1,H,rows,256]
+        o = self._bmm(o_lat, self.w_uv_t, rows)  # [1,H,rows,256]
         o = ttnn.reshape(ttnn.permute(o, (0, 2, 1, 3), memory_config=DRAM), (1, 1, rows, self.H * self.Dv))
-        return self._mm(o, self.w_o)
+        out = self.decode_mm(o, self.w_o, "o", self.ckc, DRAM) if self.decode_mm is not None else None
+        return out if out is not None else self._mm(o, self.w_o)
 
     # ---------------------------------------------------------------------------------------- pooled keys
     def _pool_chunk(self, k, gl, n: int, vmask):

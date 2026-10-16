@@ -11,7 +11,7 @@ On one layer's real weights and MoE-input rows drawn from the real stream statis
   tt       the port's MoE (Qwen35MoEOptimized, functional-decoder precision)
 and report RMS ratios and PCC: tt/ref vs ref_q8/ref separates conversion loss from device compute.
 
-usage: python tools/moe_scale_probe.py --layer 4 --rows 128"""
+usage: python tools/moe_scale_probe.py --layer 4 --rows 128 [--mode decode]"""
 
 import argparse
 
@@ -54,6 +54,7 @@ def main():
     ap.add_argument("--grouped-in0", type=int, default=None, help="K block (tiles) of the grouped sparse matmuls")
     ap.add_argument("--no-grouped", action="store_true", help="non-grouped sorted sparse matmuls")
     ap.add_argument("--skip-ref", action="store_true", help="TT only (reuse the printed reference numbers)")
+    ap.add_argument("--mode", default="prefill", choices=("prefill", "decode"), help="MoE path (decode: 32-row tiles)")
     a = ap.parse_args()
     rd = CheckpointReader()
     sd = rd.layer_state(a.layer)
@@ -89,9 +90,21 @@ def main():
             mesh, margs, moe_state_dict(sd, 192), tensor_cache_path=None, tt_ccl=None, layer_num=a.layer
         )
         tx = ttnn.from_torch(x.reshape(1, 1, a.rows, 4096), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh)
-        y = ttnn.to_torch(moe.forward(tx, mode="prefill")).reshape(a.rows, 4096).float()
         sh = ttnn.to_torch(moe._shared(tx)).reshape(a.rows, 4096).float()
+        if a.mode == "prefill":
+            y = ttnn.to_torch(moe.forward(tx, mode="prefill")).reshape(a.rows, 4096).float()
+        else:  # decode path: one 32-row tile of users per call (rows % 32 == 0)
+            ys = []
+            for r0 in range(0, a.rows, 32):
+                xt = ttnn.from_torch(
+                    x[r0 : r0 + 32].reshape(1, 1, 32, 4096), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh
+                )
+                ys.append(ttnn.to_torch(moe.forward(xt, mode="decode")).reshape(32, 4096).float())
+            y = torch.cat(ys)
         rt = y - sh
+        # per-row routed scale (decode checks are single rows)
+        rr = rt.norm(dim=-1) / ref_r.norm(dim=-1)
+        print(f"per-row routed rms ratio: mean {rr.mean():.4f} min {rr.min():.4f} max {rr.max():.4f}")
         print(
             f"tt vs ref:    routed rms {rat(rt, ref_r):.4f} PCC {pcc(rt, ref_r):.6f}; shared rms {rat(sh, ref_s):.4f} PCC {pcc(sh, ref_s):.6f}"
         )

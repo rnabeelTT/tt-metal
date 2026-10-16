@@ -53,14 +53,29 @@ sentinel rows, MoE rows computed and dropped).
 PCC of the layer update `X' - X` >= 0.995 (prefill rows and decode steps) and of the full stream `X'` >= 0.99. The
 HF reference rounds the 4-stream residual to bf16 at every mix while the port keeps fp32, so the full-stream PCC has a
 floor below 1 that is not a port error; the update PCC is the stricter measure. The full-stream bar (0.99) is a coarse
-sanity bar; measured minimum 0.99934 outside the router near-tie tokens (0.99731 with them). The tests also bound the
-update scale: |X' - X| TT / HF within [0.95, 1.05] (PCC is scale-blind; review #1).
+sanity bar; measured minimum 0.99934 outside the router near-tie tokens (0.99731 with them).
+
+The tests also bound the update scale |X' - X| TT / HF, because PCC is scale-blind (review #1):
+
+| Measured over | Bound | Measured (s1_functional4.log) |
+|---|---|---|
+| One prefill sequence | 1 +- 0.01 | 0.9927 .. 1.0058 (42 sequences) |
+| One decode token | 1 +- 0.05 | 0.9851 .. 1.0445 (464 tokens) |
+| Mean of a test's decode tokens (8 or more, near-ties included) | 1 +- 0.01 | 0.9976 .. 1.0061 (13 tests) |
+
+The routed-expert bug of review #1 (layer update ~0.988) fails the sequence bound. The per-token bound is wider because
+the reference itself scatters per token: HF runs the layer in bf16, and its mHC post / comb mixing rounds. With
+`tools/decode_stage_probe.py` (layer 4, real weights, 8 decode steps), the attention and FFN outputs agree with HF
+within 0.5 % per token (FFN on the HF input: 0.999 .. 1.001). The residual updates scatter by up to 3.7 %, and an fp32
+host computation of HF's own mHC on HF's own inputs misses HF's update by the same amount (attention 0.991 .. 1.010,
+FFN 0.978 .. 1.019). Rounding the mixes input to TF32 does not change it. Near-tie tokens skip the per-token bound,
+because a different 8th expert changes the update by design; they stay in the mean.
 
 ## Results (tests/test_functional_decoder.py, real weights unless noted)
 
 Command: `pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py` (one die; log
-`~/glm53-flash-bringup/logs/s1_functional3.log`, 2026-10-15, final code: paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
-recomputed with the code-hashed cache key). 42 tests, 42 passed (the two near-tie cases `test_lengths[dsa_moe-2051]` and `test_paged_permuted_blocks` pass under the evidence-based near-tie rule below). Minimum update / full-stream PCC per case: one PCC over all prefill
+`~/glm53-flash-bringup/logs/s1_functional4.log`, 2026-10-16, final code (same per-test minimum PCC as the 2026-10-15 run before the KDA idle-row select and the scale gate): paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
+recomputed with the code-hashed cache key). 42 tests, 42 passed. Four decode tokens pass under the evidence-based near-tie rule below (HF router margin < 5e-3): `test_lengths[dsa_moe-2051]` pos 2052 (0.98969), `test_paged_permuted_blocks` pos 4002 (0.99189), `test_batch32_all_active[dsa_moe]` slot 2 pos 38 (0.98292) and `[kda_moe]` slot 15 pos 130 (0.99437). Minimum update / full-stream PCC per case: one PCC over all prefill
 rows of a case (flattened) and one per decode step (single token):
 
 | case | checks | min update PCC | min full PCC |
@@ -183,9 +198,10 @@ reshape / transpose at 2048 rows.
   feature on) runs `test_perf_prefill[kda_dense-2048]`, `[kda_moe-2048]`, `[kda_moe-128]` and
   `test_perf_traced_decode[kda_moe-32]` clean (`scripts/01-watcher-kda-l1.sh`, logs `watcher_kda_l1/`). The earlier
   attempts with reduced watcher features (`watcher_reduced/` etc.) are kept for reference.
-- Watcher on the final code (2026-10-15, paged caches, inactive-slot masking, HiFi4 fidelities; logs `watcher_final/<case>/`,
+- Watcher on the stage-1 code (2026-10-15, paged caches, inactive-slot masking, HiFi4 fidelities; logs `watcher_final/<case>/`,
   worker_l1_size 1,444,864): `test_real_weights[dsa_moe]`, `test_lengths[dsa_moe-4000]`, `test_batch32_all_active[dsa_moe]`,
-  `test_real_weights[kda_moe]`, `test_lengths[kda_dense-4000]` pass, 0 error / assert / sanitize lines.
+  `test_real_weights[kda_moe]`, `test_lengths[kda_dense-4000]` pass, 0 error / assert / sanitize lines. The `kda_moe` run
+  predates the HiFi4 KDA-recurrence change (a compute-fidelity argument only: same kernels, same buffers).
 
 ## Limitations
 
@@ -198,6 +214,7 @@ reshape / transpose at 2048 rows.
   K block. With the partials CB marked UnpackToDestFp32 (as the dense 1d matmul factory does): 1.0036 / PCC 0.99998.
   bfp4 expert weights (datatype stage) cost 0.9826 PCC / 1.0275 scale on their own (same probe).
 - KDA attention output scale: 0.9954 of HF on real weights (layer 0, after the HiFi2 -> HiFi4 recurrence fix; PCC 0.99998);
-  the remaining -0.47 % is not root-caused (projections, norm epsilon and fused sigmoid ruled out). Bounded by the tests'
-  update-scale check.
+  layer 4 decode: 0.995 .. 0.999 per token. The remaining -0.3 .. -0.5 % is not root-caused (projections, norm epsilon
+  and fused sigmoid ruled out). At layer level it is inside the measured update scale (sequence bound 1 +- 0.01, see
+  Acceptance); a -0.5 % attention output alone moves the layer update by less than that.
 - The MTP layer and the vision tower are not part of the decoder stages (full-model / vLLM stages).

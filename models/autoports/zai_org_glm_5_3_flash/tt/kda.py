@@ -361,8 +361,8 @@ class GlmKDA(LightweightModule):
         ttnn.deallocate(sg)
         beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
         beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
-        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
-        beta = ttnn.multiply(beta_all, inputs["active"], memory_config=DRAM)
+        # inactive slots: beta = 0 and decay = 1 (selects, not multiplies) leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
         eg_all = eg
         eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
         ttnn.deallocate(beta_all)

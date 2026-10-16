@@ -142,6 +142,14 @@ class FusedHyperConnection(HyperConnection):
         return h, r4(post), r4(comb)
 
 
+def decode_linear(mod, x, w, role, ckc):
+    """x @ w for a decode step: the module's decode_mm hook (optimized decoder: explicit decode program configs) when
+    it takes the shape, else ttnn's default."""
+    hook = getattr(mod, "decode_mm", None)
+    out = hook(x, w, role, ckc, DRAM) if hook is not None else None
+    return out if out is not None else ttnn.linear(x, w, memory_config=DRAM, compute_kernel_config=ckc)
+
+
 class FusedGlmKDA(GlmKDA):
     """GlmKDA with the fused decode step (prefill unchanged)."""
 
@@ -194,7 +202,7 @@ class FusedGlmKDA(GlmKDA):
         beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
         beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
         # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
-        beta = ttnn.multiply(beta_all, inputs["active"], memory_config=DRAM)
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
         eg_all = eg
         eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
         ttnn.deallocate(beta_all)
@@ -216,7 +224,7 @@ class FusedGlmKDA(GlmKDA):
         ttnn.deallocate(og)
         ttnn.deallocate(ogate)
         o = ttnn.typecast(ttnn.reshape(o, (1, 1, B, H * V)), ttnn.bfloat16)
-        y = ttnn.linear(o, w.output_projection, memory_config=DRAM, compute_kernel_config=cc)
+        y = decode_linear(self, o, w.output_projection, "o", cc)
         ttnn.deallocate(o)
         return y
 

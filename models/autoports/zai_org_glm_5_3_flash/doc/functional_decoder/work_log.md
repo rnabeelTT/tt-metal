@@ -89,13 +89,22 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
      test_inactive_slot_state now feeds the idle slot a NaN row (passes).
   4. Output scale on real weights (`tools/layer_stage_probe.py --weights real`, layers 0 / 4): dense matmuls exact
      (`tools/matmul_scale_probe.py`: 1.00003); dense MLP ran at HiFi2 (activation mantissa truncation): ffn_out on the HF
-     input 0.9907 -> 0.9989 at HiFi4 (bfp8 weights alone: 0.9987); KDA chunk-recurrence matmuls (KDARecurrenceProgramConfig
+     input 0.9907 -> 0.9989 at HiFi4; KDA chunk-recurrence matmuls (KDARecurrenceProgramConfig
      affine prefix / scan) HiFi2 -> HiFi4: attn_out 0.9911 -> 0.9954. Residual KDA attn_out -0.47 % at PCC 0.99998 not
      resolved (projections exact at HiFi4, norm eps equal, fused sigmoid exact); bounded by the new test metric.
      Tests now also check the update scale |X' - X| TT / HF in [0.95, 1.05] (observed 0.984 - 1.045).
   Other: HF long mode vs full forward at 4K checked (`scripts/long_mode_check.py`: KDA layer bit-identical, DSA layer
   max |diff| 4.9e-4); dummy-block guard in the DSA page mapping.
   Evidence after the fidelity change (2026-10-15, `scripts/review2_evidence_b.sh`): functional suite 42/42
-  (`s1_functional3.log`, results table regenerated), fused suite 43/43; 1M kda_dense 76 s / 0.99997 / decode >= 0.99997,
+  (`s1_functional3.log`, results table regenerated; rerun 2026-10-16 as `s1_functional4.log`), fused suite 43/43; 1M kda_dense 76 s / 0.99997 / decode >= 0.99997,
   kda_moe 98 s / 0.99923 / decode >= 0.99936 (`s1_long3_*.log`, contract updated); KDA watcher case rerun; KDA Tracy
   (functional and fused) refreshed.
+
+## 2026-10-16: review #3 P2 (update scale)
+
+- `tools/decode_stage_probe.py`, layer 4, real weights, 8 decode steps (`decode_stage_l4.log`): attention and FFN
+  outputs within 0.5 % of HF per token; the residual updates scatter 0.99 .. 1.04. An fp32 host recomputation of HF's mHC
+  on HF's own inputs misses HF's update by the same amount, TF32 input rounding changes nothing: the scatter is the
+  bf16 HF reference, not the port.
+- Gate: prefill sequence 1 +- 0.01, decode token 1 +- 0.05, mean of a test's decode tokens 1 +- 0.01.
+  Functional 42/42 (`s1_functional4.log`), fused 43/43 (`s2_fused_suite4.log`).

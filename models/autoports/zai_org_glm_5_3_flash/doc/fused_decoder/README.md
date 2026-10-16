@@ -59,7 +59,7 @@ bound: tensor parallelism (stage 4) and bfp4 / bfp8 weights (stage 8) address th
 ## Correctness, determinism, watcher
 
 `tests/test_fused_decoder.py` runs the full stage-1 suite (`tests/test_functional_decoder.py`, same references and
-bars) against `FusedDecoder`, plus a check that the suite really runs the fused class. Log `s2_fused_suite3.log`
+bars) against `FusedDecoder`, plus a check that the suite really runs the fused class. Log `s2_fused_suite4.log`
 (2026-10-15, final code): 43 tests, 43 passed.
 
 | case | min update PCC kda_dense / dsa_moe / kda_moe | functional decoder (stage 1) |

@@ -21,6 +21,7 @@ _suite.DECODER_CLS = FusedDecoder
 pytestmark = _suite.pytestmark
 mesh = _suite.mesh
 rd = _suite.rd
+decode_scale_mean = _suite.decode_scale_mean
 globals().update({k: v for k, v in vars(_suite).items() if k.startswith("test_")})
 
 

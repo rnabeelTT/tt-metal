@@ -41,12 +41,31 @@ FULL_BAR = 0.99
 # update PCC 0.983-0.9957 (scripts/route_margin.py). Such a token is held to NEAR_TIE_BAR and logged in NEAR_TIES.
 NEAR_TIE = 5e-3
 NEAR_TIE_BAR = 0.98
-# update scale |X' - X| TT / HF: a systematic scale error is invisible to PCC (review #1: routed experts were 0.976 before
-# the sparse_matmul fp32-partials fix)
-UPDATE_RMS_RANGE = (0.95, 1.05)
+# Update scale |X' - X| TT / HF (PCC is scale-blind; review #1: the routed experts were 0.976 before the sparse_matmul
+# fp32-partials fix, ~0.988 at layer level). A prefill sequence is held to 1 +- SEQ_RMS_TOL, which that bug fails. One
+# decode token is held to 1 +- TOKEN_RMS_TOL only: HF runs the layer in bf16 and its mHC post / comb mixing rounds, so a
+# single token's update scale scatters around the fp32 result (tools/decode_stage_probe.py, layer 4: an fp32 host
+# recomputation of HF's own mHC on HF's inputs misses HF's update by 0.978 .. 1.019; the suite's tokens span 0.985 ..
+# 1.045). The mean over a test's decode tokens (at least MEAN_MIN_TOKENS, near-tie tokens included) is held to
+# 1 +- SEQ_RMS_TOL. Near-tie tokens skip the per-token bound: a different 8th expert changes the update by design.
+SEQ_RMS_TOL = 0.01
+TOKEN_RMS_TOL = 0.05
+MEAN_MIN_TOKENS = 8
+DECODE_RATIOS = []  # update rms ratio of every decode token of the running test
 NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
+
+
+@pytest.fixture(autouse=True)
+def decode_scale_mean():
+    """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
+    DECODE_RATIOS.clear()
+    yield
+    if len(DECODE_RATIOS) >= MEAN_MIN_TOKENS:
+        m = sum(DECODE_RATIOS) / len(DECODE_RATIOS)
+        print(f"decode update rms ratio mean {m:.4f} over {len(DECODE_RATIOS)} tokens")
+        assert abs(m - 1) <= SEQ_RMS_TOL, f"decode update rms ratio mean {m:.4f} outside 1 +- {SEQ_RMS_TOL}"
 
 
 @pytest.fixture(scope="module")
@@ -149,17 +168,19 @@ def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
     d = pcc(got - x, y - x)
     f = pcc(got, y)
     r = float((got - x).norm() / (y - x).norm())  # update scale vs HF (PCC is scale-blind)
+    token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
     note = f" (HF router margin {margin:.1e})" if margin is not None else ""
     print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+    if token:
+        DECODE_RATIOS.append(r)
     if d < delta_bar and margin is not None and margin < NEAR_TIE:
         assert d >= NEAR_TIE_BAR, f"{tag}: delta PCC {d:.6f} < {NEAR_TIE_BAR} (router near-tie, margin {margin:.1e})"
         NEAR_TIES.append((tag, d, margin))
         print(f"{tag}: accepted as a router near-tie")
         return d, f
     assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
-    assert (
-        UPDATE_RMS_RANGE[0] <= r <= UPDATE_RMS_RANGE[1]
-    ), f"{tag}: update rms ratio {r:.4f} outside {UPDATE_RMS_RANGE}"
+    tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+    assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}"
     assert f >= full_bar, f"{tag}: full PCC {f:.6f} < {full_bar}"
     return d, f
 
