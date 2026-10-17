@@ -57,42 +57,73 @@ sanity bar; measured minimum 0.99934 outside the router near-tie tokens (0.99731
 
 The tests also bound the update scale |X' - X| TT / HF, because PCC is scale-blind (review #1):
 
-| Measured over | Bound | Measured (s1_functional5.log; near-tie tokens under the same bounds) |
+| Measured over | Bound | Measured (s1_functional6.log, final kernels) |
 |---|---|---|
-| One prefill sequence | 1 +- 0.01 | 0.9927 .. 1.0058 (42 sequences) |
-| One decode token | 1 +- 0.05 | 0.9851 .. 1.0445 (464 tokens) |
-| Mean of a test's decode tokens (8 or more, near-ties included) | 1 +- 0.01 | 0.9976 .. 1.0061 (13 tests) |
+| One prefill sequence | 1 +- 0.01 | 0.9934 .. 1.0059 |
+| One decode token | 1 +- 0.05 | 0.9803 .. 1.0507 (433 tokens; the one token above 1.05 is a confirmed router flip, below) |
+| One router near-tie decode token (HF margin < 5e-3) | 1 +- 0.08 | max 1.0507 |
+| Mean of a test's decode tokens (8 or more, near-ties included) | 1 +- 0.01 | 0.9959 .. 1.0047 (13 tests) |
 
-The routed-expert bug of review #1 (layer update ~0.988) fails the sequence bound. The per-token bound is wider because
-the reference itself scatters per token: HF runs the layer in bf16, and its mHC post / comb mixing rounds. With
-`tools/decode_stage_probe.py` (layer 4, real weights, 8 decode steps), the attention and FFN outputs agree with HF
-within 0.5 % per token (FFN on the HF input: 0.999 .. 1.001). The residual updates scatter by up to 3.7 %, and an fp32
-host computation of HF's own mHC on HF's own inputs misses HF's update by the same amount (attention 0.991 .. 1.010,
-FFN 0.978 .. 1.019). Rounding the mixes input to TF32 does not change it. Router near-tie tokens are held to the
-same bounds (measured 0.988 .. 1.003). The layer-4 prefill probe on the final code (`stage_probe_l4_real.log`):
-attention output 0.995 of HF, FFN output 0.999 (1.002 on the HF FFN input), attention update X1 - X 1.003.
+**The gate catches the review #1 bug (fault injection).** `GLM53_FAULT_ROUTED_SCALE=0.9722` multiplies the routed
+output by the bug's factor (test-only hook in `tt/moe.py`). The suite then fails 17 tests (`s1_fault_routed.log`):
+
+| Layer kind | Check that fails | Measured with the fault | Margin |
+|---|---|---|---|
+| KDA-MoE (L4), real weights | prefill sequence 1 +- 0.01 | 0.9846 .. 0.9900 (5 tests) | 0 .. 1.5 % |
+| KDA-MoE (L4), synthetic weights | prefill sequence | 0.9769 | 1.3 % |
+| DSA-MoE (L3), real weights | prefill sequence | 0.9789 .. 0.9839 (9 tests) | 0.6 .. 1.1 % |
+| DSA-MoE (L3), 32 slots / inactive slot | decode mean 1 +- 0.01 | 0.9823, 0.9828 | 0.8 % |
+
+The layer-level factor of the bug is 0.985 .. 0.990 on L4 and 0.979 .. 0.984 on L3 (the "~0.988" of earlier versions
+of this README was not a measurement of this bug).
+
+**Why the per-token bound is wider.** HF runs the layer in bf16, and its mHC post / comb mixing rounds per token. An
+fp32 host computation of HF's own mHC on HF's own inputs misses HF's update by 0.978 .. 1.019 per token
+(`tools/decode_stage_probe.py`, layer 4). At sequence level the two agree to 0.1 %.
+
+**Port-side mHC offset (stage-1 review #4): fixed.** The mHC kernels read fp32 operands at TF32 precision, and the
+Sinkhorn reciprocal (`recip_tile` legacy mode) was 1.4e-3 low. TT's comb column sums were about 1e-3 below 1. That
+moved the residual update by +0.3 % (post / comb) and +0.1 % (`mhc_post`). After the kernel fix (fp32 through DST,
+hi / lo operand split, exact reciprocal; see the fused-decoder README), `decode_stage_l4c.log` gives:
+
+| Part (layer 4, 8 decode steps, identical inputs) | Before | After |
+|---|---|---|
+| TT post / comb vs exact fp32 | +0.30 % mean | -0.02 % (range -0.06 .. 0) |
+| device `mhc_post` vs host on the same post / comb | +0.10 % mean | 0.000 % |
+| L4 prefill sequences | 1.0035 .. 1.0058 | 0.9995 .. 1.0023 |
+
+**Router near-ties.** A token whose HF 8th-vs-9th margin is below 5e-3 can route one expert differently. The port's
+FFN input differs from HF's bf16-rounded input by about 1 %. One flip changes the token's function, so near-tie tokens
+get PCC bar 0.98 and per-token scale 1 +- 0.08, and stay in the decode mean. Evidence for the bound: L3 32-slot slot 2
+pos 39, HF margin 1.86e-4 (`route_margin_l3_s1302.log`). TT routes expert 31, HF's 9th, in place of 149. The other 7
+experts are equal (`flip_tt_s1302.log`), and the token's update scale is 1.051 at delta PCC 0.9987. Before the kernel
+fix, the neighbouring pos 38 flipped instead (margin 8.0e-4); now it routes as HF does.
 
 ## Results (tests/test_functional_decoder.py, real weights unless noted)
 
 Command: `pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py` (one die; log
-`~/glm53-flash-bringup/logs/s1_functional5.log`, 2026-10-16, final code (same per-test minimum PCC as the 2026-10-15 run before the KDA idle-row select and the scale gate): paging / masking / sparse_matmul fixes, HiFi4 KDA recurrence and dense MLP; references
-recomputed with the code-hashed cache key). 42 tests, 42 passed. Four decode tokens pass under the evidence-based near-tie rule below (HF router margin < 5e-3): `test_lengths[dsa_moe-2051]` pos 2052 (0.98969), `test_paged_permuted_blocks` pos 4002 (0.99189), `test_batch32_all_active[dsa_moe]` slot 2 pos 38 (0.98292) and `[kda_moe]` slot 15 pos 130 (0.99437). Minimum update / full-stream PCC per case: one PCC over all prefill
+`s1_functional6.log`, 2026-10-16, final code and final fp32-exact kernels). 42 tests: 41 passed in the full run; the
+42nd (`test_batch32_all_active[dsa_moe]`) failed only on the confirmed router flip at slot 2 pos 39 (scale 1.0507,
+see Acceptance) and passes under the near-tie scale bound (`s1_b32_dsa.log`). Three decode tokens pass under the
+near-tie PCC rule (HF router margin < 5e-3): `test_lengths[dsa_moe-2051]` pos 2052, `test_paged_permuted_blocks`
+pos 4002 and `test_batch32_all_active[kda_moe]` slot 15 pos 130. Minimum update / full-stream PCC per case (final
+run): one PCC over all prefill
 rows of a case (flattened) and one per decode step (single token):
 
 | case | checks | min update PCC | min full PCC |
 |---|---|---|---|
-| real weights kda_dense / dsa_moe / kda_moe (prefill 100 at slot 5 of 8, 3 decode steps: eager, then traced) | 4 each | 0.99997 / 0.99979 / 0.99915 | 0.99995 / 0.99990 / 0.99997 |
+| real weights kda_dense / dsa_moe / kda_moe (prefill 100 at slot 5 of 8, 3 decode steps: eager, then traced) | 4 each | 0.99997 / 0.99984 / 0.99945 | 0.99994 / 0.99992 / 0.99998 |
 | lengths kda_dense 1, 31, 33, 128, 129, 2047, 2049, 4000 | 4 each | >= 0.99996 | >= 0.99993 |
-| lengths dsa_moe 1, 33, 129, 2049, 2177, 4000 | 4 each | >= 0.99961 | >= 0.99977 |
-| lengths dsa_moe 2051 (dense -> sparse switch) | 4 | 0.98969 (decode pos 2052: router near-tie, see below); others >= 0.99980 | 0.99758 |
-| lengths kda_moe 33, 2049 | 4 each | 0.99969 / 0.99870 | >= 0.99997 |
-| 4 users in slots 1, 3, 4, 6 (lengths 37, 100, 300 or 2100 for DSA, 64), prefilled one by one, decoded together | 16 per kind | 0.99997 / 0.99877 / 0.99911 | >= 0.99933 |
-| 32 users, all slots active, mixed positions (DSA: two lengths past 2051), eager then traced | 96 per kind | 0.99993 / 0.98292* / 0.99437* | >= 0.99749 |
-| paged caches through a shuffled, interleaved block table (users 4000 / 2100 / 129) | 10 | 0.99189* (pos 4002); others >= 0.99974 | 0.99731 |
-| inactive slots keep their state (B decodes after idling 4 steps) | 8 per kind | 0.99997 / 0.99989 / 0.99941 | >= 0.99996 |
-| determinism (same sequence twice: prefill and traced decode bit-identical) | 10 per kind | 0.99997 / 0.99983 / 0.99914 | >= 0.99991 |
-| decode from an empty state (positions 0-3) | 4 per kind | 0.99997 / 0.99993 / 0.99974 | >= 0.99996 |
-| synthetic weights kda_dense / dsa_moe / kda_moe | 4 each | 0.99957 / 0.99797 / 0.99206 (prefill, see below) | >= 0.99799 |
+| lengths dsa_moe 1, 33, 129, 2049, 2177, 4000 | 4 each | >= 0.99962 | >= 0.99977 |
+| lengths dsa_moe 2051 (dense -> sparse switch) | 4 | 0.98972 (decode pos 2052: router near-tie, see below); others >= 0.99981 | 0.99759 |
+| lengths kda_moe 33, 2049 | 4 each | 0.99977 / 0.99874 | >= 0.99997 |
+| 4 users in slots 1, 3, 4, 6 (lengths 37, 100, 300 or 2100 for DSA, 64), prefilled one by one, decoded together | 16 per kind | 0.99997 / 0.99879 / 0.99951 | >= 0.99935 |
+| 32 users, all slots active, mixed positions (DSA: two lengths past 2051), eager then traced | 96 per kind | 0.99992 / 0.99568 / 0.99428* | >= 0.99876 |
+| paged caches through a shuffled, interleaved block table (users 4000 / 2100 / 129) | 10 | 0.99191* (pos 4002); others >= 0.99972 | 0.99732 |
+| inactive slots keep their state (B decodes after idling 4 steps) | 8 per kind | 0.99997 / 0.99989 / 0.99957 | >= 0.99994 |
+| determinism (same sequence twice: prefill and traced decode bit-identical) | 10 per kind | 0.99997 / 0.99942 / 0.99929 | >= 0.99971 |
+| decode from an empty state (positions 0-3) | 4 per kind | 0.99998 / 0.99993 / 0.99952 | >= 0.99996 |
+| synthetic weights kda_dense / dsa_moe / kda_moe | 4 each | 0.99984 / 0.99785 / 0.98976 (prefill, see below) | >= 0.99788 |
 
 \* Router near-ties (MoE layers, single decode tokens). The port's FFN input differs from HF's by ~1 % relative (HF
 rounds its 4-stream residual to bf16 at every mix; the port keeps fp32), so the router's selection scores move by up to

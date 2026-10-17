@@ -25,11 +25,25 @@ constexpr uint32_t CB_CONSTS = tt::CBIndex::c_1;  // 8 tiles
 constexpr uint32_t CB_PRE = tt::CBIndex::c_2;
 constexpr uint32_t CB_POST = tt::CBIndex::c_3;
 constexpr uint32_t CB_COMB = tt::CBIndex::c_4;
-constexpr uint32_t CB_M = tt::CBIndex::c_16;
-constexpr uint32_t CB_MM = tt::CBIndex::c_17;
-constexpr uint32_t CB_RECIP = tt::CBIndex::c_18;
-constexpr uint32_t CB_PRE_W = tt::CBIndex::c_24;
-constexpr uint32_t CB_POST_W = tt::CBIndex::c_25;
+constexpr uint32_t CB_PERM = tt::CBIndex::c_5;  // 2n-1 permutation tiles for the exact row / col sums (reader-made)
+constexpr uint32_t CB_M = tt::CBIndex::c_16;    // Sinkhorn iterate m, exact fp32
+constexpr uint32_t CB_MH = tt::CBIndex::c_17;   // m split for the row/col-sum matmuls: hi (TF32-exact)
+constexpr uint32_t CB_ML = tt::CBIndex::c_18;   // ... lo
+constexpr uint32_t CB_XH = tt::CBIndex::c_24;   // mixes hi
+constexpr uint32_t CB_XL = tt::CBIndex::c_25;   // mixes lo
+constexpr uint32_t CB_CH = tt::CBIndex::c_26;   // consts split in three srcA-exact pieces (8 tiles each): top 10 bits
+constexpr uint32_t CB_CM = tt::CBIndex::c_27;   // ... next 10 bits
+constexpr uint32_t CB_CL = tt::CBIndex::c_28;   // ... the rest
+
+// The FPU reads fp32 at TF32: the compute kernel only copies these fp32 CBs into DST (unpacked straight to DST, full
+// precision) and feeds its matmuls hi / lo splits the multiplier uses whole instead.
+ComputeConfigDescriptor::UnpackToDestModes unpack_to_dest_modes() {
+    ComputeConfigDescriptor::UnpackToDestModes modes(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
+    for (uint32_t cb : {CB_MIXES, CB_CONSTS, CB_M}) {
+        modes[cb] = UnpackToDestMode::UnpackToDestFp32;
+    }
+    return modes;
+}
 
 void add_cb(
     ProgramDescriptor& desc,
@@ -90,13 +104,17 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
         alias_cb(CB_PRE, pre_buffer);
         alias_cb(CB_POST, post_buffer);
         alias_cb(CB_COMB, comb_buffer);
+        add_cb(desc, cores, CB_PERM, 2 * operation_attributes.n - 1, tile_size, df);
         add_cb(desc, cores, CB_M, 2, tile_size, df);
-        add_cb(desc, cores, CB_MM, 2, tile_size, df);
-        add_cb(desc, cores, CB_RECIP, 2, tile_size, df);
-        add_cb(desc, cores, CB_PRE_W, 2, tile_size, df);
-        add_cb(desc, cores, CB_POST_W, 2, tile_size, df);
+        add_cb(desc, cores, CB_MH, 2, tile_size, df);
+        add_cb(desc, cores, CB_ML, 2, tile_size, df);
+        add_cb(desc, cores, CB_XH, 2, tile_size, df);
+        add_cb(desc, cores, CB_XL, 2, tile_size, df);
+        add_cb(desc, cores, CB_CH, 8, tile_size, df);
+        add_cb(desc, cores, CB_CM, 8, tile_size, df);
+        add_cb(desc, cores, CB_CL, 8, tile_size, df);
 
-        std::vector<uint32_t> reader_ct = {CB_MIXES, CB_CONSTS};
+        std::vector<uint32_t> reader_ct = {CB_MIXES, CB_CONSTS, CB_PERM, operation_attributes.n};
         TensorAccessorArgs(consts_buffer).append_to(reader_ct);
         KernelDescriptor reader;
         reader.kernel_source = kdir + "dataflow/reader_mhc_split_sinkhorn_sharded.cpp";
@@ -106,13 +124,18 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
         reader.config = ReaderConfigDescriptor{};
 
         std::vector<uint32_t> compute_ct = {
-            operation_attributes.sinkhorn_iters, std::bit_cast<uint32_t>(operation_attributes.eps)};
+            operation_attributes.sinkhorn_iters,
+            std::bit_cast<uint32_t>(operation_attributes.eps),
+            operation_attributes.n};
         KernelDescriptor compute;
         compute.kernel_source = kdir + "compute/mhc_split_sinkhorn_compute.cpp";
         compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
         compute.core_ranges = cores;
         compute.compile_time_args = std::move(compute_ct);
-        compute.config = ComputeConfigDescriptor{.math_fidelity = MathFidelity::HiFi4, .fp32_dest_acc_en = true};
+        compute.config = ComputeConfigDescriptor{
+            .math_fidelity = MathFidelity::HiFi4,
+            .fp32_dest_acc_en = true,
+            .unpack_to_dest_mode = unpack_to_dest_modes()};
 
         for (const CoreCoord& core : corerange_to_cores(cores)) {
             KernelDescriptor::RTArgList rr;
@@ -146,13 +169,17 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_PRE, 2, tile_size, df);
     add_cb(desc, all_cores, CB_POST, 2, tile_size, df);
     add_cb(desc, all_cores, CB_COMB, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_PERM, 2 * operation_attributes.n - 1, tile_size, df);
     add_cb(desc, all_cores, CB_M, 2, tile_size, df);
-    add_cb(desc, all_cores, CB_MM, 2, tile_size, df);
-    add_cb(desc, all_cores, CB_RECIP, 2, tile_size, df);
-    add_cb(desc, all_cores, CB_PRE_W, 2, tile_size, df);
-    add_cb(desc, all_cores, CB_POST_W, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_MH, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_ML, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_XH, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_XL, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_CH, 8, tile_size, df);
+    add_cb(desc, all_cores, CB_CM, 8, tile_size, df);
+    add_cb(desc, all_cores, CB_CL, 8, tile_size, df);
 
-    std::vector<uint32_t> reader_ct = {CB_MIXES, CB_CONSTS};
+    std::vector<uint32_t> reader_ct = {CB_MIXES, CB_CONSTS, CB_PERM, operation_attributes.n};
     TensorAccessorArgs(mixes_buffer).append_to(reader_ct);
     TensorAccessorArgs(consts_buffer).append_to(reader_ct);
     KernelDescriptor reader;
@@ -180,6 +207,7 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
     std::vector<uint32_t> compute_ct = {
         operation_attributes.sinkhorn_iters,
         std::bit_cast<uint32_t>(operation_attributes.eps),
+        operation_attributes.n,
     };
     KernelDescriptor compute;
     compute.kernel_source =
@@ -191,6 +219,7 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,
+        .unpack_to_dest_mode = unpack_to_dest_modes(),
     };
 
     // Per-core work split. start_tile is the page offset into mixes/outputs; consts (8

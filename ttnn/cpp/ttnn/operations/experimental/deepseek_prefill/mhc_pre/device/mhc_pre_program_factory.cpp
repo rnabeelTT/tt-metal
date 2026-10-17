@@ -21,6 +21,8 @@ constexpr uint32_t CB_IN = tt::CBIndex::c_0;      // the n residual-stream tiles
 constexpr uint32_t CB_PRE = tt::CBIndex::c_1;     // raw pre tile of the token-tile
 constexpr uint32_t CB_CONSTS = tt::CBIndex::c_2;  // n column-broadcast tiles, resident
 constexpr uint32_t CB_COEF = tt::CBIndex::c_3;    // n broadcast pre_i tiles of the token-tile
+constexpr uint32_t CB_PH = tt::CBIndex::c_4;      // pre split for the expansion matmul: hi (TF32-exact)
+constexpr uint32_t CB_PL = tt::CBIndex::c_5;      // ... lo
 constexpr uint32_t CB_OUT = tt::CBIndex::c_16;
 
 void add_cb(
@@ -76,6 +78,8 @@ ProgramDescriptor MhcPreProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_PRE, 2, tile_size, df);
     add_cb(desc, all_cores, CB_CONSTS, n, tile_size, df);
     add_cb(desc, all_cores, CB_COEF, n, tile_size, df);
+    add_cb(desc, all_cores, CB_PH, 1, tile_size, df);
+    add_cb(desc, all_cores, CB_PL, 1, tile_size, df);
     add_cb(desc, all_cores, CB_OUT, 2, out_tile_size, out_df);
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_pre/device/kernels/";
@@ -105,9 +109,18 @@ ProgramDescriptor MhcPreProgramFactory::create_descriptor(
     compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
     compute.core_ranges = all_cores;
     compute.compile_time_args = {n, col_tiles};
+    // The FPU reads fp32 at TF32: for an fp32 op the kernel only copies the streams, pre and the expanded coefficients
+    // into DST (unpacked straight to DST, full precision) and accumulates on the SFPU.
+    std::vector<UnpackToDestMode> unpack_to_dest(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
+    if (df == tt::DataFormat::Float32) {
+        for (uint32_t cb : {CB_IN, CB_PRE, CB_COEF}) {
+            unpack_to_dest[cb] = UnpackToDestMode::UnpackToDestFp32;
+        }
+    }
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,
+        .unpack_to_dest_mode = std::move(unpack_to_dest),
     };
 
     for (uint32_t i = 0, start_unit = 0; i < num_cores; ++i) {

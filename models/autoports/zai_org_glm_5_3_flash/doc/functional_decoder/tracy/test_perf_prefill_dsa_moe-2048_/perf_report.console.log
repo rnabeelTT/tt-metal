@@ -6,7 +6,7 @@ Using operations after 'PERF_PREFILL'.
 Using operations until 'PERF_PREFILL_END'.
 Detected data from 1 devices. Merging device data...
 Warning: SparseMatmulDeviceOperation rows without numeric nnz were found. Their DRAM/FLOP utilization is omitted; pass --active-experts K to model K active experts per input batch group.
-Writing CSV output to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report.csv
+Writing CSV output to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report.csv
 Overall DRAM roofline (modeled ops): 1.7% (9 GB/s)
 Warning: Unclassified operation 'MhcSplitSinkhornDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'UntilizeCodegenDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
@@ -18,5 +18,5 @@ Warning: Unclassified operation 'GatherDeviceOperation' found. Please add to OPE
 Warning: Unclassified operation 'MoeSortedDispatchDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MoeGatherRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MoeGatherAddRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Writing CSV stacked report to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report_stacked.csv
-Plotting PNG stacked report to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report_stacked.png
+Writing CSV stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report_stacked.csv
+Plotting PNG stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_dsa_moe-2048_/perf_report_stacked.png

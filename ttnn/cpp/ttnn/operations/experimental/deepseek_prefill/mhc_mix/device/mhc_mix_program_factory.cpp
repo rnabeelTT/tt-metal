@@ -19,6 +19,8 @@ using namespace tt::tt_metal;
 namespace {
 constexpr uint32_t CB_X = tt::CBIndex::c_0;   // the unit's Kc x tiles (one row tile, one K chunk)
 constexpr uint32_t CB_FN = tt::CBIndex::c_1;  // the chunk's Kc projection tiles
+constexpr uint32_t CB_XH = tt::CBIndex::c_2;  // x split for the matmuls: hi (10 significant bits)
+constexpr uint32_t CB_XL = tt::CBIndex::c_3;  // ... lo
 constexpr uint32_t CB_OUT = tt::CBIndex::c_16;
 
 void add_cb(ProgramDescriptor& desc, const CoreRangeSet& cores, uint32_t index, uint32_t n_tiles, uint32_t tile_size) {
@@ -52,6 +54,8 @@ ProgramDescriptor MhcMixProgramFactory::create_descriptor(
 
     add_cb(desc, all_cores, CB_X, Kc, ts);
     add_cb(desc, all_cores, CB_FN, Kc, ts);
+    add_cb(desc, all_cores, CB_XH, Kc, ts);
+    add_cb(desc, all_cores, CB_XL, Kc, ts);
     add_cb(desc, all_cores, CB_OUT, 4, ts);
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_mix/device/kernels/";
@@ -83,9 +87,13 @@ ProgramDescriptor MhcMixProgramFactory::create_descriptor(
     compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
     compute.core_ranges = all_cores;
     compute.compile_time_args = {Kc};
+    // x is only copied into DST (unpacked straight to DST, full fp32) and split there into hi / lo matmul halves
+    std::vector<UnpackToDestMode> unpack_to_dest(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
+    unpack_to_dest[CB_X] = UnpackToDestMode::UnpackToDestFp32;
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,
+        .unpack_to_dest_mode = std::move(unpack_to_dest),
     };
 
     for (uint32_t i = 0, start = 0; i < num_cores; ++i) {

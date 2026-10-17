@@ -26,25 +26,40 @@ using namespace tt::tt_metal;
 using tt::constants::TILE_WIDTH;
 
 namespace {
-// CB plan (all fp32). Kept in sync with the reader / compute / writer kernels.
-constexpr uint32_t CB_Q = tt::CBIndex::c_0;         // [1,K] head row (rows 1..31 zero)
-constexpr uint32_t CB_K = tt::CBIndex::c_1;         // [1,K]
-constexpr uint32_t CB_V = tt::CBIndex::c_2;         // [1,V]
-constexpr uint32_t CB_DECAY = tt::CBIndex::c_3;     // [1,K]
-constexpr uint32_t CB_BETA = tt::CBIndex::c_4;      // [0,0] = beta, rest zero
-constexpr uint32_t CB_S = tt::CBIndex::c_5;         // [K,V] state in
+// CB plan (all fp32). Kept in sync with the reader / compute / writer kernels. "X" = UnpackToDestFp32: the compute
+// kernel only copies / transposes those into DST (full fp32); the others feed the FPU (matmul) and hold the hi / lo
+// halves of split fp32 operands (hi sized so the multiplier uses all of it).
+constexpr uint32_t CB_Q = tt::CBIndex::c_0;         // X [1,K] head row (rows 1..31 zero)
+constexpr uint32_t CB_K = tt::CBIndex::c_1;         // X [1,K]
+constexpr uint32_t CB_V = tt::CBIndex::c_2;         // X [1,V]
+constexpr uint32_t CB_DECAY = tt::CBIndex::c_3;     // X [1,K]
+constexpr uint32_t CB_BETA = tt::CBIndex::c_4;      // X [0,0] = beta, rest zero
+constexpr uint32_t CB_S = tt::CBIndex::c_5;         // X [K,V] state in
 constexpr uint32_t CB_OUT = tt::CBIndex::c_6;       // [1,V] o row
 constexpr uint32_t CB_ST = tt::CBIndex::c_7;        // [K,V] state out (writer)
-constexpr uint32_t CB_SNEW = tt::CBIndex::c_8;      // [K,V] state out (compute, for o)
-constexpr uint32_t CB_SD = tt::CBIndex::c_9;        // [K,V] diag(decay) S
-constexpr uint32_t CB_VREAD = tt::CBIndex::c_10;    // [1,V]
-constexpr uint32_t CB_U = tt::CBIndex::c_11;        // [1,V]
-constexpr uint32_t CB_KCOL = tt::CBIndex::c_12;     // [K,1]
-constexpr uint32_t CB_DCOL = tt::CBIndex::c_13;     // [K,1]
-constexpr uint32_t CB_QN = tt::CBIndex::c_14;       // [1,K]
-constexpr uint32_t CB_KN = tt::CBIndex::c_15;       // [1,K]
-constexpr uint32_t CB_NRM = tt::CBIndex::c_16;      // [0,0] = 1 / ||x|| (scaled)
+constexpr uint32_t CB_SDH = tt::CBIndex::c_8;       // [K,V] diag(decay) S, hi
+constexpr uint32_t CB_SDL = tt::CBIndex::c_9;       // [K,V] diag(decay) S, lo
+constexpr uint32_t CB_VREAD = tt::CBIndex::c_10;    // X [1,V]
+constexpr uint32_t CB_UH = tt::CBIndex::c_11;       // [1,V] u hi
+constexpr uint32_t CB_KCOL = tt::CBIndex::c_12;     // [K,1] kn hi
+constexpr uint32_t CB_DCOL = tt::CBIndex::c_13;     // X [K,1]
+constexpr uint32_t CB_QNH = tt::CBIndex::c_14;      // [1,K]
+constexpr uint32_t CB_KNH = tt::CBIndex::c_15;      // [1,K]
+constexpr uint32_t CB_NRM = tt::CBIndex::c_16;      // X [0,0] = 1 / ||x|| (scaled)
 constexpr uint32_t CB_SCRATCH = tt::CBIndex::c_17;  // reader: one 64-byte face row (beta)
+constexpr uint32_t CB_XH = tt::CBIndex::c_18;       // [1,K] q or k, hi (norm)
+constexpr uint32_t CB_XL = tt::CBIndex::c_19;       // [1,K] q or k, lo (norm)
+constexpr uint32_t CB_QNL = tt::CBIndex::c_20;      // [1,K]
+constexpr uint32_t CB_KNL = tt::CBIndex::c_21;      // [1,K]
+constexpr uint32_t CB_KCOLL = tt::CBIndex::c_22;    // [K,1] kn lo
+constexpr uint32_t CB_UL = tt::CBIndex::c_23;       // [1,V] u lo
+constexpr uint32_t CB_SDX = tt::CBIndex::c_24;      // X [K,V] diag(decay) S, exact (rank-1 seed)
+constexpr uint32_t CB_QSD = tt::CBIndex::c_25;      // X [1,V] qn . sd
+constexpr uint32_t CB_QK = tt::CBIndex::c_26;       // X [0,0] = qn . kn
+constexpr uint32_t CB_KN1H = tt::CBIndex::c_27;     // [1,K] kn split for the matmul-in1 role, hi
+constexpr uint32_t CB_KN1L = tt::CBIndex::c_28;     // ... lo
+constexpr uint32_t UNPACK_TO_DEST_CBS[] = {
+    CB_Q, CB_K, CB_V, CB_DECAY, CB_BETA, CB_S, CB_VREAD, CB_DCOL, CB_NRM, CB_SDX, CB_QSD, CB_QK};
 
 void add_cb(ProgramDescriptor& desc, const CoreRangeSet& cores, uint32_t index, uint32_t n_tiles, uint32_t tile_size) {
     desc.cbs.push_back(CBDescriptor{
@@ -89,14 +104,25 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_S, 2 * kv, ts);
     add_cb(desc, all_cores, CB_OUT, 2 * Vt, ts);
     add_cb(desc, all_cores, CB_ST, 2 * kv, ts);
-    add_cb(desc, all_cores, CB_SNEW, kv, ts);
-    add_cb(desc, all_cores, CB_SD, kv, ts);
+    add_cb(desc, all_cores, CB_SDH, kv, ts);
+    add_cb(desc, all_cores, CB_SDL, kv, ts);
+    add_cb(desc, all_cores, CB_SDX, kv, ts);
     add_cb(desc, all_cores, CB_VREAD, Vt, ts);
-    add_cb(desc, all_cores, CB_U, Vt, ts);
+    add_cb(desc, all_cores, CB_QSD, Vt, ts);
+    add_cb(desc, all_cores, CB_QK, 1, ts);
+    add_cb(desc, all_cores, CB_UH, Vt, ts);
+    add_cb(desc, all_cores, CB_UL, Vt, ts);
     add_cb(desc, all_cores, CB_KCOL, Kt, ts);
+    add_cb(desc, all_cores, CB_KCOLL, Kt, ts);
     add_cb(desc, all_cores, CB_DCOL, Kt, ts);
-    add_cb(desc, all_cores, CB_QN, Kt, ts);
-    add_cb(desc, all_cores, CB_KN, Kt, ts);
+    add_cb(desc, all_cores, CB_QNH, Kt, ts);
+    add_cb(desc, all_cores, CB_QNL, Kt, ts);
+    add_cb(desc, all_cores, CB_KNH, Kt, ts);
+    add_cb(desc, all_cores, CB_KNL, Kt, ts);
+    add_cb(desc, all_cores, CB_KN1H, Kt, ts);
+    add_cb(desc, all_cores, CB_KN1L, Kt, ts);
+    add_cb(desc, all_cores, CB_XH, Kt, ts);
+    add_cb(desc, all_cores, CB_XL, Kt, ts);
     add_cb(desc, all_cores, CB_NRM, 1, ts);
     add_cb(desc, all_cores, CB_SCRATCH, 1, ts);
 
@@ -134,9 +160,15 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
     compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
     compute.core_ranges = all_cores;
     compute.compile_time_args = {Kt, Vt, std::bit_cast<uint32_t>(a.eps), std::bit_cast<uint32_t>(a.q_scale)};
+    // fp32 operands that the kernel only moves into DST are unpacked straight to DST (no TF32 rounding in srcA)
+    std::vector<UnpackToDestMode> unpack_to_dest(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
+    for (uint32_t cb : UNPACK_TO_DEST_CBS) {
+        unpack_to_dest[cb] = UnpackToDestMode::UnpackToDestFp32;
+    }
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,
+        .unpack_to_dest_mode = std::move(unpack_to_dest),
         .math_approx_mode = false,
     };
 

@@ -21,6 +21,8 @@ constexpr uint32_t CB_IN = tt::CBIndex::c_0;      // y tile followed by the n re
 constexpr uint32_t CB_PC = tt::CBIndex::c_1;      // raw post tile, raw comb tile
 constexpr uint32_t CB_CONSTS = tt::CBIndex::c_2;  // n*n column-broadcast tiles, resident
 constexpr uint32_t CB_COEF = tt::CBIndex::c_3;    // broadcast post_j then broadcast comb_(i,j)
+constexpr uint32_t CB_PCH = tt::CBIndex::c_4;     // post / comb split for the expansion matmul: hi (TF32-exact)
+constexpr uint32_t CB_PCL = tt::CBIndex::c_5;     // ... lo
 constexpr uint32_t CB_OUT = tt::CBIndex::c_16;
 
 void add_cb(
@@ -49,7 +51,7 @@ ProgramDescriptor MhcPostProgramFactory::create_descriptor(
     const std::optional<ttnn::MeshCoordinate>& /*mesh_dispatch_coordinate*/) {
     ProgramDescriptor desc;
 
-    // Validation pins every input to one dtype, so a single format sizes all five CBs. DEST stays
+    // Validation pins every input to one dtype, so a single format sizes every CB. DEST stays
     // fp32 regardless, so a bf16 pass still sums its five terms at full precision before packing.
     const tt::DataFormat df = datatype_to_dataformat_converter(tensor_args.y.dtype());
     const uint32_t tile_size = tt::tile_size(df);
@@ -84,6 +86,8 @@ ProgramDescriptor MhcPostProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_PC, 4, tile_size, df);
     add_cb(desc, all_cores, CB_CONSTS, n * n, tile_size, df);
     add_cb(desc, all_cores, CB_COEF, n + n * n, tile_size, df);
+    add_cb(desc, all_cores, CB_PCH, 2, tile_size, df);
+    add_cb(desc, all_cores, CB_PCL, 2, tile_size, df);
     add_cb(desc, all_cores, CB_OUT, 2 * n, tile_size, df);
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/";
@@ -115,9 +119,18 @@ ProgramDescriptor MhcPostProgramFactory::create_descriptor(
     compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
     compute.core_ranges = all_cores;
     compute.compile_time_args = {n, col_tiles};
+    // The FPU reads fp32 at TF32: for an fp32 op the kernel only copies y, the streams, post / comb and the expanded
+    // coefficients into DST (unpacked straight to DST, full precision) and mixes them on the SFPU.
+    std::vector<UnpackToDestMode> unpack_to_dest(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
+    if (df == tt::DataFormat::Float32) {
+        for (uint32_t cb : {CB_IN, CB_PC, CB_COEF}) {
+            unpack_to_dest[cb] = UnpackToDestMode::UnpackToDestFp32;
+        }
+    }
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,
+        .unpack_to_dest_mode = std::move(unpack_to_dest),
     };
 
     // Buffer* first so program-cache hits patch addresses.

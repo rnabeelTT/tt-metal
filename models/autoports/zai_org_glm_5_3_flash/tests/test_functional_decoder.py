@@ -47,19 +47,26 @@ FULL_BAR = 0.99
 NEAR_TIE = 5e-3
 NEAR_TIE_BAR = 0.98
 # Update scale |X' - X| TT / HF (PCC is scale-blind; review #1: the routed experts were 0.976 before the sparse_matmul
-# fp32-partials fix, ~0.988 at layer level). A prefill sequence is held to 1 +- SEQ_RMS_TOL, which that bug fails. One
+# fp32-partials fix). A prefill sequence is held to 1 +- SEQ_RMS_TOL, which that bug fails: injected again
+# (GLM53_FAULT_ROUTED_SCALE=0.9722, logs/s1_fault_routed.log), it fails 17 tests, every real-weight MoE prefill
+# (L4 0.985 .. 0.990, L3 0.979 .. 0.984) and the decode means (0.982). One
 # decode token is held to 1 +- TOKEN_RMS_TOL only: HF runs the layer in bf16 and its mHC post / comb mixing rounds, so a
 # single token's update scale scatters around the fp32 result (tools/decode_stage_probe.py, layer 4: an fp32 host
 # recomputation of HF's own mHC on HF's inputs misses HF's update by 0.978 .. 1.019; the suite's tokens span 0.985 ..
 # 1.045). The mean over a test's decode tokens (at least MEAN_MIN_TOKENS, near-tie tokens included) is held to
-# 1 +- SEQ_RMS_TOL. Near-tie tokens are held to the same bounds (measured 0.988 .. 1.003).
+# 1 +- SEQ_RMS_TOL. A router near-tie token (margin < NEAR_TIE) is held to 1 +- NEAR_TIE_TOKEN_RMS_TOL: a flipped expert
+# changes the token's function, not only its rounding (L3 32-slot slot 2 pos 39, HF margin 1.9e-4: TT routes expert 31,
+# HF's 9th, instead of 149, the other 7 equal (tools/route_flip_check.py, logs/flip_tt_s1302.log); delta PCC 0.9987,
+# update scale 1.051). Near-tie tokens stay in the decode mean.
 SEQ_RMS_TOL = 0.01
 TOKEN_RMS_TOL = 0.05
+NEAR_TIE_TOKEN_RMS_TOL = 0.08
 MEAN_MIN_TOKENS = 8
 DECODE_RATIOS = []  # update rms ratio of every decode token of the running test
 # Per-layer bar overrides {layer: {"delta": bar, "seq": tol, "token": tol}}: a precision policy whose weights are
 # quantized below the checkpoint (bfp4 routed experts) is held to its measured quantization floor on the layers it
-# changes (tests/test_optimized_decoder.py). Empty here: the functional bars apply.
+# changes (tests/test_optimized_decoder.py): every PCC bar of the layer (update, synthetic-weights, near-tie) moves down
+# by DELTA_BAR - delta, the scale bounds become seq / token. Empty here: the functional bars apply.
 BAR_OVERRIDES = {}
 NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
 
@@ -177,8 +184,11 @@ def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
     expert differently and is held to NEAR_TIE_BAR (recorded in NEAR_TIES)."""
     layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
     ov = BAR_OVERRIDES.get(layer)
-    if ov and delta_bar == DELTA_BAR:
-        delta_bar = ov["delta"]
+    near_tie_bar = NEAR_TIE_BAR
+    if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+        shift = DELTA_BAR - ov["delta"]
+        delta_bar -= shift
+        near_tie_bar -= shift
     d = pcc(got - x, y - x)
     f = pcc(got, y)
     r = float((got - x).norm() / (y - x).norm())  # update scale vs HF (PCC is scale-blind)
@@ -188,11 +198,13 @@ def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
     tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
     if ov:
         tol = ov["token"] if token else ov["seq"]
+    if token and margin is not None and margin < NEAR_TIE:
+        tol = max(tol, NEAR_TIE_TOKEN_RMS_TOL)
     assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
     if token:
         DECODE_RATIOS.append((layer, r))
     if d < delta_bar and margin is not None and margin < NEAR_TIE:
-        assert d >= NEAR_TIE_BAR, f"{tag}: delta PCC {d:.6f} < {NEAR_TIE_BAR} (router near-tie, margin {margin:.1e})"
+        assert d >= near_tie_bar, f"{tag}: delta PCC {d:.6f} < {near_tie_bar} (router near-tie, margin {margin:.1e})"
         NEAR_TIES.append((tag, d, margin))
         print(f"{tag}: accepted as a router near-tie")
         return d, f
@@ -276,7 +288,7 @@ def test_synthetic_weights(mesh, rd, kind):
         got = hidden_out(dec.mlp.forward(t_in, mode="prefill"))[0, 0, :n].float()
         p = pcc(got, fout)
         print(f"L{layer} synthetic MoE on the HF FFN input: PCC {p:.6f}")
-        assert p >= BAR_OVERRIDES.get(layer, {}).get("delta", DELTA_BAR), p
+        assert p >= BAR_OVERRIDES.get(layer, {}).get("delta", DELTA_BAR), p  # one MoE: the update bar itself
     bar = SYNTH_MOE_LAYER_BAR if moe else DELTA_BAR
     x, y = reference(layer, weights, 2, 200, 3)
     out = prefill_user(dec, mesh, x, 200, 3)

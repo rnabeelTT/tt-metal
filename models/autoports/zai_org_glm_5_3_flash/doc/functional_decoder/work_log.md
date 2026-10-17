@@ -104,7 +104,22 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
 
 - `tools/decode_stage_probe.py`, layer 4, real weights, 8 decode steps (`decode_stage_l4.log`): attention and FFN
   outputs within 0.5 % of HF per token; the residual updates scatter 0.99 .. 1.04. An fp32 host recomputation of HF's mHC
-  on HF's own inputs misses HF's update by the same amount, TF32 input rounding changes nothing: the scatter is the
-  bf16 HF reference, not the port.
+  on HF's own inputs misses HF's update by the same amount, TF32 input rounding changes nothing: the per-token scatter
+  is the bf16 HF reference. (Correction, review #4: the systematic +0.3 .. +0.6 % offset on the MoE kinds was the
+  port's own mHC precision, not the reference; fixed on 2026-10-16, see below.)
 - Gate: prefill sequence 1 +- 0.01, decode token 1 +- 0.05, mean of a test's decode tokens 1 +- 0.01.
   Functional 42/42 (`s1_functional5.log`), fused 43/43 (`s2_fused_suite4.log`).
+
+## 2026-10-16: review #4 P2 (mHC offset, gate evidence)
+
+- Root cause of the offset: the mHC kernels (`mhc_split_sinkhorn`, `mhc_post`, `mhc_pre`) read fp32 operands through
+  srcA / srcB at TF32 precision, and the Sinkhorn reciprocal (`recip_tile` legacy mode) was 1.4e-3 low: comb column
+  sums about 1e-3 below 1. The same TF32 reload made `kda.recurrent_decode` drift over long decodes (1000 steps: state
+  PCC 0.987). Fixed in the kernels (fp32 through DST, hi / lo operand split, exact reciprocal).
+- `decode_stage_l4c.log`: TT post / comb vs exact fp32 +0.30 % -> -0.02 %; `mhc_post` +0.10 % -> 0.000 %. L4 prefill
+  sequences 1.0035 .. 1.0058 -> 0.9995 .. 1.0023.
+- Fault injection (`GLM53_FAULT_ROUTED_SCALE=0.9722`, `s1_fault_routed.log`): 17 tests fail on the scale gate, on both
+  MoE kinds (L4 prefill 0.985 .. 0.990, L3 0.979 .. 0.984, decode means 0.982).
+- Functional suite on the final kernels (`s1_functional6.log`): 41 / 42. The failure, L3 32-slot slot 2 pos 39 at scale
+  1.0507, is a confirmed router flip (HF margin 1.86e-4; TT routes expert 31 for HF's 149, `flip_tt_s1302.log`).
+  Near-tie tokens now get a per-token scale bound of 1 +- 0.08 and stay in the decode mean.

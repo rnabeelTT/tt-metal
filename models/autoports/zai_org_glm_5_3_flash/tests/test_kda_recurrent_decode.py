@@ -104,3 +104,37 @@ def device_params_trace():
     dev = ttnn.open_device(device_id=0, trace_region_size=8 << 20)
     yield dev
     ttnn.close_device(dev)
+
+
+@pytest.mark.parametrize("decay_lo", [0.99, 0.999])
+def test_kda_recurrent_decode_long_chain(device, decay_lo):
+    """1000 chained steps (state fed back in place) with decays in [decay_lo, 1): the state must track the fp32 torch
+    recurrence without drift (a per-step bias in the decay or the state reload would compound)."""
+    B, R, steps = 1, 1, 1000
+    gen = torch.Generator().manual_seed(11)
+    q_scale = K**-0.5
+    S = torch.zeros(B, H, K, V)
+    S_dev = ttnn.from_torch(S, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+    worst, worst_r = 1.0, 0.0
+    for step in range(steps):
+        qkv = torch.randn(R, 2 * H * K + H * V, generator=gen)
+        decay = decay_lo + (1 - decay_lo) * torch.rand(R, H * K, generator=gen)
+        beta = torch.sigmoid(torch.randn(R, H, generator=gen))
+        o_ref, S = _ref_step(S, qkv, decay, beta, B, q_scale)
+        o = ttnn.experimental.kda.recurrent_decode(
+            S_dev, _dev(qkv, device), _dev(decay, device), _dev(beta, device), q_scale
+        )
+        if step % 100 == 99 or step == steps - 1:
+            S_tt = ttnn.to_torch(S_dev)
+            ps = _pcc(S_tt, S)
+            r = float(S_tt.norm() / S.norm())
+            po = _pcc(ttnn.to_torch(o)[0, 0], o_ref)
+            worst, worst_r = min(worst, ps), max(worst_r, abs(r - 1))
+            rel = float((S_tt - S).abs().max() / S.abs().max())
+            print(
+                f"decay>={decay_lo} step {step + 1}: state PCC {ps:.9f} rms ratio {r:.7f} max rel err {rel:.2e}; "
+                f"o PCC {po:.9f}"
+            )
+        ttnn.deallocate(o)
+    # fp32 state / decay must not be read at TF32 (a per-step bias compounds): no drift in scale
+    assert worst > 0.99999 and worst_r < 1e-4, (worst, worst_r)
