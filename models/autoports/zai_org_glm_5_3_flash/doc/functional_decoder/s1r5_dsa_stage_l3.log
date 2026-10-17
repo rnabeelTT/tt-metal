@@ -1,0 +1,22 @@
+=== start Sat Oct 17 07:01:18 AM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.dsa_stage_probe --layer 3 --n 100 --ref-n 108
+2026-10-17 07:01:23.096 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 07:02:14.258 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+q_a (x Wqa)                PCC 0.999999 rms ratio 1.00005
+qr                         PCC 0.999997 rms ratio 0.99912
+qr on torch q_a            PCC 0.999997 rms ratio 0.99913
+q_abs                      PCC 0.999997 rms ratio 0.99931
+q_abs on torch q           PCC 0.999998 rms ratio 1.00017
+latent c                   PCC 0.999997 rms ratio 0.99934
+o_lat (flash)              PCC 0.999950 rms ratio 0.99745
+o_lat (flash) torch in     PCC 0.999955 rms ratio 0.99831
+o (o_lat W_UV)             PCC 0.999942 rms ratio 0.99709
+o on torch o_lat           PCC 0.999997 rms ratio 1.00010
+attn out                   PCC 0.999921 rms ratio 0.99498
+attn out on torch o        PCC 0.999998 rms ratio 1.00007
+torch(dev weights) vs HF bf16 PCC 0.999967 rms ratio 0.99919
+attn out vs HF bf16        PCC 0.999886 rms ratio 0.99417
+prefill_forward            PCC 0.999921 rms ratio 0.99498
+=== exit code: 0 Sat Oct 17 07:02:19 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

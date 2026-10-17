@@ -1,0 +1,114 @@
+=== start Sat Oct 17 08:21:32 AM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe]
+2026-10-17 08:21:37.851 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe] 2026-10-17 08:21:39.908 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-17 08:21:39.908 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-17 08:21:39.909 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-17 08:21:39.909 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-17 08:21:39.921 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-17 08:21:39.922 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-17 08:21:40.020 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-17 08:21:40.021 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-17 08:21:40.021 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-17 08:21:40.021 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-17 08:21:40.023 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-17 08:21:40.294 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-17 08:21:40.523 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-17 08:21:40.523 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-17 08:21:40.524 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-17 08:21:40.525 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-17 08:21:40.525 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-17 08:21:40.656 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/watcher_r5/test_real_weights_dsa_moe_/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-17 08:21:40.657 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-17 08:21:40.657 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:40.657 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-17 08:21:40.665 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:40.672 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:40.680 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:50.725 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:50.736 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:50.745 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:21:50.753 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:00.799 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:00.817 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:00.826 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:00.836 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:10.902 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:10.913 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:10.923 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:10.931 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:20.987 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:20.996 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:21.003 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:21.013 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:31.048 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:31.059 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:31.067 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:31.075 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-17 08:22:33.702 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 5 prefill 100: delta PCC 0.999841 full PCC 0.999922 update rms ratio 1.0059
+L3 slot 5 decode pos 100: delta PCC 0.999951 full PCC 0.999977 update rms ratio 1.0032 (HF router margin 7.8e-03)
+L3 slot 5 decode pos 101: delta PCC 0.999915 full PCC 0.999949 update rms ratio 1.0053 (HF router margin 2.1e-03)
+L3 slot 5 decode pos 102: delta PCC 0.999957 full PCC 0.999976 update rms ratio 0.9991 (HF router margin 1.5e-02)
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 3 (cap 2)
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+53.75s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe]
+1.85s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe]
+0.04s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_real_weights[dsa_moe]
+============================== 1 passed in 55.91s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x712f64df6e38 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x712f646cc888 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "to_torch_with_padded_shape"
+ - leaked function "from_json"
+ - leaked function "get_system_mesh_id"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "deallocate"
+ - leaked function "dram_grid_size"
+ - leaked function "create_submeshes"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-17 08:22:39.032 | info     |    BuildKernels | JIT cache stats: 758/758 hits (100.0%) [758 cached, 264 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-17 08:22:39.032 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-17 08:22:39.035 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-17 08:22:39.057 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-17 08:22:39.057 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-17 08:22:39.752 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-17 08:22:39.752 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-17 08:22:39.753 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 0 Sat Oct 17 08:22:40 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

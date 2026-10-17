@@ -7,6 +7,9 @@ reference of decode step i (causal). TT prefills n tokens into slot 5 of an 8-sl
 decode_forward split into its stages. Per stage and step: PCC and RMS ratio TT / HF of that token's row, plus the FFN
 on the HF FFN input (isolates the FFN from upstream error) and the router margin of the token.
 
+--hf32 <.pt> (tests/hf_ref/hf_fp32_taps.py on the same reference): the main stages are also compared with the HF layer
+run in fp32 ("... vs fp32" rows; stage-1 review #5 P2-B).
+
 usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.decode_stage_probe --layer 4 --n 100 --steps 12"""
 
 import argparse
@@ -57,6 +60,7 @@ def main():
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--steps", type=int, default=12)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--hf32", default=None)
     a = ap.parse_args()
     N = a.n + a.steps
     r = hf_layer_reference(
@@ -67,6 +71,12 @@ def main():
     y = r["y"].float().reshape(N, H4)
     margin = r.get("route_margin")
     margin = None if margin is None else margin.reshape(-1).float()
+    t32 = None
+    if a.hf32:
+        h32 = torch.load(a.hf32, weights_only=False)
+        t32 = {k: v.float().reshape(N, -1) for k, v in h32["taps"].items()}
+        t32["y"] = h32["y"].float().reshape(N, H4)
+        t32["ffn_out_on_hf_in"] = h32["ffn_out_on_hf_in"].float().reshape(N, -1)
     rd = CheckpointReader()
     mesh = open_mesh()
     stats = {}
@@ -144,6 +154,18 @@ def main():
                     y[p] - taps["X1"][p],
                 ),
             }
+            if t32 is not None:
+                got.update(
+                    {
+                        "attn_out vs fp32": (R["ya"], t32["attn_out"][p]),
+                        "X1 - X vs fp32": (R["X1"] - x[p], t32["X1"][p] - x[p]),
+                        "ffn_out vs fp32": (R["z"], t32["ffn_out"][p]),
+                        "ffn(hf in) vs fp32": (R["z_hf"], t32["ffn_out_on_hf_in"][p]),
+                        "X2 - X1 vs fp32": (R["X2"] - R["X1"], t32["y"][p] - t32["X1"][p]),
+                        "X2 - X vs fp32": (R["X2"] - x[p], t32["y"][p] - x[p]),
+                        "HF16 upd vs fp32": (y[p] - x[p], t32["y"][p] - x[p]),
+                    }
+                )
             m = "" if margin is None else f" margin {float(margin[p]):.1e}"
             print(f"--- step {i} pos {p}{m}")
             for k, (t, ref) in got.items():

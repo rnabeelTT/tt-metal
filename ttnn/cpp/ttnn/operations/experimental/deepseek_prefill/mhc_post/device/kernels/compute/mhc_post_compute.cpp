@@ -16,13 +16,16 @@
 // split x = hi + lo in DST (hi = x with the 13 low mantissa bits cleared: exactly TF32; lo = x - hi) and expanded as
 // hi @ E + lo @ E (E is 0 / 1, exact); and the mix itself runs on the SFPU over DST tiles unpacked straight to DST
 // (y, the streams and the coefficients are UnpackToDestFp32 CBs for an fp32 op, see the program factory):
-// one multiply then n fused multiply-adds, all fp32.
+// one multiply then n fused multiply-adds, all fp32. Only an fp32 op takes that path (MHC_POST_FP32, set by the
+// program factory): bf16 / bfp8_b operands have <= 8-bit mantissas, which the FPU reads exactly, so they keep the
+// faster FPU path (one expansion matmul, the mix as accumulating mul_tiles).
 
 #include <cstdint>
 #include "api/compute/common.h"
 #include "api/compute/compute_kernel_api.h"
 #include "api/compute/tile_move_copy.h"
 #include "api/compute/matmul.h"
+#include "api/compute/eltwise_binary.h"
 #include "api/compute/eltwise_binary_sfpu.h"
 #include "api/compute/eltwise_unary/addcmul.h"
 #include "api/compute/reconfig_data_format.h"
@@ -74,7 +77,9 @@ void kernel_main() {
     constexpr uint32_t num_coef = n + n * n;
 
     CircularBuffer cb_consts(CB_CONSTS), cb_pc(CB_PC), cb_coef(CB_COEF), cb_in(CB_IN), cb_out(CB_OUT);
+#ifdef MHC_POST_FP32
     CircularBuffer cb_pch(CB_PCH), cb_pcl(CB_PCL);
+#endif
     cb_consts.wait_front(n * n);
 
     uint32_t cached_t0 = 0xFFFFFFFFu;
@@ -87,8 +92,9 @@ void kernel_main() {
             }
             cached_t0 = t0;
 
-            // split the raw post / comb tiles into TF32-exact halves
             cb_pc.wait_front(2);
+#ifdef MHC_POST_FP32
+            // split the raw post / comb tiles into TF32-exact halves
             cb_pch.reserve_back(2);
             cb_pcl.reserve_back(2);
             for (uint32_t s = 0; s < 2; ++s) {
@@ -127,12 +133,42 @@ void kernel_main() {
             cb_coef.push_back(num_coef);
             cb_pch.pop_front(2);
             cb_pcl.pop_front(2);
+#else
+            cb_coef.reserve_back(num_coef);
+            reconfig_data_format(CB_PC, CB_CONSTS);
+            matmul_init(CB_PC, CB_CONSTS);
+            for (uint32_t k = 0; k < num_coef; ++k) {
+                const uint32_t src_tile = k < n ? 0 : 1;
+                const uint32_t col = k < n ? k : k - n;
+                tile_regs_acquire();
+                matmul_tiles(CB_PC, CB_CONSTS, src_tile, col, 0);
+                tile_regs_commit();
+                tile_regs_wait();
+                pack_tile(0, CB_COEF);
+                tile_regs_release();
+            }
+            cb_coef.push_back(num_coef);
+            cb_pc.pop_front(2);
+#endif
             cb_coef.wait_front(num_coef);
         }
 
         cb_in.wait_front(1 + n);
         cb_out.reserve_back(n);
+#ifndef MHC_POST_FP32
+        reconfig_data_format(CB_COEF, CB_IN);
+#endif
         for (uint32_t j = 0; j < n; ++j) {
+#ifndef MHC_POST_FP32
+            // mul_init with acc_to_dest set (what the deprecated two-argument mul_tiles_init forwards to): every
+            // mul_tiles adds its product into the DEST slot, so the whole mix lands in slot 0 on the FPU.
+            tile_regs_acquire();
+            mul_init(CB_COEF, CB_IN, true /* acc_to_dest */);
+            mul_tiles(CB_COEF, CB_IN, j, 0, 0);  // post_j * y
+            for (uint32_t i = 0; i < n; ++i) {
+                mul_tiles(CB_COEF, CB_IN, n + i * n + j, 1 + i, 0);  // += comb_(i,j) * residual_i
+            }
+#else
             // CB_COEF and CB_IN share one data format / unpack mode, so one copy init serves both
             tile_regs_acquire();
             reconfig_data_format_srca(CB_IN);
@@ -147,6 +183,7 @@ void kernel_main() {
                 copy_tile(CB_IN, 1 + i, 2);
                 addcmul_tile<DataFormat::Float32>(0, 1, 2, 0, ONE_BITS);  // += comb_(i,j) * residual_i
             }
+#endif
             tile_regs_commit();
             tile_regs_wait();
             pack_tile(0, CB_OUT);

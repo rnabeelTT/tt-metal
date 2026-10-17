@@ -1,0 +1,23 @@
+== HF fp32 layer, attention output scaled (HF venv)
+L3 n 100 attn x 0.9942: update 1.0035 (rows mean 1.0034) ffn_out 1.0021 X1-X 0.9955
+L3 n 100 attn x 1.0058: update 0.9966 (rows mean 0.9968) ffn_out 0.9981 X1-X 1.0045
+== HF fp32 layer with the port's bfp8 attention weights (HF venv; weights from ttnn host packing)
+L3 n 100 bfp8 all: attn_out 0.9991 PCC 0.999973; ffn_out 1.0001; update 1.0000
+L3 n 100 bfp8 q_a_proj: attn_out 1.0000 PCC 0.999999; ffn_out 1.0000; update 1.0000
+L3 n 100 bfp8 q_b_proj: attn_out 0.9998 PCC 0.999999; ffn_out 1.0003; update 1.0002
+L3 n 100 bfp8 kv_a: attn_out 0.9997 PCC 0.999993; ffn_out 0.9998; update 1.0000
+L3 n 100 bfp8 o_proj: attn_out 0.9996 PCC 0.999981; ffn_out 1.0002; update 1.0000
+== fp32 MoE on the TT FFN input (dumped by layer_stage_probe --dump) vs on the HF FFN input
+ffn_in TT/HF rms 0.99954 PCC 0.999940; rerouted rows 4/100
+fp32 MoE on TT in / on HF in: ffn 1.00344 routed 1.00370 shared 1.00214
+  per-row: rerouted mean 1.0028, others mean 1.0026
+TT ffn_out / fp32 MoE on TT in: 1.00197 PCC 0.999963
+TT ffn_out(hf in) / fp32 MoE on HF in: 1.00190
+input diff rel 0.01094; cos(dx, xh) -0.0472
+== bfp8 expert / shared weights (host packing) vs bf16, fp32 math, HF FFN input
+L3 100 real rows: routing equal 100/100; q8/fp32 routed 0.9992 PCC 0.999975; shared 0.9984; total 0.9991; routed share of ffn rms 0.851
+== random 1 % input noise on the HF FFN input: rerouting and FFN scale
+L3 noise 0.01 seed 0: input PCC 0.999948; rows rerouted 8/100; routed rms 1.0004 (rerouted rows 1.0018, others 1.0004); ffn 1.0004
+L3 noise 0.01 seed 1: input PCC 0.999952; rows rerouted 12/100; routed rms 0.9990 (rerouted rows 0.9990, others 1.0000); ffn 0.9992
+L3 noise 0.01 seed 2: input PCC 0.999948; rows rerouted 8/100; routed rms 1.0000 (rerouted rows 1.0078, others 1.0000); ffn 1.0000
+L3 noise 0.01 seed 3: input PCC 0.999949; rows rerouted 9/100; routed rms 0.9996 (rerouted rows 1.0037, others 1.0002); ffn 0.9997

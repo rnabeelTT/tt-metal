@@ -86,8 +86,11 @@ ProgramDescriptor MhcPostProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_PC, 4, tile_size, df);
     add_cb(desc, all_cores, CB_CONSTS, n * n, tile_size, df);
     add_cb(desc, all_cores, CB_COEF, n + n * n, tile_size, df);
-    add_cb(desc, all_cores, CB_PCH, 2, tile_size, df);
-    add_cb(desc, all_cores, CB_PCL, 2, tile_size, df);
+    const bool fp32 = df == tt::DataFormat::Float32;
+    if (fp32) {  // hi / lo split of post / comb (fp32 path only)
+        add_cb(desc, all_cores, CB_PCH, 2, tile_size, df);
+        add_cb(desc, all_cores, CB_PCL, 2, tile_size, df);
+    }
     add_cb(desc, all_cores, CB_OUT, 2 * n, tile_size, df);
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/";
@@ -120,9 +123,11 @@ ProgramDescriptor MhcPostProgramFactory::create_descriptor(
     compute.core_ranges = all_cores;
     compute.compile_time_args = {n, col_tiles};
     // The FPU reads fp32 at TF32: for an fp32 op the kernel only copies y, the streams, post / comb and the expanded
-    // coefficients into DST (unpacked straight to DST, full precision) and mixes them on the SFPU.
+    // coefficients into DST (unpacked straight to DST, full precision) and mixes them on the SFPU. bf16 / bfp8_b
+    // operands are exact on the FPU and keep the FPU path.
     std::vector<UnpackToDestMode> unpack_to_dest(NUM_CIRCULAR_BUFFERS, UnpackToDestMode::Default);
-    if (df == tt::DataFormat::Float32) {
+    if (fp32) {
+        compute.defines = {{"MHC_POST_FP32", "1"}};
         for (uint32_t cb : {CB_IN, CB_PC, CB_COEF}) {
             unpack_to_dest[cb] = UnpackToDestMode::UnpackToDestFp32;
         }

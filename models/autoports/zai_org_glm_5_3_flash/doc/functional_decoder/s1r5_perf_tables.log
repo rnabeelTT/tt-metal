@@ -1,0 +1,53 @@
+# python -m models.autoports.zai_org_glm_5_3_flash.tools.perf_tables models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder  (Sat Oct 17 12:25:12 PM UTC 2026)
+| case | ops / pass | device time (us) | op-to-op gaps (us) | host wall |
+|---|---|---|---|---|
+| test_perf_prefill_dsa_moe-128 | 148 | 22366 | 341 |  |
+| test_perf_prefill_dsa_moe-2048 | 179 | 143527 | 109 | 144.43 ms |
+| test_perf_prefill_kda_dense-128 | 80 | 4105 | 1852 | 6.20 ms |
+| test_perf_prefill_kda_dense-2048 | 80 | 43737 | 605 | 45.27 ms |
+| test_perf_prefill_kda_moe-128 | 118 | 21280 | 1649 | 23.24 ms |
+| test_perf_prefill_kda_moe-2048 | 149 | 96660 | 650 | 98.39 ms |
+| test_perf_traced_decode_dsa_moe-1 | 181 | 3949 | 153 | 4.747 ms/step |
+| test_perf_traced_decode_dsa_moe-32 | 187 | 17246 | 128 | 18.208 ms/step |
+| test_perf_traced_decode_kda_dense-1 | 130 | 3539 | 91 | 4.324 ms/step |
+| test_perf_traced_decode_kda_dense-32 | 128 | 16542 | 85 | 17.296 ms/step |
+| test_perf_traced_decode_kda_moe-1 | 166 | 4082 | 121 | 4.840 ms/step |
+| test_perf_traced_decode_kda_moe-32 | 172 | 29316 | 117 | 30.303 ms/step |
+
+test_perf_prefill_dsa_moe-128: SparseMatmulDeviceOperation active=?/42048 x 32 x 4096 x 4096 x1 9380 us; SparseMatmulDeviceOperation active=?/42048 x 32 x 2048 x 4096 x1 4616 us; BinaryNgDeviceOperation x28 1047 us; ReshapeViewDeviceOperation x5 926 us; MatmulDeviceOperation b={64} x 128 x 512 x 256 x1 691 us; MoeGatherRowsDeviceOperation x1 674 us; UnaryDeviceOperation x8 540 us; MatmulDeviceOperation 128 x 16384 x 4096 x1 474 us
+
+test_perf_prefill_dsa_moe-2048: SparseMatmulDeviceOperation active=?/85056 x 32 x 4096 x 4096 x2 40366 us; SDPAOperation x1 22809 us; SparseMatmulDeviceOperation active=?/85056 x 32 x 2048 x 4096 x2 20170 us; ReshapeViewDeviceOperation x7 12102 us; MatmulDeviceOperation 2048 x 16384 x 4096 x1 7540 us; BinaryNgDeviceOperation x32 5565 us; TransposeDeviceOperation x2 5337 us; MatmulDeviceOperation 2048 x 1536 x 16384 x1 4049 us
+
+test_perf_prefill_kda_dense-128: MatmulDeviceOperation 128 x 4096 x 32960 x1 772 us; MatmulDeviceOperation 128 x 4096 x 12288 x2 500 us; MatmulDeviceOperation 128 x 16384 x 32 x2 355 us; MatmulDeviceOperation 128 x 12288 x 4096 x1 355 us; MatmulDeviceOperation 128 x 8192 x 4096 x1 262 us; ReduceDeviceOperation x2 230 us; BinaryNgDeviceOperation x9 196 us; MhcPostDeviceOperation x2 187 us
+
+test_perf_prefill_kda_dense-2048: MatmulDeviceOperation 2048 x 4096 x 12288 x2 15803 us; MatmulDeviceOperation 2048 x 12288 x 4096 x1 5665 us; MatmulDeviceOperation 2048 x 4096 x 32960 x1 4999 us; BinaryNgDeviceOperation x9 2484 us; MhcPostDeviceOperation x2 1996 us; SliceDeviceOperation x20 1910 us; TernaryDeviceOperation x6 1391 us; MatmulDeviceOperation 2048 x 16384 x 32 x2 1377 us
+
+test_perf_prefill_kda_moe-128: SparseMatmulDeviceOperation active=?/42048 x 32 x 4096 x 4096 x1 9825 us; SparseMatmulDeviceOperation active=?/42048 x 32 x 2048 x 4096 x1 4929 us; BinaryNgDeviceOperation x17 992 us; MatmulDeviceOperation 128 x 4096 x 32960 x1 772 us; MoeGatherRowsDeviceOperation x1 748 us; UnaryDeviceOperation x7 523 us; SliceDeviceOperation x26 477 us; MatmulDeviceOperation 128 x 16384 x 32 x2 357 us
+
+test_perf_prefill_kda_moe-2048: SparseMatmulDeviceOperation active=?/85056 x 32 x 4096 x 4096 x2 40382 us; SparseMatmulDeviceOperation active=?/85056 x 32 x 2048 x 4096 x2 20181 us; BinaryNgDeviceOperation x21 5442 us; MatmulDeviceOperation 2048 x 4096 x 32960 x1 5000 us; SliceDeviceOperation x34 3313 us; UnaryDeviceOperation x9 2016 us; MhcPostDeviceOperation x2 1988 us; MatmulDeviceOperation 2048 x 4096 x 4096 x1 1917 us
+
+test_perf_traced_decode_dsa_moe-1: SparseMatmulDeviceOperation active=?/192 x 32 x 4096 x 4096 x1 522 us; MatmulDeviceOperation b={64} x 32 x 512 x 256 x1 378 us; MatmulDeviceOperation 32 x 16384 x 4096 x1 290 us; MatmulDeviceOperation 32 x 16384 x 32 x2 261 us; SparseMatmulDeviceOperation active=?/192 x 32 x 2048 x 4096 x1 255 us; BinaryNgDeviceOperation x43 234 us; ReduceDeviceOperation x4 233 us; MatmulDeviceOperation b={64} x 32 x 256 x 512 x1 223 us
+
+test_perf_traced_decode_dsa_moe-32: SparseMatmulDeviceOperation active=?/37440 x 32 x 4096 x 4096 x1 7420 us; SparseMatmulDeviceOperation active=?/37440 x 32 x 2048 x 4096 x1 3789 us; BinaryNgDeviceOperation x44 915 us; MoeGatherRowsDeviceOperation x1 660 us; ReshapeViewDeviceOperation x8 434 us; UnaryDeviceOperation x10 400 us; MatmulDeviceOperation b={64} x 32 x 512 x 256 x1 380 us; SliceDeviceOperation x22 316 us
+
+test_perf_traced_decode_kda_dense-1: MatmulDeviceOperation 32 x 4096 x 32960 x1 713 us; BinaryNgDeviceOperation x27 404 us; MatmulDeviceOperation 32 x 4096 x 12288 x2 302 us; MatmulDeviceOperation 32 x 16384 x 32 x2 260 us; MatmulDeviceOperation b={64} x 32 x 128 x 128 x2 239 us; ReduceDeviceOperation x2 229 us; MatmulDeviceOperation 32 x 12288 x 4096 x1 218 us; MhcSplitSinkhornDeviceOperation x2 179 us
+
+test_perf_traced_decode_kda_dense-32: MatmulDeviceOperation b={2048} x 32 x 128 x 128 x2 7598 us; BinaryNgDeviceOperation x27 3558 us; ReshapeViewDeviceOperation x12 1925 us; MatmulDeviceOperation 32 x 4096 x 32960 x1 711 us; CopyDeviceOperation x4 687 us; MatmulDeviceOperation 32 x 4096 x 12288 x2 305 us; MatmulDeviceOperation 32 x 16384 x 32 x2 261 us; ReduceDeviceOperation x2 229 us
+
+test_perf_traced_decode_kda_moe-1: MatmulDeviceOperation 32 x 4096 x 32960 x1 713 us; SparseMatmulDeviceOperation active=?/192 x 32 x 4096 x 4096 x1 516 us; BinaryNgDeviceOperation x36 451 us; MatmulDeviceOperation 32 x 16384 x 32 x2 263 us; SparseMatmulDeviceOperation active=?/192 x 32 x 2048 x 4096 x1 252 us; MatmulDeviceOperation b={64} x 32 x 128 x 128 x2 239 us; ReduceDeviceOperation x4 233 us; MhcSplitSinkhornDeviceOperation x2 179 us
+
+test_perf_traced_decode_kda_moe-32: MatmulDeviceOperation b={2048} x 32 x 128 x 128 x2 7586 us; SparseMatmulDeviceOperation active=?/37440 x 32 x 4096 x 4096 x1 7211 us; BinaryNgDeviceOperation x37 4206 us; SparseMatmulDeviceOperation active=?/37440 x 32 x 2048 x 4096 x1 3591 us; ReshapeViewDeviceOperation x17 1970 us; MatmulDeviceOperation 32 x 4096 x 32960 x1 709 us; CopyDeviceOperation x4 680 us; MoeGatherRowsDeviceOperation x1 553 us
+
+# mHC op cost per layer pass, b916fa98021 (before the fp32-exact kernels) -> working tree (scripts/s1r5_host/mhc_cost.py)
+test_perf_prefill_dsa_moe-128_ MhcPostDeviceOperation: 149 -> 188 us/pass MhcSplitSinkhornDeviceOperation: 165 -> 181 us/pass
+test_perf_prefill_dsa_moe-2048_ MhcPostDeviceOperation: 1570 -> 2014 us/pass MhcSplitSinkhornDeviceOperation: 180 -> 194 us/pass
+test_perf_prefill_kda_dense-128_ MhcPostDeviceOperation: 145 -> 187 us/pass MhcSplitSinkhornDeviceOperation: 166 -> 181 us/pass
+test_perf_prefill_kda_dense-2048_ MhcPostDeviceOperation: 1527 -> 1996 us/pass MhcSplitSinkhornDeviceOperation: 180 -> 194 us/pass
+test_perf_prefill_kda_moe-128_ MhcPostDeviceOperation: 151 -> 188 us/pass MhcSplitSinkhornDeviceOperation: 166 -> 180 us/pass
+test_perf_prefill_kda_moe-2048_ MhcPostDeviceOperation: 1531 -> 1988 us/pass MhcSplitSinkhornDeviceOperation: 180 -> 194 us/pass
+test_perf_traced_decode_dsa_moe-1_ MhcPostDeviceOperation: 95 -> 117 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass
+test_perf_traced_decode_dsa_moe-32_ MhcPostDeviceOperation: 96 -> 117 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass
+test_perf_traced_decode_kda_dense-1_ MhcPostDeviceOperation: 96 -> 115 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass
+test_perf_traced_decode_kda_dense-32_ MhcPostDeviceOperation: 95 -> 116 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass
+test_perf_traced_decode_kda_moe-1_ MhcPostDeviceOperation: 96 -> 117 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass
+test_perf_traced_decode_kda_moe-32_ MhcPostDeviceOperation: 97 -> 117 us/pass MhcSplitSinkhornDeviceOperation: 164 -> 179 us/pass

@@ -119,7 +119,62 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
 - `decode_stage_l4c.log`: TT post / comb vs exact fp32 +0.30 % -> -0.02 %; `mhc_post` +0.10 % -> 0.000 %. L4 prefill
   sequences 1.0035 .. 1.0058 -> 0.9995 .. 1.0023.
 - Fault injection (`GLM53_FAULT_ROUTED_SCALE=0.9722`, `s1_fault_routed.log`): 17 tests fail on the scale gate, on both
-  MoE kinds (L4 prefill 0.985 .. 0.990, L3 0.979 .. 0.984, decode means 0.982).
+  MoE kinds (L4 prefill 0.985 .. 0.990, L3 0.979 .. 0.984, decode means 0.982). (Correction, review #5: these are the
+  faulted ratios, not the bug's factor. The factor (faulted / clean) is 0.977 .. 0.979 on L3 and 0.984 .. 0.991 on L4.
+  Not every real-weight MoE prefill fails: `test_lengths[kda_moe-2049]` passes with the fault.)
 - Functional suite on the final kernels (`s1_functional6.log`): 41 / 42. The failure, L3 32-slot slot 2 pos 39 at scale
   1.0507, is a confirmed router flip (HF margin 1.86e-4; TT routes expert 31 for HF's 149, `flip_tt_s1302.log`).
-  Near-tie tokens now get a per-token scale bound of 1 +- 0.08 and stay in the decode mean.
+  Near-tie tokens now get a per-token scale bound of 1 +- 0.08 and stay in the decode mean. (Replaced on 2026-10-17 by
+  the y_swap reference, below. Correction, review #5: before the kernel fix pos 38 and pos 39 both flipped.)
+
+## 2026-10-17: review #5 P2 (near-tie reference, L3 excess, kernel evidence, docs)
+
+- P2-A, router near-ties. The margin-keyed relaxations (PCC 0.98, scale 1 +- 0.08 for every decode token with HF margin
+  < 5e-3, 65 % of the MoE decode tokens) are removed. For those tokens the HF reference also gives `y_swap`, the
+  unmodified HF layer rerun with the router's 8th expert replaced by its 9th (`tests/hf_ref/hf_flip_ref.py`, own cache
+  key, so the base references stay cached; every other row reproduces the cached `y` bit-exactly). A token passes on
+  the normal bars against `y` or `y_swap`; `y_swap` matches are counted and capped (per test max(1, 5 %), per suite
+  max(2, 3 %) of the MoE decode tokens). 48 references, 1 .. 11 swap rows each, 0.4 .. 1.8 min per reference on the
+  CPU (`scripts/s1r5_host/flip_refs.py`, `s1r5_flip_refs.log`).
+- Functional suite (`s1_functional7.log`, 01:15 build): 42 / 42. Four tokens match `y_swap`, all others match `y`:
+  pos 2052 (0.99989 / 0.9931), pos 4002 (0.99991 / 0.9998), L3 32-slot slot 2 pos 39 (0.99993 / 1.0004; against `y`
+  1.0507), L4 32-slot slot 15 pos 130 (0.99963 / 0.9909). Suite total 4 of 298 MoE decode tokens.
+- Fault injection on the final code (`s1_fault_routed2.log`): 15 tests fail and 2 fail at teardown (L3 decode means).
+  L4: 4 real-weight prefills + the synthetic prefill; L3: 10 real-weight prefills + 2 decode means. Factors (faulted /
+  clean): L3 0.977 .. 0.979, L4 0.984 .. 0.991 (real), synthetic L4 0.975, synthetic L3 0.994 (passes). L4 decode
+  means pass with the fault (0.9933, 0.9912).
+- P2-B, L3 excess. HF fp32 taps of the same reference (`tests/hf_ref/hf_fp32_taps.py`); `tools/layer_stage_probe.py`
+  and `tools/decode_stage_probe.py` take `--hf32`. Against HF fp32, L3 100-row prefill: update 1.0050, attention
+  output 0.9942 (on HF's own input 0.9941), FFN output 1.0047, FFN on HF's FFN input 1.0019 (routed 1.0028, shared
+  0.9982) (`s1r5_layer_stage_l3.log`); 8 decode steps: update 1.0024, attention 0.9949, FFN on HF input 0.9998
+  (`s1r5_decode_stage_l3.log`). `tools/dsa_stage_probe.py` (fp32 torch on the device weights, `s1r5_dsa_stage_l3.log`):
+  `ttnn.rms_norm` q_a 0.9991, latent 0.9993; `flash_mla_prefill` on exact inputs 0.9983; W_UK / W_UV / o_proj
+  matmuls exact; attention output 0.9950. Host checks (`s1r5_host_checks.log`, `scripts/s1r5_host/run_all.sh`): the
+  port's bfp8 attention weights cost 0.9991; the fp32 FFN on the dumped TT FFN input is 1.0034 of the same FFN on HF's
+  input (4 of 100 rows reroute; the others move as much); the HF fp32 layer with its attention output x 0.9942 gives
+  update 1.0035, FFN 1.0021; random 1 % noise on the FFN input reroutes 8 .. 12 rows and moves the FFN by -0.08 ..
+  +0.04 % only. So the attention deficit (shared `rms_norm` / SDPA kernels) gives about +0.35 %, the MoE device compute
+  about +0.2 %. Not fixed in stage 1; README Limitations. The "fixed" wording of review #4 now covers mHC / L4 only.
+- P2-C, kernels. ttnn rebuilt at HEAD (`cmake --build build_Release --target ttnn`, 01:15 UTC: the sinkhorn and
+  mhc_post factories). `mhc_post` takes its SFPU / hi-lo path only for fp32 inputs (define `MHC_POST_FP32`); bf16 /
+  bfp8_b inputs keep the FPU path and do not allocate the hi / lo CBs. On the rebuilt ttnn:
+  `tests/test_mhc_{split_sinkhorn,post,pre,mix}.py` + `test_kda_recurrent_decode.py` 37 passed (`s1r5_kernels.log`;
+  `mhc_post` fp32 max rel err <= 3.1e-7, bf16 path PCC 0.9999986); upstream nightly `test_mhc_split_sinkhorn.py`
+  (incl. sharded c20_tpc1 / c4_tpc5), deepseek `test_mhc.py` and `test_mhc_post_op.py` 41 passed, 1 skipped by design
+  (`s1r5_upstream_mhc.log`); deepseek `tests/perf/test_mhc_perf.py` + `test_fp32_kernel_perf.py` 13 passed
+  (`s1r5_mhc_perf.log`). Watcher (`watcher_r5/`): `test_real_weights[dsa_moe]`, `test_real_weights[kda_moe]`,
+  `test_decode_only[kda_moe]` pass, 0 findings.
+- P2-C, perf. The 12 functional Tracy cases were recaptured on the final code (12:08 .. 12:24 UTC); the README table is
+  regenerated from these CSVs (`s1r5_perf_tables.log`). The mHC kernels cost +35 .. +36 us per decode step and
+  +458 .. +483 us per 2048-row prefill per layer (Sinkhorn 164 -> 179 us, `mhc_post` 95 .. 97 -> 115 .. 117 us at
+  decode; `mhc_post` 1527 .. 1570 -> 1988 .. 2014 us at 2048 rows). The 2048-row MoE prefills include an uncommitted
+  stage-6 change in `tt/moe_opt.py` (routed experts in 1024-row blocks): +31 ops, +12 .. +13 ms; disclosed in the README.
+  The stage-2 commit a01bb86cfe5 (12:11 UTC) picked up this capture's first two cases (`kda_dense-128`, `kda_dense-2048`)
+  together with its own earlier captures of the other 6 KDA cases; the working tree now holds this capture for all 12.
+- After the kernel tests, `mhc_post`'s bf16 path called the deprecated `mul_tiles_init(a, b)`; it now calls
+  `mul_init(a, b, true)`, which the deprecated wrapper forwards to (same code). Rechecked: `s1r5_post_recheck.log`
+  `test_mhc_post.py` and the deepseek `test_mhc_post_op.py`, 14 passed, no compiler warning.
+- P2-D, docs: fault table counts (4 L4, 10 L3) and per-test list; test comment (no longer "every real-weight MoE
+  prefill"); bug factor values (faulted / clean); pos 38 and pos 39 both flipped before the kernel fix; full-stream
+  minimum 0.99788; the 0.9934 sequence is the 1-row L0 prefill (a token for `check()`), the 42 multi-row sequences are
+  0.9955 .. 1.0059; "fixed" now covers mHC / L4 only.

@@ -1,0 +1,223 @@
+=== start Sat Oct 17 04:57:05 AM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.decode_stage_probe --layer 3 --n 100 --steps 8 --hf32 /home/raahem/glm53-flash-bringup/refs/hf32/l3_s1_108.pt
+2026-10-17 04:57:07.128 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 04:57:28.054 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+--- step 0 pos 100 margin 7.7e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0000
+attn_in          PCC 0.999996  rms ratio 0.9991
+attn_out         PCC 0.999903  rms ratio 0.9950
+X1 - X           PCC 0.999776  rms ratio 0.9950
+ffn_collapsed    PCC 0.999948  rms ratio 0.9983
+ffn_in           PCC 0.999943  rms ratio 0.9998
+ffn_out          PCC 0.999962  rms ratio 0.9995
+ffn_out(hf in)   PCC 0.999972  rms ratio 0.9986
+X2 - X1          PCC 0.999955  rms ratio 1.0029
+X2 - X           PCC 0.999952  rms ratio 1.0028
+X1-X host tt y   PCC 0.999776  rms ratio 0.9950
+X1-X host hf y   PCC 0.999859  rms ratio 0.9989
+X1-X host fp32 pc PCC 0.999860  rms ratio 0.9989
+X1-X host tf32 pc PCC 0.999860  rms ratio 0.9989
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 1.0023
+X2-X1 host hf y  PCC 0.999995  rms ratio 1.0034
+attn_out vs fp32 PCC 0.999904  rms ratio 0.9946
+X1 - X vs fp32   PCC 0.999923  rms ratio 0.9958
+ffn_out vs fp32  PCC 0.999971  rms ratio 0.9999
+ffn(hf in) vs fp32 PCC 0.999978  rms ratio 1.0000
+X2 - X1 vs fp32  PCC 0.999969  rms ratio 1.0007
+X2 - X vs fp32   PCC 0.999968  rms ratio 1.0006
+HF16 upd vs fp32 PCC 0.999983  rms ratio 0.9978
+--- step 1 pos 101 margin 1.8e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0000
+attn_in          PCC 0.999995  rms ratio 0.9996
+attn_out         PCC 0.999920  rms ratio 0.9943
+X1 - X           PCC 0.999715  rms ratio 0.9922
+ffn_collapsed    PCC 0.999965  rms ratio 0.9978
+ffn_in           PCC 0.999962  rms ratio 0.9993
+ffn_out          PCC 0.999919  rms ratio 1.0037
+ffn_out(hf in)   PCC 0.999955  rms ratio 1.0021
+X2 - X1          PCC 0.999914  rms ratio 1.0055
+X2 - X           PCC 0.999912  rms ratio 1.0057
+X1-X host tt y   PCC 0.999715  rms ratio 0.9922
+X1-X host hf y   PCC 0.999758  rms ratio 0.9966
+X1-X host fp32 pc PCC 0.999758  rms ratio 0.9966
+X1-X host tf32 pc PCC 0.999758  rms ratio 0.9966
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 1.0012
+X2-X1 host hf y  PCC 0.999995  rms ratio 1.0017
+attn_out vs fp32 PCC 0.999924  rms ratio 0.9945
+X1 - X vs fp32   PCC 0.999938  rms ratio 0.9957
+ffn_out vs fp32  PCC 0.999944  rms ratio 1.0034
+ffn(hf in) vs fp32 PCC 0.999958  rms ratio 1.0026
+X2 - X1 vs fp32  PCC 0.999943  rms ratio 1.0039
+X2 - X vs fp32   PCC 0.999942  rms ratio 1.0039
+HF16 upd vs fp32 PCC 0.999979  rms ratio 0.9982
+--- step 2 pos 102 margin 1.5e-02
+attn_collapsed   PCC 0.999999  rms ratio 1.0000
+attn_in          PCC 0.999996  rms ratio 0.9996
+attn_out         PCC 0.999917  rms ratio 0.9968
+X1 - X           PCC 0.999776  rms ratio 1.0004
+ffn_collapsed    PCC 0.999966  rms ratio 0.9989
+ffn_in           PCC 0.999960  rms ratio 0.9999
+ffn_out          PCC 0.999964  rms ratio 1.0005
+ffn_out(hf in)   PCC 0.999963  rms ratio 0.9963
+X2 - X1          PCC 0.999958  rms ratio 0.9993
+X2 - X           PCC 0.999957  rms ratio 0.9993
+X1-X host tt y   PCC 0.999776  rms ratio 1.0004
+X1-X host hf y   PCC 0.999849  rms ratio 1.0031
+X1-X host fp32 pc PCC 0.999849  rms ratio 1.0032
+X1-X host tf32 pc PCC 0.999849  rms ratio 1.0032
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 0.9992
+X2-X1 host hf y  PCC 0.999995  rms ratio 0.9988
+attn_out vs fp32 PCC 0.999917  rms ratio 0.9968
+X1 - X vs fp32   PCC 0.999927  rms ratio 0.9971
+ffn_out vs fp32  PCC 0.999971  rms ratio 1.0014
+ffn(hf in) vs fp32 PCC 0.999974  rms ratio 0.9971
+X2 - X1 vs fp32  PCC 0.999970  rms ratio 1.0016
+X2 - X vs fp32   PCC 0.999969  rms ratio 1.0016
+HF16 upd vs fp32 PCC 0.999983  rms ratio 1.0023
+--- step 3 pos 103 margin 1.8e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0001
+attn_in          PCC 0.999996  rms ratio 0.9994
+attn_out         PCC 0.999902  rms ratio 0.9966
+X1 - X           PCC 0.999733  rms ratio 1.0003
+ffn_collapsed    PCC 0.999959  rms ratio 1.0002
+ffn_in           PCC 0.999954  rms ratio 0.9993
+ffn_out          PCC 0.999961  rms ratio 1.0002
+ffn_out(hf in)   PCC 0.999975  rms ratio 0.9992
+X2 - X1          PCC 0.999955  rms ratio 1.0021
+X2 - X           PCC 0.999954  rms ratio 1.0019
+X1-X host tt y   PCC 0.999733  rms ratio 1.0003
+X1-X host hf y   PCC 0.999824  rms ratio 1.0032
+X1-X host fp32 pc PCC 0.999825  rms ratio 1.0034
+X1-X host tf32 pc PCC 0.999825  rms ratio 1.0034
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 1.0014
+X2-X1 host hf y  PCC 0.999995  rms ratio 1.0019
+attn_out vs fp32 PCC 0.999902  rms ratio 0.9960
+X1 - X vs fp32   PCC 0.999915  rms ratio 0.9964
+ffn_out vs fp32  PCC 0.999968  rms ratio 1.0019
+ffn(hf in) vs fp32 PCC 0.999978  rms ratio 1.0009
+X2 - X1 vs fp32  PCC 0.999967  rms ratio 1.0033
+X2 - X vs fp32   PCC 0.999966  rms ratio 1.0033
+HF16 upd vs fp32 PCC 0.999985  rms ratio 1.0014
+--- step 4 pos 104 margin 1.6e-02
+attn_collapsed   PCC 0.999999  rms ratio 1.0000
+attn_in          PCC 0.999996  rms ratio 0.9995
+attn_out         PCC 0.999913  rms ratio 0.9938
+X1 - X           PCC 0.999708  rms ratio 1.0009
+ffn_collapsed    PCC 0.999953  rms ratio 0.9959
+ffn_in           PCC 0.999947  rms ratio 0.9991
+ffn_out          PCC 0.999923  rms ratio 1.0040
+ffn_out(hf in)   PCC 0.999960  rms ratio 1.0017
+X2 - X1          PCC 0.999909  rms ratio 1.0065
+X2 - X           PCC 0.999903  rms ratio 1.0058
+X1-X host tt y   PCC 0.999708  rms ratio 1.0009
+X1-X host hf y   PCC 0.999808  rms ratio 1.0052
+X1-X host fp32 pc PCC 0.999809  rms ratio 1.0053
+X1-X host tf32 pc PCC 0.999809  rms ratio 1.0053
+X2-X1 hostfp32 pc PCC 0.999993  rms ratio 1.0018
+X2-X1 host hf y  PCC 0.999993  rms ratio 1.0023
+attn_out vs fp32 PCC 0.999919  rms ratio 0.9938
+X1 - X vs fp32   PCC 0.999940  rms ratio 0.9957
+ffn_out vs fp32  PCC 0.999945  rms ratio 1.0019
+ffn(hf in) vs fp32 PCC 0.999967  rms ratio 1.0005
+X2 - X1 vs fp32  PCC 0.999941  rms ratio 1.0018
+X2 - X vs fp32   PCC 0.999938  rms ratio 1.0018
+HF16 upd vs fp32 PCC 0.999972  rms ratio 0.9960
+--- step 5 pos 105 margin 3.9e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0000
+attn_in          PCC 0.999996  rms ratio 0.9994
+attn_out         PCC 0.999919  rms ratio 0.9951
+X1 - X           PCC 0.999699  rms ratio 0.9951
+ffn_collapsed    PCC 0.999972  rms ratio 0.9996
+ffn_in           PCC 0.999966  rms ratio 0.9996
+ffn_out          PCC 0.999907  rms ratio 0.9997
+ffn_out(hf in)   PCC 0.999943  rms ratio 1.0000
+X2 - X1          PCC 0.999893  rms ratio 0.9993
+X2 - X           PCC 0.999889  rms ratio 0.9996
+X1-X host tt y   PCC 0.999699  rms ratio 0.9951
+X1-X host hf y   PCC 0.999751  rms ratio 0.9994
+X1-X host fp32 pc PCC 0.999749  rms ratio 0.9994
+X1-X host tf32 pc PCC 0.999749  rms ratio 0.9994
+X2-X1 hostfp32 pc PCC 0.999989  rms ratio 1.0003
+X2-X1 host hf y  PCC 0.999989  rms ratio 0.9996
+attn_out vs fp32 PCC 0.999919  rms ratio 0.9950
+X1 - X vs fp32   PCC 0.999928  rms ratio 0.9957
+ffn_out vs fp32  PCC 0.999917  rms ratio 0.9990
+ffn(hf in) vs fp32 PCC 0.999950  rms ratio 0.9995
+X2 - X1 vs fp32  PCC 0.999914  rms ratio 0.9989
+X2 - X vs fp32   PCC 0.999913  rms ratio 0.9988
+HF16 upd vs fp32 PCC 0.999964  rms ratio 0.9992
+--- step 6 pos 106 margin 3.6e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0001
+attn_in          PCC 0.999996  rms ratio 0.9994
+attn_out         PCC 0.999921  rms ratio 0.9942
+X1 - X           PCC 0.999757  rms ratio 0.9967
+ffn_collapsed    PCC 0.999957  rms ratio 0.9976
+ffn_in           PCC 0.999950  rms ratio 0.9998
+ffn_out          PCC 0.999944  rms ratio 1.0048
+ffn_out(hf in)   PCC 0.999961  rms ratio 0.9989
+X2 - X1          PCC 0.999937  rms ratio 1.0052
+X2 - X           PCC 0.999935  rms ratio 1.0048
+X1-X host tt y   PCC 0.999757  rms ratio 0.9967
+X1-X host hf y   PCC 0.999845  rms ratio 1.0019
+X1-X host fp32 pc PCC 0.999845  rms ratio 1.0020
+X1-X host tf32 pc PCC 0.999845  rms ratio 1.0020
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 0.9982
+X2-X1 host hf y  PCC 0.999995  rms ratio 1.0003
+attn_out vs fp32 PCC 0.999925  rms ratio 0.9941
+X1 - X vs fp32   PCC 0.999931  rms ratio 0.9947
+ffn_out vs fp32  PCC 0.999962  rms ratio 1.0038
+ffn(hf in) vs fp32 PCC 0.999973  rms ratio 0.9995
+X2 - X1 vs fp32  PCC 0.999961  rms ratio 1.0061
+X2 - X vs fp32   PCC 0.999959  rms ratio 1.0061
+HF16 upd vs fp32 PCC 0.999981  rms ratio 1.0013
+--- step 7 pos 107 margin 7.2e-03
+attn_collapsed   PCC 0.999999  rms ratio 1.0001
+attn_in          PCC 0.999995  rms ratio 0.9989
+attn_out         PCC 0.999917  rms ratio 0.9947
+X1 - X           PCC 0.999786  rms ratio 1.0043
+ffn_collapsed    PCC 0.999972  rms ratio 1.0002
+ffn_in           PCC 0.999967  rms ratio 0.9999
+ffn_out          PCC 0.999940  rms ratio 1.0036
+ffn_out(hf in)   PCC 0.999952  rms ratio 0.9981
+X2 - X1          PCC 0.999934  rms ratio 1.0009
+X2 - X           PCC 0.999933  rms ratio 1.0006
+X1-X host tt y   PCC 0.999786  rms ratio 1.0043
+X1-X host hf y   PCC 0.999858  rms ratio 1.0076
+X1-X host fp32 pc PCC 0.999859  rms ratio 1.0076
+X1-X host tf32 pc PCC 0.999859  rms ratio 1.0076
+X2-X1 hostfp32 pc PCC 0.999995  rms ratio 0.9980
+X2-X1 host hf y  PCC 0.999995  rms ratio 0.9973
+attn_out vs fp32 PCC 0.999919  rms ratio 0.9946
+X1 - X vs fp32   PCC 0.999946  rms ratio 0.9966
+ffn_out vs fp32  PCC 0.999951  rms ratio 1.0032
+ffn(hf in) vs fp32 PCC 0.999962  rms ratio 0.9985
+X2 - X1 vs fp32  PCC 0.999950  rms ratio 1.0034
+X2 - X vs fp32   PCC 0.999948  rms ratio 1.0034
+HF16 upd vs fp32 PCC 0.999977  rms ratio 1.0027
+=== mean rms ratio over steps
+attn_collapsed   mean 1.0000 min 1.0000 max 1.0001
+attn_in          mean 0.9994 min 0.9989 max 0.9996
+attn_out         mean 0.9951 min 0.9938 max 0.9968
+X1 - X           mean 0.9981 min 0.9922 max 1.0043
+ffn_collapsed    mean 0.9986 min 0.9959 max 1.0002
+ffn_in           mean 0.9996 min 0.9991 max 0.9999
+ffn_out          mean 1.0020 min 0.9995 max 1.0048
+ffn_out(hf in)   mean 0.9994 min 0.9963 max 1.0021
+X2 - X1          mean 1.0027 min 0.9993 max 1.0065
+X2 - X           mean 1.0026 min 0.9993 max 1.0058
+X1-X host tt y   mean 0.9981 min 0.9922 max 1.0043
+X1-X host hf y   mean 1.0020 min 0.9966 max 1.0076
+X1-X host fp32 pc mean 1.0020 min 0.9966 max 1.0076
+X1-X host tf32 pc mean 1.0020 min 0.9966 max 1.0076
+X2-X1 hostfp32 pc mean 1.0003 min 0.9980 max 1.0023
+X2-X1 host hf y  mean 1.0007 min 0.9973 max 1.0034
+attn_out vs fp32 mean 0.9949 min 0.9938 max 0.9968
+X1 - X vs fp32   mean 0.9960 min 0.9947 max 0.9971
+ffn_out vs fp32  mean 1.0018 min 0.9990 max 1.0038
+ffn(hf in) vs fp32 mean 0.9998 min 0.9971 max 1.0026
+X2 - X1 vs fp32  mean 1.0025 min 0.9989 max 1.0061
+X2 - X vs fp32   mean 1.0024 min 0.9988 max 1.0061
+HF16 upd vs fp32 mean 0.9999 min 0.9960 max 1.0027
+=== exit code: 0 Sat Oct 17 04:57:37 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

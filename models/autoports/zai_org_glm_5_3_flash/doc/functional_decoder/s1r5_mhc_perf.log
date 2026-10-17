@@ -1,0 +1,139 @@
+=== start Sat Oct 17 11:13:05 AM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py
+2026-10-17 11:13:07.711 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 13 items
+
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T640] 2026-10-17 11:13:10.726 | INFO     | tracy:signpost:49 - mhc-kernel-grid
+2026-10-17 11:13:10.728 | INFO     | tracy:signpost:49 - mhc-kernel-1core
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T5120] 2026-10-17 11:13:11.084 | INFO     | tracy:signpost:49 - mhc-kernel-grid
+2026-10-17 11:13:11.096 | INFO     | tracy:signpost:49 - mhc-kernel-1core
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T8192] 2026-10-17 11:13:11.547 | INFO     | tracy:signpost:49 - mhc-kernel-grid
+2026-10-17 11:13:11.566 | INFO     | tracy:signpost:49 - mhc-kernel-1core
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T131072] 2026-10-17 11:13:12.097 | INFO     | tracy:signpost:49 - mhc-kernel-grid
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_sharded[tpc4] 2026-10-17 11:13:12.462 | INFO     | tracy:signpost:49 - mhc-kernel-interleaved
+2026-10-17 11:13:12.468 | INFO     | tracy:signpost:49 - mhc-kernel-sharded
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T640] 2026-10-17 11:13:13.237 | INFO     | tracy:signpost:49 - mhc-project
+2026-10-17 11:13:13.251 | INFO     | tracy:signpost:49 - mhc-kernel
+2026-10-17 11:13:13.268 | INFO     | tracy:signpost:49 - mhc-hc-pre
+2026-10-17 11:13:13.302 | INFO     | tracy:signpost:49 - mhc-hc-post
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T2048] 2026-10-17 11:13:14.349 | INFO     | tracy:signpost:49 - mhc-project
+2026-10-17 11:13:14.385 | INFO     | tracy:signpost:49 - mhc-kernel
+2026-10-17 11:13:14.392 | INFO     | tracy:signpost:49 - mhc-hc-pre
+2026-10-17 11:13:14.470 | INFO     | tracy:signpost:49 - mhc-hc-post
+PASSED
+models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_wrap_e2e[T640] 2026-10-17 11:13:15.032 | INFO     | tracy:signpost:49 - mhc-e2e
+2026-10-17 11:13:15.063 | INFO     | tracy:signpost:49 - mhc-e2e-kernel
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode] PERF kda_recurrent_decode: 847.8 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn] PERF mhc_split_sinkhorn: 89.8 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post] PERF mhc_post: 59.1 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre] PERF mhc_pre: 26.0 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix] PERF mhc_mix: 24.6 us/call (synchronized loop of 200)
+PASSED
+
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+models/tt_transformers/tt/common.py:28
+  /home/raahem/tt-metal/models/tt_transformers/tt/common.py:28: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ImageMedia(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.34s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T640]
+0.89s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T2048]
+0.53s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T640]
+0.35s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+0.34s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_wrap_e2e[T640]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T640]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T2048]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T131072]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T8192]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix]
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+0.32s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T5120]
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+0.32s setup    models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_sharded[tpc4]
+0.19s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T8192]
+0.14s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_wrap_e2e[T640]
+0.12s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T5120]
+0.05s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T131072]
+0.03s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T640]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+0.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+0.02s call     models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_sharded[tpc4]
+0.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+=========================== short test summary info ============================
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T640]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T5120]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T8192]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_grid_scaling[T131072]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_kernel_sharded[tpc4]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T640]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_block_perf[T2048]
+PASSED models/demos/deepseek_v3_d_p/tests/perf/test_mhc_perf.py::test_mhc_wrap_e2e[T640]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix]
+======================== 13 passed, 3 warnings in 7.86s ========================
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+nanobind: leaked 2 instances!
+ - leaked instance 0x7a54d1856dd8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7a5524e81648 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 35 types!
+ - leaked type "MathFidelity"
+ - leaked type "WorkerMode"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.types.Shape"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 324 functions!
+ - leaked function "item"
+ - leaked function ""
+ - leaked function "ranges"
+ - leaked function ""
+ - leaked function "merge"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function "default_core_range"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 11:13:19 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

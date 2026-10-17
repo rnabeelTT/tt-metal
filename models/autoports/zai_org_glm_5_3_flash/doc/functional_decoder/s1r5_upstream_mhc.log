@@ -1,0 +1,239 @@
+=== start Sat Oct 17 09:30:52 AM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py
+2026-10-17 09:30:57.551 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... 2026-10-17 09:31:02.742 | WARNING  | tests.ttnn.conftest:pytest_collection_modifyitems:45 - Fast Runtime Mode is ON. Skipping tests tagged with @pytest.mark.requires_fast_runtime_mode_off
+collected 42 items
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01] 2026-10-17 09:31:02.745 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]: 2026-10-17 09:31:02 (UTC)
+2026-10-17 09:31:04.159 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000008569963 | max|Δ|=1.19e-07
+2026-10-17 09:31:04.160 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=1.000000000034407 | max|Δ|=2.38e-07
+2026-10-17 09:31:04.161 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=0.9999999998730573 | max|Δ|=2.98e-07
+PASSED2026-10-17 09:31:04.188 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0] 2026-10-17 09:31:04.190 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]: 2026-10-17 09:31:04 (UTC)
+2026-10-17 09:31:04.344 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-17 09:31:04.344 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-17 09:31:04.344 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-17 09:31:04.369 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1] 2026-10-17 09:31:04.371 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]: 2026-10-17 09:31:04 (UTC)
+2026-10-17 09:31:04.533 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-17 09:31:04.533 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-17 09:31:04.534 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-17 09:31:04.559 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5] 2026-10-17 09:31:04.561 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]: 2026-10-17 09:31:04 (UTC)
+2026-10-17 09:31:04.714 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-17 09:31:04.715 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-17 09:31:04.716 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-17 09:31:04.749 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T1] 2026-10-17 09:31:05.889 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - expand: pcc=1.0 | max|Δ|=0.00e+00
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T32] 2026-10-17 09:31:06.504 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - expand: pcc=1.0 | max|Δ|=0.00e+00
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T1] 2026-10-17 09:31:09.524 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - mixes: pcc=0.9999998251866177 | max|Δ|=1.33e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T32] 2026-10-17 09:31:10.159 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - mixes: pcc=0.9999998100355176 | max|Δ|=2.34e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T1] 2026-10-17 09:31:13.216 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - mixes: pcc=0.9999999067484212 | max|Δ|=1.13e-02
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T32] 2026-10-17 09:31:13.863 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - mixes: pcc=0.9999998350328096 | max|Δ|=1.30e-02
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C256-s1.0-T1] 2026-10-17 09:31:14.515 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - y: pcc=0.9999998645716951 | max|Δ|=9.06e-04
+2026-10-17 09:31:14.515 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - post: pcc=0.9999998628343414 | max|Δ|=3.50e-04
+2026-10-17 09:31:14.515 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - comb: pcc=0.9999997387171784 | max|Δ|=3.34e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C256-s1.0-T32] 2026-10-17 09:31:15.101 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - y: pcc=0.9999999264893982 | max|Δ|=1.73e-03
+2026-10-17 09:31:15.101 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - post: pcc=0.9999998043692302 | max|Δ|=9.94e-04
+2026-10-17 09:31:15.102 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - comb: pcc=0.9999998782085632 | max|Δ|=3.69e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C7168-s0.01-T1] 2026-10-17 09:31:15.684 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - y: pcc=0.9999999998857779 | max|Δ|=5.66e-05
+2026-10-17 09:31:15.684 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - post: pcc=1.0000000027997378 | max|Δ|=2.72e-05
+2026-10-17 09:31:15.685 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - comb: pcc=0.9999999875619672 | max|Δ|=1.25e-05
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C7168-s0.01-T32] 2026-10-17 09:31:16.402 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - y: pcc=0.9999999998842231 | max|Δ|=1.07e-04
+2026-10-17 09:31:16.403 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - post: pcc=0.9999999927631514 | max|Δ|=4.21e-05
+2026-10-17 09:31:16.403 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - comb: pcc=0.9999999944889431 | max|Δ|=2.56e-05
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C256-T1] 2026-10-17 09:31:17.012 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - out: pcc=1.0000000005588048 | max|Δ|=4.77e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C256-T32] 2026-10-17 09:31:17.578 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - out: pcc=0.9999999999646743 | max|Δ|=7.15e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C7168-T1] 2026-10-17 09:31:18.233 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - out: pcc=0.9999999999943692 | max|Δ|=4.77e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C7168-T32] 2026-10-17 09:31:18.921 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - out: pcc=0.9999999999827278 | max|Δ|=9.54e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C256-T1] 2026-10-17 09:31:19.513 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - head_y: pcc=0.9999999947938957 | max|Δ|=1.50e-05
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C256-T32] 2026-10-17 09:31:20.120 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - head_y: pcc=0.9999999994535663 | max|Δ|=1.61e-05
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C7168-T1] 2026-10-17 09:31:20.685 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - head_y: pcc=0.9999999989436383 | max|Δ|=1.49e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C7168-T32] 2026-10-17 09:31:21.425 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - head_y: pcc=0.999999999809439 | max|Δ|=1.49e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T1] 2026-10-17 09:31:23.018 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[identity] C=256 T=1: pcc=0.9999999814070732 | max|Δ|=1.61e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T32] 2026-10-17 09:31:23.632 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[identity] C=256 T=32: pcc=0.9999999606447383 | max|Δ|=3.49e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C7168-s0.01-T1] 2026-10-17 09:31:25.208 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[identity] C=7168 T=1: pcc=0.999999999639683 | max|Δ|=2.28e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C7168-s0.01-T32] 2026-10-17 09:31:26.058 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[identity] C=7168 T=32: pcc=0.9999999998199588 | max|Δ|=3.10e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C256-s1.0-T1] 2026-10-17 09:31:27.234 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[linear] C=256 T=1: pcc=0.9999997559118099 | max|Δ|=2.47e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C256-s1.0-T32] 2026-10-17 09:31:27.898 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[linear] C=256 T=32: pcc=0.9999997780715962 | max|Δ|=3.00e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T1] 2026-10-17 09:31:29.906 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[linear] C=7168 T=1: pcc=0.9999998098345214 | max|Δ|=1.04e-02
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T32] 2026-10-17 09:31:31.283 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap[linear] C=7168 T=32: pcc=0.9999998115845041 | max|Δ|=1.33e-02
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T1] 2026-10-17 09:31:33.073 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap-real[mlp] T=1: pcc=0.9999997789412575 | max|Δ|=1.43e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T32] 2026-10-17 09:31:33.723 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap-real[mlp] T=32: pcc=0.9999998517977174 | max|Δ|=2.01e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=attn-T1] SKIPPED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=attn-T32] 2026-10-17 09:31:36.671 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc:_check:49 - wrap-real[attn] T=32: pcc=0.9999988479799805 | max|Δ|=5.62e-03
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1] 2026-10-17 09:31:37.272 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=1 C=256: pcc=1.000000003026549 | max|Δ|=1.43e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T32] 2026-10-17 09:31:37.860 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=32 C=256: pcc=1.000000000054843 | max|Δ|=1.43e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T96] 2026-10-17 09:31:38.513 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=96 C=256: pcc=0.9999999999740575 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640] 2026-10-17 09:31:39.248 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=640 C=256: pcc=0.9999999999857323 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1] 2026-10-17 09:31:39.898 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=1 C=7168: pcc=0.9999999998703939 | max|Δ|=9.54e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T32] 2026-10-17 09:31:40.646 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=32 C=7168: pcc=0.9999999999317833 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T96] 2026-10-17 09:31:41.583 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=96 C=7168: pcc=1.000000000003641 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640] 2026-10-17 09:31:43.022 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=640 C=7168: pcc=0.9999999999924398 | max|Δ|=2.38e-06
+PASSED
+
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+models/tt_transformers/tt/common.py:28
+  /home/raahem/tt-metal/models/tt_transformers/tt/common.py:28: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ImageMedia(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+2.49s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T1]
+2.40s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T1]
+1.79s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=attn-T32]
+1.39s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T1]
+1.31s setup    tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+1.19s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T1]
+1.03s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T1]
+1.01s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C7168-s0.01-T1]
+0.85s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+0.77s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T32]
+0.62s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T1]
+0.62s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C256-s1.0-T1]
+0.61s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T1]
+0.60s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T32]
+0.60s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T1]
+0.59s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T32]
+0.59s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1]
+0.59s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T32]
+0.58s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=attn-T1]
+0.58s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T32]
+0.58s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+0.57s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640]
+0.57s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T32]
+0.57s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C7168-T1]
+0.57s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T32]
+=========================== short test summary info ============================
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_expand[T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C256-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_project[C7168-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C256-s1.0-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C256-s1.0-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C7168-s0.01-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_pre[C7168-s0.01-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C256-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C256-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C7168-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_post[C7168-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C256-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C256-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C7168-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_hc_head[C7168-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C256-s1.0-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C7168-s0.01-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=identity-C7168-s0.01-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C256-s1.0-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C256-s1.0-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap[f_kind=linear-C7168-s0.01-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=mlp-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py::test_mhc_wrap_real_sublayer[f_kind=attn-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T96]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T96]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+SKIPPED [1] models/demos/deepseek_v3_d_p/tests/pcc/test_mhc.py:236: attention over a length-1 sequence is trivial
+================== 41 passed, 1 skipped, 3 warnings in 40.39s ==================
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+nanobind: leaked 2 instances!
+ - leaked instance 0x7d30d60eaec8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7d3129d4d688 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 35 types!
+ - leaked type "MathFidelity"
+ - leaked type "WorkerMode"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.types.Shape"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 324 functions!
+ - leaked function ""
+ - leaked function "__repr__"
+ - leaked function "to_json"
+ - leaked function "default_core_range"
+ - leaked function "__getitem__"
+ - leaked function "subtract"
+ - leaked function "to_rank"
+ - leaked function "__repr__"
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 09:31:47 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

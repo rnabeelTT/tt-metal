@@ -38,11 +38,14 @@ def _cache_dir() -> Path:
 # semantic edit of the reference code invalidates it (no stale reference can be served after a code change).
 REF_VERSION = "glm53-ref-2"
 REF_CODE = [SCRIPT, HERE.parents[1] / "tt" / "ckpt.py", HERE.parents[1] / "tt" / "synthetic.py"]
+# Router near-tie counterfactuals (request key "flip", hf_flip_ref.py) have their own code digest, so adding them left
+# every base reference cached.
+FLIP_SCRIPT = HERE / "hf_flip_ref.py"
 
 
-def _code_digest() -> str:
+def _code_digest(paths=REF_CODE) -> str:
     h = hashlib.sha256()
-    for path in REF_CODE:
+    for path in paths:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             body = getattr(node, "body", None)
@@ -54,6 +57,7 @@ def _code_digest() -> str:
 
 
 _CODE_DIGEST = _code_digest()
+_FLIP_DIGEST = _code_digest([FLIP_SCRIPT] + REF_CODE)
 
 
 def _digest(req: dict) -> str:
@@ -61,7 +65,7 @@ def _digest(req: dict) -> str:
     torch.save({k: req[k] for k in sorted(req)}, buf)
     h = hashlib.sha256(buf.getvalue())
     h.update(REF_VERSION.encode())
-    h.update(_CODE_DIGEST.encode())
+    h.update((_FLIP_DIGEST if "flip" in req else _CODE_DIGEST).encode())
     return h.hexdigest()[:24]
 
 
@@ -100,6 +104,9 @@ def hf_layer_reference(req: dict, timeout: int = 7200) -> dict:
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)  # the HF venv must not import tt-metal / ttnn packages
         cmd = [_hf_python(), "-I", str(SCRIPT), "--request", str(req_path), "--out", str(out)]
+        if "flip" in req:  # the base reference result is the input
+            cmd[2] = str(FLIP_SCRIPT)
+            cmd += ["--base", str(_cache_dir() / f"{req['flip']}.pt")]
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
         if proc.returncode != 0 or not out.exists():
             raise RuntimeError(
@@ -107,3 +114,20 @@ def hf_layer_reference(req: dict, timeout: int = 7200) -> dict:
             )
         req_path.unlink(missing_ok=True)
     return torch.load(out, weights_only=False)
+
+
+def flip_reference(req: dict, rows) -> dict | None:
+    """Router near-tie counterfactual of a cached real-weight reference `req` (hf_flip_ref.py): the layer output of
+    `rows` with the router's 8th expert replaced by its 9th. Returns {row: y_swap row} or None (no rows)."""
+    rows = sorted(int(r) for r in rows)
+    if not rows:
+        return None
+    assert req.get("weights") == "real", "near-tie counterfactuals are computed for real weights only"
+    base = _digest(req)
+    assert (_cache_dir() / f"{base}.pt").exists(), "base reference not cached"
+    r = hf_layer_reference(
+        {"flip": base, "layer": req["layer"], "weights": "real", "segments": list(req["segments"]), "rows": rows}
+    )
+    if isinstance(r, DryRunResult):
+        return r
+    return {int(i): r["y_swap"][j] for j, i in enumerate(r["rows"].tolist())}

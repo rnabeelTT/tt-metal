@@ -32,7 +32,7 @@ from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
     stream_in,
     stream_out,
 )
-from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import DryRunResult, hf_layer_reference
+from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import DryRunResult, flip_reference, hf_layer_reference
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
 
 KINDS = {"kda_dense": 0, "dsa_moe": 3, "kda_moe": 4}
@@ -42,33 +42,41 @@ FULL_BAR = 0.99
 # Router near-ties: a decoded token whose HF top-8 vs 9th expert selection margin is below NEAR_TIE can take a
 # different 8th expert. The port's FFN input differs from HF's by ~1 % relative (PCC ~0.99994: HF rounds its 4-stream
 # residual to bf16 at every mix, the port keeps fp32), which moves the router's selection scores sigmoid(l) + bias by up
-# to ~2.5e-3 (sigmoid slope <= 0.25) -> margins of a few 1e-3 can flip. Measured flips: margins 6e-5 .. 1.7e-3 with
-# update PCC 0.983-0.9957 (scripts/route_margin.py). Such a token is held to NEAR_TIE_BAR and logged in NEAR_TIES.
+# to ~2.5e-3 (sigmoid slope <= 0.25) -> margins of a few 1e-3 can flip. A flipped expert changes the token's function,
+# not only its rounding: over 4606 L3 / 2812 L4 HF tokens, the 8th -> 9th swap moves the update scale by up to 17.7 %
+# (L3; 99th percentile 7.9 %) and the delta PCC down to 0.870. So the HF reference also gives, for every decode row
+# with margin < NEAR_TIE, y_swap: the HF layer output with the 8th expert replaced by the 9th, weights renormalized
+# (tests/hf_ref/hf_flip_ref.py). Such a token passes when it meets the normal bars (DELTA_BAR, FULL_BAR, TOKEN_RMS_TOL)
+# against y or against y_swap; a y_swap match is logged in SWAPS. A test may match y_swap on at most
+# max(1, SWAP_MAX_FRAC x its MoE decode tokens) tokens, the module (suite) on at most
+# max(SWAP_SUITE_MIN, SWAP_SUITE_FRAC x its MoE decode tokens): a router defect that flips near-tie tokens
+# systematically fails. A token that matches neither fails.
 NEAR_TIE = 5e-3
-NEAR_TIE_BAR = 0.98
+SWAP_MAX_FRAC = 0.05
+SWAP_SUITE_FRAC = 0.03
+SWAP_SUITE_MIN = 2
 # Update scale |X' - X| TT / HF (PCC is scale-blind; review #1: the routed experts were 0.976 before the sparse_matmul
 # fp32-partials fix). A prefill sequence is held to 1 +- SEQ_RMS_TOL, which that bug fails: injected again
-# (GLM53_FAULT_ROUTED_SCALE=0.9722, logs/s1_fault_routed.log), it fails 17 tests, every real-weight MoE prefill
-# (L4 0.985 .. 0.990, L3 0.979 .. 0.984) and the decode means (0.982). One
-# decode token is held to 1 +- TOKEN_RMS_TOL only: HF runs the layer in bf16 and its mHC post / comb mixing rounds, so a
-# single token's update scale scatters around the fp32 result (tools/decode_stage_probe.py, layer 4: an fp32 host
-# recomputation of HF's own mHC on HF's inputs misses HF's update by 0.978 .. 1.019; the suite's tokens span 0.985 ..
-# 1.045). The mean over a test's decode tokens (at least MEAN_MIN_TOKENS, near-tie tokens included) is held to
-# 1 +- SEQ_RMS_TOL. A router near-tie token (margin < NEAR_TIE) is held to 1 +- NEAR_TIE_TOKEN_RMS_TOL: a flipped expert
-# changes the token's function, not only its rounding (L3 32-slot slot 2 pos 39, HF margin 1.9e-4: TT routes expert 31,
-# HF's 9th, instead of 149, the other 7 equal (tools/route_flip_check.py, logs/flip_tt_s1302.log); delta PCC 0.9987,
-# update scale 1.051). Near-tie tokens stay in the decode mean.
+# (GLM53_FAULT_ROUTED_SCALE=0.9722, the routed output x 0.9722; doc/functional_decoder/s1_fault_routed2.log), it fails
+# the multi-row real-weight prefills of L3 and most of L4 and the L3 decode means (the per-test list is in the
+# README). The bug's layer-level factor (faulted / clean update scale) is 0.977 .. 0.979 on L3 and 0.984 .. 0.991
+# on L4 (real weights). One decode token is held to 1 +- TOKEN_RMS_TOL only: HF runs the layer in bf16 and its mHC
+# post / comb mixing rounds, so a single token's update scale scatters around the fp32 result
+# (tools/decode_stage_probe.py, layer 4: an fp32 host recomputation of HF's own mHC on HF's inputs misses HF's update
+# by 0.978 .. 1.019). The mean over a test's decode tokens (at least MEAN_MIN_TOKENS; a y_swap match enters with its
+# ratio against y_swap) is held to 1 +- SEQ_RMS_TOL.
 SEQ_RMS_TOL = 0.01
 TOKEN_RMS_TOL = 0.05
-NEAR_TIE_TOKEN_RMS_TOL = 0.08
 MEAN_MIN_TOKENS = 8
 DECODE_RATIOS = []  # update rms ratio of every decode token of the running test
 # Per-layer bar overrides {layer: {"delta": bar, "seq": tol, "token": tol}}: a precision policy whose weights are
 # quantized below the checkpoint (bfp4 routed experts) is held to its measured quantization floor on the layers it
-# changes (tests/test_optimized_decoder.py): every PCC bar of the layer (update, synthetic-weights, near-tie) moves down
+# changes (tests/test_optimized_decoder.py): every PCC bar of the layer (update, synthetic-weights) moves down
 # by DELTA_BAR - delta, the scale bounds become seq / token. Empty here: the functional bars apply.
 BAR_OVERRIDES = {}
-NEAR_TIES = []  # (tag, delta PCC, HF margin) of every token accepted under the near-tie rule
+SWAPS = []  # (tag, delta PCC vs y_swap, update rms ratio vs y_swap, HF margin) of every token that matched y_swap
+MOE_TOKENS = []  # one entry per MoE decode token (HF margin known) of the running test
+SUITE = {"swaps": 0, "moe_tokens": 0}
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
 
@@ -77,7 +85,21 @@ pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs 
 def decode_scale_mean():
     """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
     DECODE_RATIOS.clear()
+    MOE_TOKENS.clear()
+    n_swaps = len(SWAPS)
     yield
+    swaps = len(SWAPS) - n_swaps
+    SUITE["swaps"] += swaps
+    SUITE["moe_tokens"] += len(MOE_TOKENS)
+    if MOE_TOKENS:
+        cap = max(1, int(SWAP_MAX_FRAC * len(MOE_TOKENS)))
+        suite_cap = max(SWAP_SUITE_MIN, int(SWAP_SUITE_FRAC * SUITE["moe_tokens"]))
+        print(
+            f"router near-tie y_swap matches: {swaps} of {len(MOE_TOKENS)} MoE decode tokens (cap {cap}); "
+            f"module total {SUITE['swaps']} of {SUITE['moe_tokens']} (cap {suite_cap})"
+        )
+        assert swaps <= cap, f"{swaps} y_swap matches in {len(MOE_TOKENS)} MoE decode tokens > {cap}"
+        assert SUITE["swaps"] <= suite_cap, f"module y_swap matches {SUITE['swaps']} > {suite_cap}"
     if len(DECODE_RATIOS) >= MEAN_MIN_TOKENS:
         m = sum(r for _, r in DECODE_RATIOS) / len(DECODE_RATIOS)
         print(f"decode update rms ratio mean {m:.4f} over {len(DECODE_RATIOS)} tokens")
@@ -137,7 +159,9 @@ def synthetic_stream(layer: int, seed: int, n: int) -> torch.Tensor:
     return (mean + std * z).to(torch.bfloat16)
 
 
-def reference(layer, weights, seed, prefill_len, decode_steps):
+def reference(layer, weights, seed, prefill_len, decode_steps, decode_rows=None):
+    """HF reference of one sequence: prefill_len rows, then decode_steps single-row segments. decode_rows: the rows the
+    test decodes on the port (default: the decode segments), whose near-tie y_swap is computed (make_ref)."""
     segs = [prefill_len] + [1] * decode_steps
     n = prefill_len + decode_steps
     if weights == "real":
@@ -154,8 +178,25 @@ def reference(layer, weights, seed, prefill_len, decode_steps):
     r = hf_layer_reference(req)
     if isinstance(r, DryRunResult):
         return _DryRef()
+    return make_ref(req, r, range(prefill_len, n) if decode_rows is None else decode_rows)
+
+
+def make_ref(req, r, decode_rows):
+    """Ref of a computed HF reference; for real-weight MoE layers, also y_swap of the decode_rows whose HF router
+    margin is below NEAR_TIE (tests/hf_ref/hf_flip_ref.py)."""
+    if isinstance(r, DryRunResult):
+        return _DryRef()
+    n = sum(req["segments"])
     x = (r["x"] if "x" in r else req["x"]).float().reshape(n, H4)
-    return Ref((x, r["y"].float().reshape(n, H4)), r.get("route_margin"))
+    margin = r.get("route_margin")
+    swap = None
+    if margin is not None and req["weights"] == "real":
+        m = margin.reshape(-1).float()
+        rows = sorted({int(i) for i in decode_rows if float(m[i]) < NEAR_TIE})
+        swap = flip_reference(req, rows)
+        if isinstance(swap, DryRunResult):
+            return _DryRef()
+    return Ref((x, r["y"].float().reshape(n, H4)), margin, swap)
 
 
 class _DryRef(tuple):
@@ -168,48 +209,61 @@ class _DryRef(tuple):
 
 
 class Ref(tuple):
-    """(x, y) of a reference sequence; .margin = HF router margin per row (None for dense-MLP layers)."""
+    """(x, y) of a reference sequence; .margin = HF router margin per row (None for dense-MLP layers); .swap = {row:
+    y_swap row} for the near-tie decode rows (None if there are none)."""
 
-    def __new__(cls, xy, margin):
+    def __new__(cls, xy, margin, swap=None):
         obj = super().__new__(cls, xy)
         obj.margin = None if margin is None else margin.reshape(-1).float()
+        obj.swap = swap or {}
         return obj
 
     def row_margin(self, i):
         return None if self.margin is None else float(self.margin[i])
 
+    def alt(self, i):
+        """y_swap of row i (router 8th expert -> 9th), or None."""
+        a = self.swap.get(i)
+        return None if a is None else a.float().reshape(-1)
 
-def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None):
-    """margin: the HF router margin of this (single) token, if any: below NEAR_TIE the token may legitimately route one
-    expert differently and is held to NEAR_TIE_BAR (recorded in NEAR_TIES)."""
+
+def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+    """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+    replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+    a y_alt match is recorded in SWAPS."""
     layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
     ov = BAR_OVERRIDES.get(layer)
-    near_tie_bar = NEAR_TIE_BAR
     if ov:  # every PCC bar of the layer moves down by the same quantization allowance
-        shift = DELTA_BAR - ov["delta"]
-        delta_bar -= shift
-        near_tie_bar -= shift
-    d = pcc(got - x, y - x)
-    f = pcc(got, y)
-    r = float((got - x).norm() / (y - x).norm())  # update scale vs HF (PCC is scale-blind)
+        delta_bar -= DELTA_BAR - ov["delta"]
     token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
-    note = f" (HF router margin {margin:.1e})" if margin is not None else ""
-    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
     tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
     if ov:
         tol = ov["token"] if token else ov["seq"]
-    if token and margin is not None and margin < NEAR_TIE:
-        tol = max(tol, NEAR_TIE_TOKEN_RMS_TOL)
+
+    def stats(ref):
+        d = pcc(got - x, ref - x)
+        f = pcc(got, ref)
+        r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+        return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+    note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+    d, f, r, ok = stats(y)
+    print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+    if token and margin is not None:
+        MOE_TOKENS.append(tag)
+    if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+        d2, f2, r2, ok2 = stats(y_alt)
+        print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+        assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+        SWAPS.append((tag, d2, r2, margin))
+        DECODE_RATIOS.append((layer, r2))
+        print(f"{tag}: matched y_swap (router near-tie)")
+        return d2, f2
     assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
-    if token:
-        DECODE_RATIOS.append((layer, r))
-    if d < delta_bar and margin is not None and margin < NEAR_TIE:
-        assert d >= near_tie_bar, f"{tag}: delta PCC {d:.6f} < {near_tie_bar} (router near-tie, margin {margin:.1e})"
-        NEAR_TIES.append((tag, d, margin))
-        print(f"{tag}: accepted as a router near-tie")
-        return d, f
     assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
     assert f >= full_bar, f"{tag}: full PCC {f:.6f} < {full_bar}"
+    if token:
+        DECODE_RATIOS.append((layer, r))
     return d, f
 
 
@@ -239,6 +293,7 @@ def run_user(mesh, dec, layer, weights, seed, prefill_len, decode_steps, slot, t
             x[prefill_len + i],
             y[prefill_len + i],
             margin=ref.row_margin(prefill_len + i),
+            y_alt=ref.alt(prefill_len + i),
         )
     runner.release()
     return out, outs
@@ -365,6 +420,7 @@ def test_batched_users(mesh, rd, kind):
                 x[n + i],
                 y[n + i],
                 margin=refs[s].row_margin(n + i),
+                y_alt=refs[s].alt(n + i),
             )
     runner.release()
 
@@ -430,9 +486,9 @@ def test_decode_only(mesh, rd, kind):
     layer = KINDS[kind]
     dec = get_layer(mesh, rd, layer)
     steps, slot = 4, 6
-    r = hf_layer_reference({"layer": layer, "weights": "real", "tokens": tokens(77, steps), "segments": [1] * steps})
-    x = r["x"].float().reshape(steps, H4)
-    y = r["y"].float().reshape(steps, H4)
+    req = {"layer": layer, "weights": "real", "tokens": tokens(77, steps), "segments": [1] * steps}
+    ref = make_ref(req, hf_layer_reference(req), range(steps))
+    x, y = ref
     if dec.attn_kind == "kda":  # fresh sequence: zero carry in the slot
         st = dec.attn.new_prefill_state()
         dec.commit_prefill(slot, st)
@@ -445,14 +501,7 @@ def test_decode_only(mesh, rd, kind):
             runner.capture({slot: x[1]}, [p + 1 if p >= 0 else -1 for p in pos])
         else:
             o = runner.traced_step({slot: x[i]}, pos)[slot]
-        mg = r.get("route_margin")
-        check(
-            f"L{layer} slot {slot} decode-only pos {i}",
-            o,
-            x[i],
-            y[i],
-            margin=None if mg is None else float(mg.reshape(-1)[i]),
-        )
+        check(f"L{layer} slot {slot} decode-only pos {i}", o, x[i], y[i], margin=ref.row_margin(i), y_alt=ref.alt(i))
     runner.release()
 
 
@@ -495,6 +544,7 @@ def test_paged_permuted_blocks(mesh, rd):
                     x[n + i],
                     y[n + i],
                     margin=refs[s].row_margin(n + i),
+                    y_alt=refs[s].alt(n + i),
                 )
         runner.release()
     finally:
@@ -512,7 +562,8 @@ def test_batch32_all_active(mesh, rd, kind):
     dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
     lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
     steps = 3
-    refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps) for seed in range(8)}
+    rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+    refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
     users = {}  # slot -> (seed, prompt length)
     for slot in range(32):
         users[slot] = (slot % 8, lengths[slot // 8])
@@ -537,6 +588,7 @@ def test_batch32_all_active(mesh, rd, kind):
                 x[n + i],
                 y[n + i],
                 margin=refs[seed].row_margin(n + i),
+                y_alt=refs[seed].alt(n + i),
             )
             worst = min(worst, d)
     runner.release()
@@ -565,10 +617,31 @@ def test_inactive_slot_state(mesh, rd, kind):
         pos[5] = na + i
         # the idle slot B gets a non-finite row (as a stacked model's idle rows may carry): its state must not change
         o = runner.eager_step({5: xa[na + i], 2: nan_row}, pos)
-        check(f"L{layer} A alone pos {na + i}", o[5], xa[na + i], ya[na + i], margin=ra.row_margin(na + i))
+        check(
+            f"L{layer} A alone pos {na + i}",
+            o[5],
+            xa[na + i],
+            ya[na + i],
+            margin=ra.row_margin(na + i),
+            y_alt=ra.alt(na + i),
+        )
     for i in range(2):
         pos = [-1] * BATCH
         pos[5], pos[2] = na + 4 + i, nb + i
         o = runner.eager_step({5: xa[na + 4 + i], 2: xb[nb + i]}, pos)
-        check(f"L{layer} A pos {na + 4 + i}", o[5], xa[na + 4 + i], ya[na + 4 + i], margin=ra.row_margin(na + 4 + i))
-        check(f"L{layer} B after idling, pos {nb + i}", o[2], xb[nb + i], yb[nb + i], margin=rb.row_margin(nb + i))
+        check(
+            f"L{layer} A pos {na + 4 + i}",
+            o[5],
+            xa[na + 4 + i],
+            ya[na + 4 + i],
+            margin=ra.row_margin(na + 4 + i),
+            y_alt=ra.alt(na + 4 + i),
+        )
+        check(
+            f"L{layer} B after idling, pos {nb + i}",
+            o[2],
+            xb[nb + i],
+            yb[nb + i],
+            margin=rb.row_margin(nb + i),
+            y_alt=rb.alt(nb + i),
+        )

@@ -1,0 +1,23 @@
+=== start Sat Oct 17 04:59:06 AM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.layer_stage_probe --layer 3 --weights real --n 100 --ref-n 108 --hf32 /home/raahem/glm53-flash-bringup/refs/hf32/l3_s1_108.pt --dump /home/raahem/glm53-flash-bringup/refs/hf32/l3_s1_tt_ffn.pt
+2026-10-17 04:59:08.119 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 04:59:29.436 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+attn_collapsed     PCC 0.999999 rms ratio 1.0000 | vs HF fp32: PCC 1.000000 rms ratio 1.0000
+attn_in            PCC 0.999996 rms ratio 0.9996 | vs HF fp32: PCC 0.999997 rms ratio 0.9996
+attn_out           PCC 0.999886 rms ratio 0.9943 | vs HF fp32: PCC 0.999892 rms ratio 0.9942
+X1                 PCC 0.999997 rms ratio 1.0000 | vs HF fp32: PCC 0.999999 rms ratio 1.0000
+X1 - X             PCC 0.999717 rms ratio 0.9947 | vs HF fp32: PCC 0.999912 rms ratio 0.9955
+ffn_collapsed      PCC 0.999948 rms ratio 0.9981 | vs HF fp32: PCC 0.999955 rms ratio 0.9980
+ffn_in             PCC 0.999940 rms ratio 0.9995 | vs HF fp32: PCC 0.999950 rms ratio 0.9993
+ffn_out            PCC 0.999879 rms ratio 1.0055 | vs HF fp32: PCC 0.999875 rms ratio 1.0047
+X2 - X1            PCC 0.999845 rms ratio 1.0059 | vs HF fp32: PCC 0.999881 rms ratio 1.0050
+X2 - X (update)    PCC 0.999841 rms ratio 1.0059 | vs HF fp32: PCC 0.999879 rms ratio 1.0050
+HF bf16 update     PCC 1.000000 rms ratio 1.0000 | vs HF fp32: PCC 0.999882 rms ratio 0.9991
+HF ffn_out bf16    PCC 1.000000 rms ratio 1.0000 | vs HF fp32: PCC 0.999989 rms ratio 0.9999
+attn_out(hf in)    PCC 0.999886 rms ratio 0.9942 | vs HF fp32: PCC 0.999891 rms ratio 0.9941
+ffn_out(hf in)     PCC 0.999959 rms ratio 1.0020 | vs HF fp32: PCC 0.999963 rms ratio 1.0019
+shared(hf in)      PCC 0.999973 rms ratio 0.9982 | vs HF fp32: PCC 0.999973 rms ratio 0.9982
+routed(hf in)      PCC 0.999956 rms ratio 1.0028 | vs HF fp32: PCC 0.999956 rms ratio 1.0028
+=== exit code: 0 Sat Oct 17 04:59:31 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

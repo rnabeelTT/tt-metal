@@ -1,8 +1,8 @@
-2026-10-16 21:39:40.431 | INFO     | __main__:main:364 - Using port 8086
-2026-10-16 21:39:40.431 | INFO     | tracy:run_report_setup:91 - Verifying tracy profiling tools
-2026-10-16 21:39:40.447 | INFO     | tracy:run_report_setup:112 - Capture command: ('/home/raahem/tt-metal/build/tools/profiler/bin/tracy-capture -o /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy -f -p 8086',)
-Connecting to 127.0.0.1:8086...2026-10-16 21:39:40.456 | INFO     | __main__:run_workload:399 - Test process started
-2026-10-16 21:39:41.390 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+2026-10-17 12:18:24.047 | INFO     | __main__:main:364 - Using port 8086
+2026-10-17 12:18:24.048 | INFO     | tracy:run_report_setup:91 - Verifying tracy profiling tools
+2026-10-17 12:18:24.073 | INFO     | tracy:run_report_setup:112 - Capture command: ('/home/raahem/tt-metal/build/tools/profiler/bin/tracy-capture -o /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy -f -p 8086',)
+Connecting to 127.0.0.1:8086...2026-10-17 12:18:24.079 | INFO     | __main__:run_workload:399 - Test process started
+2026-10-17 12:18:25.025 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
 Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
 ============================= test session starts ==============================
 platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
@@ -15,24 +15,24 @@ timeout method: signal
 timeout func_only: False
 collecting ... collected 1 item
 
-models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1] 2026-10-16 21:40:06.744 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
-2026-10-16 21:40:07.246 | INFO     | tracy:signpost:49 - PERF_DECODE
-2026-10-16 21:40:07.261 | INFO     | tracy:signpost:49 - PERF_DECODE_END
-PERF dsa_moe traced decode batch 1: 4.736 ms/step host wall (3 replays, incl. input copies)
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1] 2026-10-17 12:18:47.347 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-17 12:18:47.847 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 12:18:47.861 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+PERF dsa_moe traced decode batch 1: 4.747 ms/step host wall (3 replays, incl. input copies)
 PASSED
 
 ==================================== PASSES ====================================
 - generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
 ============================= slowest 25 durations =============================
-25.56s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
-0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+22.46s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
 0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
 =========================== short test summary info ============================
 PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
-============================== 1 passed in 25.76s ==============================
+============================== 1 passed in 22.65s ==============================
 nanobind: leaked 2 instances!
- - leaked instance 0x7fe7442b0c48 of type "ttnn._ttnn.tensor.CoreRangeSet"
- - leaked instance 0x7fe72ee5f188 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x76e1045a8af8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x76e0d6867188 of type "ttnn._ttnn.tensor.MemoryConfig"
 nanobind: leaked 20 types!
  - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
  - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
@@ -47,40 +47,40 @@ nanobind: leaked 20 types!
  - ... skipped remainder
 nanobind: leaked 257 functions!
  - leaked function ""
+ - leaked function "__repr__"
  - leaked function ""
+ - leaked function "__repr__"
  - leaked function ""
- - leaked function "sfpu_inf"
- - leaked function "unpad"
- - leaked function ""
- - leaked function ""
- - leaked function "to_list"
- - leaked function "to_json"
- - leaked function "__eq__"
+ - leaked function "__init__"
+ - leaked function "push_current_command_queue_id_for_thread"
+ - leaked function "__repr__"
+ - leaked function "get_view"
+ - leaked function "reshape"
  - ... skipped remainder
 nanobind: this is likely caused by a reference counting issue in the binding code.
 See https://nanobind.readthedocs.io/en/latest/refleaks.html
 Timer resolution: 0 ns
 
 Frames: 2
-Time span: 41.09 s
+Time span: 36.29 s
 Zones: 1,056,800
-Elapsed time: 29.42 s
+Elapsed time: 26.22 s
 Saving trace... done!
-Trace size 9471.17 KB (17.66% ratio)
-2026-10-16 21:40:11.400 | INFO     | __main__:main:436 - Copying /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_16_21_40_11.tracy
-2026-10-16 21:40:11.402 | INFO     | __main__:main:439 - Copied /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_16_21_40_11.tracy
-2026-10-16 21:40:11.402 | INFO     | __main__:main:448 - embed.tracy -> traces/no_cacheprovider_2026_10_16_21_40_11.tracy
-2026-10-16 21:40:11.402 | INFO     | tracy.serve_wasm:launch_server_subprocess:284 - Launching tracy web app GUI server subprocess...
-2026-10-16 21:40:11.402 | INFO     | tracy.serve_wasm:launch_server_subprocess:287 - Tracy WASM web UI (open in browser): http://localhost:8080/ (WebSocket for live reload: ws://localhost:8081/)
-2026-10-16 21:40:11.402 | INFO     | tracy.serve_wasm:launch_server_subprocess:294 - Tracy WASM server already serving port 8080; reusing it (live-reload refreshes the browser).
-2026-10-16 21:40:11.793 | INFO     | tracy:generate_report:162 - Host side ops time report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_times.csv
-2026-10-16 21:40:11.812 | INFO     | tracy:generate_report:173 - Host side ops data report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_data.csv
-2026-10-16 21:40:11.812 | INFO     | tracy.process_ops_logs:import_tracy_op_logs:422 - Importing ops logs
+Trace size 9467.72 KB (17.66% ratio)
+2026-10-17 12:18:51.644 | INFO     | __main__:main:436 - Copying /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_17_12_18_51.tracy
+2026-10-17 12:18:51.647 | INFO     | __main__:main:439 - Copied /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_17_12_18_51.tracy
+2026-10-17 12:18:51.647 | INFO     | __main__:main:448 - embed.tracy -> traces/no_cacheprovider_2026_10_17_12_18_51.tracy
+2026-10-17 12:18:51.647 | INFO     | tracy.serve_wasm:launch_server_subprocess:284 - Launching tracy web app GUI server subprocess...
+2026-10-17 12:18:51.647 | INFO     | tracy.serve_wasm:launch_server_subprocess:287 - Tracy WASM web UI (open in browser): http://localhost:8080/ (WebSocket for live reload: ws://localhost:8081/)
+2026-10-17 12:18:51.647 | INFO     | tracy.serve_wasm:launch_server_subprocess:294 - Tracy WASM server already serving port 8080; reusing it (live-reload refreshes the browser).
+2026-10-17 12:18:51.987 | INFO     | tracy:generate_report:162 - Host side ops time report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_times.csv
+2026-10-17 12:18:52.003 | INFO     | tracy:generate_report:173 - Host side ops data report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_data.csv
+2026-10-17 12:18:52.004 | INFO     | tracy.process_ops_logs:import_tracy_op_logs:422 - Importing ops logs
 /home/raahem/tt-metal/tools/tracy/process_ops_logs.py:527: DtypeWarning: Columns (3,4,8) have mixed types. Specify dtype option on import or set low_memory=False.
   df = pd.read_csv(tracyOpTimesLog)
-2026-10-16 21:40:12.812 | INFO     | tracy.perf_counter_analysis:get_device_op_data:2143 - Getting device ops
-2026-10-16 21:40:12.813 | INFO     | tracy.process_ops_logs:append_device_data:1090 - Appending device data
-2026-10-16 21:40:13.884 | INFO     | tracy.process_ops_logs:generate_reports:1423 - OPs' perf analysis is finished! Generating reports ...
-2026-10-16 21:40:13.884 | INFO     | tracy.process_ops_logs:generate_reports:1443 - Copying runtime artifacts
-2026-10-16 21:40:13.914 | INFO     | tracy.process_ops_logs:generate_reports:1452 - Generating OPs CSV
-2026-10-16 21:40:14.198 | INFO     | tracy.process_ops_logs:generate_reports:1908 - OPs csv generated at: /home/raahem/tt-metal/generated/profiler/reports/2026_10_16_21_40_13/ops_perf_results_2026_10_16_21_40_13.csv
+2026-10-17 12:18:52.975 | INFO     | tracy.perf_counter_analysis:get_device_op_data:2143 - Getting device ops
+2026-10-17 12:18:52.975 | INFO     | tracy.process_ops_logs:append_device_data:1090 - Appending device data
+2026-10-17 12:18:54.037 | INFO     | tracy.process_ops_logs:generate_reports:1423 - OPs' perf analysis is finished! Generating reports ...
+2026-10-17 12:18:54.038 | INFO     | tracy.process_ops_logs:generate_reports:1443 - Copying runtime artifacts
+2026-10-17 12:18:54.062 | INFO     | tracy.process_ops_logs:generate_reports:1452 - Generating OPs CSV
+2026-10-17 12:18:54.345 | INFO     | tracy.process_ops_logs:generate_reports:1908 - OPs csv generated at: /home/raahem/tt-metal/generated/profiler/reports/2026_10_17_12_18_54/ops_perf_results_2026_10_17_12_18_54.csv

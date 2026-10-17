@@ -1,0 +1,36 @@
+=== tracy test_perf_prefill[kda_dense-128] 2026-10-17T12:08:58+00:00
+tracy test_perf_prefill[kda_dense-128] exit=0
+PERF kda_dense prefill 128 rows: 6.20 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_dense-2048] 2026-10-17T12:09:57+00:00
+tracy test_perf_prefill[kda_dense-2048] exit=0
+PERF kda_dense prefill 2048 rows: 45.27 ms host wall (warmed)
+=== tracy test_perf_prefill[dsa_moe-128] 2026-10-17T12:10:57+00:00
+tracy test_perf_prefill[dsa_moe-128] exit=0
+=== tracy test_perf_prefill[dsa_moe-2048] 2026-10-17T12:12:17+00:00
+tracy test_perf_prefill[dsa_moe-2048] exit=0
+PERF dsa_moe prefill 2048 rows: 144.43 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_moe-128] 2026-10-17T12:13:39+00:00
+tracy test_perf_prefill[kda_moe-128] exit=0
+PERF kda_moe prefill 128 rows: 23.24 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_moe-2048] 2026-10-17T12:14:59+00:00
+tracy test_perf_prefill[kda_moe-2048] exit=0
+PERF kda_moe prefill 2048 rows: 98.39 ms host wall (warmed)
+=== tracy test_perf_traced_decode[kda_dense-1] 2026-10-17T12:16:19+00:00
+tracy test_perf_traced_decode[kda_dense-1] exit=0
+PERF kda_dense traced decode batch 1: 4.324 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[kda_dense-32] 2026-10-17T12:17:21+00:00
+tracy test_perf_traced_decode[kda_dense-32] exit=0
+PERF kda_dense traced decode batch 32: 17.296 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[dsa_moe-1] 2026-10-17T12:18:23+00:00
+tracy test_perf_traced_decode[dsa_moe-1] exit=0
+PERF dsa_moe traced decode batch 1: 4.747 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[dsa_moe-32] 2026-10-17T12:19:45+00:00
+tracy test_perf_traced_decode[dsa_moe-32] exit=0
+PERF dsa_moe traced decode batch 32: 18.208 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[kda_moe-1] 2026-10-17T12:21:07+00:00
+tracy test_perf_traced_decode[kda_moe-1] exit=0
+PERF kda_moe traced decode batch 1: 4.840 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[kda_moe-32] 2026-10-17T12:22:30+00:00
+tracy test_perf_traced_decode[kda_moe-32] exit=0
+PERF kda_moe traced decode batch 32: 30.303 ms/step host wall (3 replays, incl. input copies)
+=== done 2026-10-17T12:23:52+00:00
