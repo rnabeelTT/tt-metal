@@ -1,0 +1,103 @@
+=== start Sat Oct 17 03:07:57 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py
+2026-10-17 15:07:59.580 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 9 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None] T=32 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999925 max|err| 5.53e-08 max rel err 2.12e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16] T=32 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998624 scale 0.999993011 max|err| 7.41e-04 max rel err 2.84e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None] T=32 dtype=DataType.BFLOAT16 out=None: PCC 0.999998626 scale 1.000004339 max|err| 8.92e-04 max rel err 3.41e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None] T=96 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999932 max|err| 5.99e-08 max rel err 2.07e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16] T=96 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998621 scale 1.000002808 max|err| 8.84e-04 max rel err 3.06e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None] T=96 dtype=DataType.BFLOAT16 out=None: PCC 0.999998624 scale 0.999994819 max|err| 9.24e-04 max rel err 3.20e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None] T=2048 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999928 max|err| 7.04e-08 max rel err 2.00e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16] T=2048 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998623 scale 0.999998218 max|err| 9.74e-04 max rel err 2.76e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None] T=2048 dtype=DataType.BFLOAT16 out=None: PCC 0.999998623 scale 1.000000795 max|err| 9.74e-04 max rel err 2.76e-03
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.39s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+0.48s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.47s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.45s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.37s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+0.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+============================== 9 passed in 5.91s ===============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7712ea1ff048 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7712e9ad8868 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "update_tensor_topology"
+ - leaked function "from_json"
+ - leaked function "bounding_box"
+ - leaked function "extract_shard"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - leaked function "id"
+ - leaked function "pop_current_command_queue_id_for_thread"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 03:08:08 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

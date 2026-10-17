@@ -1,0 +1,54 @@
+- kernel:
+    watcher_kernel_id: 3
+    name: cq_dispatch_subordinate
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate/10944382946125777129/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+    program_id: 24
+- kernel:
+    watcher_kernel_id: 2
+    name: cq_dispatch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch/16139590279110921253/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+    program_id: 24
+- kernel:
+    watcher_kernel_id: 4
+    name: cq_dispatch_subordinate_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+    program_id: 24
+- kernel:
+    watcher_kernel_id: 1
+    name: cq_prefetch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_prefetch/5749973054224785937/
+    source: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+    program_id: 24
+- kernel:
+    watcher_kernel_id: 6
+    name: cq_realtime_profiler_push
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler_push/13148156452339021326/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+    program_id: 25
+- kernel:
+    watcher_kernel_id: 5
+    name: cq_realtime_profiler
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler/5653156745417893219/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+    program_id: 25
+- kernel:
+    watcher_kernel_id: 8
+    name: writer_recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/writer_recurrent_decode/12452485147252144501/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/dataflow/writer_recurrent_decode.cpp
+    program_id: 26
+- kernel:
+    watcher_kernel_id: 7
+    name: reader_recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/reader_recurrent_decode/8593926264297485196/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/dataflow/reader_recurrent_decode.cpp
+    program_id: 26
+- kernel:
+    watcher_kernel_id: 9
+    name: recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/recurrent_decode/7353165440611073012/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/compute/recurrent_decode.cpp
+    program_id: 26

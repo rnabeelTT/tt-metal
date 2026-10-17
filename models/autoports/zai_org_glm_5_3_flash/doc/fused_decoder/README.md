@@ -41,8 +41,8 @@ Op unit tests on the final (fp32-exact) kernels, `fp32k_after3.log` / `fp32k_aft
 - `FusedHyperConnection._mixes_split_k` (the decoder's finalize, where the stage-2 NaN bug lived), T = 1 and 8, NaN / inf
   in the tile's padding rows: finite, bit-identical to the zero-padded run, mixes PCC >= 0.99999999. Signed row sum of
   squares error (implied by the rsqrt scale): fused mean -2.3e-4 (T 1) / -1.7e-4 (T 8), max 2.3e-4; the functional
-  composite (multiply + mean, fp32 SFPU) on the same rows: -5e-8 / -3e-8. The fused scale is therefore ~1e-4 low, one
-  sign; this is 40x below the bf16 rounding (3.9e-3) of the mHC output `h` that feeds the RMSNorm.
+  composite (multiply + mean, fp32 SFPU) on the same rows: -5e-8 / -3e-8. The sum of squares is ~2e-4 low, so the
+  rsqrt scale is ~1.15e-4 high, one sign; this is 40x below the bf16 rounding (3.9e-3) of the mHC output `h` that feeds the RMSNorm.
 - `mhc_pre`, `mhc_post`, `mhc_split_sinkhorn`: pass (`fp32k_after3.log`).
 
 ## Performance (one die, warmed; Tracy + tt-perf-report)
@@ -56,6 +56,11 @@ Captures (stage review #2, 2026-10-17 10:56-12:04, final code and final fp32-exa
 - fused: all 12 cases;
 - functional: the 8 KDA cases, same session. The 4 functional DSA cases are from 2026-10-16 21:37-21:41
   (`evidence/s2r_tracy_dsa.log`), after the final kernels were swapped in (21:28).
+- Pinned baseline: the 12 functional CSVs of this table are copied to `baseline_functional/<case>/` (from a01bb86cfe5).
+  `doc/functional_decoder/tracy/` is shared with the stage-1 rework and is overwritten by later captures.
+  \* The two functional `kda_dense` prefill cases of this session were overwritten by the stage-1 review #5 Tracy
+  (12:08:58 / 12:09:58, same final kernels, `s1r5_tracy.log`) before the stage-2 commit; the table and the baseline use
+  those (4105.5 / 43736.7 us; the s2r2 captures read 4097 / 43557 us).
 - "fused, before" is the stage-2 capture (f46a06ae9ad, 2026-10-15, the TF32 kernels).
 - The worktree carries an uncommitted stage-6 change, `GLM53_MOE_SORTED_ROWS=1024` (`tt/moe_opt.py`, bit-identical,
   memory): a 2048-row MoE prefill chunk runs its routed experts in two 1024-row blocks. The 2048-row MoE rows in the
@@ -71,7 +76,7 @@ Captures (stage review #2, 2026-10-17 10:56-12:04, final code and final fp32-exa
 | traced decode kda_moe, 32 users | 172 / 29727 | 122 / 16581 | 110 / 15898 | 1.87x |
 | traced decode dsa_moe, 1 user | 181 / 3949 | 159 / 3328 | 153 / 3347 | 1.18x |
 | traced decode dsa_moe, 32 users | 187 / 17188 | 163 / 16540 | 158 / 15590 | 1.10x |
-| prefill kda_dense 128 / 2048 rows | 80 / 4097, 43557 | 56 / 3212, 38650 | 48 / 3200, 30000 | 1.28x / 1.45x |
+| prefill kda_dense 128 / 2048 rows | 80 / 4106\*, 43737\* | 56 / 3212, 38650 | 48 / 3200, 30000 | 1.28x / 1.46x |
 | prefill kda_moe 128 / 2048 rows (2048: both with the MoE split) | 118 / 21300, 96832 | 94 / 20482, 79477 | 85 / 19679, 89115 | 1.08x / 1.09x |
 | prefill dsa_moe 128 / 2048 rows (2048: both without the split) | 148 / 22251, 131283 | 124 / 21259, 126370 | 118 / 19824, 109227 | 1.12x / 1.20x |
 
@@ -84,7 +89,7 @@ The rewrites in the captures:
 - DSA prefill 2048: head split / concat 17.4 ms (ReshapeView 6122 + Transpose 3946 + Transpose 1376 + ReshapeView
   5984 us) -> 1.05 ms (NlpCreateHeads 384 + NLPConcatHeads 327 + Concat 341 us).
 - DSA decode, 32 users: head split 186 -> 45 us (untilize 6.6 + view 21.8 + permute 9.0 + tilize 7.3 us), concat
-  186 -> ~45 us (row-major permute path).
+  186 -> 60.5 us (untilize 6.95 + permute 8.52 + view 28.52 + tilize 16.55 us, `dsa_moe-32` rows 89-92).
 - Dense MLP prefill 2048: two 7.9 ms linears and four eltwise ops (1.24 ms) -> one packed linear, two slices and one
   multiply (`kda_dense-2048`: 38.7 -> 30.0 ms).
 - MoE: expert activation chain 1298 -> 668 us per MoE layer at 32 users.
@@ -156,16 +161,20 @@ bound: tensor parallelism (stage 4) and bfp4 / bfp8 weights (stage 8) address th
 | KDA gated output norm, adapted (gate in `[B, H*V]` order, sigmoid as input activation) | applied (rewrite 6). Bit-identical. B 32: 249 -> 163 us; B 1: 71 -> 51 us. The rejected earlier try (sigmoid activation on the bf16 gate, fp32 output) gave PCC 0.91 against the current graph; with the gate typecast to fp32 first it is exact. |
 | KDA decode conv: `kda.qkv_causal_conv1d_silu` (main's packed-decode trick, `models/demos/qwen38_27b_qb2/tt/decode_conv.py`) | rejected, measured: op + main's adapters at B 32 take 663 us against 270 us for the current fp32 conv, before the extra layout changes this port needs (row-major `[B, 3, C]` history, fp32 packed qkv for `recurrent_decode`). B % 8 != 0 is not supported (B 1). |
 | KDA decode conv: `addcmul` merges, in-place history shift | applied (rewrite 6). Bit-identical. Conv with fp32 tap constants: 270 -> 174 us (B 32), 183 -> 172 us (B 1). Shift: 81 -> 55 us (B 32 and B 1). Padding B to 8 only serves the packed conv (rejected). A rotating history index needs the tap order to change every step: three captured traces or a per-step tap select, for at most the 55 us that remain. Not taken. |
-| `mhc_mix` finalize (review #2 P1-a): 11-13 small ops per mHC | partly applied (rewrite 8): the scale chain folds into the final multiply, bit-identical (`evidence/s2r2_probe.log`: 168 -> 114 us host-timed at T 1, 157 -> 109 at T 32, 266 -> 255 at T 2048). Rejected, measured: `moreh_sum` over the chunks (fp32 input unsupported, TT_FATAL: bf16 / int32 only); the 64-wide diagonal mask on the unsliced sum (no gain: 173 vs 168 us). Rejected, cost: the chunk sum inside `mhc_mix` (the C partials of one row tile live on C different cores; an in-op sum needs a second reduction phase across cores). The chunk sum costs FillPad + Transpose + Reduce + Transpose = 14 us per mHC at B 1 (Tracy), so the in-op reduction can save at most ~28 us per layer step. |
+| `mhc_mix` finalize (review #2 P1-a): 11-13 small ops per mHC | partly applied (rewrite 8): the scale chain folds into the final multiply, bit-identical (`evidence/s2r2_probe.log`: 168 -> 114 us host-timed at T 1, 157 -> 109 at T 32, 266 -> 255 at T 2048). Rejected, measured: `moreh_sum` over the chunks (fp32 input unsupported, TT_FATAL: bf16 / int32 only); the 64-wide diagonal mask on the unsliced sum (no gain: 173 vs 168 us). Chunk sum (`ttnn.sum(dim=1)` = (FillPad +) Transpose + Reduce + Transpose) costs per mHC: 14 us at B 1, 12.5 us at B 32, 231 us at 2048 rows (Tracy; 459 us per KDA layer step, 1.5 % of `kda_dense-2048`). Rejected, measured: `ttnn.experimental.fast_reduce_nc(dims=[1])` (review #3, `evidence/s2r3_probe2.log`): 9x faster (host-timed 234 -> 26 us at 2048 rows, 24 -> 8 us at T 1) but not fp32-exact: its FPU `add_tiles` reads fp32 at TF32. Error against float64 at 2048 rows: signed mean -2.6e-4, max relative 12.7 on sums with cancellation; `ttnn.sum`: mean -1.2e-8, max 7.6e-4. It breaks the port's fp32-exact mHC policy (stage-1 review #4; the multichip decoder keeps it as an off-by-default option, `MCOpts.mix_nc`). Rejected, cost: the chunk sum inside `mhc_mix` (the C partials of one row tile live on C different cores; an in-op sum needs a second reduction phase across cores and a kernel change). |
 | KDA decode `o` relayout after `recurrent_decode` (review #2 P1-b) | applied for 32 users (rewrite 7): untilize + row-major view + tilize, 129 -> 56 us, bit-identical. B 1 keeps the tiled reshape (9 vs 45 us). Not taken: `o` in `[B, H*V]` order from the op. `ttnn.rms_norm` normalises whole rows, so the per-head RMSNorm over V would then need its own grouped-norm kernel. A gated-norm epilogue inside `recurrent_decode` adds a cross-tile reduction, the norm weight and the gate input to the fp32-exact kernel: not a small change. Both save at most the remaining 56 us. |
 | Single-core RMSNorm after `mhc_pre` (review #2 P1-c) | handed to stage 3/4 (sharding): the interleaved `ttnn.rms_norm` splits work by tile rows, so one tile of decode rows runs on one core (66 us). Width-sharded `rms_norm` (`multichip_decoder.sharded_rms_norm`, already used by the multichip decoder): 33 us (16 cores) / 36 us (32 cores) at B 1 and B 32, PCC 0.9999987, not bit-identical (max 1 bf16 ulp). This is an L1 sharding rewrite, not a fusion. |
-| KDA prefill: slice (511 us) + untilize (479 us) of the qkv columns after the input projection (review #2 P1-d) | rejected, measured. (1) `ttnn.untilize_with_unpadding` (untilize + crop in one op) on `[1, 2048, 32960]` hung the device: the probe hit its 1800 s timeout (`evidence/s2r2_probe.log`). (2) Adapted retry, a separate qkv matmul with `untilize_out` plus a second matmul for the other columns (`evidence/s2r2_probe2.log`): `MatmulMultiCoreReuseMultiCast1DProgramConfig` (in0 multicast, `per_core_M` = all 64 row tiles, `per_core_N` 8) needs 3.8 MB of L1 per core (TT_THROW, limit 1.5 MB). `MatmulMultiCoreReuseProgramConfig` rejects the rank-2 weight, and subblocks wider than 4 tiles are rejected. The two ops stay (3.3 % of `kda_dense-2048`). |
+| KDA prefill: slice (511 us) + untilize (479 us) of the qkv columns after the input projection (review #2 P1-d, review #3 P2-2) | Untilize fold rejected, measured: (1) `ttnn.untilize_with_unpadding` (untilize + crop) on `[1, 2048, 32960]` did not finish within the 1800 s probe timeout and the board was reset (`evidence/s2r2_probe.log`; not triaged, so slow vs hung is open; not retried). (2) A qkv matmul with `untilize_out`: the 1D in0-multicast config needs 3.8 MB of L1 per core (`evidence/s2r2_probe2.log`). Narrower matmul (slice after matmul -> qkv projection [4096 x 24576] + rest projection [4096 x 8384], untilize kept), at the model's numerics (bf16 x bf16, HiFi4, fp32 accumulation, default program configs; `evidence/s2r3_probe2.log`): bit-identical, 6688 -> 5970 us host-timed (-718 us, 11 % of the projection block; the two matmuls 4011 + 1433 us vs 5661 us fused). Not applied in stage 2, handed to stage 3: this tt-metal has no column-offset matmul (`in0_column_offset`), so the input-projection weight must be stored as two tensors. Keeping both layouts costs 270 MB per KDA layer (34 layers); a split-only layout changes the decode path and the weight layout that the stage-3/4/6 code builds on (decode program configs, TP sharding, weight cache). |
 | DSA decode head concat, grouped `nlp_concat_heads` at decode rows (review #2 P1-e) | rejected, measured: 4 x 16 groups at 32 rows 124 us, at 1 row 115 us (permute + reshape: 186 / 15 us). Row-major permute is faster at 32 rows (63 us; split 52 us) and is applied (rewrite 7); 1 row keeps the tiled path (15 / 25 us). |
 | `sparse_sdpa` untilize / tilize pairs in DSA decode (q 11.7 us, indices 10.7 us, output 13.2 us at B 32) | kept: the op contract needs ROW_MAJOR q, indices and output |
 | Packed dense MLP at decode rows | kept: probe 338 us packed against 320 us for two linears + folded multiply at 32 rows (+18 us per dense layer, 3 layers). Picking by row count needs both weight layouts in DRAM (+100 MB per dense layer at bfp8). |
 | MoE down-projection untilize via a split `per_core_N` | stage 3 item: the resident-block condition might hold with `per_core_N` 16 (about 1.1 MB). |
 | Paged indexer for decode | dedicated op (`dsa_decode_scores`, stage-1 paging work) |
-| Remaining eltwise chains (KDA gates, DSA open-pool update, MoE routing math) | small at decode (each op 1-25 us at B 32); candidates for the optimized-decoder stage (sharding / L1 placement), not single dedicated ops |
+| Remaining eltwise chains (KDA gates, DSA open-pool update, MoE routing math) | small at decode (most ops 1-25 us at B 32; the MoE routing `ReshapeView` is 35.7 us on one core, `dsa_moe-32` row 121); candidates for the optimized-decoder stage (sharding / L1 placement), not single dedicated ops |
+| KDA decode conv chain (slice, multiply, 3 x (typecast + addcmul), silu, where, 3 in-place where: 12 ops, ~250 us per KDA layer at B 1 and B 32; B 1 pads to one tile row) | stage-3 candidate: a conv + SiLU + history-shift fold into `recurrent_decode` (it already reads the conv output rows) is a custom-kernel change. The three bf16 -> fp32 typecasts (13 us each) exist because `addcmul` needs one dtype; fp32 history buffers would remove them at twice the history-shift bytes. main's `qkv_causal_conv1d_silu` is rejected above. |
+| DSA indexer query reshape at 32 users (`(1, 1, S*32, 128)` tiled `ReshapeView`, 42.5 us per DSA layer, `dsa_moe-32` row 56) | not converted: the same class as rewrite 7 but ~0.3 % of the layer; stage 3 |
+| `MoeSortedDispatch` (single core: 1.22 ms at 2048 rows, 74 us at 32 users) | stage-1 MoE infrastructure; stage 3 |
+| Stage-6 MoE row split (`GLM53_MOE_SORTED_ROWS=1024`, uncommitted) | not stage 2: +11.5 ms (`kda_moe-2048`) / +10.6 ms (`dsa_moe-2048`) per MoE layer, each block re-pays the static worst-case dispatch padding; raised for stage 6 (split only when memory requires it) |
 
 ## Correctness, determinism, watcher
 
@@ -174,6 +183,11 @@ bars) against `FusedDecoder` with every `FusedFlags` rewrite on, plus a check th
 Log `s2_fused_suite6.log` (2026-10-17, final code and kernels): 43 tests, 43 passed. Every PCC equals the one of
 `s2_fused_suite5.log` (2026-10-17 00:38, before rewrites 7-8), as the layer-level bit-exactness predicts. The functional
 column is `doc/functional_decoder/s1_functional6.log` (same kernels).
+
+Harness note: `s2_fused_suite6.log` and the watcher suite ran on the stage-1 rework's then-uncommitted test harness
+(`tests/test_functional_decoder.py` with the y_swap near-tie reference: a near-tie token also matches HF with the 8th and
+9th experts swapped). It matched three tokens against y_swap (pos 38 above at delta PCC 0.999848). The committed
+harness (bar 0.98, no y_swap) gives the same verdict: `s2_fused_suite5.log` ran on it with identical PCCs and passed.
 
 | case | min update PCC kda_dense / dsa_moe / kda_moe | functional decoder |
 |---|---|---|
@@ -189,7 +203,7 @@ column is `doc/functional_decoder/s1_functional6.log` (same kernels).
 | no host fallback during decode | pass x 3 | pass x 3 |
 
 \* Router near-tie tokens (HF 8th-vs-9th expert margin < 5e-3, bar 0.98; stage-1 README). The fused decoder's mHC
-mixes round differently (split-K partials, sum of squares ~2e-4 low), so a different set of tokens lands on the
+mixes round differently (split-K partials, sum of squares ~2e-4 low, scale ~1.15e-4 high), so a different set of tokens lands on the
 near-tie side. New in the fused path: L3 slot 2 pos 38 at 32 users (delta PCC 0.98296, update ratio within bounds). HF's
 margin there is 7.97e-4 (`doc/functional_decoder/route_margin_l3_s1302.log`). `tools/route_flip_check.py --fused`
 (`evidence/flip_tt_s1302_fused.log`) shows the TT top-8 with HF's 9th expert 111 in place of 55: a router flip. The
@@ -209,11 +223,26 @@ Watcher correctness run (final code and kernels, every `FusedFlags` rewrite on; 
   (real weights, HF-compared; B 32 traced decode with `recurrent_decode` on 110 cores; NaN idle rows): 17 passed,
   `watcher.log.gz` 65,193 lines, 0 error / assert / sanitize / overflow lines (2026-10-17 08:30,
   `scripts/s2r2_chain.sh`).
-- `ops/`: `test_kda_recurrent_decode.py` (incl. traced and the 1000-step chain), `test_mhc_mix.py` (incl. the T 1 / 8
-  padded-row cases), `test_mhc_pre.py`, `test_mhc_post.py`, `test_mhc_split_sinkhorn.py`: 37 passed, 0 suspicious lines
-  (2026-10-17, `scripts/s2_watcher_correct.sh`).
+- `ops/<module>/` (review #3 rerun, 2026-10-17, `scripts/s2r3_chain.sh`): one pytest process per op-test module with
+  `TT_METAL_WATCHER_APPEND=1`. The op tests open a device per test, and the watcher log otherwise restarts at every
+  open (the first `ops/` run kept only the last session). Each log holds one session per test:
 
-The earlier `watcher/` run (2026-10-15) covers three perf cases on the stage-2 kernels only (no assertions).
+  | module | tests | sessions in `watcher.log` | module kernels in `kernel_names.txt` | suspicious lines |
+  |---|---|---|---|---|
+  | `test_kda_recurrent_decode` (B 1 / 8 / 32, traced, 1000-step chain) | 7 passed | 7 | `recurrent_decode` | 0 |
+  | `test_mhc_mix` (incl. T 1 / 8 padded rows) | 8 passed | 8 | `mhc_mix`, `mhc_mix_compute` | 0 |
+  | `test_mhc_pre` | 9 passed | 9 | `mhc_pre`, `mhc_pre_compute` | 0 |
+  | `test_mhc_post` | 6 passed | 6 | `mhc_post`, `mhc_post_compute` | 0 |
+  | `test_mhc_split_sinkhorn` | 7 passed | 7 | `mhc_split_sinkhorn`, `_compute`, `_sharded` | 0 |
+
+- `b1_traced_kda_moe-1/`, `b1_traced_dsa_moe-1/`: B 1 traced fused decode under the watcher
+  (`tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]` / `[dsa_moe-1]`, `GLM53_DECODER=fused`; perf cases,
+  no HF check): both pass, one session each, 4838 lines, 0 suspicious lines. Kernels: `recurrent_decode` (KDA case),
+  `mhc_mix`, `mhc_pre`, `mhc_post`, `mhc_split_sinkhorn` at T 1 with 31 padding rows. These ran on the live worktree
+  (it carries later-stage uncommitted edits in `tt/dsa.py` and `tt/moe_opt.py`).
+
+Large `watcher.log` / inspector files are gzipped. The earlier `watcher/` run (2026-10-15) covers three perf cases on the
+stage-2 kernels only (no assertions).
 
 ## Limitations
 

@@ -53,3 +53,22 @@
   and the fp32-kernel reason added to the README. One-user decode is 19-39 us slower than the stage-2 TF32 capture.
 - 2026-10-17 Rejected with measurement: the KDA prefill qkv `untilize_out` matmul (3.8 MB L1 per core,
   `evidence/s2r2_probe2.log`).
+- 2026-10-17 Stage review #3 (`artifacts/stage2_review_3.md`): more-work-needed, P2 only.
+- 2026-10-17 Commit hygiene: a01bb86cfe5 carries two items that are not stage-2 work: the stage-6
+  `GLM53_DSA_INDEX_BLOCK_MB` hunk in `tt/dsa.py` (`index_row_block`, inert below ~128K tokens) and the functional
+  `kda_dense` prefill CSVs of the stage-1 review #5 Tracy (12:08 / 12:09), which overwrote the s2r2 captures. The
+  functional baseline of the README is now pinned in `baseline_functional/`; the two `kda_dense` cells use the s1r5
+  values with that provenance. `doc/context_contract.json` also carries stage-6 / multichip edits: only its
+  `fused_decoder` entry is stage 2.
+- 2026-10-17 Mistake found by review #3: the op-test watcher log kept only the last device session (the watcher log
+  restarts at every device open; the op tests open a device per test). Fix: one pytest per module with
+  `TT_METAL_WATCHER_APPEND=1` (`scripts/s2r3_chain.sh`).
+- 2026-10-17 README fixes: DSA decode concat at 32 rows is 60.5 us (not ~45); the mHC scale is ~1.15e-4 high (the sum of
+  squares is ~2e-4 low); suite6 and the watcher suite ran on the stage-1 rework's uncommitted y_swap harness.
+- 2026-10-17 Review #3 P2-2 (`evidence/s2r3_probe2.log`): `fast_reduce_nc(dims=[1])` for the `mhc_mix` chunk sum is
+  9x faster (234 -> 26 us at 2048 rows) but reads fp32 at TF32 (signed mean -2.6e-4 vs -1.2e-8): rejected under the
+  fp32-exact mHC policy. Narrower KDA prefill matmul (qkv + rest, bf16 x bf16 HiFi4): bit-identical, 6688 -> 5970 us,
+  but needs the projection weight stored split (no column-offset matmul here); handed to stage 3. First probe run
+  failed on a T=1 shape mismatch (fast_reduce_nc returns the padded row count), fixed and rerun.
+- 2026-10-17 Review #3 P2-1: op-test watcher per module with append (37 tests, 37 sessions, 0 suspicious) and two
+  B=1 traced fused decode cases under the watcher (0 suspicious).

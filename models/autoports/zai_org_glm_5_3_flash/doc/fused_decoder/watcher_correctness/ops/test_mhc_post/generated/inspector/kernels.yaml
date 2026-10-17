@@ -1,0 +1,54 @@
+- kernel:
+    watcher_kernel_id: 1
+    name: cq_prefetch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_prefetch/5749973054224785937/
+    source: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+    program_id: 20
+- kernel:
+    watcher_kernel_id: 2
+    name: cq_dispatch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch/16139590279110921253/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+    program_id: 20
+- kernel:
+    watcher_kernel_id: 3
+    name: cq_dispatch_subordinate
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate/10944382946125777129/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+    program_id: 20
+- kernel:
+    watcher_kernel_id: 4
+    name: cq_dispatch_subordinate_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+    program_id: 20
+- kernel:
+    watcher_kernel_id: 5
+    name: cq_realtime_profiler
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler/5653156745417893219/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+    program_id: 21
+- kernel:
+    watcher_kernel_id: 6
+    name: cq_realtime_profiler_push
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler_push/13148156452339021326/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+    program_id: 21
+- kernel:
+    watcher_kernel_id: 8
+    name: writer_mhc_post
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/writer_mhc_post/12453320033911017445/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/dataflow/writer_mhc_post.cpp
+    program_id: 22
+- kernel:
+    watcher_kernel_id: 7
+    name: reader_mhc_post
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/reader_mhc_post/11894005979048010343/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/dataflow/reader_mhc_post.cpp
+    program_id: 22
+- kernel:
+    watcher_kernel_id: 9
+    name: mhc_post_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/mhc_post_compute/998799745742550162/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp
+    program_id: 22

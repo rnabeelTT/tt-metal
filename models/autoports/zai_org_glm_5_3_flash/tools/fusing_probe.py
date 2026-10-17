@@ -786,7 +786,81 @@ def kdaprefill(mesh, g):
     _run(mesh, "kda prefill 2048 qkv", variants, 10, exact_vs="fused proj + slice + untilize")
 
 
+def chunksum(mesh, g):
+    """Review #3 P2-2 (i): the mhc_mix chunk sum over dim 1 of the partials [1, C, T, 64] fp32: ttnn.sum (transpose +
+    reduce + transpose, current) vs ttnn.experimental.fast_reduce_nc(dims=[1]); time, bit-exactness and error vs
+    float64."""
+    from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import mix_chunks
+
+    ckc = _ckc(mesh)
+    for T in (1, 32, 2048):
+        Tp = -(-T // 32) * 32
+        C = mix_chunks(Tp, 16384 // 32)
+        part = torch.randn(1, C, Tp, 64, generator=g, dtype=torch.float64) * 0.3
+        part[..., 32:] = part[..., 32:].abs() * 40
+        part = part[:, :, :T].float()
+        tp_ = ttnn.from_torch(part, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM)
+        ref = part.double().sum(1, keepdim=True)
+        outs = _run(
+            mesh,
+            f"chunk sum T{T} C{C}",
+            {
+                "ttnn.sum (current)": lambda: ttnn.sum(tp_, dim=1, keepdim=True, memory_config=DRAM),
+                "fast_reduce_nc": lambda: ttnn.experimental.fast_reduce_nc(
+                    tp_, dims=[1], memory_config=DRAM, compute_kernel_config=ckc
+                ),
+            },
+            50 if T < 2048 else 20,
+        )
+        # fast_reduce_nc reports the tile-padded row count (32) at T 1: compare the logical rows
+        crop = {k_: o_[..., :T, :].reshape(ref.shape) for k_, o_ in outs.items()}
+        base = crop.get("ttnn.sum (current)")
+        for k_, o_ in crop.items():
+            same = base is not None and torch.equal(o_, base)
+            print(f"    {k_:24}: vs float64 {_err(o_, ref.float())}; bit-exact vs ttnn.sum: {same}", flush=True)
+
+
+def kdaprefill2(mesh, g):
+    """Review #3 P2-2 (ii): the narrower-matmul pattern at the model's numerics (bf16 x bf16, HiFi4, fp32 accumulation,
+    default program configs): fused projection [4096 x 32960] + slice of the qkv columns + untilize, vs a qkv projection
+    [4096 x 24576] + a rest projection [4096 x 8384] + untilize (no slice)."""
+    T, Hd, P, W = 2048, 4096, 32960, 24576
+    ckc = ttnn.init_device_compute_kernel_config(
+        mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, packer_l1_acc=True
+    )
+    x = (torch.randn(1, T, Hd, generator=g) * 0.05).bfloat16()
+    w = (torch.randn(Hd, P, generator=g) * 0.02).bfloat16()
+    up = lambda t: ttnn.from_torch(t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM)
+    tx, tw, tq, tr = up(x), up(w), up(w[:, :W].contiguous()), up(w[:, W:].contiguous())
+    lin = lambda a, b: ttnn.linear(a, b, compute_kernel_config=ckc, memory_config=DRAM)
+    RM = ttnn.ROW_MAJOR_LAYOUT
+
+    def cur():
+        pr = lin(tx, tw)
+        return ttnn.to_layout(ttnn.slice(pr, (0, 0, 0), (1, T, W), memory_config=DRAM), RM, memory_config=DRAM)
+
+    def split():
+        rest = lin(tx, tr)
+        return ttnn.to_layout(lin(tx, tq), RM, memory_config=DRAM)
+
+    _run(
+        mesh,
+        "kda prefill 2048 bf16 HiFi4",
+        {
+            "fused + slice + untilize": cur,
+            "qkv + rest + untilize": split,
+            "fused proj alone": lambda: lin(tx, tw),
+            "qkv proj alone": lambda: lin(tx, tq),
+            "rest proj alone": lambda: lin(tx, tr),
+        },
+        10,
+        exact_vs="fused + slice + untilize",
+    )
+
+
 SECTIONS = {
+    "chunksum": chunksum,
+    "kdaprefill2": kdaprefill2,
     "kdaprefill": kdaprefill,
     "finalize": finalize,
     "relayout": relayout,

@@ -1,0 +1,87 @@
+=== start Sat Oct 17 05:26:04 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py
+2026-10-17 17:26:06.359 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 6 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32] T=32 C=4096 fp32: PCC 1.000000000 scale 0.999999930 max rel err 2.30e-07 rms rel err 1.20e-07; residual update: scale 1.0000000 rms rel err 7.61e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16] T=32 C=4096 bf16: PCC 0.999998627 scale 1.000042337 max rel err 2.09e-03 rms rel err 1.66e-03; residual update: scale 1.0000226 rms rel err 1.05e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32] T=96 C=1024 fp32: PCC 1.000000000 scale 0.999999925 max rel err 2.60e-07 rms rel err 1.29e-07; residual update: scale 1.0000000 rms rel err 8.36e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16] T=96 C=1024 bf16: PCC 0.999998624 scale 0.999959289 max rel err 2.53e-03 rms rel err 1.66e-03; residual update: scale 0.9999852 rms rel err 1.08e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32] T=2048 C=4096 fp32: PCC 1.000000000 scale 0.999999924 max rel err 3.04e-07 rms rel err 1.28e-07; residual update: scale 1.0000000 rms rel err 8.28e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16] T=2048 C=4096 bf16: PCC 0.999998623 scale 1.000001645 max rel err 2.68e-03 rms rel err 1.66e-03; residual update: scale 1.0000021 rms rel err 1.07e-03
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+1.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+1.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+0.56s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+0.49s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+0.49s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+0.37s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+============================== 6 passed in 6.85s ===============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7bddecbe2e38 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7bddec4bc8c8 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "load_sub_device_manager"
+ - leaked function "item"
+ - leaked function "compute_program_hash"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "create_matmul_attributes"
+ - leaked function "to_json"
+ - leaked function ""
+ - leaked function "enable_program_cache"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 05:26:16 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

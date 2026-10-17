@@ -1,0 +1,10 @@
+0: blank
+2: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch/16139590279110921253//brisc/brisc.elf
+3: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate/10944382946125777129//ncrisc/ncrisc.elf
+1: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_prefetch/5749973054224785937//brisc/brisc.elf
+4: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676//trisc0/trisc0.elf:/home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676//trisc1/trisc1.elf:/home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676//trisc2/trisc2.elf
+6: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler_push/13148156452339021326//ncrisc/ncrisc.elf
+5: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler/5653156745417893219//brisc/brisc.elf
+8: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/writer_mhc_pre/3157898214400705900//brisc/brisc.elf
+7: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/reader_mhc_pre/13896596092795040977//ncrisc/ncrisc.elf
+9: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/mhc_pre_compute/8658248469446632824//trisc0/trisc0.elf:/home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/mhc_pre_compute/8658248469446632824//trisc1/trisc1.elf:/home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/mhc_pre_compute/8658248469446632824//trisc2/trisc2.elf

@@ -43,8 +43,59 @@
     },
     "dsa_cache": "paged: shared block pool of 128-token blocks, block table [S, T/128 + 1]; any mix of sequence lengths up to the pool size"
   },
+  "fused_decoder": {
+    "hardware": "one Blackhole die (mesh 1x1)",
+    "supported_context": 1048576,
+    "status": "unchanged from functional_decoder",
+    "reason": "the fused rewrites (tt/fused_decoder.py, FusedFlags) replace op sequences inside a step; they add no state, keep the paged DSA latent / pool-key caches, the KDA recurrent / conv state and the page-table contract of the functional decoder, and every row-count-dependent path (head ops at prefill rows > 32, indexer row blocks, mhc_mix chunks) is defined for any row count",
+    "tested": "tests/test_fused_decoder.py lengths up to 4000 tokens (incl. 2049 / 2051 / 2177 chunk boundaries); no fused 1M-token run (tests/test_long_context.py runs the functional decoder)",
+    "capability_reduction": null
+  },
   "full_model": {
-    "status": "to be measured in stage 6 (45 layers, 4 dies)",
+    "status": "measured (stage 6)",
+    "hardware": "p300x2, mesh (1,4), TP4",
+    "supported_context": 104448,
+    "per_slot_profiles_max_model_len": {
+      "1": 104448,
+      "4": 94208,
+      "8": 81920,
+      "16": 57344,
+      "32": 8192
+    },
+    "budget": "doc/full_model/memory_budget.json",
+    "dsa_cache": "paged shared pool of 128-token blocks, replicated per die, 11,968 B per token; KDA state 35.65 MB per slot per die",
+    "trace_region_bytes_needed": 47972352,
     "dram_budget_note": "E192 weights at bfp4 experts are ~28.5 GiB of the 31.9 GiB per die; the 11 DSA layers' latent cache (512 x 2 B per token per layer) and the 34 KDA states per slot share the remainder. Any reduction below the advertised context will be recorded here with the byte calculation and a capacity probe."
+  },
+  "optimized_multichip_decoder": {
+    "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py, MCOpts / DEFAULT_MC)",
+    "per_die_state_bytes": {
+      "dsa_cache_per_token": 11968,
+      "dsa_cache_note": "replicated on every die: 11 DSA layers x (latent 512 x 2 B + pooled index key 128 x 2 B / 4)",
+      "kda_state_per_slot": "1 MiB recurrent state (16 local heads) + conv history per KDA layer per die",
+      "one_slot_padding": "max_batch = 1: KDA kda.recurrent_decode needs batch x 16 heads % 32 == 0, so a 1-slot decoder allocates 2 KDA state slots: +1 MiB per KDA layer per die (34 MiB per die, ~2.9K tokens of DSA cache)",
+      "persistent_all_gather_outputs": "DRAM, one buffer per call site per decode shape on the shared TT_CCL: 4 sites x (B x 4096 bf16 or 4 x B x 64 fp32): < 0.6 MB per die"
+    },
+    "weights": "unchanged: both DSA packs are concatenations of the separate weights (ds_shared frees those), the 1D decode programs read the same interleaved weights",
+    "supported_context": "full_model.supported_context (measured 1-slot limit 104,448 tokens with this decoder's state; per-slot profiles there)",
+    "capability_reduction": null,
+    "cache_dtype_candidates": "bfp8 latent impossible: sparse_sdpa takes ROW_MAJOR bf16 or FP8_E4M3 KV only (bfp8 is a tile format). FP8_E4M3 halves the latent (3 mantissa bits) but needs both scatter_rows write paths cast to FP8 and a model-accuracy check: stage-8 datatype-sweep item. The path to the advertised 1,048,576 is the sequence-sharded latent (stage-4 rework: MCOpts.dsa_shard).",
+    "doc": "doc/optimized_multichip_decoder/README.md (Memory and context contract)"
+  },
+  "supported_context": 104448,
+  "limiting_reason": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin",
+  "capacity_evidence": {
+    "probe": "tools/memory_probe.py capacity --trace-region 67108864 --workspace-mib 700 --max-context 131072 (scripts: ~/glm53-flash-bringup/scripts/s6mem_cap.sh)",
+    "result": "doc/full_model/memory/capacity_probe_1slot.json, log doc/full_model/memory/capacity_probe.log",
+    "what_ran": "full 45-layer model, TP4 (1,4) p300x2, vLLM serving path (Glm53Generator(defer_caches=True), max_batch_size 1, max_seq_len 131072): weights loaded -> free DRAM measured (1,988,502,016 B per die) -> DSA pool sized from it: bind_kv_cache(818 blocks = 104,576 tokens) -> warm_programs + traced decode capture -> one 104,515-token prompt (non-aligned: 51 x 2048 + 67) prefilled in 169.7 s -> 24 traced decode steps at positions 104,515..104,538",
+    "check": "the prompt is a 1500-token natural-text passage repeated; the greedy continuation at the top positions copied it 24/24 (copy_accuracy 1.0)",
+    "dram_at_peak": "33,928,885,760 of 34,111,622,144 B allocatable per die (183 MB free at the prefill peak)"
+  },
+  "capability_reduction": {
+    "from": 1048576,
+    "to": 104448,
+    "reason": "hard physical limit: DRAM per die (byte budget doc/full_model/memory_budget.json; the advertised 1,048,576 tokens need 12.5 GB of DSA cache per die at the replicated layout)",
+    "setting": "Glm53Generator / vLLM: max_num_seqs 1, max_model_len 104448 (block_size 128), GLM53_TRACE_REGION 67108864; other slot counts: doc/full_model/memory_budget.json recommended_profiles_anchored_to_capacity_probe",
+    "path_to_advertised": "sequence-sharded DSA latent pool over the 4 dies (~4x) + bfp8 latent + host embedding lookup: ~1M tokens at 1 slot (memory_budget.json path_to_1M); not implemented"
   }
 }

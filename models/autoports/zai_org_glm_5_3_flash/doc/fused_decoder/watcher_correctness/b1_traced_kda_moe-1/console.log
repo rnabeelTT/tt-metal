@@ -1,0 +1,60 @@
+=== start Sat Oct 17 07:49:42 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+2026-10-17 19:49:44.067 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1] 2026-10-17 19:50:09.826 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-17 19:50:15.635 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 19:50:15.677 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+PERF kda_moe traced decode batch 1: 13.877 ms/step host wall (3 replays, incl. input copies)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+30.84s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+============================== 1 passed in 31.05s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x763326cf08a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x763327433138 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "set_program_cache_misses_allowed"
+ - leaked function ""
+ - leaked function "create_descriptor"
+ - leaked function "__ne__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "experimental_set_per_core_allocation"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 07:50:18 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

@@ -1,0 +1,117 @@
+- program_created:
+    id: 24
+    timestamp_ns: 1792244258240079668
+- program_compile_started:
+    id: 24
+    timestamp_ns: 1792244258266374432
+- program_kernel_compile_finished:
+    id: 24
+    timestamp_ns: 1792244258266479482
+    duration_ns: 105050
+    watcher_kernel_id: 3
+    name: cq_dispatch_subordinate
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate/10944382946125777129/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+- program_kernel_compile_finished:
+    id: 24
+    timestamp_ns: 1792244258266490984
+    duration_ns: 116552
+    watcher_kernel_id: 2
+    name: cq_dispatch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch/16139590279110921253/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+- program_kernel_compile_finished:
+    id: 24
+    timestamp_ns: 1792244258266500422
+    duration_ns: 125990
+    watcher_kernel_id: 4
+    name: cq_dispatch_subordinate_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+- program_kernel_compile_finished:
+    id: 24
+    timestamp_ns: 1792244258266509830
+    duration_ns: 135398
+    watcher_kernel_id: 1
+    name: cq_prefetch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_prefetch/5749973054224785937/
+    source: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+- program_compile_finished:
+    id: 24
+    timestamp_ns: 1792244258266521673
+    duration_ns: 147241
+- program_created:
+    id: 25
+    timestamp_ns: 1792244258312752115
+- program_compile_started:
+    id: 25
+    timestamp_ns: 1792244258312802100
+- program_kernel_compile_finished:
+    id: 25
+    timestamp_ns: 1792244258312835123
+    duration_ns: 33023
+    watcher_kernel_id: 6
+    name: cq_realtime_profiler_push
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler_push/13148156452339021326/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+- program_kernel_compile_finished:
+    id: 25
+    timestamp_ns: 1792244258312841075
+    duration_ns: 38975
+    watcher_kernel_id: 5
+    name: cq_realtime_profiler
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler/5653156745417893219/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+- program_compile_finished:
+    id: 25
+    timestamp_ns: 1792244258312855272
+    duration_ns: 53172
+- program_created:
+    id: 26
+    timestamp_ns: 1792244258320416860
+- program_created:
+    id: 27
+    timestamp_ns: 1792244258320611572
+- program_destroyed:
+    id: 27
+    timestamp_ns: 1792244258320616090
+- program_compile_started:
+    id: 26
+    timestamp_ns: 1792244258320638162
+- program_kernel_compile_finished:
+    id: 26
+    timestamp_ns: 1792244258320708086
+    duration_ns: 69924
+    watcher_kernel_id: 8
+    name: writer_recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/writer_recurrent_decode/12452485147252144501/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/dataflow/writer_recurrent_decode.cpp
+- program_kernel_compile_finished:
+    id: 26
+    timestamp_ns: 1792244258320719337
+    duration_ns: 81175
+    watcher_kernel_id: 7
+    name: reader_recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/reader_recurrent_decode/8593926264297485196/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/dataflow/reader_recurrent_decode.cpp
+- program_kernel_compile_finished:
+    id: 26
+    timestamp_ns: 1792244258320736480
+    duration_ns: 98318
+    watcher_kernel_id: 9
+    name: recurrent_decode
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/recurrent_decode/7353165440611073012/
+    source: ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/compute/recurrent_decode.cpp
+- program_compile_finished:
+    id: 26
+    timestamp_ns: 1792244258320750657
+    duration_ns: 112495
+- program_destroyed:
+    id: 25
+    timestamp_ns: 1792244259948453806
+- program_destroyed:
+    id: 24
+    timestamp_ns: 1792244259959772183
+- program_destroyed:
+    id: 26
+    timestamp_ns: 1792244260135738784

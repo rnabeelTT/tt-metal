@@ -1,0 +1,20 @@
+- mesh_device_created:
+    mesh_id: 16
+    timestamp_ns: 1792249685699062180
+    devices: [0]
+    shape: [1, 1]
+- mesh_device_created:
+    mesh_id: 17
+    timestamp_ns: 1792249685699152743
+    parent_mesh_id: 16
+    devices: [0]
+    shape: [1, 1]
+- mesh_device_initialized:
+    mesh_id: 17
+    timestamp_ns: 1792249685699341283
+- mesh_device_destroyed:
+    mesh_id: 16
+    timestamp_ns: 1792249686266087782
+- mesh_device_destroyed:
+    mesh_id: 17
+    timestamp_ns: 1792249686459834902

@@ -1,0 +1,25 @@
+=== start Sat Oct 17 01:39:11 PM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe chunksum kdaprefill2
+2026-10-17 13:39:12.862 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== chunksum
+chunk sum T1 C64                   ttnn.sum (current)    :      23.9 us
+chunk sum T1 C64                   fast_reduce_nc        :       8.1 us
+    ttnn.sum (current)      : vs float64 signed mean rel err +1.41e-08, max |rel err| 3.02e-07; bit-exact vs ttnn.sum: True
+    fast_reduce_nc          : vs float64 signed mean rel err -7.52e-05, max |rel err| 6.09e-03; bit-exact vs ttnn.sum: False
+chunk sum T32 C64                  ttnn.sum (current)    :      17.6 us
+chunk sum T32 C64                  fast_reduce_nc        :       8.1 us
+    ttnn.sum (current)      : vs float64 signed mean rel err -7.26e-08, max |rel err| 1.49e-04; bit-exact vs ttnn.sum: True
+    fast_reduce_nc          : vs float64 signed mean rel err +8.55e-05, max |rel err| 4.26e-01; bit-exact vs ttnn.sum: False
+chunk sum T2048 C16                ttnn.sum (current)    :     234.1 us
+chunk sum T2048 C16                fast_reduce_nc        :      26.1 us
+    ttnn.sum (current)      : vs float64 signed mean rel err -1.24e-08, max |rel err| 7.59e-04; bit-exact vs ttnn.sum: True
+    fast_reduce_nc          : vs float64 signed mean rel err -2.56e-04, max |rel err| 1.27e+01; bit-exact vs ttnn.sum: False
+=== kdaprefill2
+kda prefill 2048 bf16 HiFi4        fused + slice + untilize:    6687.6 us
+kda prefill 2048 bf16 HiFi4        qkv + rest + untilize :    5970.3 us  bit-exact vs fused + slice + untilize: True
+kda prefill 2048 bf16 HiFi4        fused proj alone      :    5660.6 us  bit-exact vs fused + slice + untilize: False (shape (1, 2048, 32960) vs (1, 2048, 24576))
+kda prefill 2048 bf16 HiFi4        qkv proj alone        :    4011.0 us  bit-exact vs fused + slice + untilize: True
+kda prefill 2048 bf16 HiFi4        rest proj alone       :    1432.7 us  bit-exact vs fused + slice + untilize: False (shape (1, 2048, 8384) vs (1, 2048, 24576))
+=== exit code: 0 Sat Oct 17 01:39:17 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

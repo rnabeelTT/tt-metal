@@ -1,0 +1,117 @@
+- program_created:
+    id: 20
+    timestamp_ns: 1792257972783986460
+- program_compile_started:
+    id: 20
+    timestamp_ns: 1792257972810328258
+- program_kernel_compile_finished:
+    id: 20
+    timestamp_ns: 1792257972810430123
+    duration_ns: 101865
+    watcher_kernel_id: 1
+    name: cq_prefetch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_prefetch/5749973054224785937/
+    source: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+- program_kernel_compile_finished:
+    id: 20
+    timestamp_ns: 1792257972810444590
+    duration_ns: 116332
+    watcher_kernel_id: 2
+    name: cq_dispatch
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch/16139590279110921253/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+- program_kernel_compile_finished:
+    id: 20
+    timestamp_ns: 1792257972810452045
+    duration_ns: 123787
+    watcher_kernel_id: 3
+    name: cq_dispatch_subordinate
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate/10944382946125777129/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+- program_kernel_compile_finished:
+    id: 20
+    timestamp_ns: 1792257972810460751
+    duration_ns: 132493
+    watcher_kernel_id: 4
+    name: cq_dispatch_subordinate_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_dispatch_subordinate_compute/11168295532479209676/
+    source: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+- program_compile_finished:
+    id: 20
+    timestamp_ns: 1792257972810471973
+    duration_ns: 143715
+- program_created:
+    id: 21
+    timestamp_ns: 1792257972856647781
+- program_compile_started:
+    id: 21
+    timestamp_ns: 1792257972856705290
+- program_kernel_compile_finished:
+    id: 21
+    timestamp_ns: 1792257972856749595
+    duration_ns: 44305
+    watcher_kernel_id: 5
+    name: cq_realtime_profiler
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler/5653156745417893219/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+- program_kernel_compile_finished:
+    id: 21
+    timestamp_ns: 1792257972856761948
+    duration_ns: 56658
+    watcher_kernel_id: 6
+    name: cq_realtime_profiler_push
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/cq_realtime_profiler_push/13148156452339021326/
+    source: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+- program_compile_finished:
+    id: 21
+    timestamp_ns: 1792257972856770996
+    duration_ns: 65706
+- program_created:
+    id: 22
+    timestamp_ns: 1792257973044350907
+- program_created:
+    id: 23
+    timestamp_ns: 1792257973044573511
+- program_destroyed:
+    id: 23
+    timestamp_ns: 1792257973044577138
+- program_compile_started:
+    id: 22
+    timestamp_ns: 1792257973044601926
+- program_kernel_compile_finished:
+    id: 22
+    timestamp_ns: 1792257973044689282
+    duration_ns: 87356
+    watcher_kernel_id: 8
+    name: writer_mhc_post
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/writer_mhc_post/12453320033911017445/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/dataflow/writer_mhc_post.cpp
+- program_kernel_compile_finished:
+    id: 22
+    timestamp_ns: 1792257973044704501
+    duration_ns: 102575
+    watcher_kernel_id: 7
+    name: reader_mhc_post
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/reader_mhc_post/11894005979048010343/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/dataflow/reader_mhc_post.cpp
+- program_kernel_compile_finished:
+    id: 22
+    timestamp_ns: 1792257973044715412
+    duration_ns: 113486
+    watcher_kernel_id: 9
+    name: mhc_post_compute
+    path: /home/raahem/.cache/tt-metal-cache/14805484589553886727/kernels/mhc_post_compute/998799745742550162/
+    source: ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp
+- program_compile_finished:
+    id: 22
+    timestamp_ns: 1792257973044729710
+    duration_ns: 127784
+- program_destroyed:
+    id: 21
+    timestamp_ns: 1792257973911921922
+- program_destroyed:
+    id: 20
+    timestamp_ns: 1792257973923188162
+- program_destroyed:
+    id: 22
+    timestamp_ns: 1792257974117589780

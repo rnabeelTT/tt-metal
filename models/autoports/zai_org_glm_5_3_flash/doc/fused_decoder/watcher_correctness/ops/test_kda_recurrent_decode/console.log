@@ -1,0 +1,121 @@
+=== start Sat Oct 17 01:37:28 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py
+2026-10-17 13:37:29.955 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 7 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1] B=1 R=1 step 0: o PCC 0.9999999 max|err| 1.05e-05; state PCC 1.0000000 max|err| 4.11e-05
+B=1 R=1 step 1: o PCC 1.0000000 max|err| 2.04e-05; state PCC 1.0000000 max|err| 3.37e-05
+B=1 R=1 step 2: o PCC 0.9999999 max|err| 1.32e-05; state PCC 1.0000000 max|err| 3.95e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8] B=8 R=8 step 0: o PCC 1.0000000 max|err| 1.42e-05; state PCC 1.0000000 max|err| 5.54e-05
+B=8 R=8 step 1: o PCC 0.9999999 max|err| 2.02e-05; state PCC 1.0000000 max|err| 5.75e-05
+B=8 R=8 step 2: o PCC 1.0000000 max|err| 1.70e-05; state PCC 1.0000000 max|err| 6.19e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32] B=8 R=32 step 0: o PCC 0.9999999 max|err| 1.48e-05; state PCC 1.0000000 max|err| 5.02e-05
+B=8 R=32 step 1: o PCC 0.9999999 max|err| 1.80e-05; state PCC 1.0000000 max|err| 8.17e-05
+B=8 R=32 step 2: o PCC 1.0000000 max|err| 1.74e-05; state PCC 1.0000000 max|err| 6.87e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32] B=32 R=32 step 0: o PCC 1.0000000 max|err| 1.73e-05; state PCC 1.0000000 max|err| 9.42e-05
+B=32 R=32 step 1: o PCC 1.0000000 max|err| 1.84e-05; state PCC 1.0000000 max|err| 7.19e-05
+B=32 R=32 step 2: o PCC 0.9999999 max|err| 2.15e-05; state PCC 1.0000000 max|err| 6.77e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced traced step 0: o PCC 1.0000000 state PCC 1.0000000
+traced step 1: o PCC 0.9999999 state PCC 1.0000000
+traced step 2: o PCC 0.9999999 state PCC 1.0000000
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99] decay>=0.99 step 100: state PCC 0.999999996 rms ratio 0.9999725 max rel err 9.24e-05; o PCC 0.999999946
+decay>=0.99 step 200: state PCC 0.999999994 rms ratio 0.9999723 max rel err 1.18e-04; o PCC 0.999999946
+decay>=0.99 step 300: state PCC 0.999999993 rms ratio 0.9999735 max rel err 1.22e-04; o PCC 0.999999947
+decay>=0.99 step 400: state PCC 0.999999993 rms ratio 0.9999734 max rel err 1.75e-04; o PCC 0.999999943
+decay>=0.99 step 500: state PCC 0.999999993 rms ratio 0.9999743 max rel err 1.24e-04; o PCC 0.999999946
+decay>=0.99 step 600: state PCC 0.999999993 rms ratio 0.9999737 max rel err 1.28e-04; o PCC 0.999999944
+decay>=0.99 step 700: state PCC 0.999999993 rms ratio 0.9999727 max rel err 1.39e-04; o PCC 0.999999946
+decay>=0.99 step 800: state PCC 0.999999993 rms ratio 0.9999731 max rel err 1.23e-04; o PCC 0.999999945
+decay>=0.99 step 900: state PCC 0.999999993 rms ratio 0.9999732 max rel err 1.18e-04; o PCC 0.999999944
+decay>=0.99 step 1000: state PCC 0.999999993 rms ratio 0.9999731 max rel err 1.32e-04; o PCC 0.999999943
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999] decay>=0.999 step 100: state PCC 0.999999995 rms ratio 0.9999733 max rel err 1.15e-04; o PCC 0.999999946
+decay>=0.999 step 200: state PCC 0.999999991 rms ratio 0.9999728 max rel err 1.44e-04; o PCC 0.999999942
+decay>=0.999 step 300: state PCC 0.999999988 rms ratio 0.9999737 max rel err 1.67e-04; o PCC 0.999999941
+decay>=0.999 step 400: state PCC 0.999999986 rms ratio 0.9999752 max rel err 1.81e-04; o PCC 0.999999935
+decay>=0.999 step 500: state PCC 0.999999985 rms ratio 0.9999748 max rel err 1.68e-04; o PCC 0.999999936
+decay>=0.999 step 600: state PCC 0.999999984 rms ratio 0.9999755 max rel err 1.90e-04; o PCC 0.999999935
+decay>=0.999 step 700: state PCC 0.999999983 rms ratio 0.9999744 max rel err 1.93e-04; o PCC 0.999999935
+decay>=0.999 step 800: state PCC 0.999999983 rms ratio 0.9999745 max rel err 2.06e-04; o PCC 0.999999935
+decay>=0.999 step 900: state PCC 0.999999983 rms ratio 0.9999747 max rel err 1.74e-04; o PCC 0.999999934
+decay>=0.999 step 1000: state PCC 0.999999983 rms ratio 0.9999739 max rel err 1.83e-04; o PCC 0.999999933
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.61s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+1.61s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+1.35s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+1.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+0.35s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+0.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.34s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.04s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+============================== 7 passed in 9.29s ===============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x77ad77ad0868 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x77ad781f6fb8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function "from_json"
+ - leaked function "to_json"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "contains"
+ - leaked function "to_json"
+ - leaked function "device_coords"
+ - leaked function "subtract"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 01:37:42 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
