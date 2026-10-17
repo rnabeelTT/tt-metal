@@ -1,8 +1,8 @@
-2026-10-16 21:15:31.523 | INFO     | __main__:main:364 - Using port 8086
-2026-10-16 21:15:31.523 | INFO     | tracy:run_report_setup:91 - Verifying tracy profiling tools
-2026-10-16 21:15:31.533 | INFO     | tracy:run_report_setup:112 - Capture command: ('/home/raahem/tt-metal/build/tools/profiler/bin/tracy-capture -o /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy -f -p 8086',)
-Connecting to 127.0.0.1:8086...2026-10-16 21:15:31.544 | INFO     | __main__:run_workload:399 - Test process started
-2026-10-16 21:15:32.482 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+2026-10-17 11:09:37.266 | INFO     | __main__:main:364 - Using port 8086
+2026-10-17 11:09:37.266 | INFO     | tracy:run_report_setup:91 - Verifying tracy profiling tools
+2026-10-17 11:09:37.285 | INFO     | tracy:run_report_setup:112 - Capture command: ('/home/raahem/tt-metal/build/tools/profiler/bin/tracy-capture -o /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy -f -p 8086',)
+Connecting to 127.0.0.1:8086...2026-10-17 11:09:37.291 | INFO     | __main__:run_workload:399 - Test process started
+2026-10-17 11:09:38.223 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
 Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
 ============================= test session starts ==============================
 platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
@@ -15,93 +15,24 @@ timeout method: signal
 timeout func_only: False
 collecting ... collected 1 item
 
-models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1] 2026-10-16 21:15:57.561 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
-Building ncrisc, compile step:
-/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh -fno-tree-loop-distribute-patterns -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_mix/device/kernels/dataflow -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROFILE_KERNEL=1 -DPROFILER_FULL_HOST_BUFFER_SIZE_PER_RISC=48000 -DPROCESSOR_INDEX=1 -DCOMPILE_FOR_NCRISC -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DNOC_INDEX=0 -DNOC_MODE=0 -DFULL_KERNEL_NAME="reader_mhc_mix/6632127316521180344/" -DKERNEL_COMPILE_TIME_ARGS=512,8,64,2,4096,2,4096 -c -o /home/raahem/.cache/tt-metal-cache/5421511850381216912/kernels/reader_mhc_mix/6632127316521180344/ncrisc/ncrisck.11454606631188148107_2812693.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/ncrisck.cc -MF /home/raahem/.cache/tt-metal-cache/5421511850381216912/kernels/reader_mhc_mix/6632127316521180344/ncrisc/ncrisck.11454606631188148107_2812693.d
-In file included from /home/raahem/tt-metal/tt_metal/hw/inc/api/dataflow/dataflow_api.h:24,
-                 from /home/raahem/tt-metal/tt_metal/hw/inc/internal/firmware_common.h:24,
-                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/ncrisck.cc:17:
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp: In function 'void kernel_profiler::quick_push()':
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: PROFILER-NOC-QUICK-PUSH,/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp,630,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:39:5: note: in expansion of macro 'DO_PRAGMA'
-   39 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name))); \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:630:5: note: in expansion of macro 'SrcLocNameToHash'
-  630 |     SrcLocNameToHash("PROFILER-NOC-QUICK-PUSH");
-      |     ^~~~~~~~~~~~~~~~
-/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/ncrisck.cc: In function 'uint32_t _start()':
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: NCRISC-KERNEL,/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/ncrisck.cc,70,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:1043:5: note: in expansion of macro 'DO_PRAGMA'
- 1043 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name)));                               \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/ncrisck.cc:70:5: note: in expansion of macro 'DeviceZoneScopedMainChildN'
-   70 |     DeviceZoneScopedMainChildN("NCRISC-KERNEL");
-      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~
-Building brisc, compile step:
-/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh -fno-tree-loop-distribute-patterns -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_mix/device/kernels/dataflow -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROFILE_KERNEL=1 -DPROFILER_FULL_HOST_BUFFER_SIZE_PER_RISC=48000 -DPROCESSOR_INDEX=0 -DCOMPILE_FOR_BRISC -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DNOC_INDEX=1 -DNOC_MODE=0 -DFULL_KERNEL_NAME="writer_mhc_mix/4117265469177141053/" -DKERNEL_COMPILE_TIME_ARGS=1,64,2,4096 -c -o /home/raahem/.cache/tt-metal-cache/5421511850381216912/kernels/writer_mhc_mix/4117265469177141053/brisc/brisck.11454606631188148107_2812693.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/brisck.cc -MF /home/raahem/.cache/tt-metal-cache/5421511850381216912/kernels/writer_mhc_mix/4117265469177141053/brisc/brisck.11454606631188148107_2812693.d
-In file included from /home/raahem/tt-metal/tt_metal/hw/inc/api/dataflow/dataflow_api.h:24,
-                 from /home/raahem/tt-metal/tt_metal/hw/inc/internal/firmware_common.h:24,
-                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/brisck.cc:16:
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp: In function 'void kernel_profiler::finish_profiler(bool)':
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: PROFILER-NOC-FLUSH,/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp,478,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:39:5: note: in expansion of macro 'DO_PRAGMA'
-   39 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name))); \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:478:17: note: in expansion of macro 'SrcLocNameToHash'
-  478 |                 SrcLocNameToHash("PROFILER-NOC-FLUSH");
-      |                 ^~~~~~~~~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: PROFILER-DRAM-PUSH,/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp,487,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:39:5: note: in expansion of macro 'DO_PRAGMA'
-   39 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name))); \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:487:17: note: in expansion of macro 'SrcLocNameToHash'
-  487 |                 SrcLocNameToHash("PROFILER-DRAM-PUSH");
-      |                 ^~~~~~~~~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp: In function 'void kernel_profiler::quick_push()':
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: PROFILER-NOC-QUICK-PUSH,/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp,630,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:39:5: note: in expansion of macro 'DO_PRAGMA'
-   39 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name))); \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:630:5: note: in expansion of macro 'SrcLocNameToHash'
-  630 |     SrcLocNameToHash("PROFILER-NOC-QUICK-PUSH");
-      |     ^~~~~~~~~~~~~~~~
-/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/brisck.cc: In function 'uint32_t _start()':
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:29:22: note: '#pragma message: BRISC-KERNEL,/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/brisck.cc,77,KERNEL_PROFILER'
-   29 | #define DO_PRAGMA(x) _Pragma(#x)
-      |                      ^~~~~~~
-/home/raahem/tt-metal/tt_metal/tools/profiler/kernel_profiler.hpp:1043:5: note: in expansion of macro 'DO_PRAGMA'
- 1043 |     DO_PRAGMA(message(PROFILER_MSG_NAME(name)));                               \
-      |     ^~~~~~~~~
-/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/brisck.cc:77:9: note: in expansion of macro 'DeviceZoneScopedMainChildN'
-   77 |         DeviceZoneScopedMainChildN("BRISC-KERNEL");
-      |         ^~~~~~~~~~~~~~~~~~~~~~~~~~
-2026-10-16 21:15:58.311 | INFO     | tracy:signpost:49 - PERF_DECODE
-2026-10-16 21:15:58.324 | INFO     | tracy:signpost:49 - PERF_DECODE_END
-PERF dsa_moe traced decode batch 1: 4.124 ms/step host wall (3 replays, incl. input copies)
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1] 2026-10-17 11:10:00.654 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-17 11:10:01.208 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 11:10:01.221 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+PERF dsa_moe traced decode batch 1: 4.126 ms/step host wall (3 replays, incl. input copies)
 PASSED
 
 ==================================== PASSES ====================================
 - generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
 ============================= slowest 25 durations =============================
-25.47s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+22.49s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
 0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
 0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
 =========================== short test summary info ============================
 PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
-============================== 1 passed in 25.68s ==============================
+============================== 1 passed in 22.70s ==============================
 nanobind: leaked 2 instances!
- - leaked instance 0x74d20a6b3188 of type "ttnn._ttnn.tensor.MemoryConfig"
- - leaked instance 0x74d21f1b0c78 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7f1a8b6a7188 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7f1ab93acc48 of type "ttnn._ttnn.tensor.CoreRangeSet"
 nanobind: leaked 20 types!
  - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
  - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
@@ -115,41 +46,41 @@ nanobind: leaked 20 types!
  - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
  - ... skipped remainder
 nanobind: leaked 257 functions!
- - leaked function ""
- - leaked function ""
- - leaked function "buffer_aligned_page_size"
- - leaked function "logical_volume"
- - leaked function ""
- - leaked function ""
  - leaked function "__init__"
- - leaked function "from_json"
+ - leaked function "compute_program_hash"
+ - leaked function "default_core_range"
  - leaked function ""
- - leaked function "create_matmul_attributes"
+ - leaked function ""
+ - leaked function "get_view"
+ - leaked function "quiesce_devices"
+ - leaked function ""
+ - leaked function "reshape"
+ - leaked function ""
  - ... skipped remainder
 nanobind: this is likely caused by a reference counting issue in the binding code.
 See https://nanobind.readthedocs.io/en/latest/refleaks.html
 Timer resolution: 0 ns
 
 Frames: 2
-Time span: 41.46 s
-Zones: 976,454
-Elapsed time: 29.22 s
+Time span: 36.43 s
+Zones: 910,418
+Elapsed time: 26.22 s
 Saving trace... done!
-Trace size 8722.98 KB (17.58% ratio)
-2026-10-16 21:16:02.294 | INFO     | __main__:main:436 - Copying /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_16_21_16_02.tracy
-2026-10-16 21:16:02.296 | INFO     | __main__:main:439 - Copied /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_16_21_16_02.tracy
-2026-10-16 21:16:02.296 | INFO     | __main__:main:448 - embed.tracy -> traces/no_cacheprovider_2026_10_16_21_16_02.tracy
-2026-10-16 21:16:02.296 | INFO     | tracy.serve_wasm:launch_server_subprocess:284 - Launching tracy web app GUI server subprocess...
-2026-10-16 21:16:02.296 | INFO     | tracy.serve_wasm:launch_server_subprocess:287 - Tracy WASM web UI (open in browser): http://localhost:8080/ (WebSocket for live reload: ws://localhost:8081/)
-2026-10-16 21:16:02.296 | INFO     | tracy.serve_wasm:launch_server_subprocess:294 - Tracy WASM server already serving port 8080; reusing it (live-reload refreshes the browser).
-2026-10-16 21:16:02.655 | INFO     | tracy:generate_report:162 - Host side ops time report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_times.csv
-2026-10-16 21:16:02.672 | INFO     | tracy:generate_report:173 - Host side ops data report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_data.csv
-2026-10-16 21:16:02.672 | INFO     | tracy.process_ops_logs:import_tracy_op_logs:422 - Importing ops logs
+Trace size 8295.53 KB (17.89% ratio)
+2026-10-17 11:10:04.807 | INFO     | __main__:main:436 - Copying /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_17_11_10_04.tracy
+2026-10-17 11:10:04.809 | INFO     | __main__:main:439 - Copied /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/no_cacheprovider_2026_10_17_11_10_04.tracy
+2026-10-17 11:10:04.810 | INFO     | __main__:main:448 - embed.tracy -> traces/no_cacheprovider_2026_10_17_11_10_04.tracy
+2026-10-17 11:10:04.810 | INFO     | tracy.serve_wasm:launch_server_subprocess:284 - Launching tracy web app GUI server subprocess...
+2026-10-17 11:10:04.810 | INFO     | tracy.serve_wasm:launch_server_subprocess:287 - Tracy WASM web UI (open in browser): http://localhost:8080/ (WebSocket for live reload: ws://localhost:8081/)
+2026-10-17 11:10:04.810 | INFO     | tracy.serve_wasm:launch_server_subprocess:294 - Tracy WASM server already serving port 8080; reusing it (live-reload refreshes the browser).
+2026-10-17 11:10:05.105 | INFO     | tracy:generate_report:162 - Host side ops time report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_times.csv
+2026-10-17 11:10:05.121 | INFO     | tracy:generate_report:173 - Host side ops data report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_data.csv
+2026-10-17 11:10:05.121 | INFO     | tracy.process_ops_logs:import_tracy_op_logs:422 - Importing ops logs
 /home/raahem/tt-metal/tools/tracy/process_ops_logs.py:527: DtypeWarning: Columns (3,4,8) have mixed types. Specify dtype option on import or set low_memory=False.
   df = pd.read_csv(tracyOpTimesLog)
-2026-10-16 21:16:03.595 | INFO     | tracy.perf_counter_analysis:get_device_op_data:2143 - Getting device ops
-2026-10-16 21:16:03.595 | INFO     | tracy.process_ops_logs:append_device_data:1090 - Appending device data
-2026-10-16 21:16:04.611 | INFO     | tracy.process_ops_logs:generate_reports:1423 - OPs' perf analysis is finished! Generating reports ...
-2026-10-16 21:16:04.612 | INFO     | tracy.process_ops_logs:generate_reports:1443 - Copying runtime artifacts
-2026-10-16 21:16:04.637 | INFO     | tracy.process_ops_logs:generate_reports:1452 - Generating OPs CSV
-2026-10-16 21:16:04.895 | INFO     | tracy.process_ops_logs:generate_reports:1908 - OPs csv generated at: /home/raahem/tt-metal/generated/profiler/reports/2026_10_16_21_16_04/ops_perf_results_2026_10_16_21_16_04.csv
+2026-10-17 11:10:05.953 | INFO     | tracy.perf_counter_analysis:get_device_op_data:2143 - Getting device ops
+2026-10-17 11:10:05.953 | INFO     | tracy.process_ops_logs:append_device_data:1090 - Appending device data
+2026-10-17 11:10:06.859 | INFO     | tracy.process_ops_logs:generate_reports:1423 - OPs' perf analysis is finished! Generating reports ...
+2026-10-17 11:10:06.859 | INFO     | tracy.process_ops_logs:generate_reports:1443 - Copying runtime artifacts
+2026-10-17 11:10:06.881 | INFO     | tracy.process_ops_logs:generate_reports:1452 - Generating OPs CSV
+2026-10-17 11:10:07.120 | INFO     | tracy.process_ops_logs:generate_reports:1908 - OPs csv generated at: /home/raahem/tt-metal/generated/profiler/reports/2026_10_17_11_10_06/ops_perf_results_2026_10_17_11_10_06.csv

@@ -49,3 +49,60 @@ def test_mhc_mix(device, T, fn_bf16):
     assert pc > 0.99999 and ss_err < 1e-3
     if fn_bf16:
         assert mix_err < 1e-3
+
+
+@pytest.mark.parametrize("T", [1, 8])
+def test_mixes_split_k_padded_rows(T):
+    """The fused decoder's own finalize (FusedHyperConnection._mixes_split_k) at a non-aligned row count, with NaN / inf
+    in the tile's padding rows (the decode case with idle padding rows; the stage-2 DSA NaN bug lived here). Checks:
+    finite output, bit-identical to the zero-padded run, mixes vs float64, and the signed sum-of-squares error next to
+    the functional composite's (multiply + mean). Column 0 of fn is a one-hot (bf16-exact 1.0), so the implied scale is
+    out[:, 0] / x[:, K0]."""
+    from models.autoports.zai_org_glm_5_3_flash.tests.harness import close_mesh, open_mesh
+    from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import FusedFlags, FusedHyperConnection
+    from models.autoports.zai_org_glm_5_3_flash.tt.mhc import HcConfig, HyperConnection
+
+    K0 = 5
+    g = torch.Generator().manual_seed(100 + T)
+    x = torch.randn(T, K, generator=g) * 0.02
+    x[:, ::97] *= 30
+    x[:, K0] = 0.5 + torch.rand(T, generator=g)
+    fn = torch.randn(24, K, generator=g) * 0.01
+    fn[0] = 0.0
+    fn[0, K0] = 1.0
+    cfg = HcConfig(n=4, sinkhorn_iters=20, eps=1e-6, norm_eps=EPS)
+    mesh = open_mesh()
+    try:
+        hc = FusedHyperConnection(HyperConnection(mesh, cfg, fn, torch.zeros(24), torch.ones(3)), FusedFlags())
+        hc.prepare([T])
+
+        def stream(pad):
+            full = torch.full((32, K), pad)
+            full[T + 1 :: 2] = float("inf")
+            full[:T] = x
+            t = ttnn.from_torch(full.reshape(1, 1, 32, K), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+            return ttnn.reshape(t, (1, 1, T, K), (1, 1, 32, K))  # logical T rows; the padding rows keep their values
+
+        out_nan = ttnn.to_torch(hc._mixes_split_k(stream(float("nan")))).reshape(T, 32)
+        out_zero = ttnn.to_torch(hc._mixes_split_k(stream(0.0))).reshape(T, 32)
+        assert torch.isfinite(out_nan).all()
+        same = torch.equal(out_nan, out_zero)
+        fnb = fn.bfloat16().double()
+        ss_ref = x.double().pow(2).sum(-1)
+        ref = (x.double() @ fnb.t()) * torch.rsqrt(ss_ref / K + EPS).reshape(T, 1)
+        pc = _pcc(out_nan[:, :24], ref)
+        scale = out_nan[:, 0].double() / x[:, K0].double()
+        ss_fused = K * (scale.pow(-2) - EPS)
+        e_f = ss_fused / ss_ref - 1
+        # functional composite on the same rows (clean padding: the composite reduces logical columns only)
+        tx = ttnn.from_torch(x.reshape(1, 1, T, K), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+        ms = ttnn.mean(ttnn.multiply(tx, tx), dim=-1, keepdim=True)
+        e_c = ttnn.to_torch(ms).reshape(T).double() * K / ss_ref - 1
+        print(
+            f"T={T}: finite, bit-identical to zero padding: {same}, mixes PCC {pc:.9f}; sum-of-squares signed rel err "
+            f"fused mean {e_f.mean().item():+.2e} max |.| {e_f.abs().max().item():.2e} (via the rsqrt scale) | "
+            f"functional composite mean {e_c.mean().item():+.2e} max |.| {e_c.abs().max().item():.2e}"
+        )
+        assert same and pc > 0.99999 and e_f.abs().max().item() < 1e-3
+    finally:
+        close_mesh(mesh)

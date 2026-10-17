@@ -1,0 +1,20 @@
+=== start Fri Oct 16 08:41:02 PM UTC 2026 : timeout 3600 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fused_flag_check dsa_heads_op,mlp_act_fold,kda_decode_fold 0 3 4
+2026-10-16 20:41:04.534 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-16 20:41:06.435 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-16 20:41:08.338 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+dsa_heads_op,mlp_act_fold,kda_decode_fold L0 prefill: bit-exact True  max|d| 0.000e+00  finite True
+dsa_heads_op,mlp_act_fold,kda_decode_fold L0 decode: bit-exact True  max|d| 0.000e+00  finite True
+2026-10-16 20:41:32.247 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-16 20:41:56.060 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+dsa_heads_op,mlp_act_fold,kda_decode_fold L3 prefill: bit-exact True  max|d| 0.000e+00  finite True
+dsa_heads_op,mlp_act_fold,kda_decode_fold L3 decode: bit-exact True  max|d| 0.000e+00  finite True
+2026-10-16 20:42:02.261 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-16 20:42:15.767 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-16 20:42:21.368 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-16 20:42:34.720 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+dsa_heads_op,mlp_act_fold,kda_decode_fold L4 prefill: bit-exact True  max|d| 0.000e+00  finite True
+dsa_heads_op,mlp_act_fold,kda_decode_fold L4 decode: bit-exact True  max|d| 0.000e+00  finite True
+=== exit code: 0 Fri Oct 16 08:42:37 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

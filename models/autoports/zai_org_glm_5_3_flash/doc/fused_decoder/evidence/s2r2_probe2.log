@@ -1,0 +1,21 @@
+=== start Sat Oct 17 04:52:50 AM UTC 2026 : timeout -k 60 900 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe kdaprefill
+2026-10-17 04:52:52.371 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== kdaprefill
+kda prefill 2048 qkv               fused proj + slice + untilize:    4371.0 us
+kda prefill 2048 qkv               fused proj alone      :    3408.7 us  bit-exact vs fused proj + slice + untilize: False (shape (1, 1, 2048, 32960) vs (1, 1, 2048, 24576))
+2026-10-17 04:52:56.076 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3816448 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out 1d N8/4 (+rest): error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+2026-10-17 04:52:56.078 | critical |          Always | TT_FATAL: Batched (non-bcast) matmul requires inputs of the same rank, got a_shape rank: 4 vs b_shape rank: 2 (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out reuse N8/4 (+rest): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:268: a_shape.rank() == b_shape.rank()
+2026-10-17 04:52:56.079 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCast1DProgramConfig: out_subblock_w 8 times out_subblock_h 1 needs to be at most 4 to fit in hardware (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out 1d N8/8 (+rest): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:567: program_config.out_subblock_h * pro
+2026-10-17 04:52:56.079 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: out_subblock_w 8 times out_subblock_h 1 needs to be at most 4 to fit in hardware (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out reuse N8/8 (+rest): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:567: program_config.out_subblock_h * pro
+2026-10-17 04:52:56.080 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCast1DProgramConfig: out_subblock_w 7 times out_subblock_h 1 needs to be at most 4 to fit in hardware (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out 1d N7/7 (+rest): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:567: program_config.out_subblock_h * pro
+2026-10-17 04:52:56.080 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: out_subblock_w 7 times out_subblock_h 1 needs to be at most 4 to fit in hardware (assert.hpp:104)
+kda prefill 2048 qkv               qkv untilize_out reuse N7/7 (+rest): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:567: program_config.out_subblock_h * pro
+=== exit code: 0 Sat Oct 17 04:52:57 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

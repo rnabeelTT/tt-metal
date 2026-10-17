@@ -5,8 +5,8 @@ Sorting CSV by 'HOST START TS' column...
 Using operations after 'PERF_PREFILL'.
 Using operations until 'PERF_PREFILL_END'.
 Detected data from 1 devices. Merging device data...
-Writing CSV output to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report.csv
-Overall DRAM roofline (modeled ops): 26.1% (133 GB/s)
+Writing CSV output to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report.csv
+Overall DRAM roofline (modeled ops): 25.7% (131 GB/s)
 Warning: Unclassified operation 'MhcSplitSinkhornDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'ChronologicalSelectionsOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'QkvCausalConv1dSiluOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
@@ -14,5 +14,5 @@ Warning: Unclassified operation 'PrepareChunkRecurrenceOperation' found. Please 
 Warning: Unclassified operation 'RecurrentChunkScanOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'SigmoidGatedRmsNormOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcPostDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Writing CSV stacked report to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report_stacked.csv
-Plotting PNG stacked report to models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report_stacked.png
+Writing CSV stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report_stacked.csv
+Plotting PNG stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/functional_decoder/tracy/test_perf_prefill_kda_dense-128_/perf_report_stacked.png

@@ -1,0 +1,19 @@
+=== start Fri Oct 16 08:48:35 PM UTC 2026 : timeout 600 python_env/bin/python /tmp/claude-1003/-home-raahem-tt-metal/948ea7b2-716e-4e68-9fdd-7f4d65b9e0da/scratchpad/diag4.py
+2026-10-16 20:48:36.580 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2^-8: same-face +3.9062e-03  cross-face +3.9062e-03  cross-tile +3.9062e-03  small-first +3.9062e-03  (exact 3.9062e-03)
+2^-10: same-face +9.7656e-04  cross-face +9.7656e-04  cross-tile +9.7656e-04  small-first +9.7656e-04  (exact 9.7656e-04)
+2^-12: same-face +0.0000e+00  cross-face +2.4414e-04  cross-tile +2.4414e-04  small-first +0.0000e+00  (exact 2.4414e-04)
+2^-14: same-face +0.0000e+00  cross-face +6.1035e-05  cross-tile +6.1035e-05  small-first +0.0000e+00  (exact 6.1035e-05)
+2^-16: same-face +0.0000e+00  cross-face +1.5259e-05  cross-tile +1.5259e-05  small-first +0.0000e+00  (exact 1.5259e-05)
+2^-18: same-face +0.0000e+00  cross-face +3.8147e-06  cross-tile +3.8147e-06  small-first +0.0000e+00  (exact 3.8147e-06)
+2^-20: same-face +0.0000e+00  cross-face +9.5367e-07  cross-tile +9.5367e-07  small-first +0.0000e+00  (exact 9.5367e-07)
+2^-22: same-face +0.0000e+00  cross-face +2.3842e-07  cross-tile +2.3842e-07  small-first +0.0000e+00  (exact 2.3842e-07)
+2^-24: same-face +0.0000e+00  cross-face +1.1921e-07  cross-tile +1.1921e-07  small-first +0.0000e+00  (exact 5.9605e-08)
+32 x (1+2^-10): got +3.125000e-02 exact +3.125000e-02
+32 x (1+2^-9): got +6.250000e-02 exact +6.250000e-02
+K=32 positive exact operands: max rel err 2.159e-04 mean rel +8.496e-05
+K=512 positive exact operands: max rel err 1.100e-04 mean rel +8.460e-05
+=== exit code: 0 Fri Oct 16 08:48:39 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

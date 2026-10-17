@@ -1,0 +1,23 @@
+=== start Fri Oct 16 08:01:03 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe kda2
+2026-10-16 20:01:04.756 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== kda2
+kda gated norm B1                  current               :      71.3 us  PCC vs torch 0.9999984
+kda gated norm B1                  gate in [B,H*V]       :      63.2 us  PCC vs torch 0.9999984  bit-exact vs current: True
+kda gated norm B1                  gate [B,H*V] sigmoid-act:      50.5 us  PCC vs torch 0.9999984  bit-exact vs current: True
+kda conv B1                        current               :     182.6 us
+kda conv B1                        addcmul (fp32 tap consts):     172.1 us  bit-exact vs current: True
+kda shift B1 current               :      80.7 us  one step exact: True
+kda shift B1 where in place        :      54.9 us  one step exact: True
+kda packed conv B1: not applicable (B % 8 != 0)
+kda gated norm B32                 current               :     248.6 us  PCC vs torch 0.9999984
+kda gated norm B32                 gate in [B,H*V]       :     168.7 us  PCC vs torch 0.9999984  bit-exact vs current: True
+kda gated norm B32                 gate [B,H*V] sigmoid-act:     163.1 us  PCC vs torch 0.9999984  bit-exact vs current: True
+kda conv B32                       current               :     269.7 us
+kda conv B32                       addcmul (fp32 tap consts):     173.9 us  bit-exact vs current: True
+kda shift B32 current               :      81.2 us  one step exact: True
+kda shift B32 where in place        :      55.0 us  one step exact: True
+kda packed conv B32 (op + main's adapters):     662.6 us
+=== exit code: 0 Fri Oct 16 08:01:10 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

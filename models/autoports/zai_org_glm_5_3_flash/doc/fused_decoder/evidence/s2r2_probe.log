@@ -1,0 +1,78 @@
+=== start Sat Oct 17 02:54:59 AM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe finalize relayout
+2026-10-17 02:55:01.514 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== finalize
+mhc finalize T1 C64                current               :     168.1 us
+mhc finalize T1 C64                chunk sum only (sum)  :      24.7 us  bit-exact vs current: False (shape (1, 1, 1, 64) vs (1, 1, 1, 32))
+2026-10-17 02:55:02.669 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T1 C64                chunk sum only (moreh): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+2026-10-17 02:55:02.672 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T1 C64                moreh_sum             : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+mhc finalize T1 C64                rsqrt chain folded    :     113.7 us  bit-exact vs current: True
+mhc finalize T1 C64                64-wide mask          :     172.7 us  bit-exact vs current: True
+2026-10-17 02:55:03.322 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T1 C64                moreh + fold + 64 mask: error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+    current                 : vs float64 signed mean rel err +9.82e-09, max |rel err| 2.89e-07
+    rsqrt chain folded      : vs float64 signed mean rel err +9.82e-09, max |rel err| 2.89e-07
+    64-wide mask            : vs float64 signed mean rel err +9.82e-09, max |rel err| 2.89e-07
+mhc finalize T32 C64               current               :     157.1 us
+mhc finalize T32 C64               chunk sum only (sum)  :      18.4 us  bit-exact vs current: False (shape (1, 1, 32, 64) vs (1, 1, 32, 32))
+2026-10-17 02:55:03.340 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T32 C64               chunk sum only (moreh): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+2026-10-17 02:55:03.340 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T32 C64               moreh_sum             : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+mhc finalize T32 C64               rsqrt chain folded    :     109.2 us  bit-exact vs current: True
+mhc finalize T32 C64               64-wide mask          :     168.1 us  bit-exact vs current: True
+2026-10-17 02:55:03.579 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T32 C64               moreh + fold + 64 mask: error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+    current                 : vs float64 signed mean rel err -1.47e-07, max |rel err| 1.49e-04
+    rsqrt chain folded      : vs float64 signed mean rel err -1.47e-07, max |rel err| 1.49e-04
+    64-wide mask            : vs float64 signed mean rel err -1.47e-07, max |rel err| 1.49e-04
+mhc finalize T2048 C16             current               :     266.2 us
+mhc finalize T2048 C16             chunk sum only (sum)  :     235.1 us  bit-exact vs current: False (shape (1, 1, 2048, 64) vs (1, 1, 2048, 32))
+2026-10-17 02:55:03.628 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T2048 C16             chunk sum only (moreh): error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+2026-10-17 02:55:03.629 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T2048 C16             moreh_sum             : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+mhc finalize T2048 C16             rsqrt chain folded    :     254.7 us  bit-exact vs current: True
+mhc finalize T2048 C16             64-wide mask          :     267.1 us  bit-exact vs current: True
+2026-10-17 02:55:03.642 | critical |          Always | TT_FATAL: moreh_sum input only supports specific data types. [BFLOAT16, INT32]  (assert.hpp:104)
+mhc finalize T2048 C16             moreh + fold + 64 mask: error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/moreh/moreh_helper_functions.cpp:285: dtype_supported
+    current                 : vs float64 signed mean rel err -2.44e-08, max |rel err| 7.59e-04
+    rsqrt chain folded      : vs float64 signed mean rel err -2.44e-08, max |rel err| 7.59e-04
+    64-wide mask            : vs float64 signed mean rel err -2.44e-08, max |rel err| 7.59e-04
+=== relayout
+kda o relayout B1                  reshape (TILE)        :       9.2 us
+kda o relayout B1                  untilize+view+tilize  :      45.1 us  bit-exact vs reshape (TILE): True
+kda o relayout B32                 reshape (TILE)        :     128.9 us
+kda o relayout B32                 untilize+view+tilize  :      56.1 us  bit-exact vs reshape (TILE): True
+split  H64 rows 1                  reshape+permute       :      25.0 us
+split  H64 rows 1                  row-major permute     :      39.8 us  bit-exact vs reshape+permute: True
+concat H64 rows 1                  permute+reshape       :      15.1 us
+concat H64 rows 1                  row-major permute     :      48.6 us  bit-exact vs permute+reshape: True
+concat H64 rows 1                  concat_heads x4 groups:     115.0 us  bit-exact vs permute+reshape: True
+split  H64 rows 32                 reshape+permute       :     187.0 us
+split  H64 rows 32                 row-major permute     :      52.1 us  bit-exact vs reshape+permute: True
+concat H64 rows 32                 permute+reshape       :     186.4 us
+concat H64 rows 32                 row-major permute     :      62.8 us  bit-exact vs permute+reshape: True
+concat H64 rows 32                 concat_heads x4 groups:     123.7 us  bit-exact vs permute+reshape: True
+split  H16 rows 1                  reshape+permute       :      15.5 us
+split  H16 rows 1                  row-major permute     :      28.7 us  bit-exact vs reshape+permute: True
+concat H16 rows 1                  permute+reshape       :      17.0 us
+concat H16 rows 1                  row-major permute     :      31.8 us  bit-exact vs permute+reshape: True
+concat H16 rows 1                  nlp_concat_heads      :      54.0 us  bit-exact vs permute+reshape: True
+split  H16 rows 32                 reshape+permute       :      50.0 us
+split  H16 rows 32                 row-major permute     :      40.7 us  bit-exact vs reshape+permute: True
+concat H16 rows 32                 permute+reshape       :      49.9 us
+concat H16 rows 32                 row-major permute     :      39.1 us  bit-exact vs permute+reshape: True
+concat H16 rows 32                 nlp_concat_heads      :      54.2 us  bit-exact vs permute+reshape: True
+rms_norm B1                        interleaved           :      66.6 us
+rms_norm B1                        width-sharded (32 cores):      36.4 us  bit-exact vs interleaved: False (PCC 0.9999987, max|d| 1.562e-02)
+rms_norm B1                        width-sharded (16 cores):      33.2 us  bit-exact vs interleaved: False (PCC 0.9999987, max|d| 1.562e-02)
+rms_norm B32                       interleaved           :      66.4 us
+rms_norm B32                       width-sharded (32 cores):      36.8 us  bit-exact vs interleaved: False (PCC 0.9999993, max|d| 1.562e-02)
+rms_norm B32                       width-sharded (16 cores):      33.1 us  bit-exact vs interleaved: False (PCC 0.9999993, max|d| 1.562e-02)
+kda prefill qkv slice+untilize     slice + to_layout     :    1040.2 us
+=== exit code: 124 Sat Oct 17 03:25:00 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

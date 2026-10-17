@@ -9,3 +9,47 @@
   (decode batch 1) -> validation on the padded shape, per-row-count diagonal masks created at setup.
 - 2026-10-15 Tracy before / after (`scripts/s2_tracy.sh`), table in README. Decode is now weight-bound.
 - 2026-10-15 Bug found by the fused suite: mhc_mix finalize multiplied the Gram tile by the diagonal mask; the Gram tile also mixes the activation's padding rows (non-finite leftovers after mhc_post in the DSA layer) -> 0 * inf = NaN in the row sum (dsa_moe decode PCC 0.44). Bisected with tools/fused_bisect.py (mhc_mix off: pass). Fix: ttnn.where(mask, gram, 0) select; dsa_moe decode >= 0.99992.
+- 2026-10-16 Stage review #1 (`artifacts/stage2_review_1.md`): more-work-needed. Fusing items a-e and the stale DSA
+  Tracy taken up here; the `recurrent_decode` TF32 state item and the mHC kernels went to the stage-1 review #4 work.
+- 2026-10-16 `tools/fusing_probe.py` (`s2r_fusing_probe{,2,3}.log`): DSA head split / concat ops win at prefill rows
+  (9966 -> 392 us split, 7410 -> 1043 us concat at 2048 rows), lose at one tile of decode rows (single core). Bug on the
+  way: `nlp_concat_heads` at 64 heads x 256 overflows L1 (2.2 MB) -> groups of 16 heads. Packed dense MLP + folded
+  activations 17.2 -> 8.2 ms at 2048 rows; MoE activation fold 1307 -> 665 us at 32 users; KDA decode conv / shift /
+  gate folds. Rejected by measurement: `sigmoid_gated_rms_norm` at decode (permute costs more), main's packed
+  `qkv_causal_conv1d_silu` (663 vs 270 us). Anomaly: a multiply with a sigmoid input activation on a bf16 operand and
+  an fp32 operand gave PCC 0.91; with the gate typecast to fp32 first it is exact (used).
+- 2026-10-16 Flags `dsa_heads_op`, `mlp_act_fold`, `kda_decode_fold` (default on). `tools/fused_flag_check.py`: L0 / L3
+  / L4 prefill + decode bit-identical (`s2r_flag_check.log`).
+- 2026-10-16 Fused Tracy re-capture (`s2r_tracy_dsa.log`, `s2r_tracy_prefill_redo.log`): the 20 ms DSA replay gaps do
+  not reproduce (0.28 ms). Mistake: gzipping the new `ops.csv` files lost the raw prefill CSVs (tracked as plain
+  files); the six prefill cases were captured again.
+- 2026-10-16 21:28 fp32-exact kernels swapped in (stage-1 review #4, b57f7da0b59): `recurrent_decode`, `mhc_post`,
+  `mhc_pre`, `mhc_split_sinkhorn`, `mhc_mix`. The six fused decode captures of 21:15-21:27 ran on an intermediate
+  Sinkhorn kernel (60 us instead of 89.5 us); recaptured in review #2.
+- 2026-10-17 00:38 Fused suite on the final kernels (`s2_fused_suite5.log`): 43 / 43. New near-tie token L3 slot 2
+  pos 38 (delta PCC 0.98296, HF margin 7.97e-4).
+- 2026-10-17 Stage review #2 (`artifacts/stage2_review_2.md`): more-work-needed (five fusing items, fresh decode Tracy,
+  watcher correctness run, docs, mhc_mix padded-row tests).
+- 2026-10-17 `fusing_probe.py finalize / relayout` (`s2r2_probe.log`): row-major relayout at 32 decode rows (KDA o
+  129 -> 56 us, DSA split / concat 187 / 186 -> 52 / 63 us), finalize scale-chain fold (3 ops fewer), sharded RMSNorm
+  66 -> 33 us (handed to stage 3/4: sharding, not bit-identical). Rejected: `moreh_sum` (no fp32), grouped
+  `nlp_concat_heads` at decode rows (124 us), `untilize_with_unpadding` for the KDA prefill qkv (hung the device; the
+  probe hit its 1800 s timeout and the board was reset).
+- 2026-10-17 `tests/test_mhc_mix.py::test_mixes_split_k_padded_rows` (T 1 / 8, NaN / inf padding rows through
+  `_mixes_split_k`): pass, bit-identical to zero padding (`s2r2_mhc_mix.log`). Signed sum-of-squares error fused
+  -2.3e-4 vs functional composite -5e-8.
+- 2026-10-17 `tools/route_flip_check.py --fused` (`flip_tt_s1302_fused.log`): L3 slot 2 pos 38 picks HF's 9th expert
+  111 instead of 55 (margin 7.97e-4): a router flip under the near-tie policy. The functional path routes it as HF.
+- 2026-10-17 Flags `decode_rm_relayout`, `mhc_finalize_fold` (default on). `fused_flag_check.py` extended to 1 eager + 4
+  traced decode steps at B 32 and B 1.
+- 2026-10-17 Layer-level check (`evidence/s2r2_flag_check.log`): every rewrite off vs on, L0 / L3 / L4, B 32 and B 1,
+  prefill + 1 eager + 4 traced decode steps: 36 / 36 bit-identical. Fused suite on the final code
+  (`s2_fused_suite6.log`): 43 / 43, PCCs equal to suite5.
+- 2026-10-17 Watcher correctness run on the final code (`watcher_correctness/suite`, reviewer's `-k`): 17 passed, 0
+  suspicious lines in 65,193; op tests under the watcher (`watcher_correctness/ops`): 37 passed, 0 suspicious.
+- 2026-10-17 Tracy re-capture on the final kernels (`evidence/s2r2_tracy.log`): 12 fused + 8 functional KDA cases.
+  Found: the worktree's uncommitted stage-6 MoE row split (`GLM53_MOE_SORTED_ROWS=1024`) adds ~11 ms to the 2048-row
+  MoE prefill cases; the fused MoE 2048 cases were captured again without it (`tracy_nosplit/`). Kernel-cost table
+  and the fp32-kernel reason added to the README. One-user decode is 19-39 us slower than the stage-2 TF32 capture.
+- 2026-10-17 Rejected with measurement: the KDA prefill qkv `untilize_out` matmul (3.8 MB L1 per core,
+  `evidence/s2r2_probe2.log`).

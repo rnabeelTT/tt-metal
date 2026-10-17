@@ -7,8 +7,11 @@ Rewrites (doc/fused_decoder/README.md has the before / after op tables and measu
   * mHC pre-collapse h = sum_i pre_i * X_i: one ttnn.experimental.deepseek_prefill.mhc_pre call (dedicated op, written
     for this port) instead of n stream slices + n coefficient-column slices + n multiply/addcmul; its bf16 output feeds
     the RMSNorm directly (the fp32 -> bf16 typecast folds into the op).
-  * mHC projection scale rsqrt(mean(X^2) + eps): ttnn.rms_norm_pre_all_gather (one pass over X giving sum(X^2)) instead
-    of multiply + mean over the 16384-wide stream.
+  * mHC mix projection and scale (x @ fn^T) * rsqrt(mean(X^2) + eps): one ttnn.experimental.deepseek_prefill.mhc_mix
+    call (dedicated op, written for this port): split-K partials of the projection and of the per-row-tile Gram matrix
+    over many cores (fp32-exact operand split), then a short finalize (sum over chunks, Gram diagonals, rsqrt). This
+    replaces a single-core matmul and a single-core multiply + mean. (rms_norm_pre_all_gather for the sum of squares is
+    off: its CBs scale with the 16384-wide row; FusedFlags.mhc_sumsq_op.)
   * KDA decode recurrence: one ttnn.experimental.kda.recurrent_decode call (dedicated op, written for this port from
     ttnn.transformer.fused_recurrent_gated_delta_rule with a per-key-channel decay) instead of the q / k / v slices,
     two reshape + L2-norm pairs and the 12-op fp32 recurrence over [B, H, K, V]; it reads the head rows straight out of
@@ -17,6 +20,9 @@ Rewrites (doc/fused_decoder/README.md has the before / after op tables and measu
     DSA head split / concat on nlp_create_qkv_heads / nlp_concat_heads at prefill rows (dsa_heads_op); dense MLP gate /
     up packed and the swiglu_limit clamps + SiLU folded into one multiply, also on the routed experts (mlp_act_fold);
     KDA decode conv on addcmul, in-place history shift and the output gate in [B, H*V] order (kda_decode_fold).
+  * Stage-2 review #2 (bit-identical): 32-user decode relayouts (KDA o, DSA head split / concat) through row-major
+    (decode_rm_relayout); the mhc_mix finalize's scale chain as input activations of its final multiply
+    (mhc_finalize_fold).
 """
 
 from __future__ import annotations
@@ -42,6 +48,8 @@ class FusedFlags:
         dsa_heads_op: bool = True,
         mlp_act_fold: bool = True,
         kda_decode_fold: bool = True,
+        decode_rm_relayout: bool = True,
+        mhc_finalize_fold: bool = True,
     ):
         self.mhc_pre_op = mhc_pre_op
         # mhc_sumsq_op: rms_norm_pre_all_gather on the 16384-wide fp32 stream sizes its CBs by the row width (8.5 MB
@@ -61,6 +69,13 @@ class FusedFlags:
         # fp32 tap constants; conv history shifted by `where` straight into the history buffers (no copies); output gate
         # applied in the [B, H*V] order with the sigmoid as an input activation of the multiply (no gate relayout)
         self.kda_decode_fold = kda_decode_fold
+        # decode_rm_relayout (review #2, bit-identical): tile-row relayouts of a 32-user decode step through row-major
+        # (untilize, view / permute, tilize): KDA o [B*H, V] -> [B, H*V] 129 -> 56 us; DSA head split / concat
+        # 187 / 186 -> 52 / 63 us (H 64)
+        self.decode_rm_relayout = decode_rm_relayout
+        # mhc_finalize_fold (review #2, bit-identical): the mhc_mix finalize's scale chain (x 1/K, + eps, rsqrt) as input
+        # activations of the final multiply (3 ops fewer per mHC)
+        self.mhc_finalize_fold = mhc_finalize_fold
 
 
 def mix_chunks(T: int, k_tiles: int) -> int:
@@ -135,6 +150,20 @@ class FusedHyperConnection(HyperConnection):
         # leftovers; 0 * inf would poison the row sum
         ss = ttnn.sum(ttnn.where(self._mask(T), gram, 0.0, memory_config=DRAM), dim=-1, keepdim=True)  # [1,1,T,1]
         ttnn.deallocate(gram)
+        if self.flags.mhc_finalize_fold:
+            out = ttnn.multiply(
+                mixes,
+                ss,
+                input_tensor_b_activations=[
+                    ttnn.UnaryWithParam((ttnn.UnaryOpType.MUL_UNARY_SFPU, 1.0 / K)),
+                    ttnn.UnaryWithParam((ttnn.UnaryOpType.ADD_UNARY_SFPU, self.cfg.norm_eps)),
+                    ttnn.UnaryWithParam(ttnn.UnaryOpType.RSQRT),
+                ],
+                memory_config=DRAM,
+            )
+            ttnn.deallocate(ss)
+            ttnn.deallocate(mixes)
+            return out
         scale = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss, 1.0 / K), self.cfg.norm_eps), memory_config=DRAM)
         ttnn.deallocate(ss)
         out = ttnn.multiply(mixes, scale, memory_config=DRAM)
@@ -268,9 +297,15 @@ class FusedGlmKDA(GlmKDA):
         )
         if fold:
             og = ttnn.typecast(ogate, ttnn.float32)
-            o = ttnn.multiply(
-                ttnn.reshape(o, (1, 1, B, H * V)), og, input_tensor_b_activations=self.sigmoid_act, memory_config=DRAM
-            )
+            if self.flags.decode_rm_relayout and B % 32 == 0:
+                # [B*H, V] -> [B, H*V] through row-major: 129 -> 56 us at B 32 (one tile-row view; bit-identical)
+                rm = ttnn.reshape(ttnn.to_layout(o, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM), (1, 1, B, H * V))
+                ttnn.deallocate(o)
+                o2 = ttnn.to_layout(rm, ttnn.TILE_LAYOUT, memory_config=DRAM)
+                ttnn.deallocate(rm)
+            else:
+                o2 = ttnn.reshape(o, (1, 1, B, H * V))
+            o = ttnn.multiply(o2, og, input_tensor_b_activations=self.sigmoid_act, memory_config=DRAM)
             ttnn.deallocate(og)
             ttnn.deallocate(ogate)
             o = ttnn.typecast(o, ttnn.bfloat16)
@@ -296,6 +331,7 @@ class FusedDecoder(FunctionalDecoder):
             dec.attn = FusedGlmKDA(dec.attn, dec.flags)
         else:
             dec.attn.heads_op = dec.flags.dsa_heads_op
+            dec.attn.decode_rm_relayout = dec.flags.decode_rm_relayout
         if dec.flags.mlp_act_fold:
             if dec.mlp_kind == "dense":
                 dec.mlp.pack()

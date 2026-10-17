@@ -1,0 +1,54 @@
+=== start Fri Oct 16 06:48:54 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe
+2026-10-16 18:48:55.933 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== heads
+split  H64 D256 rows 1             reshape+permute       :      26.8 us  PCC vs torch 1.0000000
+split  H64 D256 rows 1             nlp_create_qkv_heads  :     208.7 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H64 D256 rows 1             permute+reshape       :      15.4 us  PCC vs torch 1.0000000
+2026-10-16 18:48:57.485 | critical |          Always | TT_THROW: Statically allocated dataflow buffers on core range [0-0 - 0-0] grow to 2208768 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+concat H64 D256 rows 1             nlp_concat_heads      : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/dataflow_buffer/dataflow_buffer.cpp:2608: tt::exception
+split  H64 D256 rows 32            reshape+permute       :     187.2 us  PCC vs torch 1.0000000
+split  H64 D256 rows 32            nlp_create_qkv_heads  :     209.3 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H64 D256 rows 32            permute+reshape       :     186.4 us  PCC vs torch 1.0000000
+2026-10-16 18:48:57.554 | critical |          Always | TT_THROW: Statically allocated dataflow buffers on core range [0-0 - 0-0] grow to 2208768 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+concat H64 D256 rows 32            nlp_concat_heads      : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/dataflow_buffer/dataflow_buffer.cpp:2608: tt::exception
+split  H64 D256 rows 2048          reshape+permute       :    9965.5 us  PCC vs torch 1.0000000
+split  H64 D256 rows 2048          nlp_create_qkv_heads  :     390.8 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H64 D256 rows 2048          permute+reshape       :    7424.9 us  PCC vs torch 1.0000000
+2026-10-16 18:49:00.335 | critical |          Always | TT_THROW: Statically allocated dataflow buffers on core range [0-0 - 6-3] grow to 2208768 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+concat H64 D256 rows 2048          nlp_concat_heads      : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/dataflow_buffer/dataflow_buffer.cpp:2608: tt::exception
+split  H16 D256 rows 1             reshape+permute       :      14.2 us  PCC vs torch 1.0000000
+split  H16 D256 rows 1             nlp_create_qkv_heads  :      53.2 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H16 D256 rows 1             permute+reshape       :      14.0 us  PCC vs torch 1.0000000
+concat H16 D256 rows 1             nlp_concat_heads      :      53.7 us  PCC vs torch 1.0000000  bit-exact vs permute+reshape: True
+split  H16 D256 rows 32            reshape+permute       :      50.0 us  PCC vs torch 1.0000000
+split  H16 D256 rows 32            nlp_create_qkv_heads  :      53.1 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H16 D256 rows 32            permute+reshape       :      49.8 us  PCC vs torch 1.0000000
+concat H16 D256 rows 32            nlp_concat_heads      :      53.8 us  PCC vs torch 1.0000000  bit-exact vs permute+reshape: True
+split  H16 D256 rows 2048          reshape+permute       :    2231.5 us  PCC vs torch 1.0000000
+split  H16 D256 rows 2048          nlp_create_qkv_heads  :      84.1 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+concat H16 D256 rows 2048          permute+reshape       :    2042.5 us  PCC vs torch 1.0000000
+concat H16 D256 rows 2048          nlp_concat_heads      :      85.4 us  PCC vs torch 1.0000000  bit-exact vs permute+reshape: True
+split  H32 D128 rows 2048          reshape+permute       :    2175.8 us  PCC vs torch 1.0000000
+split  H32 D128 rows 2048          nlp_create_qkv_heads  :      84.3 us  PCC vs torch 1.0000000  bit-exact vs reshape+permute: True
+=== mlp
+mlp rows 32                        2 linear (alone)      :     307.6 us  PCC vs torch 0.5030332
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tools/fusing_probe.py", line 339, in <module>
+    main()
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tools/fusing_probe.py", line 333, in main
+    SECTIONS[s](mesh, g)
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tools/fusing_probe.py", line 165, in mlp
+    _run(
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tools/fusing_probe.py", line 58, in _run
+    msg += f"  PCC vs torch {pcc(out, ref):.7f}"
+                             ^^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 30, in pcc
+    return float((a @ b) / (a.norm() * b.norm() + 1e-30))
+                  ~~^~~
+RuntimeError: inconsistent tensor size, expected tensor [786432] and src [393216] to have the same number of elements, but got 786432 and 393216 elements respectively
+=== exit code: 1 Fri Oct 16 06:49:04 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

@@ -532,7 +532,264 @@ def kda2(mesh, g):
             print(f"kda packed conv B{B}: error {str(e).splitlines()[0][:160]}", flush=True)
 
 
+def _ckc(mesh):
+    return ttnn.init_device_compute_kernel_config(
+        mesh.arch(),
+        math_fidelity=ttnn.MathFidelity.HiFi4,
+        math_approx_mode=False,
+        fp32_dest_acc_en=True,
+        packer_l1_acc=False,
+    )
+
+
+def _err(out, ref):
+    """signed mean and max |.| of the relative error against a float64 reference."""
+    d = (out.double() - ref.double()) / ref.double().abs().clamp_min(1e-30)
+    return f"signed mean rel err {d.mean().item():+.2e}, max |rel err| {d.abs().max().item():.2e}"
+
+
+def finalize(mesh, g):
+    """Review #2 P1-a: the mhc_mix finalize (sum over the K chunks, Gram diagonals, rsqrt scale) on the op's partials
+    [1, C, T, 64] fp32: current graph vs moreh_sum over the chunks vs the rsqrt chain as input activations of the final
+    multiply."""
+    from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import mix_chunks
+
+    K, eps = 16384, 1e-6
+    ckc = _ckc(mesh)
+    for T in (1, 32, 2048):
+        Tp = -(-T // 32) * 32
+        C = mix_chunks(Tp, K // 32)
+        part = torch.randn(1, C, Tp, 64, generator=g, dtype=torch.float64) * 0.3
+        part[..., 32:] = part[..., 32:].abs() * 40  # Gram partials: positive diagonal-scale magnitudes
+        part = part[:, :, :T].float()
+        mask = torch.zeros(1, 1, T, 32)
+        mask[0, 0, torch.arange(T), torch.arange(T) % 32] = 1.0
+        mask64 = torch.cat([torch.zeros(1, 1, T, 32), mask], dim=-1)
+        dev = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM)
+        tp_, tm, tm64 = dev(part), dev(mask), dev(mask64)
+        tot = part.double().sum(1, keepdim=True)
+        ss = (tot[..., 32:] * mask.double()).sum(-1, keepdim=True)
+        ref = tot[..., :32] * torch.rsqrt(ss / K + eps)
+        act = [
+            ttnn.UnaryWithParam((ttnn.UnaryOpType.MUL_UNARY_SFPU, 1.0 / K)),
+            ttnn.UnaryWithParam((ttnn.UnaryOpType.ADD_UNARY_SFPU, eps)),
+            ttnn.UnaryWithParam(ttnn.UnaryOpType.RSQRT),
+        ]
+
+        def tail(tot_, fold, mask_mode):
+            mixes = ttnn.slice(tot_, (0, 0, 0, 0), (1, 1, T, 32))
+            if mask_mode == "64":
+                ss_ = ttnn.sum(ttnn.where(tm64, tot_, 0.0, memory_config=DRAM), dim=-1, keepdim=True)
+            else:
+                gram = ttnn.slice(tot_, (0, 0, 0, 32), (1, 1, T, 64))
+                ss_ = ttnn.sum(ttnn.where(tm, gram, 0.0, memory_config=DRAM), dim=-1, keepdim=True)
+            if fold:
+                return ttnn.multiply(mixes, ss_, input_tensor_b_activations=act, memory_config=DRAM)
+            sc = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss_, 1.0 / K), eps), memory_config=DRAM)
+            return ttnn.multiply(mixes, sc, memory_config=DRAM)
+
+        sum1 = lambda: ttnn.sum(tp_, dim=1, keepdim=True, memory_config=DRAM)
+        msum = lambda: ttnn.moreh_sum(tp_, dim=1, keepdim=True, memory_config=DRAM, compute_kernel_config=ckc)
+        outs = _run(
+            mesh,
+            f"mhc finalize T{T} C{C}",
+            {
+                "current": lambda: tail(sum1(), False, "32"),
+                "chunk sum only (sum)": sum1,
+                "chunk sum only (moreh)": msum,
+                "moreh_sum": lambda: tail(msum(), False, "32"),
+                "rsqrt chain folded": lambda: tail(sum1(), True, "32"),
+                "64-wide mask": lambda: tail(sum1(), False, "64"),
+                "moreh + fold + 64 mask": lambda: tail(msum(), True, "64"),
+            },
+            50 if T < 2048 else 20,
+            exact_vs="current",
+        )
+        for k_, o_ in outs.items():
+            if o_.shape[-1] == 32:
+                print(f"    {k_:24}: vs float64 {_err(o_, ref.float())}", flush=True)
+
+
+def relayout(mesh, g):
+    """Review #2 P1-b / P1-e / P1-c / P1-d: tile-row relayouts at decode rows, single-core RMSNorm, KDA prefill
+    slice + untilize."""
+    from models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder import sharded_rms_norm
+
+    ckc = _ckc(mesh)
+    RM, TL = ttnn.ROW_MAJOR_LAYOUT, ttnn.TILE_LAYOUT
+    # (b) KDA o [1,1,B*H,V] fp32 -> [1,1,B,H*V]
+    H, V = 64, 128
+    for B in (1, 32):
+        o = torch.randn(1, 1, B * H, V, generator=g)
+        to = ttnn.from_torch(o, dtype=ttnn.float32, layout=TL, device=mesh, memory_config=DRAM)
+        _run(
+            mesh,
+            f"kda o relayout B{B}",
+            {
+                "reshape (TILE)": lambda: ttnn.reshape(to, (1, 1, B, H * V)),
+                "untilize+view+tilize": lambda: ttnn.to_layout(
+                    ttnn.reshape(ttnn.to_layout(to, RM, memory_config=DRAM), (1, 1, B, H * V)), TL, memory_config=DRAM
+                ),
+            },
+            50,
+            exact_vs="reshape (TILE)",
+        )
+    # (e) DSA decode head split / concat at rows 1 and 32: grouped concat, row-major permute
+    D = 256
+    for Hh in (64, 16):
+        for rows in (1, 32):
+            q = torch.randn(1, 1, rows, Hh * D, generator=g).bfloat16()
+            tq = ttnn.from_torch(q, dtype=ttnn.bfloat16, layout=TL, device=mesh, memory_config=DRAM)
+            _run(
+                mesh,
+                f"split  H{Hh} rows {rows}",
+                {
+                    "reshape+permute": lambda: ttnn.permute(
+                        ttnn.reshape(tq, (1, rows, Hh, D)), (0, 2, 1, 3), memory_config=DRAM
+                    ),
+                    "row-major permute": lambda: ttnn.to_layout(
+                        ttnn.permute(
+                            ttnn.reshape(ttnn.to_layout(tq, RM, memory_config=DRAM), (1, rows, Hh, D)),
+                            (0, 2, 1, 3),
+                            memory_config=DRAM,
+                        ),
+                        TL,
+                        memory_config=DRAM,
+                    ),
+                },
+                50,
+                exact_vs="reshape+permute",
+            )
+            o = torch.randn(1, Hh, rows, D, generator=g).bfloat16()
+            to = ttnn.from_torch(o, dtype=ttnn.bfloat16, layout=TL, device=mesh, memory_config=DRAM)
+            v = {
+                "permute+reshape": lambda: ttnn.reshape(
+                    ttnn.permute(to, (0, 2, 1, 3), memory_config=DRAM), (1, 1, rows, Hh * D)
+                ),
+                "row-major permute": lambda: ttnn.to_layout(
+                    ttnn.reshape(
+                        ttnn.permute(ttnn.to_layout(to, RM, memory_config=DRAM), (0, 2, 1, 3), memory_config=DRAM),
+                        (1, 1, rows, Hh * D),
+                    ),
+                    TL,
+                    memory_config=DRAM,
+                ),
+            }
+            if Hh > 16:
+                v["concat_heads x4 groups"] = lambda: _concat_grouped(to, rows, Hh, D, 4)
+            else:
+                v["nlp_concat_heads"] = lambda: ttnn.experimental.nlp_concat_heads(to, memory_config=DRAM)
+            _run(mesh, f"concat H{Hh} rows {rows}", v, 50, exact_vs="permute+reshape")
+    # (c) RMSNorm of the mhc_pre output [1,1,B,4096] bf16: interleaved (one core per tile row) vs width-sharded
+    w = ttnn.from_torch(
+        (1 + 0.1 * torch.randn(1, 1, 1, 4096, generator=g)).bfloat16().reshape(1, 1, 128, 32),
+        dtype=ttnn.bfloat16,
+        layout=RM,
+        device=mesh,
+    )
+    for B in (1, 32):
+        x = torch.randn(1, 1, B, 4096, generator=g).bfloat16()
+        tx = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=TL, device=mesh, memory_config=DRAM)
+        _run(
+            mesh,
+            f"rms_norm B{B}",
+            {
+                "interleaved": lambda: ttnn.rms_norm(
+                    tx, epsilon=1e-5, weight=w, memory_config=DRAM, compute_kernel_config=ckc
+                ),
+                "width-sharded (32 cores)": lambda: sharded_rms_norm(tx, w, 1e-5, ckc),
+                "width-sharded (16 cores)": lambda: sharded_rms_norm(tx, w, 1e-5, ckc, max_cores=16),
+            },
+            50,
+            exact_vs="interleaved",
+        )
+    # (d) KDA prefill: qkv columns [0, 24576) of the [1, T, 32960] projection, row-major for qkv_causal_conv1d_silu
+    T, P, W = 2048, 32960, 24576
+    pr = torch.randn(1, T, P, generator=g).bfloat16()
+    tpr = ttnn.from_torch(pr, dtype=ttnn.bfloat16, layout=TL, device=mesh, memory_config=DRAM)
+    _run(
+        mesh,
+        "kda prefill qkv slice+untilize",
+        {
+            "slice + to_layout": lambda: ttnn.to_layout(
+                ttnn.slice(tpr, (0, 0, 0), (1, T, W), memory_config=DRAM), RM, memory_config=DRAM
+            ),
+            "untilize_with_unpadding": lambda: ttnn.untilize_with_unpadding(
+                tpr, output_tensor_end=(0, T - 1, W - 1), memory_config=DRAM
+            ),
+        },
+        20,
+        exact_vs="slice + to_layout",
+    )
+
+
+def kdaprefill(mesh, g):
+    """Review #2 P1-d, adapted retry: the KDA prefill qkv columns straight out of a narrower matmul with `untilize_out`
+    (row-major output for qkv_causal_conv1d_silu) + a second matmul for the other columns, against the fused projection
+    + slice + untilize."""
+    T, Hd, P, W = 2048, 4096, 32960, 24576
+    ckc = ttnn.init_device_compute_kernel_config(
+        mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=True, packer_l1_acc=True
+    )
+    grid = mesh.compute_with_storage_grid_size()
+    x = (torch.randn(1, 1, T, Hd, generator=g) * 0.05).bfloat16()
+    w = (torch.randn(Hd, P, generator=g) * 0.02).bfloat16()
+    up = lambda t, dt: ttnn.from_torch(t, dtype=dt, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM)
+    tx, tw = up(x, ttnn.bfloat16), up(w, ttnn.bfloat8_b)
+    tq, tr = up(w[:, :W], ttnn.bfloat8_b), up(w[:, W:], ttnn.bfloat8_b)
+    lin = lambda a, b, **kw: ttnn.linear(a, b, compute_kernel_config=ckc, memory_config=DRAM, **kw)
+
+    def cur():
+        pr = lin(tx, tw)
+        q = ttnn.to_layout(
+            ttnn.slice(pr, (0, 0, 0, 0), (1, 1, T, W), memory_config=DRAM), ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM
+        )
+        return q
+
+    variants = {"fused proj + slice + untilize": cur, "fused proj alone": lambda: lin(tx, tw)}
+    Nt = W // 32
+    for pn, sw in ((8, 4), (8, 8), (7, 7)):
+        if Nt % pn and pn != 7:
+            continue
+        for kind in ("1d", "reuse"):
+            try:
+                if kind == "1d":
+                    pc = ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
+                        compute_with_storage_grid_size=(grid.x, grid.y),
+                        in0_block_w=2,
+                        out_subblock_h=1,
+                        out_subblock_w=sw,
+                        per_core_M=T // 32,
+                        per_core_N=pn,
+                        fuse_batch=True,
+                        fused_activation=None,
+                        mcast_in0=True,
+                        untilize_out=True,
+                    )
+                else:
+                    pc = ttnn.MatmulMultiCoreReuseProgramConfig(
+                        compute_with_storage_grid_size=(grid.x, grid.y),
+                        in0_block_w=2,
+                        out_subblock_h=1,
+                        out_subblock_w=sw,
+                        per_core_M=T // 32,
+                        per_core_N=pn,
+                        untilize_out=True,
+                    )
+            except Exception as e:  # noqa: BLE001
+                print(f"kda prefill {kind} pn {pn} sw {sw}: config error {str(e).splitlines()[0][:120]}", flush=True)
+                continue
+            variants[f"qkv untilize_out {kind} N{pn}/{sw} (+rest)"] = lambda pc=pc: (
+                lin(tx, tr),
+                lin(tx, tq, program_config=pc),
+            )[1]
+    _run(mesh, "kda prefill 2048 qkv", variants, 10, exact_vs="fused proj + slice + untilize")
+
+
 SECTIONS = {
+    "kdaprefill": kdaprefill,
+    "finalize": finalize,
+    "relayout": relayout,
     "kda2": kda2,
     "heads": heads,
     "heads2": heads2,

@@ -1,0 +1,63 @@
+=== start Fri Oct 16 07:21:39 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.fusing_probe heads2 mlp moe kdanorm kdaconv
+2026-10-16 19:21:41.225 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+=== heads2
+split  H64 D256 rows 64            reshape+permute       :     278.3 us
+split  H64 D256 rows 64            nlp_create_qkv_heads  :     211.8 us  bit-exact vs reshape+permute: True
+concat H64 D256 rows 64            permute+reshape       :     284.2 us
+concat H64 D256 rows 64            concat_heads x2 groups:     133.7 us  bit-exact vs permute+reshape: True
+concat H64 D256 rows 64            concat_heads x4 groups:     112.5 us  bit-exact vs permute+reshape: True
+split  H64 D256 rows 128           reshape+permute       :     532.3 us
+split  H64 D256 rows 128           nlp_create_qkv_heads  :     214.8 us  bit-exact vs reshape+permute: True
+concat H64 D256 rows 128           permute+reshape       :     548.2 us
+concat H64 D256 rows 128           concat_heads x2 groups:     158.0 us  bit-exact vs permute+reshape: True
+concat H64 D256 rows 128           concat_heads x4 groups:     115.4 us  bit-exact vs permute+reshape: True
+split  H64 D256 rows 2048          reshape+permute       :    9971.3 us
+split  H64 D256 rows 2048          nlp_create_qkv_heads  :     391.9 us  bit-exact vs reshape+permute: True
+concat H64 D256 rows 2048          permute+reshape       :    7410.0 us
+concat H64 D256 rows 2048          concat_heads x2 groups:    1101.2 us  bit-exact vs permute+reshape: True
+concat H64 D256 rows 2048          concat_heads x4 groups:    1042.6 us  bit-exact vs permute+reshape: True
+split  H16 D256 rows 64            reshape+permute       :      98.2 us
+split  H16 D256 rows 64            nlp_create_qkv_heads  :      53.5 us  bit-exact vs reshape+permute: True
+concat H16 D256 rows 64            permute+reshape       :      93.6 us
+concat H16 D256 rows 64            nlp_concat_heads      :      53.1 us  bit-exact vs permute+reshape: True
+split  H16 D256 rows 128           reshape+permute       :     138.4 us
+split  H16 D256 rows 128           nlp_create_qkv_heads  :      53.7 us  bit-exact vs reshape+permute: True
+concat H16 D256 rows 128           permute+reshape       :     191.2 us
+concat H16 D256 rows 128           nlp_concat_heads      :      54.3 us  bit-exact vs permute+reshape: True
+=== mlp
+mlp rows 32                        2 linear (alone)      :     306.9 us  PCC vs torch 0.5019921
+mlp rows 32                        packed linear (alone) :     313.5 us
+mlp rows 32                        current               :     334.3 us  PCC vs torch 0.9999944
+mlp rows 32                        fused-act multiply    :     320.5 us  PCC vs torch 0.9999944  bit-exact vs current: True
+mlp rows 32                        packed + fused-act    :     338.1 us  PCC vs torch 0.9999944  bit-exact vs current: True
+mlp rows 2048                      2 linear (alone)      :   15843.0 us  PCC vs torch 0.5016383
+mlp rows 2048                      packed linear (alone) :    7190.1 us
+mlp rows 2048                      current               :   17194.0 us  PCC vs torch 0.9999944
+mlp rows 2048                      fused-act multiply    :   16378.0 us  PCC vs torch 0.9999944  bit-exact vs current: True
+mlp rows 2048                      packed + fused-act    :    8182.3 us  PCC vs torch 0.9999944  bit-exact vs current: True
+=== moe
+moe act decode 32 users G195       current               :    1307.3 us  PCC vs torch 0.9999963
+moe act decode 32 users G195       slices + fused-act    :     664.6 us  PCC vs torch 0.9999963  bit-exact vs current: True
+moe act prefill 2048 G699          current               :    4635.4 us  PCC vs torch 0.9999963
+moe act prefill 2048 G699          slices + fused-act    :    2352.0 us  PCC vs torch 0.9999963  bit-exact vs current: True
+=== kdanorm
+kda gated norm B1                  current               :      71.4 us  PCC vs torch 0.9999984
+kda gated norm B1                  gate fused in multiply:      39.5 us  PCC vs torch 0.9691205  bit-exact vs current: False (PCC 0.9691159, max|d| 1.797e+00)
+2026-10-16 19:21:54.011 | critical |          Always | TT_FATAL: sigmoid_gated_rms_norm: sequence must be positive and tile aligned (assert.hpp:104)
+kda gated norm B1                  permute + gated op    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/kda/sigmoid_gated_rms_norm/device/sigmoid_gated_rms_norm_device_opera
+kda gated norm B32                 current               :     249.9 us  PCC vs torch 0.9999984
+kda gated norm B32                 gate fused in multiply:     151.2 us  PCC vs torch 0.9133610  bit-exact vs current: False (PCC 0.9133597, max|d| 3.272e+00)
+kda gated norm B32                 permute + gated op    :     274.1 us  PCC vs torch 0.9999983  bit-exact vs current: False (shape (1, 32, 8192) vs (1, 1, 32, 8192))
+=== kdaconv
+kda conv B1                        current               :     187.6 us  PCC vs torch 1.0000000
+2026-10-16 19:21:55.134 | critical |          Always | TT_FATAL: Addcmul TTT requires all input tensors to have the same dtype. Got input_a=DataType::FLOAT32, input_b=DataType::BFLOAT16, input_c=DataType::BFLOAT16 (assert.hpp:104)
+kda conv B1                        addcmul (bf16 b, c)   : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/eltwise/ternary/ternary.cpp:367: input_b.dtype() == input_a.dtype() && input_c.dty
+kda conv B1                        addcmul (fp32 b, c)   :     210.9 us  PCC vs torch 1.0000000  bit-exact vs current: True
+kda conv B32                       current               :     269.0 us  PCC vs torch 1.0000000
+2026-10-16 19:21:55.971 | critical |          Always | TT_FATAL: Addcmul TTT requires all input tensors to have the same dtype. Got input_a=DataType::FLOAT32, input_b=DataType::BFLOAT16, input_c=DataType::BFLOAT16 (assert.hpp:104)
+kda conv B32                       addcmul (bf16 b, c)   : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/eltwise/ternary/ternary.cpp:367: input_b.dtype() == input_a.dtype() && input_c.dty
+kda conv B32                       addcmul (fp32 b, c)   :     237.7 us  PCC vs torch 1.0000000  bit-exact vs current: True
+=== exit code: 0 Fri Oct 16 07:21:57 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

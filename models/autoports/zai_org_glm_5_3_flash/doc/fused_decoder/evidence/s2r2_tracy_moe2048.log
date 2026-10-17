@@ -1,0 +1,8 @@
+=== tracy test_perf_prefill[kda_moe-2048] 2026-10-17T12:05:29+00:00
+tracy test_perf_prefill[kda_moe-2048] exit=0
+PERF kda_moe prefill 2048 rows: 79.21 ms host wall (warmed)
+=== tracy test_perf_prefill[dsa_moe-2048] 2026-10-17T12:06:49+00:00
+tracy test_perf_prefill[dsa_moe-2048] exit=0
+PERF dsa_moe prefill 2048 rows: 109.99 ms host wall (warmed)
+=== done 2026-10-17T12:08:08+00:00
+ALLDONE

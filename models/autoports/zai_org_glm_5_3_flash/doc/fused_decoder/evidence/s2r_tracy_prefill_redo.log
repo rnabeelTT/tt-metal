@@ -1,0 +1,20 @@
+=== tracy test_perf_prefill[dsa_moe-128] 2026-10-16T22:07:55+00:00
+tracy test_perf_prefill[dsa_moe-128] exit=0
+PERF dsa_moe prefill 128 rows: 20.70 ms host wall (warmed)
+=== tracy test_perf_prefill[dsa_moe-2048] 2026-10-16T22:09:17+00:00
+tracy test_perf_prefill[dsa_moe-2048] exit=0
+PERF dsa_moe prefill 2048 rows: 109.40 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_dense-128] 2026-10-16T22:10:40+00:00
+tracy test_perf_prefill[kda_dense-128] exit=0
+PERF kda_dense prefill 128 rows: 5.27 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_dense-2048] 2026-10-16T22:11:39+00:00
+tracy test_perf_prefill[kda_dense-2048] exit=0
+PERF kda_dense prefill 2048 rows: 31.67 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_moe-128] 2026-10-16T22:12:39+00:00
+tracy test_perf_prefill[kda_moe-128] exit=0
+PERF kda_moe prefill 128 rows: 21.87 ms host wall (warmed)
+=== tracy test_perf_prefill[kda_moe-2048] 2026-10-16T22:14:01+00:00
+tracy test_perf_prefill[kda_moe-2048] exit=0
+PERF kda_moe prefill 2048 rows: 79.37 ms host wall (warmed)
+=== done 2026-10-16T22:15:23+00:00
+ALLDONE

@@ -9,7 +9,7 @@ same cases, references and acceptance bars apply to the fused path."""
 import importlib.util
 from pathlib import Path
 
-from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import FusedDecoder
+from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import FusedDecoder, FusedFlags
 
 _spec = importlib.util.spec_from_file_location(
     "glm53_fused_decoder_suite", Path(__file__).with_name("test_functional_decoder.py")
@@ -26,4 +26,7 @@ globals().update({k: v for k, v in vars(_suite).items() if k.startswith("test_")
 
 
 def test_suite_runs_fused_decoder():
+    """The suite builds FusedDecoder with the default FusedFlags: every rewrite on except the rejected mhc_sumsq_op."""
     assert _suite.DECODER_CLS is FusedDecoder
+    flags = vars(FusedFlags())
+    assert {k for k, v in flags.items() if not v} == {"mhc_sumsq_op"}, flags

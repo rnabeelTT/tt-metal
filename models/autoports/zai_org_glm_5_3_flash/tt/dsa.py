@@ -34,6 +34,8 @@ and open-pool state are not changed.
 
 from __future__ import annotations
 
+import os
+
 import torch
 
 import ttnn
@@ -156,6 +158,7 @@ class GlmDSA(LightweightModule):
         # head split / concat with the nlp_create_qkv_heads / nlp_concat_heads data-movement ops instead of reshape +
         # permute (fused decoder; bit-identical, tools/fusing_probe.py)
         self.heads_op = False
+        self.decode_rm_relayout = False  # decode head relayouts through row-major (fused decoder; _rm_rows)
         # indexer (bf16 in the checkpoint; kept bf16)
         ix = a + "indexer."
         self.w_iq = w("iq", lambda: sd[ix + "wq_b.weight"].T, ttnn.bfloat16)  # [1536, 32*128]
@@ -297,6 +300,12 @@ class GlmDSA(LightweightModule):
         core and is slower than reshape + permute (H 64: 209 vs 187 us), so only prefill rows take them."""
         return self.heads_op and rows % 32 == 0 and rows > 32
 
+    def _rm_rows(self, rows: int) -> bool:
+        """Decode tile of users (32 rows): the head relayout goes through row-major (untilize, row-major permute, tilize)
+        instead of the tiled reshape + permute (H 64: split 187 -> 52 us, concat 186 -> 63 us; H 16: 50 -> 41 / 39 us;
+        bit-identical, tools/fusing_probe.py relayout). One row stays tiled (25 vs 40 us)."""
+        return self.decode_rm_relayout and rows == 32
+
     def _split_heads(self, t, rows: int, heads: int, dim: int):
         """[1,1,rows,heads*dim] (head-major columns) -> [1,heads,rows,dim]."""
         if self._heads_op_rows(rows):
@@ -306,6 +315,13 @@ class GlmDSA(LightweightModule):
             for e in (k, v):
                 ttnn.deallocate(e)
             return q
+        if self._rm_rows(rows):
+            rm = ttnn.reshape(ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM), (1, rows, heads, dim))
+            p = ttnn.permute(rm, (0, 2, 1, 3), memory_config=DRAM)
+            ttnn.deallocate(rm)
+            out = ttnn.to_layout(p, ttnn.TILE_LAYOUT, memory_config=DRAM)
+            ttnn.deallocate(p)
+            return out
         return ttnn.permute(ttnn.reshape(t, (1, rows, heads, dim)), (0, 2, 1, 3), memory_config=DRAM)
 
     def _concat_heads(self, t, rows: int):
@@ -326,6 +342,13 @@ class GlmDSA(LightweightModule):
             out = ttnn.concat(parts, dim=-1, memory_config=DRAM)
             for p_ in parts:
                 ttnn.deallocate(p_)
+            return out
+        if self._rm_rows(rows):
+            rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM)
+            p = ttnn.permute(rm, (0, 2, 1, 3), memory_config=DRAM)
+            ttnn.deallocate(rm)
+            out = ttnn.to_layout(ttnn.reshape(p, (1, 1, rows, self.H * self.Dv)), ttnn.TILE_LAYOUT, memory_config=DRAM)
+            ttnn.deallocate(p)
             return out
         return ttnn.reshape(ttnn.permute(t, (0, 2, 1, 3), memory_config=DRAM), (1, 1, rows, self.H * self.Dv))
 
@@ -466,8 +489,12 @@ class GlmDSA(LightweightModule):
         return ttnn.to_layout(o, ttnn.TILE_LAYOUT)
 
     def index_row_block(self, n: int) -> int:
-        """Rows per indexer block of a prefill chunk: [rows, P_alloc] bf16 scores near 128 MB (multiple of 32, divides n)."""
-        rb = max(32, min(n, (128 << 20) // (2 * self.P_alloc) // 32 * 32))
+        """Rows per indexer block of a prefill chunk: [rows, P_alloc] bf16 scores near GLM53_DSA_INDEX_BLOCK_MB (default 64
+        MB; multiple of 32, divides n). The block's scores are live ~3x (scores, tiled copy, masked) and set the sparse
+        prefill's DRAM peak (stage-6 memory: 128 MB blocks peaked 409 MiB per die at max_context 131072, the full
+        model's largest prefill transient). Every row's selection is independent of the block: bit-identical."""
+        target = int(float(os.environ.get("GLM53_DSA_INDEX_BLOCK_MB", "64")) * (1 << 20))
+        rb = max(32, min(n, target // (2 * self.P_alloc) // 32 * 32))
         while n % rb:
             rb -= 32
         return rb
