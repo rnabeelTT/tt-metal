@@ -1,0 +1,35 @@
+{
+ "tp": 4,
+ "policy": {
+  "experts": "bfp4",
+  "shared": "bfp8",
+  "dense": "bfp8",
+  "kda": "bfp8",
+  "dsa": "bfp8",
+  "embed": "bf16",
+  "lm_head": "bfp8"
+ },
+ "die_bytes": 34225520640,
+ "weights_bytes_per_die": {
+  "routed experts": 28538044416,
+  "shared experts": 280756224,
+  "dense MLP (layers 0-2)": 120324096,
+  "KDA in/out projections": 1522294784,
+  "DSA q_b / W_UK / W_UV / o_proj": 318636032,
+  "DSA q_a / kv_a (replicated)": 98041856,
+  "DSA indexer (replicated)": 164364288,
+  "router gates (replicated)": 66060288,
+  "embedding (host lookup / device)": 317194240,
+  "LM head": 168509440
+ },
+ "weights_total_bytes_per_die": 31594225664,
+ "reserve_bytes": 1073741824,
+ "free_bytes_per_die": 1557553152,
+ "kda_state_bytes_per_slot_per_die": 36904960,
+ "dsa_cache_bytes_per_token_per_die": 11968.0,
+ "max_tokens_total_1_slots": 127059,
+ "max_tokens_total_4_slots": 117808,
+ "max_tokens_total_8_slots": 105474,
+ "max_tokens_total_16_slots": 80804,
+ "max_tokens_total_32_slots": 31466
+}

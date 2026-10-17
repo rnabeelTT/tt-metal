@@ -1,0 +1,760 @@
+=== start Fri Oct 16 07:23:26 PM UTC 2026 : timeout 14400 python_env/bin/pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py -p no:cacheprovider
+2026-10-16 19:23:28.433 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 44 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:23:31.339 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 slot 5 prefill 100: delta PCC 0.999974 full PCC 0.999948 update rms ratio 0.9974
+L0 slot 5 decode pos 100: delta PCC 0.999977 full PCC 0.999952 update rms ratio 1.0011
+L0 slot 5 decode pos 101: delta PCC 0.999978 full PCC 0.999956 update rms ratio 1.0002
+L0 slot 5 decode pos 102: delta PCC 0.999974 full PCC 0.999949 update rms ratio 1.0004
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:24:01.942 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 slot 5 prefill 100: delta PCC 0.994899 full PCC 0.997537 update rms ratio 1.0077
+L3 slot 5 decode pos 100: delta PCC 0.997039 full PCC 0.998635 update rms ratio 0.9959 (HF router margin 7.8e-03)
+L3 slot 5 decode pos 101: delta PCC 0.993537 full PCC 0.996252 update rms ratio 1.0141 (HF router margin 2.1e-03)
+L3 slot 5 decode pos 102: delta PCC 0.996360 full PCC 0.998004 update rms ratio 0.9906 (HF router margin 1.5e-02)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:24:25.962 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:24:43.089 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 slot 5 prefill 100: delta PCC 0.991535 full PCC 0.999715 update rms ratio 1.0090
+L4 slot 5 decode pos 100: delta PCC 0.993360 full PCC 0.999818 update rms ratio 1.0120 (HF router margin 3.3e-03)
+L4 slot 5 decode pos 101: delta PCC 0.997745 full PCC 0.999963 update rms ratio 1.0023 (HF router margin 2.6e-03)
+L4 slot 5 decode pos 102: delta PCC 0.990488 full PCC 0.999694 update rms ratio 1.0107 (HF router margin 2.0e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:25:08.479 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 slot 3 prefill 200: delta PCC 0.999665 full PCC 0.999991 update rms ratio 0.9988
+L0 slot 3 decode pos 200: delta PCC 0.999712 full PCC 0.999989 update rms ratio 1.0014
+L0 slot 3 decode pos 201: delta PCC 0.999695 full PCC 0.999988 update rms ratio 1.0017
+L0 slot 3 decode pos 202: delta PCC 0.999718 full PCC 0.999988 update rms ratio 1.0016
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:25:50.508 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 synthetic MoE on the HF FFN input: PCC 0.983371
+L3 slot 3 prefill 200: delta PCC 0.993984 full PCC 0.994048 update rms ratio 1.0041
+L3 slot 3 decode pos 200: delta PCC 0.996401 full PCC 0.996435 update rms ratio 1.0041
+L3 slot 3 decode pos 201: delta PCC 0.996162 full PCC 0.996198 update rms ratio 1.0043
+L3 slot 3 decode pos 202: delta PCC 0.996352 full PCC 0.996396 update rms ratio 1.0030
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:27:00.167 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:27:17.414 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 synthetic MoE on the HF FFN input: PCC 0.981223
+L4 slot 3 prefill 200: delta PCC 0.972796 full PCC 0.997691 update rms ratio 1.0051
+L4 slot 3 decode pos 200: delta PCC 0.983414 full PCC 0.998815 update rms ratio 1.0078
+L4 slot 3 decode pos 201: delta PCC 0.982762 full PCC 0.998818 update rms ratio 1.0061
+L4 slot 3 decode pos 202: delta PCC 0.980938 full PCC 0.997886 update rms ratio 1.0025
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-1] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:28:04.082 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 slot 1 prefill 1: delta PCC 0.999960 full PCC 0.999969 update rms ratio 0.9956
+L0 slot 1 decode pos 1: delta PCC 0.999980 full PCC 0.999959 update rms ratio 0.9994
+L0 slot 1 decode pos 2: delta PCC 0.999972 full PCC 0.999963 update rms ratio 0.9986
+L0 slot 1 decode pos 3: delta PCC 0.999966 full PCC 0.999970 update rms ratio 1.0015
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-31] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 31: delta PCC 0.999974 full PCC 0.999946 update rms ratio 0.9971
+L0 slot 7 decode pos 31: delta PCC 0.999981 full PCC 0.999959 update rms ratio 1.0012
+L0 slot 7 decode pos 32: delta PCC 0.999974 full PCC 0.999946 update rms ratio 0.9999
+L0 slot 7 decode pos 33: delta PCC 0.999983 full PCC 0.999958 update rms ratio 0.9999
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 33: delta PCC 0.999974 full PCC 0.999949 update rms ratio 0.9974
+L0 slot 1 decode pos 33: delta PCC 0.999974 full PCC 0.999964 update rms ratio 1.0013
+L0 slot 1 decode pos 34: delta PCC 0.999981 full PCC 0.999956 update rms ratio 0.9989
+L0 slot 1 decode pos 35: delta PCC 0.999978 full PCC 0.999949 update rms ratio 1.0021
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-128] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 128: delta PCC 0.999974 full PCC 0.999946 update rms ratio 0.9973
+L0 slot 0 decode pos 128: delta PCC 0.999975 full PCC 0.999940 update rms ratio 0.9991
+L0 slot 0 decode pos 129: delta PCC 0.999978 full PCC 0.999949 update rms ratio 1.0008
+L0 slot 0 decode pos 130: delta PCC 0.999979 full PCC 0.999960 update rms ratio 1.0004
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-129] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 129: delta PCC 0.999974 full PCC 0.999949 update rms ratio 0.9976
+L0 slot 1 decode pos 129: delta PCC 0.999969 full PCC 0.999938 update rms ratio 0.9989
+L0 slot 1 decode pos 130: delta PCC 0.999973 full PCC 0.999957 update rms ratio 1.0013
+L0 slot 1 decode pos 131: delta PCC 0.999978 full PCC 0.999958 update rms ratio 1.0006
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-2047] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 2047: delta PCC 0.999973 full PCC 0.999942 update rms ratio 0.9974
+L0 slot 7 decode pos 2047: delta PCC 0.999974 full PCC 0.999945 update rms ratio 1.0017
+L0 slot 7 decode pos 2048: delta PCC 0.999966 full PCC 0.999952 update rms ratio 1.0016
+L0 slot 7 decode pos 2049: delta PCC 0.999975 full PCC 0.999950 update rms ratio 1.0021
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 2049: delta PCC 0.999972 full PCC 0.999940 update rms ratio 0.9973
+L0 slot 1 decode pos 2049: delta PCC 0.999968 full PCC 0.999950 update rms ratio 0.9995
+L0 slot 1 decode pos 2050: delta PCC 0.999979 full PCC 0.999955 update rms ratio 1.0004
+L0 slot 1 decode pos 2051: delta PCC 0.999976 full PCC 0.999951 update rms ratio 0.9997
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 4000: delta PCC 0.999972 full PCC 0.999941 update rms ratio 0.9975
+L0 slot 0 decode pos 4000: delta PCC 0.999976 full PCC 0.999946 update rms ratio 0.9996
+L0 slot 0 decode pos 4001: delta PCC 0.999973 full PCC 0.999945 update rms ratio 1.0011
+L0 slot 0 decode pos 4002: delta PCC 0.999968 full PCC 0.999930 update rms ratio 1.0020
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-1] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:29:09.609 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 slot 1 prefill 1: delta PCC 0.994288 full PCC 0.995485 update rms ratio 1.0115
+L3 slot 1 decode pos 1: delta PCC 0.995306 full PCC 0.997258 update rms ratio 0.9835 (HF router margin 5.0e-04)
+L3 slot 1 decode pos 2: delta PCC 0.995473 full PCC 0.998596 update rms ratio 1.0035 (HF router margin 3.2e-03)
+L3 slot 1 decode pos 3: delta PCC 0.994298 full PCC 0.997322 update rms ratio 1.0059 (HF router margin 7.6e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 33: delta PCC 0.995162 full PCC 0.997317 update rms ratio 1.0045
+L3 slot 1 decode pos 33: delta PCC 0.996153 full PCC 0.999323 update rms ratio 0.9999 (HF router margin 2.3e-03)
+L3 slot 1 decode pos 34: delta PCC 0.994008 full PCC 0.996950 update rms ratio 1.0089 (HF router margin 1.6e-03)
+L3 slot 1 decode pos 35: delta PCC 0.993113 full PCC 0.997871 update rms ratio 1.0030 (HF router margin 4.5e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-129] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 129: delta PCC 0.994757 full PCC 0.997433 update rms ratio 1.0057
+L3 slot 1 decode pos 129: delta PCC 0.992904 full PCC 0.999093 update rms ratio 1.0053 (HF router margin 5.5e-03)
+L3 slot 1 decode pos 130: delta PCC 0.992830 full PCC 0.995766 update rms ratio 0.9981 (HF router margin 5.3e-05)
+L3 slot 1 decode pos 131: delta PCC 0.993554 full PCC 0.995874 update rms ratio 0.9965 (HF router margin 5.8e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 2049: delta PCC 0.994836 full PCC 0.997598 update rms ratio 1.0033
+L3 slot 1 decode pos 2049: delta PCC 0.995913 full PCC 0.998718 update rms ratio 0.9911 (HF router margin 1.3e-03)
+L3 slot 1 decode pos 2050: delta PCC 0.995558 full PCC 0.997876 update rms ratio 1.0226 (HF router margin 4.9e-03)
+L3 slot 1 decode pos 2051: delta PCC 0.996505 full PCC 0.998455 update rms ratio 1.0106 (HF router margin 8.2e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2051] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 3 prefill 2051: delta PCC 0.994739 full PCC 0.997574 update rms ratio 1.0026
+L3 slot 3 decode pos 2051: delta PCC 0.990605 full PCC 0.995598 update rms ratio 1.0112 (HF router margin 4.4e-03)
+L3 slot 3 decode pos 2052: delta PCC 0.995672 full PCC 0.998985 update rms ratio 1.0039 (HF router margin 1.7e-03)
+L3 slot 3 decode pos 2053: delta PCC 0.995912 full PCC 0.998366 update rms ratio 0.9939 (HF router margin 6.4e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2177] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 2177: delta PCC 0.994815 full PCC 0.997626 update rms ratio 1.0033
+L3 slot 1 decode pos 2177: delta PCC 0.993957 full PCC 0.997023 update rms ratio 1.0174 (HF router margin 5.1e-03)
+L3 slot 1 decode pos 2178: delta PCC 0.996057 full PCC 0.997634 update rms ratio 1.0169 (HF router margin 6.0e-03)
+L3 slot 1 decode pos 2179: delta PCC 0.995989 full PCC 0.998957 update rms ratio 1.0136 (HF router margin 6.8e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 0 prefill 4000: delta PCC 0.994752 full PCC 0.997595 update rms ratio 1.0041
+L3 slot 0 decode pos 4000: delta PCC 0.996298 full PCC 0.997995 update rms ratio 1.0085 (HF router margin 4.0e-03)
+L3 slot 0 decode pos 4001: delta PCC 0.995798 full PCC 0.998317 update rms ratio 1.0171 (HF router margin 1.4e-02)
+L3 slot 0 decode pos 4002: delta PCC 0.995019 full PCC 0.997166 update rms ratio 1.0002 (HF router margin 4.9e-04)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:32:33.096 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:32:50.373 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 slot 1 prefill 33: delta PCC 0.989692 full PCC 0.999627 update rms ratio 1.0141
+L4 slot 1 decode pos 33: delta PCC 0.996834 full PCC 0.999866 update rms ratio 1.0003 (HF router margin 1.4e-03)
+L4 slot 1 decode pos 34: delta PCC 0.998435 full PCC 0.999974 update rms ratio 1.0052 (HF router margin 4.7e-03)
+L4 slot 1 decode pos 35: delta PCC 0.996084 full PCC 0.999849 update rms ratio 1.0043 (HF router margin 4.8e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L4 slot 1 prefill 2049: delta PCC 0.993943 full PCC 0.999847 update rms ratio 1.0071
+L4 slot 1 decode pos 2049: delta PCC 0.998100 full PCC 0.999956 update rms ratio 0.9996 (HF router margin 2.6e-05)
+L4 slot 1 decode pos 2050: delta PCC 0.997595 full PCC 0.999961 update rms ratio 1.0158 (HF router margin 2.0e-03)
+L4 slot 1 decode pos 2051: delta PCC 0.998543 full PCC 0.999979 update rms ratio 0.9993 (HF router margin 1.1e-02)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:34:03.330 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 user slot 1 prefill 37: delta PCC 0.999974 full PCC 0.999950 update rms ratio 0.9973
+L0 user slot 3 prefill 100: delta PCC 0.999974 full PCC 0.999947 update rms ratio 0.9974
+L0 user slot 4 prefill 300: delta PCC 0.999974 full PCC 0.999944 update rms ratio 0.9973
+L0 user slot 6 prefill 64: delta PCC 0.999973 full PCC 0.999948 update rms ratio 0.9973
+L0 user slot 1 decode pos 37: delta PCC 0.999972 full PCC 0.999951 update rms ratio 1.0005
+L0 user slot 3 decode pos 100: delta PCC 0.999977 full PCC 0.999955 update rms ratio 1.0004
+L0 user slot 4 decode pos 300: delta PCC 0.999972 full PCC 0.999943 update rms ratio 1.0018
+L0 user slot 6 decode pos 64: delta PCC 0.999978 full PCC 0.999955 update rms ratio 1.0001
+L0 user slot 1 decode pos 38: delta PCC 0.999975 full PCC 0.999950 update rms ratio 1.0019
+L0 user slot 3 decode pos 101: delta PCC 0.999973 full PCC 0.999963 update rms ratio 1.0023
+L0 user slot 4 decode pos 301: delta PCC 0.999978 full PCC 0.999946 update rms ratio 1.0018
+L0 user slot 6 decode pos 65: delta PCC 0.999976 full PCC 0.999955 update rms ratio 0.9998
+L0 user slot 1 decode pos 39: delta PCC 0.999977 full PCC 0.999950 update rms ratio 1.0013
+L0 user slot 3 decode pos 102: delta PCC 0.999977 full PCC 0.999954 update rms ratio 1.0012
+L0 user slot 4 decode pos 302: delta PCC 0.999975 full PCC 0.999946 update rms ratio 1.0005
+L0 user slot 6 decode pos 66: delta PCC 0.999977 full PCC 0.999955 update rms ratio 0.9994
+PASSEDdecode update rms ratio mean 1.0009 over 12 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:34:35.849 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 user slot 1 prefill 37: delta PCC 0.995025 full PCC 0.997525 update rms ratio 1.0058
+L3 user slot 3 prefill 100: delta PCC 0.994657 full PCC 0.997494 update rms ratio 1.0063
+L3 user slot 4 prefill 2100: delta PCC 0.994811 full PCC 0.997584 update rms ratio 1.0027
+L3 user slot 6 prefill 64: delta PCC 0.995100 full PCC 0.997393 update rms ratio 1.0046
+L3 user slot 1 decode pos 37: delta PCC 0.995801 full PCC 0.997823 update rms ratio 0.9835 (HF router margin 1.6e-03)
+L3 user slot 3 decode pos 100: delta PCC 0.995072 full PCC 0.997090 update rms ratio 0.9989 (HF router margin 1.9e-03)
+L3 user slot 4 decode pos 2100: delta PCC 0.991159 full PCC 0.996320 update rms ratio 1.0125 (HF router margin 1.7e-02)
+L3 user slot 6 decode pos 64: delta PCC 0.994069 full PCC 0.998015 update rms ratio 1.0104 (HF router margin 6.5e-03)
+L3 user slot 1 decode pos 38: delta PCC 0.995916 full PCC 0.997376 update rms ratio 1.0120 (HF router margin 1.5e-03)
+L3 user slot 3 decode pos 101: delta PCC 0.990008 full PCC 0.996471 update rms ratio 1.0033 (HF router margin 1.1e-04)
+L3 user slot 4 decode pos 2101: delta PCC 0.991998 full PCC 0.996434 update rms ratio 1.0116 (HF router margin 1.5e-03)
+L3 user slot 6 decode pos 65: delta PCC 0.996379 full PCC 0.997941 update rms ratio 0.9960 (HF router margin 2.6e-04)
+L3 user slot 1 decode pos 39: delta PCC 0.995700 full PCC 0.998365 update rms ratio 0.9989 (HF router margin 2.7e-02)
+L3 user slot 3 decode pos 102: delta PCC 0.995392 full PCC 0.997568 update rms ratio 1.0201 (HF router margin 1.7e-03)
+L3 user slot 4 decode pos 2102: delta PCC 0.992276 full PCC 0.998704 update rms ratio 1.0122 (HF router margin 2.7e-03)
+L3 user slot 6 decode pos 66: delta PCC 0.994326 full PCC 0.998631 update rms ratio 1.0045 (HF router margin 5.2e-04)
+PASSEDdecode update rms ratio mean 1.0053 over 12 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:35:55.242 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:36:12.451 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 user slot 1 prefill 37: delta PCC 0.992136 full PCC 0.999760 update rms ratio 1.0117
+L4 user slot 3 prefill 100: delta PCC 0.992261 full PCC 0.999759 update rms ratio 1.0101
+L4 user slot 4 prefill 300: delta PCC 0.992619 full PCC 0.999777 update rms ratio 1.0096
+L4 user slot 6 prefill 64: delta PCC 0.992322 full PCC 0.999811 update rms ratio 1.0086
+L4 user slot 1 decode pos 37: delta PCC 0.990012 full PCC 0.999576 update rms ratio 1.0162 (HF router margin 8.0e-03)
+L4 user slot 3 decode pos 100: delta PCC 0.998621 full PCC 0.999980 update rms ratio 0.9875 (HF router margin 1.8e-02)
+L4 user slot 4 decode pos 300: delta PCC 0.988475 full PCC 0.999346 update rms ratio 1.0068 (HF router margin 1.6e-02)
+L4 user slot 6 decode pos 64: delta PCC 0.998525 full PCC 0.999982 update rms ratio 0.9960 (HF router margin 2.9e-03)
+L4 user slot 1 decode pos 38: delta PCC 0.984530 full PCC 0.998143 update rms ratio 1.0126 (HF router margin 1.5e-03)
+L4 user slot 3 decode pos 101: delta PCC 0.993289 full PCC 0.999702 update rms ratio 1.0048 (HF router margin 2.9e-04)
+L4 user slot 4 decode pos 301: delta PCC 0.996072 full PCC 0.999930 update rms ratio 1.0077 (HF router margin 1.8e-03)
+L4 user slot 6 decode pos 65: delta PCC 0.998679 full PCC 0.999983 update rms ratio 1.0062 (HF router margin 1.2e-03)
+L4 user slot 1 decode pos 39: delta PCC 0.987031 full PCC 0.998970 update rms ratio 1.0137 (HF router margin 5.8e-03)
+L4 user slot 3 decode pos 102: delta PCC 0.999117 full PCC 0.999987 update rms ratio 1.0097 (HF router margin 4.6e-03)
+L4 user slot 4 decode pos 302: delta PCC 0.999490 full PCC 0.999991 update rms ratio 0.9952 (HF router margin 7.3e-03)
+L4 user slot 6 decode pos 66: delta PCC 0.999202 full PCC 0.999971 update rms ratio 0.9991 (HF router margin 4.9e-03)
+PASSEDdecode update rms ratio mean 1.0046 over 12 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:37:44.672 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 slot 2 prefill 150: delta PCC 0.999975 full PCC 0.999948 update rms ratio 0.9975
+L0 slot 2 decode pos 150: delta PCC 0.999979 full PCC 0.999952 update rms ratio 1.0016
+L0 slot 2 decode pos 151: delta PCC 0.999965 full PCC 0.999942 update rms ratio 0.9996
+L0 slot 2 decode pos 152: delta PCC 0.999974 full PCC 0.999940 update rms ratio 1.0023
+L0 slot 2 decode pos 153: delta PCC 0.999977 full PCC 0.999958 update rms ratio 0.9992
+L0 slot 2 prefill 150: delta PCC 0.999975 full PCC 0.999948 update rms ratio 0.9975
+L0 slot 2 decode pos 150: delta PCC 0.999979 full PCC 0.999952 update rms ratio 1.0016
+L0 slot 2 decode pos 151: delta PCC 0.999965 full PCC 0.999942 update rms ratio 0.9996
+L0 slot 2 decode pos 152: delta PCC 0.999974 full PCC 0.999940 update rms ratio 1.0023
+L0 slot 2 decode pos 153: delta PCC 0.999977 full PCC 0.999958 update rms ratio 0.9992
+PASSEDdecode update rms ratio mean 1.0007 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:38:09.666 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 slot 2 prefill 150: delta PCC 0.994532 full PCC 0.997311 update rms ratio 1.0070
+L3 slot 2 decode pos 150: delta PCC 0.995651 full PCC 0.999031 update rms ratio 1.0030 (HF router margin 1.1e-03)
+L3 slot 2 decode pos 151: delta PCC 0.994632 full PCC 0.997328 update rms ratio 1.0127 (HF router margin 5.2e-04)
+L3 slot 2 decode pos 152: delta PCC 0.993452 full PCC 0.995424 update rms ratio 0.9903 (HF router margin 5.9e-03)
+L3 slot 2 decode pos 153: delta PCC 0.995557 full PCC 0.998006 update rms ratio 1.0057 (HF router margin 5.2e-04)
+L3 slot 2 prefill 150: delta PCC 0.994532 full PCC 0.997311 update rms ratio 1.0070
+L3 slot 2 decode pos 150: delta PCC 0.995651 full PCC 0.999031 update rms ratio 1.0030 (HF router margin 1.1e-03)
+L3 slot 2 decode pos 151: delta PCC 0.994632 full PCC 0.997328 update rms ratio 1.0127 (HF router margin 5.2e-04)
+L3 slot 2 decode pos 152: delta PCC 0.993452 full PCC 0.995424 update rms ratio 0.9903 (HF router margin 5.9e-03)
+L3 slot 2 decode pos 153: delta PCC 0.995557 full PCC 0.998006 update rms ratio 1.0057 (HF router margin 5.2e-04)
+PASSEDdecode update rms ratio mean 1.0029 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:38:30.414 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:38:47.814 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 slot 2 prefill 150: delta PCC 0.991820 full PCC 0.999728 update rms ratio 1.0094
+L4 slot 2 decode pos 150: delta PCC 0.995014 full PCC 0.999767 update rms ratio 0.9991 (HF router margin 4.2e-04)
+L4 slot 2 decode pos 151: delta PCC 0.994831 full PCC 0.999901 update rms ratio 0.9929 (HF router margin 4.7e-03)
+L4 slot 2 decode pos 152: delta PCC 0.996718 full PCC 0.999955 update rms ratio 1.0063 (HF router margin 6.3e-03)
+L4 slot 2 decode pos 153: delta PCC 0.995101 full PCC 0.999841 update rms ratio 1.0084 (HF router margin 2.3e-03)
+L4 slot 2 prefill 150: delta PCC 0.991820 full PCC 0.999728 update rms ratio 1.0094
+L4 slot 2 decode pos 150: delta PCC 0.995014 full PCC 0.999767 update rms ratio 0.9991 (HF router margin 4.2e-04)
+L4 slot 2 decode pos 151: delta PCC 0.994831 full PCC 0.999901 update rms ratio 0.9929 (HF router margin 4.7e-03)
+L4 slot 2 decode pos 152: delta PCC 0.996718 full PCC 0.999955 update rms ratio 1.0063 (HF router margin 6.3e-03)
+L4 slot 2 decode pos 153: delta PCC 0.995101 full PCC 0.999841 update rms ratio 1.0084 (HF router margin 2.3e-03)
+PASSEDdecode update rms ratio mean 1.0017 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:39:13.963 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:39:38.134 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:39:57.524 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:40:14.594 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:40:39.138 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 slot 6 decode-only pos 0: delta PCC 0.999971 full PCC 0.999968 update rms ratio 1.0011
+L0 slot 6 decode-only pos 1: delta PCC 0.999976 full PCC 0.999968 update rms ratio 1.0024
+L0 slot 6 decode-only pos 2: delta PCC 0.999975 full PCC 0.999965 update rms ratio 1.0003
+L0 slot 6 decode-only pos 3: delta PCC 0.999979 full PCC 0.999965 update rms ratio 1.0016
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:41:03.151 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 slot 6 decode-only pos 0: delta PCC 0.994376 full PCC 0.996382 update rms ratio 1.0100 (HF router margin 2.0e-02)
+L3 slot 6 decode-only pos 1: delta PCC 0.994819 full PCC 0.997181 update rms ratio 1.0262 (HF router margin 2.9e-03)
+L3 slot 6 decode-only pos 2: delta PCC 0.994592 full PCC 0.996428 update rms ratio 1.0089 (HF router margin 7.1e-03)
+L3 slot 6 decode-only pos 3: delta PCC 0.994761 full PCC 0.997874 update rms ratio 1.0056 (HF router margin 6.8e-04)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:41:21.595 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:41:39.004 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 slot 6 decode-only pos 0: delta PCC 0.994254 full PCC 0.999874 update rms ratio 1.0018 (HF router margin 3.3e-04)
+L4 slot 6 decode-only pos 1: delta PCC 0.993134 full PCC 0.999821 update rms ratio 1.0055 (HF router margin 2.0e-03)
+L4 slot 6 decode-only pos 2: delta PCC 0.996826 full PCC 0.999953 update rms ratio 1.0010 (HF router margin 1.8e-03)
+L4 slot 6 decode-only pos 3: delta PCC 0.985732 full PCC 0.996558 update rms ratio 1.0181 (HF router margin 6.5e-03)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_paged_permuted_blocks <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:42:25.345 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 paged slot 0 prefill 4000: delta PCC 0.994708 full PCC 0.997570 update rms ratio 1.0039
+L3 paged slot 5 prefill 2100: delta PCC 0.994836 full PCC 0.997594 update rms ratio 1.0029
+L3 paged slot 7 prefill 129: delta PCC 0.994970 full PCC 0.997495 update rms ratio 1.0065
+L3 paged slot 0 decode pos 4000: delta PCC 0.993542 full PCC 0.997710 update rms ratio 1.0008 (HF router margin 4.4e-03)
+L3 paged slot 5 decode pos 2100: delta PCC 0.995583 full PCC 0.998187 update rms ratio 1.0117 (HF router margin 7.5e-03)
+L3 paged slot 7 decode pos 129: delta PCC 0.993888 full PCC 0.997085 update rms ratio 0.9868 (HF router margin 9.1e-03)
+L3 paged slot 0 decode pos 4001: delta PCC 0.994794 full PCC 0.996998 update rms ratio 1.0064 (HF router margin 2.5e-03)
+L3 paged slot 5 decode pos 2101: delta PCC 0.995739 full PCC 0.998016 update rms ratio 0.9986 (HF router margin 2.2e-03)
+L3 paged slot 7 decode pos 130: delta PCC 0.993344 full PCC 0.998648 update rms ratio 1.0170 (HF router margin 1.8e-03)
+L3 paged slot 0 decode pos 4002: delta PCC 0.986301 full PCC 0.995441 update rms ratio 0.9961 (HF router margin 1.4e-03)
+L3 paged slot 5 decode pos 2102: delta PCC 0.994835 full PCC 0.997051 update rms ratio 1.0133 (HF router margin 1.3e-02)
+L3 paged slot 7 decode pos 131: delta PCC 0.997112 full PCC 0.998727 update rms ratio 1.0051 (HF router margin 9.2e-04)
+PASSEDdecode update rms ratio mean 1.0040 over 9 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:43:56.816 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 32-slot decode slot 0 pos 37: delta PCC 0.999980 full PCC 0.999953 update rms ratio 1.0024
+L0 32-slot decode slot 1 pos 37: delta PCC 0.999985 full PCC 0.999966 update rms ratio 1.0008
+L0 32-slot decode slot 2 pos 37: delta PCC 0.999969 full PCC 0.999962 update rms ratio 0.9997
+L0 32-slot decode slot 3 pos 37: delta PCC 0.999978 full PCC 0.999944 update rms ratio 1.0020
+L0 32-slot decode slot 4 pos 37: delta PCC 0.999976 full PCC 0.999950 update rms ratio 1.0024
+L0 32-slot decode slot 5 pos 37: delta PCC 0.999972 full PCC 0.999941 update rms ratio 1.0040
+L0 32-slot decode slot 6 pos 37: delta PCC 0.999980 full PCC 0.999957 update rms ratio 1.0008
+L0 32-slot decode slot 7 pos 37: delta PCC 0.999977 full PCC 0.999955 update rms ratio 1.0003
+L0 32-slot decode slot 8 pos 129: delta PCC 0.999978 full PCC 0.999958 update rms ratio 1.0007
+L0 32-slot decode slot 9 pos 129: delta PCC 0.999983 full PCC 0.999956 update rms ratio 1.0011
+L0 32-slot decode slot 10 pos 129: delta PCC 0.999975 full PCC 0.999957 update rms ratio 0.9987
+L0 32-slot decode slot 11 pos 129: delta PCC 0.999978 full PCC 0.999951 update rms ratio 1.0022
+L0 32-slot decode slot 12 pos 129: delta PCC 0.999980 full PCC 0.999957 update rms ratio 1.0014
+L0 32-slot decode slot 13 pos 129: delta PCC 0.999973 full PCC 0.999948 update rms ratio 1.0002
+L0 32-slot decode slot 14 pos 129: delta PCC 0.999979 full PCC 0.999951 update rms ratio 1.0001
+L0 32-slot decode slot 15 pos 129: delta PCC 0.999975 full PCC 0.999942 update rms ratio 1.0028
+L0 32-slot decode slot 16 pos 300: delta PCC 0.999983 full PCC 0.999955 update rms ratio 1.0012
+L0 32-slot decode slot 17 pos 300: delta PCC 0.999975 full PCC 0.999957 update rms ratio 1.0009
+L0 32-slot decode slot 18 pos 300: delta PCC 0.999977 full PCC 0.999956 update rms ratio 1.0004
+L0 32-slot decode slot 19 pos 300: delta PCC 0.999977 full PCC 0.999958 update rms ratio 1.0007
+L0 32-slot decode slot 20 pos 300: delta PCC 0.999976 full PCC 0.999942 update rms ratio 1.0017
+L0 32-slot decode slot 21 pos 300: delta PCC 0.999977 full PCC 0.999958 update rms ratio 1.0014
+L0 32-slot decode slot 22 pos 300: delta PCC 0.999976 full PCC 0.999948 update rms ratio 1.0014
+L0 32-slot decode slot 23 pos 300: delta PCC 0.999971 full PCC 0.999945 update rms ratio 1.0000
+L0 32-slot decode slot 24 pos 700: delta PCC 0.999974 full PCC 0.999946 update rms ratio 0.9993
+L0 32-slot decode slot 25 pos 700: delta PCC 0.999975 full PCC 0.999951 update rms ratio 1.0016
+L0 32-slot decode slot 26 pos 700: delta PCC 0.999971 full PCC 0.999941 update rms ratio 0.9996
+L0 32-slot decode slot 27 pos 700: delta PCC 0.999975 full PCC 0.999959 update rms ratio 1.0004
+L0 32-slot decode slot 28 pos 700: delta PCC 0.999971 full PCC 0.999953 update rms ratio 1.0000
+L0 32-slot decode slot 29 pos 700: delta PCC 0.999971 full PCC 0.999950 update rms ratio 0.9993
+L0 32-slot decode slot 30 pos 700: delta PCC 0.999976 full PCC 0.999946 update rms ratio 1.0003
+L0 32-slot decode slot 31 pos 700: delta PCC 0.999976 full PCC 0.999948 update rms ratio 1.0000
+L0 32-slot decode slot 0 pos 38: delta PCC 0.999979 full PCC 0.999952 update rms ratio 1.0009
+L0 32-slot decode slot 1 pos 38: delta PCC 0.999977 full PCC 0.999949 update rms ratio 1.0004
+L0 32-slot decode slot 2 pos 38: delta PCC 0.999965 full PCC 0.999947 update rms ratio 0.9978
+L0 32-slot decode slot 3 pos 38: delta PCC 0.999974 full PCC 0.999959 update rms ratio 0.9994
+L0 32-slot decode slot 4 pos 38: delta PCC 0.999981 full PCC 0.999955 update rms ratio 1.0011
+L0 32-slot decode slot 5 pos 38: delta PCC 0.999972 full PCC 0.999954 update rms ratio 1.0023
+L0 32-slot decode slot 6 pos 38: delta PCC 0.999975 full PCC 0.999956 update rms ratio 1.0023
+L0 32-slot decode slot 7 pos 38: delta PCC 0.999978 full PCC 0.999954 update rms ratio 1.0006
+L0 32-slot decode slot 8 pos 130: delta PCC 0.999972 full PCC 0.999943 update rms ratio 1.0021
+L0 32-slot decode slot 9 pos 130: delta PCC 0.999976 full PCC 0.999947 update rms ratio 1.0013
+L0 32-slot decode slot 10 pos 130: delta PCC 0.999973 full PCC 0.999958 update rms ratio 1.0015
+L0 32-slot decode slot 11 pos 130: delta PCC 0.999977 full PCC 0.999956 update rms ratio 1.0017
+L0 32-slot decode slot 12 pos 130: delta PCC 0.999974 full PCC 0.999948 update rms ratio 1.0027
+L0 32-slot decode slot 13 pos 130: delta PCC 0.999971 full PCC 0.999953 update rms ratio 1.0009
+L0 32-slot decode slot 14 pos 130: delta PCC 0.999977 full PCC 0.999954 update rms ratio 1.0010
+L0 32-slot decode slot 15 pos 130: delta PCC 0.999976 full PCC 0.999962 update rms ratio 0.9994
+L0 32-slot decode slot 16 pos 301: delta PCC 0.999972 full PCC 0.999947 update rms ratio 1.0013
+L0 32-slot decode slot 17 pos 301: delta PCC 0.999985 full PCC 0.999962 update rms ratio 1.0014
+L0 32-slot decode slot 18 pos 301: delta PCC 0.999969 full PCC 0.999952 update rms ratio 0.9991
+L0 32-slot decode slot 19 pos 301: delta PCC 0.999976 full PCC 0.999949 update rms ratio 1.0009
+L0 32-slot decode slot 20 pos 301: delta PCC 0.999950 full PCC 0.999913 update rms ratio 0.9961
+L0 32-slot decode slot 21 pos 301: delta PCC 0.999975 full PCC 0.999956 update rms ratio 1.0008
+L0 32-slot decode slot 22 pos 301: delta PCC 0.999975 full PCC 0.999941 update rms ratio 1.0023
+L0 32-slot decode slot 23 pos 301: delta PCC 0.999974 full PCC 0.999952 update rms ratio 1.0000
+L0 32-slot decode slot 24 pos 701: delta PCC 0.999972 full PCC 0.999940 update rms ratio 0.9978
+L0 32-slot decode slot 25 pos 701: delta PCC 0.999974 full PCC 0.999943 update rms ratio 0.9991
+L0 32-slot decode slot 26 pos 701: delta PCC 0.999973 full PCC 0.999941 update rms ratio 1.0013
+L0 32-slot decode slot 27 pos 701: delta PCC 0.999981 full PCC 0.999955 update rms ratio 1.0007
+L0 32-slot decode slot 28 pos 701: delta PCC 0.999973 full PCC 0.999940 update rms ratio 1.0000
+L0 32-slot decode slot 29 pos 701: delta PCC 0.999974 full PCC 0.999945 update rms ratio 1.0009
+L0 32-slot decode slot 30 pos 701: delta PCC 0.999967 full PCC 0.999951 update rms ratio 1.0009
+L0 32-slot decode slot 31 pos 701: delta PCC 0.999973 full PCC 0.999944 update rms ratio 1.0011
+L0 32-slot decode slot 0 pos 39: delta PCC 0.999974 full PCC 0.999938 update rms ratio 1.0036
+L0 32-slot decode slot 1 pos 39: delta PCC 0.999977 full PCC 0.999952 update rms ratio 1.0010
+L0 32-slot decode slot 2 pos 39: delta PCC 0.999985 full PCC 0.999962 update rms ratio 1.0007
+L0 32-slot decode slot 3 pos 39: delta PCC 0.999980 full PCC 0.999954 update rms ratio 1.0010
+L0 32-slot decode slot 4 pos 39: delta PCC 0.999919 full PCC 0.999884 update rms ratio 1.0023
+L0 32-slot decode slot 5 pos 39: delta PCC 0.999970 full PCC 0.999961 update rms ratio 1.0022
+L0 32-slot decode slot 6 pos 39: delta PCC 0.999969 full PCC 0.999959 update rms ratio 1.0010
+L0 32-slot decode slot 7 pos 39: delta PCC 0.999976 full PCC 0.999958 update rms ratio 1.0014
+L0 32-slot decode slot 8 pos 131: delta PCC 0.999982 full PCC 0.999959 update rms ratio 0.9997
+L0 32-slot decode slot 9 pos 131: delta PCC 0.999971 full PCC 0.999945 update rms ratio 1.0012
+L0 32-slot decode slot 10 pos 131: delta PCC 0.999978 full PCC 0.999952 update rms ratio 0.9998
+L0 32-slot decode slot 11 pos 131: delta PCC 0.999974 full PCC 0.999948 update rms ratio 1.0013
+L0 32-slot decode slot 12 pos 131: delta PCC 0.999978 full PCC 0.999952 update rms ratio 1.0019
+L0 32-slot decode slot 13 pos 131: delta PCC 0.999958 full PCC 0.999936 update rms ratio 0.9979
+L0 32-slot decode slot 14 pos 131: delta PCC 0.999971 full PCC 0.999933 update rms ratio 1.0027
+L0 32-slot decode slot 15 pos 131: delta PCC 0.999972 full PCC 0.999955 update rms ratio 0.9993
+L0 32-slot decode slot 16 pos 302: delta PCC 0.999969 full PCC 0.999946 update rms ratio 1.0029
+L0 32-slot decode slot 17 pos 302: delta PCC 0.999973 full PCC 0.999943 update rms ratio 1.0005
+L0 32-slot decode slot 18 pos 302: delta PCC 0.999973 full PCC 0.999947 update rms ratio 1.0023
+L0 32-slot decode slot 19 pos 302: delta PCC 0.999974 full PCC 0.999945 update rms ratio 1.0005
+L0 32-slot decode slot 20 pos 302: delta PCC 0.999970 full PCC 0.999967 update rms ratio 0.9994
+L0 32-slot decode slot 21 pos 302: delta PCC 0.999979 full PCC 0.999933 update rms ratio 1.0013
+L0 32-slot decode slot 22 pos 302: delta PCC 0.999970 full PCC 0.999938 update rms ratio 0.9995
+L0 32-slot decode slot 23 pos 302: delta PCC 0.999975 full PCC 0.999958 update rms ratio 1.0013
+L0 32-slot decode slot 24 pos 702: delta PCC 0.999979 full PCC 0.999952 update rms ratio 1.0008
+L0 32-slot decode slot 25 pos 702: delta PCC 0.999975 full PCC 0.999957 update rms ratio 1.0008
+L0 32-slot decode slot 26 pos 702: delta PCC 0.999973 full PCC 0.999951 update rms ratio 0.9999
+L0 32-slot decode slot 27 pos 702: delta PCC 0.999981 full PCC 0.999954 update rms ratio 1.0014
+L0 32-slot decode slot 28 pos 702: delta PCC 0.999976 full PCC 0.999954 update rms ratio 1.0011
+L0 32-slot decode slot 29 pos 702: delta PCC 0.999971 full PCC 0.999932 update rms ratio 1.0019
+L0 32-slot decode slot 30 pos 702: delta PCC 0.999977 full PCC 0.999954 update rms ratio 0.9998
+L0 32-slot decode slot 31 pos 702: delta PCC 0.999976 full PCC 0.999950 update rms ratio 1.0019
+L0 32 active slots: min decode delta PCC 0.999919
+PASSEDdecode update rms ratio mean 1.0008 over 96 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:45:11.805 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 32-slot decode slot 0 pos 37: delta PCC 0.996989 full PCC 0.998792 update rms ratio 0.9989 (HF router margin 2.7e-03)
+L3 32-slot decode slot 1 pos 37: delta PCC 0.993784 full PCC 0.998232 update rms ratio 0.9967 (HF router margin 2.0e-05)
+L3 32-slot decode slot 2 pos 37: delta PCC 0.994675 full PCC 0.996134 update rms ratio 1.0054 (HF router margin 1.8e-03)
+L3 32-slot decode slot 3 pos 37: delta PCC 0.996332 full PCC 0.997914 update rms ratio 0.9994 (HF router margin 1.6e-03)
+L3 32-slot decode slot 4 pos 37: delta PCC 0.993031 full PCC 0.996377 update rms ratio 1.0002 (HF router margin 1.9e-03)
+L3 32-slot decode slot 5 pos 37: delta PCC 0.992940 full PCC 0.996038 update rms ratio 1.0225 (HF router margin 3.1e-03)
+L3 32-slot decode slot 6 pos 37: delta PCC 0.993270 full PCC 0.995560 update rms ratio 1.0238 (HF router margin 6.2e-03)
+L3 32-slot decode slot 7 pos 37: delta PCC 0.992694 full PCC 0.996829 update rms ratio 1.0093 (HF router margin 2.0e-02)
+L3 32-slot decode slot 8 pos 300: delta PCC 0.995887 full PCC 0.998178 update rms ratio 0.9981 (HF router margin 3.1e-04)
+L3 32-slot decode slot 9 pos 300: delta PCC 0.993541 full PCC 0.997046 update rms ratio 0.9918 (HF router margin 8.2e-04)
+L3 32-slot decode slot 10 pos 300: delta PCC 0.995788 full PCC 0.998476 update rms ratio 1.0028 (HF router margin 1.5e-02)
+L3 32-slot decode slot 11 pos 300: delta PCC 0.994780 full PCC 0.997418 update rms ratio 0.9953 (HF router margin 4.7e-03)
+L3 32-slot decode slot 12 pos 300: delta PCC 0.997016 full PCC 0.998730 update rms ratio 1.0102 (HF router margin 2.0e-02)
+L3 32-slot decode slot 13 pos 300: delta PCC 0.996969 full PCC 0.999358 update rms ratio 1.0011 (HF router margin 7.1e-03)
+L3 32-slot decode slot 14 pos 300: delta PCC 0.995213 full PCC 0.998129 update rms ratio 0.9870 (HF router margin 7.5e-04)
+L3 32-slot decode slot 15 pos 300: delta PCC 0.992391 full PCC 0.995773 update rms ratio 0.9932 (HF router margin 9.0e-03)
+L3 32-slot decode slot 16 pos 2100: delta PCC 0.994129 full PCC 0.997494 update rms ratio 0.9933 (HF router margin 1.6e-03)
+L3 32-slot decode slot 17 pos 2100: delta PCC 0.992520 full PCC 0.997703 update rms ratio 1.0225 (HF router margin 1.1e-03)
+L3 32-slot decode slot 18 pos 2100: delta PCC 0.995899 full PCC 0.997847 update rms ratio 1.0076 (HF router margin 8.6e-03)
+L3 32-slot decode slot 19 pos 2100: delta PCC 0.996213 full PCC 0.998132 update rms ratio 0.9980 (HF router margin 1.0e-02)
+L3 32-slot decode slot 20 pos 2100: delta PCC 0.994501 full PCC 0.998060 update rms ratio 1.0114 (HF router margin 1.2e-03)
+L3 32-slot decode slot 21 pos 2100: delta PCC 0.993979 full PCC 0.997719 update rms ratio 1.0074 (HF router margin 3.1e-03)
+L3 32-slot decode slot 22 pos 2100: delta PCC 0.995219 full PCC 0.998389 update rms ratio 1.0034 (HF router margin 4.4e-04)
+L3 32-slot decode slot 23 pos 2100: delta PCC 0.990597 full PCC 0.995941 update rms ratio 1.0112 (HF router margin 1.2e-02)
+L3 32-slot decode slot 24 pos 2300: delta PCC 0.995800 full PCC 0.998307 update rms ratio 0.9969 (HF router margin 1.4e-02)
+L3 32-slot decode slot 25 pos 2300: delta PCC 0.996111 full PCC 0.999359 update rms ratio 0.9971 (HF router margin 2.0e-03)
+L3 32-slot decode slot 26 pos 2300: delta PCC 0.995272 full PCC 0.999157 update rms ratio 1.0036 (HF router margin 8.6e-03)
+L3 32-slot decode slot 27 pos 2300: delta PCC 0.993737 full PCC 0.996765 update rms ratio 1.0098 (HF router margin 2.6e-03)
+L3 32-slot decode slot 28 pos 2300: delta PCC 0.995790 full PCC 0.997787 update rms ratio 0.9824 (HF router margin 2.9e-03)
+L3 32-slot decode slot 29 pos 2300: delta PCC 0.990671 full PCC 0.997351 update rms ratio 0.9763 (HF router margin 3.0e-05)
+L3 32-slot decode slot 30 pos 2300: delta PCC 0.996506 full PCC 0.998313 update rms ratio 0.9970 (HF router margin 4.4e-03)
+L3 32-slot decode slot 31 pos 2300: delta PCC 0.995639 full PCC 0.998053 update rms ratio 1.0277 (HF router margin 2.9e-03)
+L3 32-slot decode slot 0 pos 38: delta PCC 0.996266 full PCC 0.998560 update rms ratio 1.0055 (HF router margin 3.7e-03)
+L3 32-slot decode slot 1 pos 38: delta PCC 0.996411 full PCC 0.998143 update rms ratio 1.0125 (HF router margin 4.2e-03)
+L3 32-slot decode slot 2 pos 38: delta PCC 0.977935 full PCC 0.996752 update rms ratio 0.9909 (HF router margin 8.0e-04)
+L3 32-slot decode slot 2 pos 38: accepted as a router near-tie
+L3 32-slot decode slot 3 pos 38: delta PCC 0.991262 full PCC 0.996143 update rms ratio 1.0007 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 38: delta PCC 0.994862 full PCC 0.997109 update rms ratio 1.0028 (HF router margin 6.4e-03)
+L3 32-slot decode slot 5 pos 38: delta PCC 0.993598 full PCC 0.996908 update rms ratio 0.9973 (HF router margin 1.0e-02)
+L3 32-slot decode slot 6 pos 38: delta PCC 0.992379 full PCC 0.995679 update rms ratio 1.0072 (HF router margin 9.5e-03)
+L3 32-slot decode slot 7 pos 38: delta PCC 0.998781 full PCC 0.999627 update rms ratio 0.9986 (HF router margin 1.9e-02)
+L3 32-slot decode slot 8 pos 301: delta PCC 0.995696 full PCC 0.997475 update rms ratio 1.0011 (HF router margin 6.2e-03)
+L3 32-slot decode slot 9 pos 301: delta PCC 0.996355 full PCC 0.998263 update rms ratio 0.9983 (HF router margin 2.0e-03)
+L3 32-slot decode slot 10 pos 301: delta PCC 0.994466 full PCC 0.997640 update rms ratio 0.9936 (HF router margin 4.1e-03)
+L3 32-slot decode slot 11 pos 301: delta PCC 0.993042 full PCC 0.996036 update rms ratio 1.0012 (HF router margin 3.7e-03)
+L3 32-slot decode slot 12 pos 301: delta PCC 0.991351 full PCC 0.997874 update rms ratio 1.0041 (HF router margin 9.5e-03)
+L3 32-slot decode slot 13 pos 301: delta PCC 0.992926 full PCC 0.995946 update rms ratio 0.9967 (HF router margin 6.1e-03)
+L3 32-slot decode slot 14 pos 301: delta PCC 0.992734 full PCC 0.995500 update rms ratio 0.9751 (HF router margin 3.6e-03)
+L3 32-slot decode slot 15 pos 301: delta PCC 0.994419 full PCC 0.996620 update rms ratio 1.0038 (HF router margin 2.4e-03)
+L3 32-slot decode slot 16 pos 2101: delta PCC 0.994809 full PCC 0.997070 update rms ratio 1.0012 (HF router margin 1.9e-04)
+L3 32-slot decode slot 17 pos 2101: delta PCC 0.994497 full PCC 0.997516 update rms ratio 1.0271 (HF router margin 4.5e-03)
+L3 32-slot decode slot 18 pos 2101: delta PCC 0.992913 full PCC 0.996031 update rms ratio 0.9951 (HF router margin 7.7e-03)
+L3 32-slot decode slot 19 pos 2101: delta PCC 0.994881 full PCC 0.997684 update rms ratio 0.9972 (HF router margin 1.8e-03)
+L3 32-slot decode slot 20 pos 2101: delta PCC 0.996604 full PCC 0.998452 update rms ratio 1.0110 (HF router margin 6.9e-04)
+L3 32-slot decode slot 21 pos 2101: delta PCC 0.992926 full PCC 0.996965 update rms ratio 1.0121 (HF router margin 2.8e-02)
+L3 32-slot decode slot 22 pos 2101: delta PCC 0.992610 full PCC 0.996801 update rms ratio 0.9918 (HF router margin 7.0e-03)
+L3 32-slot decode slot 23 pos 2101: delta PCC 0.991097 full PCC 0.995661 update rms ratio 1.0142 (HF router margin 1.2e-02)
+L3 32-slot decode slot 24 pos 2301: delta PCC 0.995242 full PCC 0.997353 update rms ratio 1.0136 (HF router margin 5.3e-03)
+L3 32-slot decode slot 25 pos 2301: delta PCC 0.996215 full PCC 0.997915 update rms ratio 0.9955 (HF router margin 1.3e-03)
+L3 32-slot decode slot 26 pos 2301: delta PCC 0.994800 full PCC 0.997998 update rms ratio 1.0349 (HF router margin 5.2e-03)
+L3 32-slot decode slot 27 pos 2301: delta PCC 0.997034 full PCC 0.998280 update rms ratio 1.0084 (HF router margin 6.2e-03)
+L3 32-slot decode slot 28 pos 2301: delta PCC 0.995702 full PCC 0.997850 update rms ratio 1.0067 (HF router margin 3.1e-03)
+L3 32-slot decode slot 29 pos 2301: delta PCC 0.992792 full PCC 0.997538 update rms ratio 1.0154 (HF router margin 4.7e-03)
+L3 32-slot decode slot 30 pos 2301: delta PCC 0.992175 full PCC 0.996320 update rms ratio 1.0131 (HF router margin 4.8e-03)
+L3 32-slot decode slot 31 pos 2301: delta PCC 0.996533 full PCC 0.998915 update rms ratio 1.0076 (HF router margin 5.1e-04)
+L3 32-slot decode slot 0 pos 39: delta PCC 0.994603 full PCC 0.996601 update rms ratio 1.0137 (HF router margin 2.0e-03)
+L3 32-slot decode slot 1 pos 39: delta PCC 0.993966 full PCC 0.995781 update rms ratio 1.0062 (HF router margin 7.3e-03)
+L3 32-slot decode slot 2 pos 39: delta PCC 0.993845 full PCC 0.996951 update rms ratio 1.0574 (HF router margin 1.9e-04)
+L3 32-slot decode slot 3 pos 39: delta PCC 0.996241 full PCC 0.999011 update rms ratio 1.0050 (HF router margin 1.3e-03)
+L3 32-slot decode slot 4 pos 39: delta PCC 0.989334 full PCC 0.994483 update rms ratio 1.0028 (HF router margin 6.9e-03)
+L3 32-slot decode slot 5 pos 39: delta PCC 0.988075 full PCC 0.996093 update rms ratio 1.0104 (HF router margin 1.2e-02)
+L3 32-slot decode slot 6 pos 39: delta PCC 0.994885 full PCC 0.996980 update rms ratio 0.9904 (HF router margin 5.8e-03)
+L3 32-slot decode slot 7 pos 39: delta PCC 0.995385 full PCC 0.997260 update rms ratio 1.0142 (HF router margin 1.2e-02)
+L3 32-slot decode slot 8 pos 302: delta PCC 0.994731 full PCC 0.997833 update rms ratio 1.0055 (HF router margin 1.3e-03)
+L3 32-slot decode slot 9 pos 302: delta PCC 0.995381 full PCC 0.997963 update rms ratio 1.0241 (HF router margin 6.5e-03)
+L3 32-slot decode slot 10 pos 302: delta PCC 0.994213 full PCC 0.996278 update rms ratio 1.0122 (HF router margin 7.7e-05)
+L3 32-slot decode slot 11 pos 302: delta PCC 0.995750 full PCC 0.997650 update rms ratio 0.9970 (HF router margin 3.3e-03)
+L3 32-slot decode slot 12 pos 302: delta PCC 0.993847 full PCC 0.995979 update rms ratio 1.0229 (HF router margin 1.0e-03)
+L3 32-slot decode slot 13 pos 302: delta PCC 0.993901 full PCC 0.997952 update rms ratio 1.0006 (HF router margin 8.8e-03)
+L3 32-slot decode slot 14 pos 302: delta PCC 0.993790 full PCC 0.996629 update rms ratio 0.9902 (HF router margin 1.8e-02)
+L3 32-slot decode slot 15 pos 302: delta PCC 0.994341 full PCC 0.998909 update rms ratio 1.0033 (HF router margin 3.1e-03)
+L3 32-slot decode slot 16 pos 2102: delta PCC 0.992249 full PCC 0.997089 update rms ratio 1.0116 (HF router margin 9.3e-05)
+L3 32-slot decode slot 17 pos 2102: delta PCC 0.995225 full PCC 0.997815 update rms ratio 1.0081 (HF router margin 5.0e-03)
+L3 32-slot decode slot 18 pos 2102: delta PCC 0.992752 full PCC 0.996582 update rms ratio 1.0170 (HF router margin 2.2e-04)
+L3 32-slot decode slot 19 pos 2102: delta PCC 0.995908 full PCC 0.997795 update rms ratio 1.0035 (HF router margin 3.1e-03)
+L3 32-slot decode slot 20 pos 2102: delta PCC 0.997741 full PCC 0.999019 update rms ratio 0.9921 (HF router margin 8.5e-03)
+L3 32-slot decode slot 21 pos 2102: delta PCC 0.993933 full PCC 0.997098 update rms ratio 1.0099 (HF router margin 8.8e-03)
+L3 32-slot decode slot 22 pos 2102: delta PCC 0.992016 full PCC 0.995507 update rms ratio 1.0094 (HF router margin 4.6e-04)
+L3 32-slot decode slot 23 pos 2102: delta PCC 0.992214 full PCC 0.995778 update rms ratio 1.0119 (HF router margin 1.1e-02)
+L3 32-slot decode slot 24 pos 2302: delta PCC 0.995045 full PCC 0.997174 update rms ratio 0.9915 (HF router margin 6.5e-03)
+L3 32-slot decode slot 25 pos 2302: delta PCC 0.995669 full PCC 0.999086 update rms ratio 0.9994 (HF router margin 1.7e-03)
+L3 32-slot decode slot 26 pos 2302: delta PCC 0.990484 full PCC 0.997191 update rms ratio 1.0087 (HF router margin 1.4e-03)
+L3 32-slot decode slot 27 pos 2302: delta PCC 0.995711 full PCC 0.998101 update rms ratio 1.0007 (HF router margin 5.2e-03)
+L3 32-slot decode slot 28 pos 2302: delta PCC 0.995789 full PCC 0.997638 update rms ratio 1.0089 (HF router margin 9.3e-03)
+L3 32-slot decode slot 29 pos 2302: delta PCC 0.996974 full PCC 0.998442 update rms ratio 1.0204 (HF router margin 5.5e-04)
+L3 32-slot decode slot 30 pos 2302: delta PCC 0.997274 full PCC 0.999640 update rms ratio 0.9994 (HF router margin 1.3e-03)
+L3 32-slot decode slot 31 pos 2302: delta PCC 0.994086 full PCC 0.997640 update rms ratio 0.9994 (HF router margin 1.4e-03)
+L3 32 active slots: min decode delta PCC 0.977935
+PASSEDdecode update rms ratio mean 1.0048 over 96 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:49:46.012 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:50:02.842 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 32-slot decode slot 0 pos 37: delta PCC 0.998707 full PCC 0.999970 update rms ratio 1.0019 (HF router margin 1.7e-03)
+L4 32-slot decode slot 1 pos 37: delta PCC 0.997714 full PCC 0.999961 update rms ratio 1.0125 (HF router margin 9.0e-04)
+L4 32-slot decode slot 2 pos 37: delta PCC 0.996570 full PCC 0.999956 update rms ratio 1.0016 (HF router margin 1.3e-02)
+L4 32-slot decode slot 3 pos 37: delta PCC 0.996219 full PCC 0.999936 update rms ratio 1.0130 (HF router margin 3.4e-03)
+L4 32-slot decode slot 4 pos 37: delta PCC 0.996417 full PCC 0.999946 update rms ratio 1.0044 (HF router margin 1.2e-02)
+L4 32-slot decode slot 5 pos 37: delta PCC 0.994773 full PCC 0.999889 update rms ratio 1.0083 (HF router margin 1.3e-02)
+L4 32-slot decode slot 6 pos 37: delta PCC 0.998182 full PCC 0.999978 update rms ratio 1.0034 (HF router margin 6.1e-03)
+L4 32-slot decode slot 7 pos 37: delta PCC 0.997741 full PCC 0.999942 update rms ratio 1.0047 (HF router margin 4.5e-03)
+L4 32-slot decode slot 8 pos 129: delta PCC 0.997975 full PCC 0.999961 update rms ratio 1.0037 (HF router margin 7.9e-04)
+L4 32-slot decode slot 9 pos 129: delta PCC 0.999394 full PCC 0.999992 update rms ratio 1.0069 (HF router margin 6.3e-03)
+L4 32-slot decode slot 10 pos 129: delta PCC 0.997904 full PCC 0.999959 update rms ratio 1.0007 (HF router margin 8.7e-03)
+L4 32-slot decode slot 11 pos 129: delta PCC 0.998838 full PCC 0.999979 update rms ratio 0.9984 (HF router margin 4.0e-03)
+L4 32-slot decode slot 12 pos 129: delta PCC 0.997334 full PCC 0.999903 update rms ratio 1.0057 (HF router margin 1.1e-02)
+L4 32-slot decode slot 13 pos 129: delta PCC 0.993960 full PCC 0.999757 update rms ratio 1.0040 (HF router margin 2.8e-03)
+L4 32-slot decode slot 14 pos 129: delta PCC 0.998927 full PCC 0.999982 update rms ratio 1.0075 (HF router margin 6.4e-03)
+L4 32-slot decode slot 15 pos 129: delta PCC 0.997583 full PCC 0.999960 update rms ratio 1.0040 (HF router margin 4.7e-03)
+L4 32-slot decode slot 16 pos 300: delta PCC 0.997412 full PCC 0.999966 update rms ratio 0.9932 (HF router margin 4.5e-05)
+L4 32-slot decode slot 17 pos 300: delta PCC 0.995348 full PCC 0.999896 update rms ratio 1.0016 (HF router margin 2.4e-03)
+L4 32-slot decode slot 18 pos 300: delta PCC 0.997581 full PCC 0.999935 update rms ratio 1.0045 (HF router margin 1.1e-04)
+L4 32-slot decode slot 19 pos 300: delta PCC 0.985666 full PCC 0.997661 update rms ratio 1.0216 (HF router margin 4.4e-03)
+L4 32-slot decode slot 20 pos 300: delta PCC 0.997338 full PCC 0.999950 update rms ratio 1.0122 (HF router margin 8.4e-04)
+L4 32-slot decode slot 21 pos 300: delta PCC 0.996270 full PCC 0.999799 update rms ratio 1.0079 (HF router margin 2.6e-03)
+L4 32-slot decode slot 22 pos 300: delta PCC 0.997543 full PCC 0.999932 update rms ratio 1.0000 (HF router margin 4.4e-03)
+L4 32-slot decode slot 23 pos 300: delta PCC 0.996142 full PCC 0.999909 update rms ratio 1.0086 (HF router margin 1.4e-03)
+L4 32-slot decode slot 24 pos 700: delta PCC 0.995920 full PCC 0.999915 update rms ratio 1.0068 (HF router margin 5.1e-03)
+L4 32-slot decode slot 25 pos 700: delta PCC 0.997909 full PCC 0.999921 update rms ratio 1.0068 (HF router margin 9.2e-04)
+L4 32-slot decode slot 26 pos 700: delta PCC 0.996114 full PCC 0.999918 update rms ratio 1.0089 (HF router margin 1.8e-03)
+L4 32-slot decode slot 27 pos 700: delta PCC 0.994653 full PCC 0.999830 update rms ratio 1.0149 (HF router margin 5.1e-04)
+L4 32-slot decode slot 28 pos 700: delta PCC 0.985373 full PCC 0.998414 update rms ratio 1.0085 (HF router margin 3.6e-04)
+L4 32-slot decode slot 29 pos 700: delta PCC 0.995934 full PCC 0.999939 update rms ratio 0.9982 (HF router margin 1.0e-03)
+L4 32-slot decode slot 30 pos 700: delta PCC 0.998743 full PCC 0.999980 update rms ratio 1.0093 (HF router margin 1.6e-03)
+L4 32-slot decode slot 31 pos 700: delta PCC 0.998271 full PCC 0.999973 update rms ratio 0.9981 (HF router margin 9.3e-04)
+L4 32-slot decode slot 0 pos 38: delta PCC 0.999475 full PCC 0.999992 update rms ratio 1.0037 (HF router margin 1.7e-03)
+L4 32-slot decode slot 1 pos 38: delta PCC 0.997845 full PCC 0.999964 update rms ratio 1.0016 (HF router margin 2.6e-03)
+L4 32-slot decode slot 2 pos 38: delta PCC 0.998286 full PCC 0.999957 update rms ratio 1.0041 (HF router margin 7.7e-04)
+L4 32-slot decode slot 3 pos 38: delta PCC 0.997726 full PCC 0.999942 update rms ratio 1.0038 (HF router margin 3.7e-04)
+L4 32-slot decode slot 4 pos 38: delta PCC 0.999171 full PCC 0.999990 update rms ratio 0.9982 (HF router margin 1.6e-03)
+L4 32-slot decode slot 5 pos 38: delta PCC 0.997032 full PCC 0.999970 update rms ratio 1.0112 (HF router margin 3.8e-03)
+L4 32-slot decode slot 6 pos 38: delta PCC 0.992480 full PCC 0.999715 update rms ratio 1.0169 (HF router margin 2.4e-03)
+L4 32-slot decode slot 7 pos 38: delta PCC 0.999269 full PCC 0.999985 update rms ratio 0.9953 (HF router margin 2.0e-04)
+L4 32-slot decode slot 8 pos 130: delta PCC 0.995130 full PCC 0.999785 update rms ratio 1.0068 (HF router margin 1.0e-03)
+L4 32-slot decode slot 9 pos 130: delta PCC 0.998701 full PCC 0.999954 update rms ratio 0.9980 (HF router margin 1.2e-03)
+L4 32-slot decode slot 10 pos 130: delta PCC 0.992537 full PCC 0.999739 update rms ratio 1.0040 (HF router margin 3.5e-04)
+L4 32-slot decode slot 11 pos 130: delta PCC 0.997975 full PCC 0.999959 update rms ratio 0.9957 (HF router margin 3.0e-03)
+L4 32-slot decode slot 12 pos 130: delta PCC 0.992029 full PCC 0.999475 update rms ratio 1.0116 (HF router margin 5.9e-04)
+L4 32-slot decode slot 13 pos 130: delta PCC 0.996162 full PCC 0.999927 update rms ratio 1.0015 (HF router margin 5.4e-04)
+L4 32-slot decode slot 14 pos 130: delta PCC 0.997726 full PCC 0.999966 update rms ratio 1.0173 (HF router margin 9.4e-04)
+L4 32-slot decode slot 15 pos 130: delta PCC 0.998146 full PCC 0.999971 update rms ratio 0.9947 (HF router margin 2.0e-04)
+L4 32-slot decode slot 16 pos 301: delta PCC 0.996890 full PCC 0.999951 update rms ratio 1.0117 (HF router margin 4.8e-03)
+L4 32-slot decode slot 17 pos 301: delta PCC 0.999208 full PCC 0.999990 update rms ratio 0.9826 (HF router margin 5.4e-03)
+L4 32-slot decode slot 18 pos 301: delta PCC 0.993651 full PCC 0.999865 update rms ratio 0.9988 (HF router margin 9.7e-04)
+L4 32-slot decode slot 19 pos 301: delta PCC 0.994023 full PCC 0.999833 update rms ratio 1.0058 (HF router margin 2.4e-03)
+L4 32-slot decode slot 20 pos 301: delta PCC 0.986180 full PCC 0.998884 update rms ratio 1.0193 (HF router margin 1.2e-02)
+L4 32-slot decode slot 21 pos 301: delta PCC 0.985998 full PCC 0.998708 update rms ratio 1.0187 (HF router margin 2.8e-03)
+L4 32-slot decode slot 22 pos 301: delta PCC 0.998260 full PCC 0.999973 update rms ratio 1.0079 (HF router margin 4.4e-03)
+L4 32-slot decode slot 23 pos 301: delta PCC 0.998651 full PCC 0.999982 update rms ratio 1.0095 (HF router margin 7.0e-03)
+L4 32-slot decode slot 24 pos 701: delta PCC 0.996987 full PCC 0.999967 update rms ratio 1.0174 (HF router margin 3.1e-02)
+L4 32-slot decode slot 25 pos 701: delta PCC 0.998031 full PCC 0.999972 update rms ratio 0.9918 (HF router margin 9.3e-03)
+L4 32-slot decode slot 26 pos 701: delta PCC 0.994939 full PCC 0.999827 update rms ratio 1.0069 (HF router margin 1.9e-02)
+L4 32-slot decode slot 27 pos 701: delta PCC 0.996579 full PCC 0.999899 update rms ratio 1.0014 (HF router margin 1.1e-03)
+L4 32-slot decode slot 28 pos 701: delta PCC 0.998577 full PCC 0.999956 update rms ratio 1.0032 (HF router margin 1.2e-03)
+L4 32-slot decode slot 29 pos 701: delta PCC 0.994017 full PCC 0.999862 update rms ratio 1.0131 (HF router margin 4.7e-03)
+L4 32-slot decode slot 30 pos 701: delta PCC 0.996730 full PCC 0.999931 update rms ratio 1.0056 (HF router margin 2.0e-03)
+L4 32-slot decode slot 31 pos 701: delta PCC 0.994017 full PCC 0.999843 update rms ratio 1.0134 (HF router margin 1.2e-02)
+L4 32-slot decode slot 0 pos 39: delta PCC 0.998069 full PCC 0.999967 update rms ratio 0.9919 (HF router margin 9.9e-04)
+L4 32-slot decode slot 1 pos 39: delta PCC 0.992859 full PCC 0.999892 update rms ratio 1.0069 (HF router margin 8.3e-03)
+L4 32-slot decode slot 2 pos 39: delta PCC 0.999214 full PCC 0.999988 update rms ratio 0.9864 (HF router margin 4.6e-04)
+L4 32-slot decode slot 3 pos 39: delta PCC 0.993117 full PCC 0.999540 update rms ratio 1.0051 (HF router margin 8.7e-03)
+L4 32-slot decode slot 4 pos 39: delta PCC 0.989469 full PCC 0.999561 update rms ratio 1.0155 (HF router margin 3.5e-03)
+L4 32-slot decode slot 5 pos 39: delta PCC 0.992751 full PCC 0.999820 update rms ratio 1.0143 (HF router margin 3.5e-03)
+L4 32-slot decode slot 6 pos 39: delta PCC 0.987645 full PCC 0.999151 update rms ratio 1.0157 (HF router margin 2.3e-03)
+L4 32-slot decode slot 7 pos 39: delta PCC 0.986794 full PCC 0.999064 update rms ratio 1.0225 (HF router margin 5.8e-03)
+L4 32-slot decode slot 8 pos 131: delta PCC 0.998853 full PCC 0.999976 update rms ratio 0.9961 (HF router margin 7.9e-03)
+L4 32-slot decode slot 9 pos 131: delta PCC 0.997564 full PCC 0.999955 update rms ratio 0.9984 (HF router margin 9.5e-03)
+L4 32-slot decode slot 10 pos 131: delta PCC 0.991464 full PCC 0.999354 update rms ratio 1.0102 (HF router margin 2.3e-03)
+L4 32-slot decode slot 11 pos 131: delta PCC 0.997520 full PCC 0.999950 update rms ratio 1.0042 (HF router margin 1.7e-03)
+L4 32-slot decode slot 12 pos 131: delta PCC 0.997066 full PCC 0.999892 update rms ratio 1.0035 (HF router margin 3.0e-04)
+L4 32-slot decode slot 13 pos 131: delta PCC 0.988639 full PCC 0.999690 update rms ratio 1.0150 (HF router margin 6.7e-03)
+L4 32-slot decode slot 14 pos 131: delta PCC 0.997909 full PCC 0.999917 update rms ratio 1.0053 (HF router margin 1.9e-04)
+L4 32-slot decode slot 15 pos 131: delta PCC 0.993299 full PCC 0.999728 update rms ratio 1.0133 (HF router margin 4.7e-03)
+L4 32-slot decode slot 16 pos 302: delta PCC 0.988531 full PCC 0.999375 update rms ratio 1.0159 (HF router margin 4.5e-03)
+L4 32-slot decode slot 17 pos 302: delta PCC 0.989022 full PCC 0.999461 update rms ratio 1.0136 (HF router margin 1.1e-02)
+L4 32-slot decode slot 18 pos 302: delta PCC 0.979499 full PCC 0.998216 update rms ratio 1.0139 (HF router margin 1.5e-04)
+L4 32-slot decode slot 18 pos 302: accepted as a router near-tie
+L4 32-slot decode slot 19 pos 302: delta PCC 0.995204 full PCC 0.999907 update rms ratio 1.0022 (HF router margin 2.5e-04)
+L4 32-slot decode slot 20 pos 302: delta PCC 0.992983 full PCC 0.999889 update rms ratio 1.0106 (HF router margin 7.7e-04)
+L4 32-slot decode slot 21 pos 302: delta PCC 0.996695 full PCC 0.999959 update rms ratio 0.9909 (HF router margin 2.5e-03)
+L4 32-slot decode slot 22 pos 302: delta PCC 0.996428 full PCC 0.999924 update rms ratio 1.0081 (HF router margin 8.8e-03)
+L4 32-slot decode slot 23 pos 302: delta PCC 0.997303 full PCC 0.999874 update rms ratio 1.0046 (HF router margin 3.1e-03)
+L4 32-slot decode slot 24 pos 702: delta PCC 0.987713 full PCC 0.999143 update rms ratio 1.0159 (HF router margin 3.1e-03)
+L4 32-slot decode slot 25 pos 702: delta PCC 0.995122 full PCC 0.999896 update rms ratio 1.0022 (HF router margin 8.2e-03)
+L4 32-slot decode slot 26 pos 702: delta PCC 0.997791 full PCC 0.999965 update rms ratio 1.0047 (HF router margin 3.6e-02)
+L4 32-slot decode slot 27 pos 702: delta PCC 0.998687 full PCC 0.999983 update rms ratio 1.0117 (HF router margin 2.6e-03)
+L4 32-slot decode slot 28 pos 702: delta PCC 0.995976 full PCC 0.999928 update rms ratio 1.0022 (HF router margin 8.8e-03)
+L4 32-slot decode slot 29 pos 702: delta PCC 0.994440 full PCC 0.999888 update rms ratio 1.0168 (HF router margin 5.9e-05)
+L4 32-slot decode slot 30 pos 702: delta PCC 0.997732 full PCC 0.999881 update rms ratio 1.0022 (HF router margin 5.3e-03)
+L4 32-slot decode slot 31 pos 702: delta PCC 0.999160 full PCC 0.999973 update rms ratio 1.0085 (HF router margin 1.6e-04)
+L4 32 active slots: min decode delta PCC 0.979499
+PASSEDdecode update rms ratio mean 1.0061 over 96 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:53:54.314 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+L0 A alone pos 64: delta PCC 0.999968 full PCC 0.999954 update rms ratio 1.0004
+L0 A alone pos 65: delta PCC 0.999974 full PCC 0.999957 update rms ratio 1.0022
+L0 A alone pos 66: delta PCC 0.999977 full PCC 0.999962 update rms ratio 1.0000
+L0 A alone pos 67: delta PCC 0.999980 full PCC 0.999957 update rms ratio 1.0017
+L0 A pos 68: delta PCC 0.999978 full PCC 0.999945 update rms ratio 1.0014
+L0 B after idling, pos 102: delta PCC 0.999979 full PCC 0.999954 update rms ratio 1.0017
+L0 A pos 69: delta PCC 0.999978 full PCC 0.999957 update rms ratio 1.0006
+L0 B after idling, pos 103: delta PCC 0.999975 full PCC 0.999950 update rms ratio 1.0016
+PASSEDdecode update rms ratio mean 1.0012 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:54:21.624 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 A alone pos 64: delta PCC 0.995051 full PCC 0.997703 update rms ratio 1.0056 (HF router margin 2.4e-02)
+L3 A alone pos 65: delta PCC 0.996072 full PCC 0.998525 update rms ratio 1.0038 (HF router margin 6.2e-03)
+L3 A alone pos 66: delta PCC 0.995097 full PCC 0.997612 update rms ratio 1.0220 (HF router margin 2.9e-03)
+L3 A alone pos 67: delta PCC 0.995844 full PCC 0.999093 update rms ratio 1.0012 (HF router margin 4.9e-04)
+L3 A pos 68: delta PCC 0.997576 full PCC 0.998845 update rms ratio 1.0028 (HF router margin 2.8e-03)
+L3 B after idling, pos 102: delta PCC 0.996270 full PCC 0.998354 update rms ratio 0.9991 (HF router margin 5.3e-03)
+L3 A pos 69: delta PCC 0.996351 full PCC 0.998345 update rms ratio 0.9905 (HF router margin 2.2e-02)
+L3 B after idling, pos 103: delta PCC 0.995948 full PCC 0.997880 update rms ratio 0.9958 (HF router margin 2.5e-03)
+PASSEDdecode update rms ratio mean 1.0026 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-16 19:54:54.587 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:55:11.733 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L4 A alone pos 64: delta PCC 0.991553 full PCC 0.999713 update rms ratio 1.0151 (HF router margin 2.9e-03)
+L4 A alone pos 65: delta PCC 0.997055 full PCC 0.999937 update rms ratio 1.0049 (HF router margin 3.6e-04)
+L4 A alone pos 66: delta PCC 0.998199 full PCC 0.999975 update rms ratio 0.9959 (HF router margin 1.5e-03)
+L4 A alone pos 67: delta PCC 0.999170 full PCC 0.999971 update rms ratio 0.9994 (HF router margin 1.3e-03)
+L4 A pos 68: delta PCC 0.999399 full PCC 0.999994 update rms ratio 0.9856 (HF router margin 2.3e-04)
+L4 B after idling, pos 102: delta PCC 0.992161 full PCC 0.999713 update rms ratio 1.0184 (HF router margin 9.5e-03)
+L4 A pos 69: delta PCC 0.993663 full PCC 0.999802 update rms ratio 1.0091 (HF router margin 4.3e-03)
+L4 B after idling, pos 103: delta PCC 0.997204 full PCC 0.999963 update rms ratio 1.0109 (HF router margin 1.1e-02)
+PASSEDdecode update rms ratio mean 1.0049 over 8 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_suite_runs_multichip_decoder PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline 2026-10-16 19:55:57.470 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:56:20.025 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-16 19:56:25.410 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 19:56:42.796 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:361 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+kda_dense prefill_a: PCC vs single die 0.999992 rms ratio 1.00091
+kda_dense prefill_b: PCC vs single die 0.999991 rms ratio 1.00082
+kda_dense decode: PCC vs single die 0.999990 rms ratio 1.00353
+dsa_moe prefill_a: PCC vs single die 0.999938 rms ratio 1.00241
+dsa_moe prefill_b: PCC vs single die 0.999952 rms ratio 1.00278
+dsa_moe decode: PCC vs single die 0.999902 rms ratio 1.00278
+kda_moe prefill_a: PCC vs single die 0.999799 rms ratio 0.99798
+kda_moe prefill_b: PCC vs single die 0.999782 rms ratio 0.99760
+kda_moe decode: PCC vs single die 0.999945 rms ratio 0.99651
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+290.88s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+252.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_moe]
+113.82s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[kda_moe]
+113.06s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_paged_permuted_blocks
+94.88s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[dsa_moe]
+84.65s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[dsa_moe]
+76.06s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[kda_moe]
+66.87s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[kda_moe]
+53.79s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_dense]
+49.77s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[dsa_moe]
+48.55s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[kda_moe]
+48.54s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-33]
+47.68s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[kda_moe]
+46.95s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-4000]
+46.28s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+46.04s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[kda_moe]
+46.00s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[kda_moe]
+45.80s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-2049]
+43.09s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+39.12s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2051]
+38.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2177]
+36.39s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[dsa_moe]
+35.35s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[dsa_moe]
+34.66s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[dsa_moe]
+34.05s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-1]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_synthetic_weights[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-31]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-128]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-129]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-2047]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_dense-4000]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-129]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2051]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-2177]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[dsa_moe-4000]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_lengths[kda_moe-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batched_users[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_determinism[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_no_host_fallback[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_decode_only[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_paged_permuted_blocks
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_inactive_slot_state[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_suite_runs_multichip_decoder
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+======================= 44 passed in 1994.40s (0:33:14) ========================
+nanobind: leaked 174 instances!
+ - leaked instance 0x7dc98c2755d8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7da7abed55a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc98c276bf8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc98c23d218 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7da7abed5c98 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc98c3c7c48 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7da7abed5a88 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x4682e100 of type "ttnn._ttnn.multi_device.MeshDevice"
+ - leaked instance 0x7dc98c301488 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7dc98c3c6f28 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7da7abee3a48 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseProgramConfig"
+ - leaked instance 0x7da7abed5398 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc9a1891628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7da7abed6a18 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc93ebdd508 of type "ttnn._ttnn.tensor.Tile"
+ - leaked instance 0x7dc98c23c618 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7da7a9457548 of type "ttnn._ttnn.global_semaphore.global_semaphore"
+ - leaked instance 0x7dc98c23fdc8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc98c3028c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7dc94e3e71f8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 65 keep_alive records!
+nanobind: leaked 27 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - ... skipped remainder
+nanobind: leaked 284 functions!
+ - leaked function "set_program_cache_misses_allowed"
+ - leaked function ""
+ - leaked function "compute_with_storage_grid_size"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function "is_per_core_allocated"
+ - leaked function "__init__"
+ - leaked function "to_json"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Fri Oct 16 07:56:46 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
