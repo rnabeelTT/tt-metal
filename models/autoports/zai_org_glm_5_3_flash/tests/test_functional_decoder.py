@@ -81,6 +81,16 @@ SUITE = {"swaps": 0, "moe_tokens": 0}
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
 
 
+@pytest.fixture(scope="module", autouse=True)
+def suite_swap_cap():
+    """Module-level y_swap cap, checked once at teardown (a running check fails early on a chance cluster)."""
+    yield
+    if SUITE["moe_tokens"]:
+        suite_cap = max(SWAP_SUITE_MIN, int(SWAP_SUITE_FRAC * SUITE["moe_tokens"]))
+        print(f"module y_swap matches {SUITE['swaps']} of {SUITE['moe_tokens']} MoE decode tokens (cap {suite_cap})")
+        assert SUITE["swaps"] <= suite_cap, f"module y_swap matches {SUITE['swaps']} > {suite_cap}"
+
+
 @pytest.fixture(autouse=True)
 def decode_scale_mean():
     """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
@@ -99,7 +109,6 @@ def decode_scale_mean():
             f"module total {SUITE['swaps']} of {SUITE['moe_tokens']} (cap {suite_cap})"
         )
         assert swaps <= cap, f"{swaps} y_swap matches in {len(MOE_TOKENS)} MoE decode tokens > {cap}"
-        assert SUITE["swaps"] <= suite_cap, f"module y_swap matches {SUITE['swaps']} > {suite_cap}"
     if len(DECODE_RATIOS) >= MEAN_MIN_TOKENS:
         m = sum(r for _, r in DECODE_RATIOS) / len(DECODE_RATIOS)
         print(f"decode update rms ratio mean {m:.4f} over {len(DECODE_RATIOS)} tokens")

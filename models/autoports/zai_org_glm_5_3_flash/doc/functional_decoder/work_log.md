@@ -134,7 +134,7 @@ autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the FP8 parent; `tt/ckpt.py`). 
   unmodified HF layer rerun with the router's 8th expert replaced by its 9th (`tests/hf_ref/hf_flip_ref.py`, own cache
   key, so the base references stay cached; every other row reproduces the cached `y` bit-exactly). A token passes on
   the normal bars against `y` or `y_swap`; `y_swap` matches are counted and capped (per test max(1, 5 %), per suite
-  max(2, 3 %) of the MoE decode tokens). 48 references, 1 .. 11 swap rows each, 0.4 .. 1.8 min per reference on the
+  max(2, 3 %) of the MoE decode tokens). 48 references, 0 .. 11 swap rows each, 0.4 .. 1.8 min per reference on the
   CPU (`scripts/s1r5_host/flip_refs.py`, `s1r5_flip_refs.log`).
 - Functional suite (`s1_functional7.log`, 01:15 build): 42 / 42. Four tokens match `y_swap`, all others match `y`:
   pos 2052 (0.99989 / 0.9931), pos 4002 (0.99991 / 0.9998), L3 32-slot slot 2 pos 39 (0.99993 / 1.0004; against `y`

@@ -188,7 +188,7 @@ expert-selection margin below 1e-3 (real stream: 8.7 %; real router on the synth
 relative difference between the TT and HF FFN inputs (after mHC and RMSNorm) flips experts of a few prefill tokens.
 Measured on layer 4 (`tools/layer_stage_probe.py`): every stage up to the FFN input at PCC >= 0.99994; FFN output
 on the TT input 0.987, on the HF input 0.9998. The synthetic MoE tests therefore assert (a) the MoE block on the HF
-FFN input >= 0.995 (0.9984 / 0.9999) and (b) the layer update >= 0.98 (prefill 0.99797 / 0.99206, decode >= 0.9996).
+FFN input >= 0.995 (0.9984 / 0.9999) and (b) the layer update >= 0.98 (final run: prefill 0.99785 / 0.98976, about 1 % above the bar on L4; decode >= 0.9996).
 Real-weight cases keep the 0.995 bar throughout.
 
 ## Context contract
@@ -317,6 +317,10 @@ reshape / transpose at 2048 rows.
   sequence bound of 1 +- 0.01. The mHC offset of review #4 (fixed) is a different cause; it only applied to L4.
 - mHC kernel cost: the fp32-exact `mhc_split_sinkhorn` / `mhc_post` (review #4) are slower than before (Tracy, same
   shapes in every layer): Sinkhorn 2 calls 164 -> 179 us per decode step; `mhc_post` 97 -> 118 us per decode step and
-  1531 -> 2019 us at a 2048-row prefill. `mhc_post` takes the slower SFPU path only for fp32 inputs (this port);
-  bf16 / bfp8_b callers keep the FPU path (2026-10-17).
+  1531 -> 2019 us at a 2048-row prefill. `mhc_post` takes the slower SFPU path only for fp32 inputs; bf16 / bfp8_b
+  callers keep the FPU path (2026-10-17). The upstream deepseek caller (`TtMHCWrap`) is fp32-only, so it pays the same
+  cost (+21 .. 32 % `mhc_post`, +9 % Sinkhorn) for the precision gain.
+- Prefill routed-expert excess (not explained): on the same HF input, the prefill (sorted) routed path is 1.0028 of
+  fp32 and the decode path 1.0000; bfp8 weights alone predict 0.9992. It is prefill-only. The datatype / optimize stages
+  A/B the sorted prefill path against the decode path on identical rows.
 - The MTP layer and the vision tower are not part of the decoder stages (full-model / vLLM stages).
