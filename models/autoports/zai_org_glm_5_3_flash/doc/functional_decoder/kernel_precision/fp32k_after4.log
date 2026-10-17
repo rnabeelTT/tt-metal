@@ -1,0 +1,172 @@
+=== start Fri Oct 16 09:43:15 PM UTC 2026 : timeout 1800 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py
+2026-10-16 21:43:17.293 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 21 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale] T=32 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.30e-07 max elementwise rel err 4.22e-07
+T=32 bf16 a/b post: PCC 1.000000000 scale 0.999999989 max rel err 1.35e-07 max elementwise rel err 8.16e-07
+T=32 bf16 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 3.95e-07 max elementwise rel err 7.05e-07
+T=32: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale] T=32 fp32 a/b pre: PCC 1.000000000 scale 1.000000033 max rel err 1.11e-07 max elementwise rel err 4.33e-07
+T=32 fp32 a/b post: PCC 1.000000000 scale 1.000000011 max rel err 1.09e-07 max elementwise rel err 1.69e-07
+T=32 fp32 a/b comb: PCC 1.000000000 scale 1.000000031 max rel err 2.04e-07 max elementwise rel err 9.51e-07
+T=32: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale] T=96 bf16 a/b pre: PCC 1.000000000 scale 1.000000019 max rel err 1.28e-07 max elementwise rel err 5.45e-07
+T=96 bf16 a/b post: PCC 1.000000000 scale 0.999999992 max rel err 1.38e-07 max elementwise rel err 4.43e-07
+T=96 bf16 a/b comb: PCC 1.000000000 scale 1.000000048 max rel err 2.54e-07 max elementwise rel err 1.37e-06
+T=96: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale] T=96 fp32 a/b pre: PCC 1.000000000 scale 1.000000025 max rel err 1.05e-07 max elementwise rel err 4.81e-07
+T=96 fp32 a/b post: PCC 1.000000000 scale 1.000000004 max rel err 1.24e-07 max elementwise rel err 5.26e-07
+T=96 fp32 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 4.03e-07 max elementwise rel err 1.38e-06
+T=96: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale] T=2048 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.35e-07 max elementwise rel err 6.40e-07
+T=2048 bf16 a/b post: PCC 1.000000000 scale 0.999999998 max rel err 1.32e-07 max elementwise rel err 5.67e-07
+T=2048 bf16 a/b comb: PCC 1.000000000 scale 1.000000052 max rel err 4.02e-07 max elementwise rel err 1.43e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale] T=2048 fp32 a/b pre: PCC 1.000000000 scale 1.000000021 max rel err 1.92e-07 max elementwise rel err 8.16e-07
+T=2048 fp32 a/b post: PCC 1.000000000 scale 1.000000001 max rel err 1.99e-07 max elementwise rel err 6.83e-07
+T=2048 fp32 a/b comb: PCC 1.000000000 scale 1.000000050 max rel err 3.43e-07 max elementwise rel err 1.86e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded sharded T=7040 pre: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 1.70e-07
+sharded T=7040 post: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 1.84e-07
+sharded T=7040 comb: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 4.09e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16] T=32 C=64 fn bf16: mixes PCC 0.999999930 max rel err 4.36e-04, sum-of-squares max rel err 2.33e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32] T=32 C=64 fn fp32: mixes PCC 0.999999850 max rel err 7.10e-04, sum-of-squares max rel err 2.33e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16] T=64 C=32 fn bf16: mixes PCC 0.999999928 max rel err 3.49e-04, sum-of-squares max rel err 2.87e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32] T=64 C=32 fn fp32: mixes PCC 0.999999836 max rel err 7.20e-04, sum-of-squares max rel err 2.87e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16] T=2048 C=16 fn bf16: mixes PCC 0.999999921 max rel err 4.81e-04, sum-of-squares max rel err 3.09e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32] T=2048 C=16 fn fp32: mixes PCC 0.999999826 max rel err 9.83e-04, sum-of-squares max rel err 3.09e-04
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1] 2026-10-16 21:43:26.590 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=1 C=256: pcc=1.000000003026549 | max|Δ|=1.43e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T32] 2026-10-16 21:43:26.942 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=32 C=256: pcc=1.000000000054843 | max|Δ|=1.43e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T96] 2026-10-16 21:43:27.316 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=96 C=256: pcc=0.9999999999740575 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640] 2026-10-16 21:43:27.687 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=640 C=256: pcc=0.9999999999857323 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1] 2026-10-16 21:43:28.597 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=1 C=7168: pcc=0.9999999998703939 | max|Δ|=9.54e-07
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T32] 2026-10-16 21:43:28.969 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=32 C=7168: pcc=0.9999999999317833 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T96] 2026-10-16 21:43:29.367 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=96 C=7168: pcc=1.000000000003641 | max|Δ|=1.91e-06
+PASSED
+models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640] 2026-10-16 21:43:30.170 | INFO     | models.demos.deepseek_v3_d_p.tests.pcc.test_mhc_post_op:test_mhc_post_vs_composite:52 - mhc_post T=640 C=7168: pcc=0.9999999999924398 | max|Δ|=2.38e-06
+PASSED
+
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+models/tt_transformers/tt/common.py:28
+  /home/raahem/tt-metal/models/tt_transformers/tt/common.py:28: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ImageMedia(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale]
+0.79s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1]
+0.56s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1]
+0.46s call     models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+0.38s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+0.37s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+0.34s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T96]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T32]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32]
+0.33s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+0.33s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale]
+0.32s setup    models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T96]
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale]
+0.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T96]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C256-T640]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T1]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T32]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T96]
+PASSED models/demos/deepseek_v3_d_p/tests/pcc/test_mhc_post_op.py::test_mhc_post_vs_composite[C7168-T640]
+======================= 21 passed, 3 warnings in 11.24s ========================
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+nanobind: leaked 2 instances!
+ - leaked instance 0x7927c0a0b468 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x792813f41628 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 36 types!
+ - leaked type "ttnn._ttnn.types.iterator"
+ - leaked type "MathFidelity"
+ - leaked type "WorkerMode"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.types.Shape"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - ... skipped remainder
+nanobind: leaked 326 functions!
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function "create_submesh"
+ - leaked function ""
+ - leaked function "mesh_size"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "get_system_mesh_id"
+ - leaked function "get_tile"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Fri Oct 16 09:43:32 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

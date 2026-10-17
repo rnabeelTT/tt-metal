@@ -1,0 +1,398 @@
+=== start Fri Oct 16 09:28:41 PM UTC 2026 : bash /tmp/claude-1003/-home-raahem-tt-metal/948ea7b2-716e-4e68-9fdd-7f4d65b9e0da/scratchpad/swap_and_test.sh
+=== build
+[4/8] Building CXX object ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/CMakeFiles/ttnn_op_experimental_kda_recurrent_decode.dir/Unity/unity_0_cxx.cxx.o
+[5/8] Building CXX object ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_mix/CMakeFiles/ttnn_op_experimental_deepseek_prefill_mhc_mix.dir/Unity/unity_0_cxx.cxx.o
+[6/8] Building CXX object ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/CMakeFiles/ttnn_op_experimental_deepseek_prefill_mhc_split_sinkhorn.dir/Unity/unity_0_cxx.cxx.o
+[7/8] Linking CXX shared library ttnn/_ttnncpp.so
+[8/8] Linking CXX shared library ttnn/_ttnn.so
+=== sanity
+2026-10-16 21:28:58.341 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 4 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1] B=1 R=1 step 0: o PCC 0.9999999 max|err| 1.05e-05; state PCC 1.0000000 max|err| 4.11e-05
+B=1 R=1 step 1: o PCC 1.0000000 max|err| 2.04e-05; state PCC 1.0000000 max|err| 3.37e-05
+B=1 R=1 step 2: o PCC 0.9999999 max|err| 1.32e-05; state PCC 1.0000000 max|err| 3.95e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8] B=8 R=8 step 0: o PCC 1.0000000 max|err| 1.42e-05; state PCC 1.0000000 max|err| 5.54e-05
+B=8 R=8 step 1: o PCC 0.9999999 max|err| 2.02e-05; state PCC 1.0000000 max|err| 5.75e-05
+B=8 R=8 step 2: o PCC 1.0000000 max|err| 1.70e-05; state PCC 1.0000000 max|err| 6.19e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32] B=8 R=32 step 0: o PCC 0.9999999 max|err| 1.48e-05; state PCC 1.0000000 max|err| 5.02e-05
+B=8 R=32 step 1: o PCC 0.9999999 max|err| 1.80e-05; state PCC 1.0000000 max|err| 8.17e-05
+B=8 R=32 step 2: o PCC 1.0000000 max|err| 1.74e-05; state PCC 1.0000000 max|err| 6.87e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32] B=32 R=32 step 0: o PCC 1.0000000 max|err| 1.73e-05; state PCC 1.0000000 max|err| 9.42e-05
+B=32 R=32 step 1: o PCC 1.0000000 max|err| 1.84e-05; state PCC 1.0000000 max|err| 7.19e-05
+B=32 R=32 step 2: o PCC 0.9999999 max|err| 2.15e-05; state PCC 1.0000000 max|err| 6.77e-05
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.30s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+1.25s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+============================== 4 passed in 4.17s ===============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x709edd833558 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x709edd0f8868 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "pad_to_tile"
+ - leaked function ""
+ - leaked function "from_json"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "enable_program_cache"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-16 21:29:07.083 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 27 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale] T=32 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.30e-07 max elementwise rel err 4.22e-07
+T=32 bf16 a/b post: PCC 1.000000000 scale 0.999999989 max rel err 1.35e-07 max elementwise rel err 8.16e-07
+T=32 bf16 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 3.95e-07 max elementwise rel err 7.05e-07
+T=32: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale] T=32 fp32 a/b pre: PCC 1.000000000 scale 1.000000033 max rel err 1.11e-07 max elementwise rel err 4.33e-07
+T=32 fp32 a/b post: PCC 1.000000000 scale 1.000000011 max rel err 1.09e-07 max elementwise rel err 1.69e-07
+T=32 fp32 a/b comb: PCC 1.000000000 scale 1.000000031 max rel err 2.04e-07 max elementwise rel err 9.51e-07
+T=32: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale] T=96 bf16 a/b pre: PCC 1.000000000 scale 1.000000019 max rel err 1.28e-07 max elementwise rel err 5.45e-07
+T=96 bf16 a/b post: PCC 1.000000000 scale 0.999999992 max rel err 1.38e-07 max elementwise rel err 4.43e-07
+T=96 bf16 a/b comb: PCC 1.000000000 scale 1.000000048 max rel err 2.54e-07 max elementwise rel err 1.37e-06
+T=96: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale] T=96 fp32 a/b pre: PCC 1.000000000 scale 1.000000025 max rel err 1.05e-07 max elementwise rel err 4.81e-07
+T=96 fp32 a/b post: PCC 1.000000000 scale 1.000000004 max rel err 1.24e-07 max elementwise rel err 5.26e-07
+T=96 fp32 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 4.03e-07 max elementwise rel err 1.38e-06
+T=96: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale] T=2048 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.35e-07 max elementwise rel err 6.40e-07
+T=2048 bf16 a/b post: PCC 1.000000000 scale 0.999999998 max rel err 1.32e-07 max elementwise rel err 5.67e-07
+T=2048 bf16 a/b comb: PCC 1.000000000 scale 1.000000052 max rel err 4.02e-07 max elementwise rel err 1.43e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale] T=2048 fp32 a/b pre: PCC 1.000000000 scale 1.000000021 max rel err 1.92e-07 max elementwise rel err 8.16e-07
+T=2048 fp32 a/b post: PCC 1.000000000 scale 1.000000001 max rel err 1.99e-07 max elementwise rel err 6.83e-07
+T=2048 fp32 a/b comb: PCC 1.000000000 scale 1.000000050 max rel err 3.43e-07 max elementwise rel err 1.86e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32] T=32 C=4096 fp32: PCC 1.000000000 scale 0.999999930 max rel err 2.30e-07 rms rel err 1.20e-07; residual update: scale 1.0000000 rms rel err 7.61e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16] T=32 C=4096 bf16: PCC 0.999998627 scale 1.000042337 max rel err 2.09e-03 rms rel err 1.66e-03; residual update: scale 1.0000226 rms rel err 1.05e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32] T=96 C=1024 fp32: PCC 1.000000000 scale 0.999999925 max rel err 2.60e-07 rms rel err 1.29e-07; residual update: scale 1.0000000 rms rel err 8.36e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16] T=96 C=1024 bf16: PCC 0.999998624 scale 0.999959289 max rel err 2.53e-03 rms rel err 1.66e-03; residual update: scale 0.9999852 rms rel err 1.08e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32] T=2048 C=4096 fp32: PCC 1.000000000 scale 0.999999924 max rel err 3.04e-07 rms rel err 1.28e-07; residual update: scale 1.0000000 rms rel err 8.28e-08
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16] T=2048 C=4096 bf16: PCC 0.999998623 scale 1.000001646 max rel err 2.68e-03 rms rel err 1.66e-03; residual update: scale 1.0000021 rms rel err 1.07e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None] T=32 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999925 max|err| 5.53e-08 max rel err 2.12e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16] T=32 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998624 scale 0.999993011 max|err| 7.41e-04 max rel err 2.84e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None] T=32 dtype=DataType.BFLOAT16 out=None: PCC 0.999998626 scale 1.000004339 max|err| 8.92e-04 max rel err 3.41e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None] T=96 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999932 max|err| 5.99e-08 max rel err 2.07e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16] T=96 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998621 scale 1.000002808 max|err| 8.84e-04 max rel err 3.06e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None] T=96 dtype=DataType.BFLOAT16 out=None: PCC 0.999998624 scale 0.999994819 max|err| 9.24e-04 max rel err 3.20e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None] T=2048 dtype=DataType.FLOAT32 out=None: PCC 1.000000000 scale 0.999999928 max|err| 7.04e-08 max rel err 2.00e-07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16] T=2048 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998623 scale 0.999998218 max|err| 9.74e-04 max rel err 2.76e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None] T=2048 dtype=DataType.BFLOAT16 out=None: PCC 0.999998623 scale 1.000000795 max|err| 9.74e-04 max rel err 2.76e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16] T=32 C=64 fn bf16: mixes PCC 0.999999930 max rel err 4.36e-04, sum-of-squares max rel err 2.33e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32] T=32 C=64 fn fp32: mixes PCC 0.999999850 max rel err 7.10e-04, sum-of-squares max rel err 2.33e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16] T=64 C=32 fn bf16: mixes PCC 0.999999928 max rel err 3.49e-04, sum-of-squares max rel err 2.87e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32] T=64 C=32 fn fp32: mixes PCC 0.999999836 max rel err 7.20e-04, sum-of-squares max rel err 2.87e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16] T=2048 C=16 fn bf16: mixes PCC 0.999999921 max rel err 4.81e-04, sum-of-squares max rel err 3.09e-04
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32] T=2048 C=16 fn fp32: mixes PCC 0.999999826 max rel err 9.83e-04, sum-of-squares max rel err 3.09e-04
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.30s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale]
+1.09s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+1.07s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+1.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale]
+0.51s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.48s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.47s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.36s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+0.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+============================= 27 passed in 14.68s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x747f943bf678 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x747f93ca4868 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "from_json"
+ - leaked function "__repr__"
+ - leaked function "arch"
+ - leaked function "create_descriptor"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "deallocate"
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== full
+2026-10-16 21:29:26.469 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 12 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1] B=1 R=1 step 0: o PCC 0.9999999 max|err| 1.05e-05; state PCC 1.0000000 max|err| 4.11e-05
+B=1 R=1 step 1: o PCC 1.0000000 max|err| 2.04e-05; state PCC 1.0000000 max|err| 3.37e-05
+B=1 R=1 step 2: o PCC 0.9999999 max|err| 1.32e-05; state PCC 1.0000000 max|err| 3.95e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8] B=8 R=8 step 0: o PCC 1.0000000 max|err| 1.42e-05; state PCC 1.0000000 max|err| 5.54e-05
+B=8 R=8 step 1: o PCC 0.9999999 max|err| 2.02e-05; state PCC 1.0000000 max|err| 5.75e-05
+B=8 R=8 step 2: o PCC 1.0000000 max|err| 1.70e-05; state PCC 1.0000000 max|err| 6.19e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32] B=8 R=32 step 0: o PCC 0.9999999 max|err| 1.48e-05; state PCC 1.0000000 max|err| 5.02e-05
+B=8 R=32 step 1: o PCC 0.9999999 max|err| 1.80e-05; state PCC 1.0000000 max|err| 8.17e-05
+B=8 R=32 step 2: o PCC 1.0000000 max|err| 1.74e-05; state PCC 1.0000000 max|err| 6.87e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32] B=32 R=32 step 0: o PCC 1.0000000 max|err| 1.73e-05; state PCC 1.0000000 max|err| 9.42e-05
+B=32 R=32 step 1: o PCC 1.0000000 max|err| 1.84e-05; state PCC 1.0000000 max|err| 7.19e-05
+B=32 R=32 step 2: o PCC 0.9999999 max|err| 2.15e-05; state PCC 1.0000000 max|err| 6.77e-05
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced traced step 0: o PCC 1.0000000 state PCC 1.0000000
+traced step 1: o PCC 0.9999999 state PCC 1.0000000
+traced step 2: o PCC 0.9999999 state PCC 1.0000000
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99] decay>=0.99 step 100: state PCC 0.999999996 rms ratio 0.9999725 max rel err 9.24e-05; o PCC 0.999999946
+decay>=0.99 step 200: state PCC 0.999999994 rms ratio 0.9999723 max rel err 1.18e-04; o PCC 0.999999946
+decay>=0.99 step 300: state PCC 0.999999993 rms ratio 0.9999735 max rel err 1.22e-04; o PCC 0.999999947
+decay>=0.99 step 400: state PCC 0.999999993 rms ratio 0.9999734 max rel err 1.75e-04; o PCC 0.999999943
+decay>=0.99 step 500: state PCC 0.999999993 rms ratio 0.9999743 max rel err 1.24e-04; o PCC 0.999999946
+decay>=0.99 step 600: state PCC 0.999999993 rms ratio 0.9999737 max rel err 1.28e-04; o PCC 0.999999944
+decay>=0.99 step 700: state PCC 0.999999993 rms ratio 0.9999727 max rel err 1.39e-04; o PCC 0.999999946
+decay>=0.99 step 800: state PCC 0.999999993 rms ratio 0.9999731 max rel err 1.23e-04; o PCC 0.999999945
+decay>=0.99 step 900: state PCC 0.999999993 rms ratio 0.9999732 max rel err 1.18e-04; o PCC 0.999999944
+decay>=0.99 step 1000: state PCC 0.999999993 rms ratio 0.9999731 max rel err 1.32e-04; o PCC 0.999999943
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999] decay>=0.999 step 100: state PCC 0.999999995 rms ratio 0.9999733 max rel err 1.15e-04; o PCC 0.999999946
+decay>=0.999 step 200: state PCC 0.999999991 rms ratio 0.9999728 max rel err 1.44e-04; o PCC 0.999999942
+decay>=0.999 step 300: state PCC 0.999999988 rms ratio 0.9999737 max rel err 1.67e-04; o PCC 0.999999941
+decay>=0.999 step 400: state PCC 0.999999986 rms ratio 0.9999752 max rel err 1.81e-04; o PCC 0.999999935
+decay>=0.999 step 500: state PCC 0.999999985 rms ratio 0.9999748 max rel err 1.68e-04; o PCC 0.999999936
+decay>=0.999 step 600: state PCC 0.999999984 rms ratio 0.9999755 max rel err 1.90e-04; o PCC 0.999999935
+decay>=0.999 step 700: state PCC 0.999999983 rms ratio 0.9999744 max rel err 1.93e-04; o PCC 0.999999935
+decay>=0.999 step 800: state PCC 0.999999983 rms ratio 0.9999745 max rel err 2.06e-04; o PCC 0.999999935
+decay>=0.999 step 900: state PCC 0.999999983 rms ratio 0.9999747 max rel err 1.74e-04; o PCC 0.999999934
+decay>=0.999 step 1000: state PCC 0.999999983 rms ratio 0.9999739 max rel err 1.83e-04; o PCC 0.999999933
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode] PERF kda_recurrent_decode: 847.9 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn] PERF mhc_split_sinkhorn: 89.8 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post] PERF mhc_post: 58.9 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre] PERF mhc_pre: 25.9 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix] PERF mhc_mix: 24.6 us/call (synchronized loop of 200)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+1.30s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+0.70s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+0.69s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+0.35s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+0.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.32s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+0.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix]
+============================== 12 passed in 8.74s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x739b94407558 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x739b93ee4868 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "to"
+ - leaked function "from_json"
+ - leaked function "memory_config"
+ - leaked function "__repr__"
+ - leaked function "is_sharded"
+ - leaked function ""
+ - leaked function "volume"
+ - leaked function "reshape"
+ - leaked function "device_coords"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Fri Oct 16 09:29:38 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

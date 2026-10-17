@@ -1,0 +1,155 @@
+=== start Sat Oct 17 12:47:14 AM UTC 2026 : timeout 2400 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe]
+2026-10-17 00:47:16.200 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe] 2026-10-17 00:47:39.577 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 32-slot decode slot 0 pos 37: delta PCC 0.999922 full PCC 0.999970 update rms ratio 1.0052 (HF router margin 2.7e-03)
+L3 32-slot decode slot 1 pos 37: delta PCC 0.999808 full PCC 0.999946 update rms ratio 1.0079 (HF router margin 2.0e-05)
+L3 32-slot decode slot 2 pos 37: delta PCC 0.999948 full PCC 0.999960 update rms ratio 0.9934 (HF router margin 1.8e-03)
+L3 32-slot decode slot 3 pos 37: delta PCC 0.999953 full PCC 0.999974 update rms ratio 0.9986 (HF router margin 1.6e-03)
+L3 32-slot decode slot 4 pos 37: delta PCC 0.999905 full PCC 0.999953 update rms ratio 1.0049 (HF router margin 1.9e-03)
+L3 32-slot decode slot 5 pos 37: delta PCC 0.999921 full PCC 0.999952 update rms ratio 1.0104 (HF router margin 3.1e-03)
+L3 32-slot decode slot 6 pos 37: delta PCC 0.999928 full PCC 0.999951 update rms ratio 1.0077 (HF router margin 6.2e-03)
+L3 32-slot decode slot 7 pos 37: delta PCC 0.999906 full PCC 0.999960 update rms ratio 0.9999 (HF router margin 2.0e-02)
+L3 32-slot decode slot 8 pos 300: delta PCC 0.999931 full PCC 0.999967 update rms ratio 1.0101 (HF router margin 3.1e-04)
+L3 32-slot decode slot 9 pos 300: delta PCC 0.999930 full PCC 0.999967 update rms ratio 0.9966 (HF router margin 8.2e-04)
+L3 32-slot decode slot 10 pos 300: delta PCC 0.999930 full PCC 0.999974 update rms ratio 1.0053 (HF router margin 1.5e-02)
+L3 32-slot decode slot 11 pos 300: delta PCC 0.999927 full PCC 0.999963 update rms ratio 1.0028 (HF router margin 4.7e-03)
+L3 32-slot decode slot 12 pos 300: delta PCC 0.999944 full PCC 0.999975 update rms ratio 1.0087 (HF router margin 2.0e-02)
+L3 32-slot decode slot 13 pos 300: delta PCC 0.999918 full PCC 0.999983 update rms ratio 0.9977 (HF router margin 7.1e-03)
+L3 32-slot decode slot 14 pos 300: delta PCC 0.999203 full PCC 0.999686 update rms ratio 1.0014 (HF router margin 7.5e-04)
+L3 32-slot decode slot 15 pos 300: delta PCC 0.999915 full PCC 0.999952 update rms ratio 1.0007 (HF router margin 9.0e-03)
+L3 32-slot decode slot 16 pos 2100: delta PCC 0.999917 full PCC 0.999964 update rms ratio 1.0032 (HF router margin 1.6e-03)
+L3 32-slot decode slot 17 pos 2100: delta PCC 0.999884 full PCC 0.999966 update rms ratio 0.9998 (HF router margin 1.1e-03)
+L3 32-slot decode slot 18 pos 2100: delta PCC 0.999937 full PCC 0.999966 update rms ratio 0.9948 (HF router margin 8.6e-03)
+L3 32-slot decode slot 19 pos 2100: delta PCC 0.999942 full PCC 0.999971 update rms ratio 1.0011 (HF router margin 1.0e-02)
+L3 32-slot decode slot 20 pos 2100: delta PCC 0.999928 full PCC 0.999975 update rms ratio 0.9998 (HF router margin 1.2e-03)
+L3 32-slot decode slot 21 pos 2100: delta PCC 0.999917 full PCC 0.999968 update rms ratio 1.0042 (HF router margin 3.1e-03)
+L3 32-slot decode slot 22 pos 2100: delta PCC 0.999940 full PCC 0.999980 update rms ratio 1.0042 (HF router margin 4.4e-04)
+L3 32-slot decode slot 23 pos 2100: delta PCC 0.999895 full PCC 0.999954 update rms ratio 1.0026 (HF router margin 1.2e-02)
+L3 32-slot decode slot 24 pos 2300: delta PCC 0.999934 full PCC 0.999973 update rms ratio 1.0009 (HF router margin 1.4e-02)
+L3 32-slot decode slot 25 pos 2300: delta PCC 0.999876 full PCC 0.999982 update rms ratio 0.9967 (HF router margin 2.0e-03)
+L3 32-slot decode slot 26 pos 2300: delta PCC 0.999775 full PCC 0.999960 update rms ratio 0.9989 (HF router margin 8.6e-03)
+L3 32-slot decode slot 27 pos 2300: delta PCC 0.999918 full PCC 0.999958 update rms ratio 1.0060 (HF router margin 2.6e-03)
+L3 32-slot decode slot 28 pos 2300: delta PCC 0.999937 full PCC 0.999967 update rms ratio 1.0021 (HF router margin 2.9e-03)
+L3 32-slot decode slot 29 pos 2300: delta PCC 0.995676 full PCC 0.998762 update rms ratio 0.9822 (HF router margin 3.0e-05)
+L3 32-slot decode slot 30 pos 2300: delta PCC 0.999947 full PCC 0.999974 update rms ratio 1.0053 (HF router margin 4.4e-03)
+L3 32-slot decode slot 31 pos 2300: delta PCC 0.999946 full PCC 0.999976 update rms ratio 1.0035 (HF router margin 2.9e-03)
+L3 32-slot decode slot 0 pos 38: delta PCC 0.999904 full PCC 0.999961 update rms ratio 1.0095 (HF router margin 3.7e-03)
+L3 32-slot decode slot 1 pos 38: delta PCC 0.999936 full PCC 0.999966 update rms ratio 1.0055 (HF router margin 4.2e-03)
+L3 32-slot decode slot 2 pos 38: delta PCC 0.999839 full PCC 0.999978 update rms ratio 0.9977 (HF router margin 8.0e-04)
+L3 32-slot decode slot 3 pos 38: delta PCC 0.999873 full PCC 0.999944 update rms ratio 1.0018 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 38: delta PCC 0.999947 full PCC 0.999970 update rms ratio 0.9989 (HF router margin 6.4e-03)
+L3 32-slot decode slot 5 pos 38: delta PCC 0.999902 full PCC 0.999951 update rms ratio 1.0059 (HF router margin 1.0e-02)
+L3 32-slot decode slot 6 pos 38: delta PCC 0.999897 full PCC 0.999941 update rms ratio 1.0056 (HF router margin 9.5e-03)
+L3 32-slot decode slot 7 pos 38: delta PCC 0.999921 full PCC 0.999976 update rms ratio 0.9980 (HF router margin 1.9e-02)
+L3 32-slot decode slot 8 pos 301: delta PCC 0.999937 full PCC 0.999963 update rms ratio 1.0010 (HF router margin 6.2e-03)
+L3 32-slot decode slot 9 pos 301: delta PCC 0.999948 full PCC 0.999975 update rms ratio 1.0037 (HF router margin 2.0e-03)
+L3 32-slot decode slot 10 pos 301: delta PCC 0.999923 full PCC 0.999967 update rms ratio 1.0023 (HF router margin 4.1e-03)
+L3 32-slot decode slot 11 pos 301: delta PCC 0.999918 full PCC 0.999954 update rms ratio 1.0051 (HF router margin 3.7e-03)
+L3 32-slot decode slot 12 pos 301: delta PCC 0.999897 full PCC 0.999974 update rms ratio 1.0025 (HF router margin 9.5e-03)
+L3 32-slot decode slot 13 pos 301: delta PCC 0.999915 full PCC 0.999951 update rms ratio 1.0031 (HF router margin 6.1e-03)
+L3 32-slot decode slot 14 pos 301: delta PCC 0.999926 full PCC 0.999949 update rms ratio 1.0078 (HF router margin 3.6e-03)
+L3 32-slot decode slot 15 pos 301: delta PCC 0.999944 full PCC 0.999966 update rms ratio 1.0034 (HF router margin 2.4e-03)
+L3 32-slot decode slot 16 pos 2101: delta PCC 0.999612 full PCC 0.999781 update rms ratio 1.0023 (HF router margin 1.9e-04)
+L3 32-slot decode slot 17 pos 2101: delta PCC 0.999929 full PCC 0.999969 update rms ratio 1.0032 (HF router margin 4.5e-03)
+L3 32-slot decode slot 18 pos 2101: delta PCC 0.999906 full PCC 0.999947 update rms ratio 1.0010 (HF router margin 7.7e-03)
+L3 32-slot decode slot 19 pos 2101: delta PCC 0.999944 full PCC 0.999975 update rms ratio 1.0072 (HF router margin 1.8e-03)
+L3 32-slot decode slot 20 pos 2101: delta PCC 0.999943 full PCC 0.999970 update rms ratio 1.0066 (HF router margin 6.9e-04)
+L3 32-slot decode slot 21 pos 2101: delta PCC 0.999906 full PCC 0.999960 update rms ratio 1.0006 (HF router margin 2.8e-02)
+L3 32-slot decode slot 22 pos 2101: delta PCC 0.999904 full PCC 0.999959 update rms ratio 1.0035 (HF router margin 7.0e-03)
+L3 32-slot decode slot 23 pos 2101: delta PCC 0.999872 full PCC 0.999938 update rms ratio 1.0021 (HF router margin 1.2e-02)
+L3 32-slot decode slot 24 pos 2301: delta PCC 0.999947 full PCC 0.999968 update rms ratio 1.0094 (HF router margin 5.3e-03)
+L3 32-slot decode slot 25 pos 2301: delta PCC 0.999947 full PCC 0.999971 update rms ratio 0.9989 (HF router margin 1.3e-03)
+L3 32-slot decode slot 26 pos 2301: delta PCC 0.999894 full PCC 0.999960 update rms ratio 1.0116 (HF router margin 5.2e-03)
+L3 32-slot decode slot 27 pos 2301: delta PCC 0.999956 full PCC 0.999973 update rms ratio 1.0085 (HF router margin 6.2e-03)
+L3 32-slot decode slot 28 pos 2301: delta PCC 0.999942 full PCC 0.999968 update rms ratio 1.0079 (HF router margin 3.1e-03)
+L3 32-slot decode slot 29 pos 2301: delta PCC 0.999912 full PCC 0.999970 update rms ratio 1.0000 (HF router margin 4.7e-03)
+L3 32-slot decode slot 30 pos 2301: delta PCC 0.999879 full PCC 0.999944 update rms ratio 1.0045 (HF router margin 4.8e-03)
+L3 32-slot decode slot 31 pos 2301: delta PCC 0.999896 full PCC 0.999968 update rms ratio 1.0000 (HF router margin 5.1e-04)
+L3 32-slot decode slot 0 pos 39: delta PCC 0.999932 full PCC 0.999956 update rms ratio 1.0110 (HF router margin 2.0e-03)
+L3 32-slot decode slot 1 pos 39: delta PCC 0.999937 full PCC 0.999954 update rms ratio 1.0050 (HF router margin 7.3e-03)
+L3 32-slot decode slot 2 pos 39: delta PCC 0.998733 full PCC 0.999321 update rms ratio 1.0507 (HF router margin 1.9e-04)
+L3 32-slot decode slot 3 pos 39: delta PCC 0.999893 full PCC 0.999971 update rms ratio 1.0043 (HF router margin 1.3e-03)
+L3 32-slot decode slot 4 pos 39: delta PCC 0.999827 full PCC 0.999912 update rms ratio 1.0045 (HF router margin 6.9e-03)
+L3 32-slot decode slot 5 pos 39: delta PCC 0.999875 full PCC 0.999959 update rms ratio 1.0008 (HF router margin 1.2e-02)
+L3 32-slot decode slot 6 pos 39: delta PCC 0.999938 full PCC 0.999960 update rms ratio 1.0080 (HF router margin 5.8e-03)
+L3 32-slot decode slot 7 pos 39: delta PCC 0.999931 full PCC 0.999956 update rms ratio 1.0091 (HF router margin 1.2e-02)
+L3 32-slot decode slot 8 pos 302: delta PCC 0.999933 full PCC 0.999970 update rms ratio 1.0046 (HF router margin 1.3e-03)
+L3 32-slot decode slot 9 pos 302: delta PCC 0.999945 full PCC 0.999976 update rms ratio 1.0040 (HF router margin 6.5e-03)
+L3 32-slot decode slot 10 pos 302: delta PCC 0.999944 full PCC 0.999964 update rms ratio 1.0018 (HF router margin 7.7e-05)
+L3 32-slot decode slot 11 pos 302: delta PCC 0.999951 full PCC 0.999970 update rms ratio 1.0076 (HF router margin 3.3e-03)
+L3 32-slot decode slot 12 pos 302: delta PCC 0.999293 full PCC 0.999542 update rms ratio 1.0073 (HF router margin 1.0e-03)
+L3 32-slot decode slot 13 pos 302: delta PCC 0.999910 full PCC 0.999968 update rms ratio 1.0072 (HF router margin 8.8e-03)
+L3 32-slot decode slot 14 pos 302: delta PCC 0.999920 full PCC 0.999956 update rms ratio 1.0041 (HF router margin 1.8e-02)
+L3 32-slot decode slot 15 pos 302: delta PCC 0.999863 full PCC 0.999974 update rms ratio 1.0011 (HF router margin 3.1e-03)
+L3 32-slot decode slot 16 pos 2102: delta PCC 0.999109 full PCC 0.999666 update rms ratio 1.0034 (HF router margin 9.3e-05)
+L3 32-slot decode slot 17 pos 2102: delta PCC 0.999933 full PCC 0.999967 update rms ratio 1.0044 (HF router margin 5.0e-03)
+L3 32-slot decode slot 18 pos 2102: delta PCC 0.999896 full PCC 0.999951 update rms ratio 1.0036 (HF router margin 2.2e-04)
+L3 32-slot decode slot 19 pos 2102: delta PCC 0.999933 full PCC 0.999964 update rms ratio 0.9994 (HF router margin 3.1e-03)
+L3 32-slot decode slot 20 pos 2102: delta PCC 0.999949 full PCC 0.999977 update rms ratio 1.0014 (HF router margin 8.5e-03)
+L3 32-slot decode slot 21 pos 2102: delta PCC 0.999904 full PCC 0.999953 update rms ratio 1.0038 (HF router margin 8.8e-03)
+L3 32-slot decode slot 22 pos 2102: delta PCC 0.999178 full PCC 0.999534 update rms ratio 1.0060 (HF router margin 4.6e-04)
+L3 32-slot decode slot 23 pos 2102: delta PCC 0.999913 full PCC 0.999953 update rms ratio 1.0011 (HF router margin 1.1e-02)
+L3 32-slot decode slot 24 pos 2302: delta PCC 0.999923 full PCC 0.999956 update rms ratio 0.9992 (HF router margin 6.5e-03)
+L3 32-slot decode slot 25 pos 2302: delta PCC 0.999849 full PCC 0.999968 update rms ratio 0.9982 (HF router margin 1.7e-03)
+L3 32-slot decode slot 26 pos 2302: delta PCC 0.999918 full PCC 0.999976 update rms ratio 1.0093 (HF router margin 1.4e-03)
+L3 32-slot decode slot 27 pos 2302: delta PCC 0.999936 full PCC 0.999972 update rms ratio 0.9994 (HF router margin 5.2e-03)
+L3 32-slot decode slot 28 pos 2302: delta PCC 0.999948 full PCC 0.999969 update rms ratio 1.0068 (HF router margin 9.3e-03)
+L3 32-slot decode slot 29 pos 2302: delta PCC 0.999915 full PCC 0.999953 update rms ratio 1.0102 (HF router margin 5.5e-04)
+L3 32-slot decode slot 30 pos 2302: delta PCC 0.999807 full PCC 0.999974 update rms ratio 1.0011 (HF router margin 1.3e-03)
+L3 32-slot decode slot 31 pos 2302: delta PCC 0.999903 full PCC 0.999961 update rms ratio 1.0013 (HF router margin 1.4e-03)
+L3 32 active slots: min decode delta PCC 0.995676
+PASSEDdecode update rms ratio mean 1.0037 over 96 tokens
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+33.11s call     models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe]
+1.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py::test_batch32_all_active[dsa_moe]
+============================== 1 passed in 34.60s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x72fde38c0868 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x72fde3fff1c8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "sfpu_inf"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "get_layout"
+ - leaked function ""
+ - leaked function "to_torch"
+ - leaked function "from_json"
+ - leaked function "dram_grid_size"
+ - leaked function "to"
+ - leaked function "num_program_cache_entries"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 12:47:54 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

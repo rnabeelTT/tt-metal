@@ -1,0 +1,1140 @@
+=== start Fri Oct 16 06:44:21 PM UTC 2026 : timeout 3000 python_env/bin/pytest -sv models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py -p no:cacheprovider
+2026-10-16 18:44:23.528 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 39 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1] B=1 R=1 step 0: o PCC 0.9999993 max|err| 1.09e-04; state PCC 0.9999997 max|err| 2.40e-03
+B=1 R=1 step 1: o PCC 0.9999994 max|err| 1.81e-04; state PCC 0.9999997 max|err| 2.51e-03
+B=1 R=1 step 2: o PCC 0.9999993 max|err| 1.44e-04; state PCC 0.9999996 max|err| 2.19e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8] B=8 R=8 step 0: o PCC 0.9999994 max|err| 1.88e-04; state PCC 0.9999997 max|err| 3.01e-03
+B=8 R=8 step 1: o PCC 0.9999993 max|err| 2.42e-04; state PCC 0.9999997 max|err| 3.01e-03
+B=8 R=8 step 2: o PCC 0.9999994 max|err| 2.11e-04; state PCC 0.9999997 max|err| 2.79e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32] B=8 R=32 step 0: o PCC 0.9999993 max|err| 1.84e-04; state PCC 0.9999997 max|err| 3.18e-03
+B=8 R=32 step 1: o PCC 0.9999993 max|err| 1.51e-04; state PCC 0.9999997 max|err| 2.62e-03
+B=8 R=32 step 2: o PCC 0.9999994 max|err| 2.36e-04; state PCC 0.9999997 max|err| 2.74e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32] B=32 R=32 step 0: o PCC 0.9999994 max|err| 2.43e-04; state PCC 0.9999997 max|err| 3.02e-03
+B=32 R=32 step 1: o PCC 0.9999994 max|err| 3.01e-04; state PCC 0.9999997 max|err| 3.12e-03
+B=32 R=32 step 2: o PCC 0.9999993 max|err| 3.17e-04; state PCC 0.9999997 max|err| 3.12e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced traced step 0: o PCC 0.9999994 state PCC 0.9999997
+traced step 1: o PCC 0.9999993 state PCC 0.9999997
+traced step 2: o PCC 0.9999994 state PCC 0.9999997
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99] decay>=0.99 step 100: state PCC 0.999390402 rms ratio 0.9520861 max rel err 5.85e-02; o PCC 0.999363086
+decay>=0.99 step 200: state PCC 0.998282959 rms ratio 0.9336412 max rel err 8.54e-02; o PCC 0.998351505
+decay>=0.99 step 300: state PCC 0.997559810 rms ratio 0.9269420 max rel err 9.38e-02; o PCC 0.997609599
+decay>=0.99 step 400: state PCC 0.997225674 rms ratio 0.9251335 max rel err 1.15e-01; o PCC 0.997051602
+decay>=0.99 step 500: state PCC 0.997096939 rms ratio 0.9244655 max rel err 1.01e-01; o PCC 0.997132792
+decay>=0.99 step 600: state PCC 0.997029107 rms ratio 0.9240574 max rel err 9.92e-02; o PCC 0.997005191
+decay>=0.99 step 700: state PCC 0.997050275 rms ratio 0.9244004 max rel err 1.14e-01; o PCC 0.997063890
+decay>=0.99 step 800: state PCC 0.997029374 rms ratio 0.9252393 max rel err 1.14e-01; o PCC 0.996999751
+decay>=0.99 step 900: state PCC 0.997053723 rms ratio 0.9250000 max rel err 1.08e-01; o PCC 0.997057629
+decay>=0.99 step 1000: state PCC 0.997044671 rms ratio 0.9241248 max rel err 1.22e-01; o PCC 0.997047081
+FAILED2026-10-16 18:44:30.029 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999] decay>=0.999 step 100: state PCC 0.999340601 rms ratio 0.9446748 max rel err 7.00e-02; o PCC 0.999312502
+decay>=0.999 step 200: state PCC 0.997580283 rms ratio 0.9082643 max rel err 1.12e-01; o PCC 0.997634957
+decay>=0.999 step 300: state PCC 0.995316483 rms ratio 0.8839616 max rel err 1.44e-01; o PCC 0.995408488
+decay>=0.999 step 400: state PCC 0.993007343 rms ratio 0.8687230 max rel err 1.80e-01; o PCC 0.992637482
+decay>=0.999 step 500: state PCC 0.991004171 rms ratio 0.8591773 max rel err 1.85e-01; o PCC 0.991152501
+decay>=0.999 step 600: state PCC 0.989458997 rms ratio 0.8530179 max rel err 1.93e-01; o PCC 0.989207590
+decay>=0.999 step 700: state PCC 0.988342636 rms ratio 0.8505119 max rel err 2.22e-01; o PCC 0.988142662
+decay>=0.999 step 800: state PCC 0.987607599 rms ratio 0.8492858 max rel err 2.27e-01; o PCC 0.987492088
+decay>=0.999 step 900: state PCC 0.987229553 rms ratio 0.8486043 max rel err 2.08e-01; o PCC 0.987454287
+decay>=0.999 step 1000: state PCC 0.986970151 rms ratio 0.8473623 max rel err 2.27e-01; o PCC 0.986490453
+FAILED2026-10-16 18:44:31.028 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale] T=32 bf16 a/b pre: PCC 0.999999767 scale 0.999625715 max rel err 8.00e-04 max elementwise rel err 1.39e-03
+T=32 bf16 a/b post: PCC 0.999999774 scale 0.999567261 max rel err 9.38e-04 max elementwise rel err 1.60e-03
+T=32 bf16 a/b comb: PCC 0.999997074 scale 0.997914903 max rel err 3.66e-03 max elementwise rel err 6.41e-03
+T=32: comb column-sum max |1 - s| 2.81e-03
+FAILED2026-10-16 18:44:31.330 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale] T=32 fp32 a/b pre: PCC 0.999999627 scale 0.999479588 max rel err 1.20e-03 max elementwise rel err 3.44e-03
+T=32 fp32 a/b post: PCC 0.999999151 scale 0.999509921 max rel err 1.19e-03 max elementwise rel err 2.13e-03
+T=32 fp32 a/b comb: PCC 0.999997839 scale 0.997810953 max rel err 3.03e-03 max elementwise rel err 6.41e-03
+T=32: comb column-sum max |1 - s| 2.69e-03
+FAILED2026-10-16 18:44:31.633 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale] T=96 bf16 a/b pre: PCC 0.999999758 scale 0.999635573 max rel err 7.11e-04 max elementwise rel err 1.35e-03
+T=96 bf16 a/b post: PCC 0.999999711 scale 0.999600766 max rel err 9.21e-04 max elementwise rel err 1.45e-03
+T=96 bf16 a/b comb: PCC 0.999998090 scale 0.997872204 max rel err 2.84e-03 max elementwise rel err 9.33e-03
+T=96: comb column-sum max |1 - s| 2.93e-03
+FAILED2026-10-16 18:44:31.946 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale] T=96 fp32 a/b pre: PCC 0.999999600 scale 0.999513820 max rel err 1.08e-03 max elementwise rel err 3.62e-03
+T=96 fp32 a/b post: PCC 0.999999488 scale 0.999546768 max rel err 9.38e-04 max elementwise rel err 3.71e-03
+T=96 fp32 a/b comb: PCC 0.999998157 scale 0.997758059 max rel err 3.33e-03 max elementwise rel err 9.28e-03
+T=96: comb column-sum max |1 - s| 2.81e-03
+FAILED2026-10-16 18:44:32.253 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale] T=2048 bf16 a/b pre: PCC 0.999999663 scale 0.999588941 max rel err 8.66e-04 max elementwise rel err 2.65e-03
+T=2048 bf16 a/b post: PCC 0.999999650 scale 0.999587442 max rel err 1.00e-03 max elementwise rel err 1.74e-03
+T=2048 bf16 a/b comb: PCC 0.999997866 scale 0.997917048 max rel err 3.54e-03 max elementwise rel err 8.10e-03
+T=2048: comb column-sum max |1 - s| 2.93e-03
+FAILED2026-10-16 18:44:32.558 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale] T=2048 fp32 a/b pre: PCC 0.999999772 scale 0.999590007 max rel err 9.41e-04 max elementwise rel err 2.73e-03
+T=2048 fp32 a/b post: PCC 0.999999712 scale 0.999582427 max rel err 9.63e-04 max elementwise rel err 3.74e-03
+T=2048 fp32 a/b comb: PCC 0.999998390 scale 0.997773985 max rel err 3.39e-03 max elementwise rel err 1.96e-02
+T=2048: comb column-sum max |1 - s| 2.93e-03
+FAILED2026-10-16 18:44:32.861 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32] T=32 C=4096 fp32: PCC 0.999999885 scale 0.998917591 max rel err 1.66e-03 rms rel err 1.18e-03; residual update: scale 0.9998375 rms rel err 7.50e-04
+FAILED2026-10-16 18:44:33.175 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16] Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/11926203579001616331/" -DKERNEL_COMPILE_TIME_ARGS=4,128 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc0/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc0/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_unpack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/11926203579001616331/" -DKERNEL_COMPILE_TIME_ARGS=4,128 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc2/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc2/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_pack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/11926203579001616331/" -DKERNEL_COMPILE_TIME_ARGS=4,128 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc1/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/11926203579001616331/trisc1/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_math.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+T=32 C=4096 bf16: PCC 0.999998627 scale 1.000042337 max rel err 2.09e-03 rms rel err 1.66e-03; residual update: scale 1.0000226 rms rel err 1.05e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32] T=96 C=1024 fp32: PCC 0.999999876 scale 0.998930230 max rel err 1.60e-03 rms rel err 1.18e-03; residual update: scale 0.9998695 rms rel err 7.67e-04
+FAILED2026-10-16 18:44:34.480 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16] Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/14143374976844631216/" -DKERNEL_COMPILE_TIME_ARGS=4,32 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc0/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc0/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_unpack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/14143374976844631216/" -DKERNEL_COMPILE_TIME_ARGS=4,32 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc2/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc2/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_pack.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_post_compute/14143374976844631216/" -DKERNEL_COMPILE_TIME_ARGS=4,32 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc1/trisck.9978707159164620010_2263949.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_post_compute/14143374976844631216/trisc1/trisck.9978707159164620010_2263949.d
+In file included from ../chlkc_math.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:83:27: warning: 'void ckernel::mul_tiles_init(uint32_t, uint32_t, uint32_t)' is deprecated: Renamed to mul_init(). This will be removed after September 15th, 2026. [-Wdeprecated-declarations]
+   83 |             mul_tiles_init(CB_COEF, CB_IN);
+      |             ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_post/device/kernels/compute/mhc_post_compute.cpp:20:
+/home/raahem/tt-metal/tt_metal/hw/inc/api/compute/eltwise_binary.h:528:101: note: declared here
+  528 | [[deprecated("Renamed to mul_init(). This will be removed after September 15th, 2026.")]] ALWI void mul_tiles_init(
+      |                                                                                                     ^~~~~~~~~~~~~~
+T=96 C=1024 bf16: PCC 0.999998624 scale 0.999959289 max rel err 2.53e-03 rms rel err 1.66e-03; residual update: scale 0.9999852 rms rel err 1.08e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32] T=2048 C=4096 fp32: PCC 0.999999878 scale 0.998935016 max rel err 1.70e-03 rms rel err 1.17e-03; residual update: scale 0.9998643 rms rel err 7.59e-04
+FAILED2026-10-16 18:44:36.569 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16] T=2048 C=4096 bf16: PCC 0.999998623 scale 1.000001645 max rel err 2.68e-03 rms rel err 1.66e-03; residual update: scale 1.0000021 rms rel err 1.07e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None] T=32 dtype=DataType.FLOAT32 out=None: PCC 0.999999889 scale 0.998915215 max|err| 4.32e-04 max rel err 1.65e-03
+FAILED2026-10-16 18:44:38.405 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16] T=32 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998509 scale 0.998921712 max|err| 7.88e-04 max rel err 3.02e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None] T=32 dtype=DataType.BFLOAT16 out=None: PCC 0.999998626 scale 1.000004339 max|err| 8.92e-04 max rel err 3.41e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None] T=96 dtype=DataType.FLOAT32 out=None: PCC 0.999999891 scale 0.999001722 max|err| 4.27e-04 max rel err 1.48e-03
+FAILED2026-10-16 18:44:39.323 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16] T=96 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998513 scale 0.998997862 max|err| 1.17e-03 max rel err 4.05e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None] T=96 dtype=DataType.BFLOAT16 out=None: PCC 0.999998624 scale 0.999994819 max|err| 9.24e-04 max rel err 3.20e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None] T=2048 dtype=DataType.FLOAT32 out=None: PCC 0.999999888 scale 0.998970335 max|err| 4.73e-04 max rel err 1.34e-03
+FAILED2026-10-16 18:44:40.736 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16] T=2048 dtype=DataType.FLOAT32 out=DataType.BFLOAT16: PCC 0.999998510 scale 0.998967220 max|err| 1.34e-03 max rel err 3.81e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None] T=2048 dtype=DataType.BFLOAT16 out=None: PCC 0.999998623 scale 1.000000795 max|err| 9.74e-04 max rel err 2.76e-03
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16] T=32 C=64 fn bf16: mixes PCC 0.999999905 max rel err 5.08e-04, sum-of-squares max rel err 1.34e-03
+FAILED2026-10-16 18:44:42.681 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32] T=32 C=64 fn fp32: mixes PCC 0.999999824 max rel err 6.41e-04, sum-of-squares max rel err 1.34e-03
+FAILED2026-10-16 18:44:42.986 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16] T=64 C=32 fn bf16: mixes PCC 0.999999904 max rel err 4.43e-04, sum-of-squares max rel err 1.53e-03
+FAILED2026-10-16 18:44:43.320 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32] T=64 C=32 fn fp32: mixes PCC 0.999999815 max rel err 7.01e-04, sum-of-squares max rel err 1.53e-03
+FAILED2026-10-16 18:44:43.640 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16] T=2048 C=16 fn bf16: mixes PCC 0.999999897 max rel err 5.85e-04, sum-of-squares max rel err 1.55e-03
+FAILED2026-10-16 18:44:44.302 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32] T=2048 C=16 fn fp32: mixes PCC 0.999999801 max rel err 9.31e-04, sum-of-squares max rel err 1.55e-03
+FAILED2026-10-16 18:44:44.975 | INFO     | conftest:pytest_runtest_teardown:1227 - In custom teardown, open device ids: {0}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode] PERF kda_recurrent_decode: 688.1 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn] PERF mhc_split_sinkhorn: 82.5 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post] PERF mhc_post: 48.4 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre] PERF mhc_pre: 24.4 us/call (synchronized loop of 200)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix] PERF mhc_mix: 21.1 us/call (synchronized loop of 200)
+PASSED
+
+=================================== FAILURES ===================================
+__________________ test_kda_recurrent_decode_long_chain[0.99] __________________
+
+device = MeshDevice(1x1 grid, 1 devices), decay_lo = 0.99
+
+    @pytest.mark.parametrize("decay_lo", [0.99, 0.999])
+    def test_kda_recurrent_decode_long_chain(device, decay_lo):
+        """1000 chained steps (state fed back in place) with decays in [decay_lo, 1): the state must track the fp32 torch
+        recurrence without drift (a per-step bias in the decay or the state reload would compound)."""
+        B, R, steps = 1, 1, 1000
+        gen = torch.Generator().manual_seed(11)
+        q_scale = K**-0.5
+        S = torch.zeros(B, H, K, V)
+        S_dev = ttnn.from_torch(S, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        worst, worst_r = 1.0, 0.0
+        for step in range(steps):
+            qkv = torch.randn(R, 2 * H * K + H * V, generator=gen)
+            decay = decay_lo + (1 - decay_lo) * torch.rand(R, H * K, generator=gen)
+            beta = torch.sigmoid(torch.randn(R, H, generator=gen))
+            o_ref, S = _ref_step(S, qkv, decay, beta, B, q_scale)
+            o = ttnn.experimental.kda.recurrent_decode(
+                S_dev, _dev(qkv, device), _dev(decay, device), _dev(beta, device), q_scale
+            )
+            if step % 100 == 99 or step == steps - 1:
+                S_tt = ttnn.to_torch(S_dev)
+                ps = _pcc(S_tt, S)
+                r = float(S_tt.norm() / S.norm())
+                po = _pcc(ttnn.to_torch(o)[0, 0], o_ref)
+                worst, worst_r = min(worst, ps), max(worst_r, abs(r - 1))
+                rel = float((S_tt - S).abs().max() / S.abs().max())
+                print(
+                    f"decay>={decay_lo} step {step + 1}: state PCC {ps:.9f} rms ratio {r:.7f} max rel err {rel:.2e}; "
+                    f"o PCC {po:.9f}"
+                )
+            ttnn.deallocate(o)
+        # fp32 state / decay must not be read at TF32 (a per-step bias compounds): no drift in scale
+>       assert worst > 0.99999 and worst_r < 1e-4, (worst, worst_r)
+E       AssertionError: (0.9970291073832188, 0.07594263553619385)
+E       assert (0.9970291073832188 > 0.99999)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py:140: AssertionError
+_________________ test_kda_recurrent_decode_long_chain[0.999] __________________
+
+device = MeshDevice(1x1 grid, 1 devices), decay_lo = 0.999
+
+    @pytest.mark.parametrize("decay_lo", [0.99, 0.999])
+    def test_kda_recurrent_decode_long_chain(device, decay_lo):
+        """1000 chained steps (state fed back in place) with decays in [decay_lo, 1): the state must track the fp32 torch
+        recurrence without drift (a per-step bias in the decay or the state reload would compound)."""
+        B, R, steps = 1, 1, 1000
+        gen = torch.Generator().manual_seed(11)
+        q_scale = K**-0.5
+        S = torch.zeros(B, H, K, V)
+        S_dev = ttnn.from_torch(S, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        worst, worst_r = 1.0, 0.0
+        for step in range(steps):
+            qkv = torch.randn(R, 2 * H * K + H * V, generator=gen)
+            decay = decay_lo + (1 - decay_lo) * torch.rand(R, H * K, generator=gen)
+            beta = torch.sigmoid(torch.randn(R, H, generator=gen))
+            o_ref, S = _ref_step(S, qkv, decay, beta, B, q_scale)
+            o = ttnn.experimental.kda.recurrent_decode(
+                S_dev, _dev(qkv, device), _dev(decay, device), _dev(beta, device), q_scale
+            )
+            if step % 100 == 99 or step == steps - 1:
+                S_tt = ttnn.to_torch(S_dev)
+                ps = _pcc(S_tt, S)
+                r = float(S_tt.norm() / S.norm())
+                po = _pcc(ttnn.to_torch(o)[0, 0], o_ref)
+                worst, worst_r = min(worst, ps), max(worst_r, abs(r - 1))
+                rel = float((S_tt - S).abs().max() / S.abs().max())
+                print(
+                    f"decay>={decay_lo} step {step + 1}: state PCC {ps:.9f} rms ratio {r:.7f} max rel err {rel:.2e}; "
+                    f"o PCC {po:.9f}"
+                )
+            ttnn.deallocate(o)
+        # fp32 state / decay must not be read at TF32 (a per-step bias compounds): no drift in scale
+>       assert worst > 0.99999 and worst_r < 1e-4, (worst, worst_r)
+E       AssertionError: (0.9869701508056142, 0.15263766050338745)
+E       assert (0.9869701508056142 > 0.99999)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py:140: AssertionError
+____________________ test_mhc_split_sinkhorn[32-bf16_scale] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, bf16_scale = True
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.003659789992481072
+E       assert 0.003659789992481072 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+____________________ test_mhc_split_sinkhorn[32-fp32_scale] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, bf16_scale = False
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.0030261912160997433
+E       assert 0.0030261912160997433 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+____________________ test_mhc_split_sinkhorn[96-bf16_scale] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 96, bf16_scale = True
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.002841786792504862
+E       assert 0.002841786792504862 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+____________________ test_mhc_split_sinkhorn[96-fp32_scale] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 96, bf16_scale = False
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.0033325419773876084
+E       assert 0.0033325419773876084 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+___________________ test_mhc_split_sinkhorn[2048-bf16_scale] ___________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, bf16_scale = True
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.003542150888282702
+E       assert 0.003542150888282702 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+___________________ test_mhc_split_sinkhorn[2048-fp32_scale] ___________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, bf16_scale = False
+
+    @pytest.mark.parametrize("bf16_scale", [True, False], ids=["bf16_scale", "fp32_scale"])
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_split_sinkhorn(device, T, bf16_scale):
+        g = torch.Generator().manual_seed(T + bf16_scale)
+        mix = (2 + N) * N
+        # mixes as the model makes them (rms-normalized projection: O(1) logits), a / b like the GLM checkpoint
+        mixes = torch.randn(T, mix, generator=g)
+        scale = torch.rand(3, generator=g) * 0.5 + 0.5
+        base = torch.randn(mix, generator=g) * 0.5
+        if bf16_scale:  # GLM rounds base / scale to bf16 at load
+            scale, base = scale.bfloat16().float(), base.bfloat16().float()
+        cfg = HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5)
+        consts = build_consts(cfg, scale, base)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        rcfg = MHCConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS)
+        pre_r, post_r, comb_r = parametrize(mixes.double(), scale.double(), base.double(), rcfg)
+        got = {
+            "pre": ttnn.to_torch(pre).float()[:T, :N],
+            "post": ttnn.to_torch(post).float()[:T, :N],
+            "comb": ttnn.to_torch(comb).float()[:T, : N * N],
+        }
+        ref = {"pre": pre_r, "post": post_r, "comb": comb_r.reshape(T, N * N)}
+        worst = 0.0
+        for k in ("pre", "post", "comb"):
+            s = _stats(got[k], ref[k])
+            worst = max(worst, s["max_rel"])
+            print(
+                f"T={T} {'bf16' if bf16_scale else 'fp32'} a/b {k}: PCC {s['pcc']:.9f} scale {s['scale']:.9f} "
+                f"max rel err {s['max_rel']:.2e} max elementwise rel err {s['max_elem_rel']:.2e}"
+            )
+        # doubly stochastic: column sums exactly 1 after the final column normalization
+        cs = got["comb"].double().reshape(T, N, N).sum(-2)
+        print(f"T={T}: comb column-sum max |1 - s| {(cs - 1).abs().max().item():.2e}")
+>       assert worst < 1e-5, worst
+E       AssertionError: 0.0033896630434191296
+E       assert 0.0033896630434191296 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py:72: AssertionError
+_________________________ test_mhc_post[32-4096-fp32] __________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, C = 4096
+dtype = DataType.FLOAT32
+
+    @pytest.mark.parametrize("dtype", [ttnn.float32, ttnn.bfloat16], ids=["fp32", "bf16"])
+    @pytest.mark.parametrize("T,C", [(32, 4096), (96, 1024), (2048, 4096)])
+    def test_mhc_post(device, T, C, dtype):
+        g = torch.Generator().manual_seed(T + C)
+        # residual streams carry large outlier channels (the real stream), the sub-block output is smaller
+        res = torch.randn(1, 1, T, N * C, generator=g)
+        res[..., ::97] *= 30
+        y = torch.randn(1, 1, T, C, generator=g) * 0.3
+        post = 2 * torch.sigmoid(torch.randn(1, 1, T, N, generator=g))
+        comb = sinkhorn_knopp(torch.randn(T, N, N, generator=g), 20, 1e-6).reshape(1, 1, T, N * N)
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        q = lambda t: t.to(tdt).float()
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        out = ttnn.experimental.deepseek_prefill.mhc_post(up(y), up(res), up(post), up(comb), consts, N)
+        got = ttnn.to_torch(out).float().reshape(1, 1, T, N * C).double()
+        ref = _ref(q(y), q(res), q(post), q(comb), C)
+        err = (got - ref).abs()
+        upd = got - q(res).double()  # the residual update the reviewer measured: post*y + (comb^T - I) streams
+        upd_ref = ref - q(res).double()
+        p = _pcc(got, ref)
+        scale = float((got.flatten() @ ref.flatten()) / (ref.flatten() @ ref.flatten()))
+        upd_scale = float((upd.flatten() @ upd_ref.flatten()) / (upd_ref.flatten() @ upd_ref.flatten()))
+        max_rel = float(err.max() / ref.abs().max())
+        rms_rel = float(err.pow(2).mean().sqrt() / ref.pow(2).mean().sqrt())
+        upd_rel = float((upd - upd_ref).pow(2).mean().sqrt() / upd_ref.pow(2).mean().sqrt())
+        print(
+            f"T={T} C={C} {'fp32' if dtype == ttnn.float32 else 'bf16'}: PCC {p:.9f} scale {scale:.9f} "
+            f"max rel err {max_rel:.2e} rms rel err {rms_rel:.2e}; residual update: scale {upd_scale:.7f} "
+            f"rms rel err {upd_rel:.2e}"
+        )
+        if dtype == ttnn.float32:
+>           assert max_rel < 1e-5 and abs(upd_scale - 1) < 1e-5, (max_rel, upd_scale)
+E           AssertionError: (0.0016627301777802212, 0.9998374776538737)
+E           assert (0.0016627301777802212 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py:64: AssertionError
+_________________________ test_mhc_post[96-1024-fp32] __________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 96, C = 1024
+dtype = DataType.FLOAT32
+
+    @pytest.mark.parametrize("dtype", [ttnn.float32, ttnn.bfloat16], ids=["fp32", "bf16"])
+    @pytest.mark.parametrize("T,C", [(32, 4096), (96, 1024), (2048, 4096)])
+    def test_mhc_post(device, T, C, dtype):
+        g = torch.Generator().manual_seed(T + C)
+        # residual streams carry large outlier channels (the real stream), the sub-block output is smaller
+        res = torch.randn(1, 1, T, N * C, generator=g)
+        res[..., ::97] *= 30
+        y = torch.randn(1, 1, T, C, generator=g) * 0.3
+        post = 2 * torch.sigmoid(torch.randn(1, 1, T, N, generator=g))
+        comb = sinkhorn_knopp(torch.randn(T, N, N, generator=g), 20, 1e-6).reshape(1, 1, T, N * N)
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        q = lambda t: t.to(tdt).float()
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        out = ttnn.experimental.deepseek_prefill.mhc_post(up(y), up(res), up(post), up(comb), consts, N)
+        got = ttnn.to_torch(out).float().reshape(1, 1, T, N * C).double()
+        ref = _ref(q(y), q(res), q(post), q(comb), C)
+        err = (got - ref).abs()
+        upd = got - q(res).double()  # the residual update the reviewer measured: post*y + (comb^T - I) streams
+        upd_ref = ref - q(res).double()
+        p = _pcc(got, ref)
+        scale = float((got.flatten() @ ref.flatten()) / (ref.flatten() @ ref.flatten()))
+        upd_scale = float((upd.flatten() @ upd_ref.flatten()) / (upd_ref.flatten() @ upd_ref.flatten()))
+        max_rel = float(err.max() / ref.abs().max())
+        rms_rel = float(err.pow(2).mean().sqrt() / ref.pow(2).mean().sqrt())
+        upd_rel = float((upd - upd_ref).pow(2).mean().sqrt() / upd_ref.pow(2).mean().sqrt())
+        print(
+            f"T={T} C={C} {'fp32' if dtype == ttnn.float32 else 'bf16'}: PCC {p:.9f} scale {scale:.9f} "
+            f"max rel err {max_rel:.2e} rms rel err {rms_rel:.2e}; residual update: scale {upd_scale:.7f} "
+            f"rms rel err {upd_rel:.2e}"
+        )
+        if dtype == ttnn.float32:
+>           assert max_rel < 1e-5 and abs(upd_scale - 1) < 1e-5, (max_rel, upd_scale)
+E           AssertionError: (0.0015971512441997572, 0.9998695009704984)
+E           assert (0.0015971512441997572 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py:64: AssertionError
+________________________ test_mhc_post[2048-4096-fp32] _________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, C = 4096
+dtype = DataType.FLOAT32
+
+    @pytest.mark.parametrize("dtype", [ttnn.float32, ttnn.bfloat16], ids=["fp32", "bf16"])
+    @pytest.mark.parametrize("T,C", [(32, 4096), (96, 1024), (2048, 4096)])
+    def test_mhc_post(device, T, C, dtype):
+        g = torch.Generator().manual_seed(T + C)
+        # residual streams carry large outlier channels (the real stream), the sub-block output is smaller
+        res = torch.randn(1, 1, T, N * C, generator=g)
+        res[..., ::97] *= 30
+        y = torch.randn(1, 1, T, C, generator=g) * 0.3
+        post = 2 * torch.sigmoid(torch.randn(1, 1, T, N, generator=g))
+        comb = sinkhorn_knopp(torch.randn(T, N, N, generator=g), 20, 1e-6).reshape(1, 1, T, N * N)
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        q = lambda t: t.to(tdt).float()
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        out = ttnn.experimental.deepseek_prefill.mhc_post(up(y), up(res), up(post), up(comb), consts, N)
+        got = ttnn.to_torch(out).float().reshape(1, 1, T, N * C).double()
+        ref = _ref(q(y), q(res), q(post), q(comb), C)
+        err = (got - ref).abs()
+        upd = got - q(res).double()  # the residual update the reviewer measured: post*y + (comb^T - I) streams
+        upd_ref = ref - q(res).double()
+        p = _pcc(got, ref)
+        scale = float((got.flatten() @ ref.flatten()) / (ref.flatten() @ ref.flatten()))
+        upd_scale = float((upd.flatten() @ upd_ref.flatten()) / (upd_ref.flatten() @ upd_ref.flatten()))
+        max_rel = float(err.max() / ref.abs().max())
+        rms_rel = float(err.pow(2).mean().sqrt() / ref.pow(2).mean().sqrt())
+        upd_rel = float((upd - upd_ref).pow(2).mean().sqrt() / upd_ref.pow(2).mean().sqrt())
+        print(
+            f"T={T} C={C} {'fp32' if dtype == ttnn.float32 else 'bf16'}: PCC {p:.9f} scale {scale:.9f} "
+            f"max rel err {max_rel:.2e} rms rel err {rms_rel:.2e}; residual update: scale {upd_scale:.7f} "
+            f"rms rel err {upd_rel:.2e}"
+        )
+        if dtype == ttnn.float32:
+>           assert max_rel < 1e-5 and abs(upd_scale - 1) < 1e-5, (max_rel, upd_scale)
+E           AssertionError: (0.001697536093242055, 0.9998643197932684)
+E           assert (0.001697536093242055 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py:64: AssertionError
+____________________ test_mhc_pre[32-DataType.FLOAT32-None] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, dtype = DataType.FLOAT32
+out_dtype = None
+
+    @pytest.mark.parametrize(
+        "dtype,out_dtype", [(ttnn.float32, None), (ttnn.float32, ttnn.bfloat16), (ttnn.bfloat16, None)]
+    )
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_pre(device, T, dtype, out_dtype):
+        torch.manual_seed(0)
+        res = torch.randn(1, 1, T, N * C) * 0.05
+        pre = torch.sigmoid(torch.randn(1, 1, T, N)) + 1e-6
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        kw = {"output_dtype": out_dtype} if out_dtype is not None else {}
+        h = ttnn.experimental.deepseek_prefill.mhc_pre(up(res), up(pre), consts, N, **kw)
+        assert list(h.shape) == [1, 1, T, C]
+        assert h.dtype == (out_dtype or dtype)
+        got = ttnn.to_torch(h).float()
+        ref_q = sum(
+            pre.to(tdt).double()[..., i : i + 1] * res.to(tdt).double()[..., i * C : (i + 1) * C] for i in range(N)
+        )
+        p = _pcc(got, ref_q)
+        err = (got - ref_q).abs().max().item()
+        rel = err / ref_q.abs().max().item()
+        scale = float((got.double().flatten() @ ref_q.double().flatten()) / ref_q.double().flatten().pow(2).sum())
+        print(f"T={T} dtype={dtype} out={out_dtype}: PCC {p:.9f} scale {scale:.9f} max|err| {err:.2e} max rel err {rel:.2e}")
+        assert p > (0.99999 if dtype == ttnn.float32 and out_dtype is None else 0.9999)
+        if dtype == ttnn.float32 and out_dtype is None:  # fp32 end to end: no TF32 read of the streams / pre
+>           assert rel < 1e-5, rel
+E           AssertionError: 0.0016529608407457653
+E           assert 0.0016529608407457653 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py:46: AssertionError
+____________________ test_mhc_pre[96-DataType.FLOAT32-None] ____________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 96, dtype = DataType.FLOAT32
+out_dtype = None
+
+    @pytest.mark.parametrize(
+        "dtype,out_dtype", [(ttnn.float32, None), (ttnn.float32, ttnn.bfloat16), (ttnn.bfloat16, None)]
+    )
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_pre(device, T, dtype, out_dtype):
+        torch.manual_seed(0)
+        res = torch.randn(1, 1, T, N * C) * 0.05
+        pre = torch.sigmoid(torch.randn(1, 1, T, N)) + 1e-6
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        kw = {"output_dtype": out_dtype} if out_dtype is not None else {}
+        h = ttnn.experimental.deepseek_prefill.mhc_pre(up(res), up(pre), consts, N, **kw)
+        assert list(h.shape) == [1, 1, T, C]
+        assert h.dtype == (out_dtype or dtype)
+        got = ttnn.to_torch(h).float()
+        ref_q = sum(
+            pre.to(tdt).double()[..., i : i + 1] * res.to(tdt).double()[..., i * C : (i + 1) * C] for i in range(N)
+        )
+        p = _pcc(got, ref_q)
+        err = (got - ref_q).abs().max().item()
+        rel = err / ref_q.abs().max().item()
+        scale = float((got.double().flatten() @ ref_q.double().flatten()) / ref_q.double().flatten().pow(2).sum())
+        print(f"T={T} dtype={dtype} out={out_dtype}: PCC {p:.9f} scale {scale:.9f} max|err| {err:.2e} max rel err {rel:.2e}")
+        assert p > (0.99999 if dtype == ttnn.float32 and out_dtype is None else 0.9999)
+        if dtype == ttnn.float32 and out_dtype is None:  # fp32 end to end: no TF32 read of the streams / pre
+>           assert rel < 1e-5, rel
+E           AssertionError: 0.001476903139583955
+E           assert 0.001476903139583955 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py:46: AssertionError
+___________________ test_mhc_pre[2048-DataType.FLOAT32-None] ___________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, dtype = DataType.FLOAT32
+out_dtype = None
+
+    @pytest.mark.parametrize(
+        "dtype,out_dtype", [(ttnn.float32, None), (ttnn.float32, ttnn.bfloat16), (ttnn.bfloat16, None)]
+    )
+    @pytest.mark.parametrize("T", [32, 96, 2048])
+    def test_mhc_pre(device, T, dtype, out_dtype):
+        torch.manual_seed(0)
+        res = torch.randn(1, 1, T, N * C) * 0.05
+        pre = torch.sigmoid(torch.randn(1, 1, T, N)) + 1e-6
+        tdt = torch.float32 if dtype == ttnn.float32 else torch.bfloat16
+        up = lambda t: ttnn.from_torch(t.to(tdt), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=device)
+        consts = up(build_bcast_consts(N).reshape(N * N, 32, 32))
+        kw = {"output_dtype": out_dtype} if out_dtype is not None else {}
+        h = ttnn.experimental.deepseek_prefill.mhc_pre(up(res), up(pre), consts, N, **kw)
+        assert list(h.shape) == [1, 1, T, C]
+        assert h.dtype == (out_dtype or dtype)
+        got = ttnn.to_torch(h).float()
+        ref_q = sum(
+            pre.to(tdt).double()[..., i : i + 1] * res.to(tdt).double()[..., i * C : (i + 1) * C] for i in range(N)
+        )
+        p = _pcc(got, ref_q)
+        err = (got - ref_q).abs().max().item()
+        rel = err / ref_q.abs().max().item()
+        scale = float((got.double().flatten() @ ref_q.double().flatten()) / ref_q.double().flatten().pow(2).sum())
+        print(f"T={T} dtype={dtype} out={out_dtype}: PCC {p:.9f} scale {scale:.9f} max|err| {err:.2e} max rel err {rel:.2e}")
+        assert p > (0.99999 if dtype == ttnn.float32 and out_dtype is None else 0.9999)
+        if dtype == ttnn.float32 and out_dtype is None:  # fp32 end to end: no TF32 read of the streams / pre
+>           assert rel < 1e-5, rel
+E           AssertionError: 0.0013421527042916097
+E           assert 0.0013421527042916097 < 1e-05
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py:46: AssertionError
+___________________________ test_mhc_mix[32-fn_bf16] ___________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, fn_bf16 = True
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999999054174266 > 0.99999 and 0.0013447110187694289 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+___________________________ test_mhc_mix[32-fn_fp32] ___________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 32, fn_bf16 = False
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999998241302038 > 0.99999 and 0.0013447110187694289 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+___________________________ test_mhc_mix[64-fn_bf16] ___________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 64, fn_bf16 = True
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999999041673244 > 0.99999 and 0.0015300921819845215 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+___________________________ test_mhc_mix[64-fn_fp32] ___________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 64, fn_bf16 = False
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999998153549331 > 0.99999 and 0.0015300921819845215 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+__________________________ test_mhc_mix[2048-fn_bf16] __________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, fn_bf16 = True
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999998971161056 > 0.99999 and 0.0015487263242531801 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+__________________________ test_mhc_mix[2048-fn_fp32] __________________________
+
+device = MeshDevice(1x1 grid, 1 devices), T = 2048, fn_bf16 = False
+
+    @pytest.mark.parametrize("fn_bf16", [True, False], ids=["fn_bf16", "fn_fp32"])
+    @pytest.mark.parametrize("T", [32, 64, 2048])
+    def test_mhc_mix(device, T, fn_bf16):
+        g = torch.Generator().manual_seed(T)
+        x = torch.randn(T, K, generator=g) * 0.02
+        x[:, ::97] *= 30  # outlier channels, as the real stream
+        fn = torch.zeros(K, 32)
+        fn[:, :24] = torch.randn(K, 24, generator=g) * 0.01
+        if fn_bf16:  # the model's projection weights are bf16-valued (HyperConnection: fn.to(bfloat16).float())
+            fn = fn.bfloat16().float()
+        ref = (x.double() @ fn.double()) * torch.rsqrt(x.double().pow(2).mean(-1, keepdim=True) + EPS)
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+        C = mix_chunks(T, K // 32)
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(up(x.reshape(1, 1, T, K)), up(fn), C)
+        assert list(part.shape) == [1, C, T, 64]
+        p = ttnn.to_torch(part).reshape(C, T, 64).sum(0)
+        gram_diag = p[:, 32:].reshape(T // 32, 32, 32).diagonal(dim1=1, dim2=2).reshape(T)
+        got = p[:, :32] * torch.rsqrt(gram_diag.reshape(T, 1) / K + EPS)
+        ss_err = (gram_diag.double() / x.double().pow(2).sum(-1) - 1).abs().max().item()
+        pc = _pcc(got[:, :24], ref[:, :24])
+        mix_err = ((got[:, :24].double() - ref[:, :24]).abs().max() / ref[:, :24].abs().max()).item()
+        print(
+            f"T={T} C={C} fn {'bf16' if fn_bf16 else 'fp32'}: mixes PCC {pc:.9f} max rel err {mix_err:.2e}, "
+            f"sum-of-squares max rel err {ss_err:.2e}"
+        )
+        # x is split hi + lo in the kernel (no TF32 read of the fp32 stream); fn is read at TF32, exact for bf16 weights
+>       assert pc > 0.99999 and ss_err < 1e-5
+E       assert (0.9999998011423965 > 0.99999 and 0.0015487263242531801 < 1e-05)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py:47: AssertionError
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+1.26s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+1.14s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+1.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32]
+0.69s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999]
+0.68s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99]
+0.52s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.50s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+0.49s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None]
+0.47s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+0.46s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+0.36s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None]
+0.36s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+0.36s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16]
+0.32s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+0.32s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+0.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+0.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+0.30s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[1-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[8-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode[32-32]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-bf16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-DataType.BFLOAT16]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.BFLOAT16-None]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[kda_recurrent_decode]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_split_sinkhorn]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_post]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_pre]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_fp32_kernel_perf.py::test_fp32_kernel_perf[mhc_mix]
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.99] - AssertionError: (0.9970291073832188, 0.07594263553619385)
+assert (0.9970291073832188 > 0.99999)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_long_chain[0.999] - AssertionError: (0.9869701508056142, 0.15263766050338745)
+assert (0.9869701508056142 > 0.99999)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-bf16_scale] - AssertionError: 0.003659789992481072
+assert 0.003659789992481072 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[32-fp32_scale] - AssertionError: 0.0030261912160997433
+assert 0.0030261912160997433 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-bf16_scale] - AssertionError: 0.002841786792504862
+assert 0.002841786792504862 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[96-fp32_scale] - AssertionError: 0.0033325419773876084
+assert 0.0033325419773876084 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-bf16_scale] - AssertionError: 0.003542150888282702
+assert 0.003542150888282702 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[2048-fp32_scale] - AssertionError: 0.0033896630434191296
+assert 0.0033896630434191296 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[32-4096-fp32] - AssertionError: (0.0016627301777802212, 0.9998374776538737)
+assert (0.0016627301777802212 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[96-1024-fp32] - AssertionError: (0.0015971512441997572, 0.9998695009704984)
+assert (0.0015971512441997572 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_post.py::test_mhc_post[2048-4096-fp32] - AssertionError: (0.001697536093242055, 0.9998643197932684)
+assert (0.001697536093242055 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[32-DataType.FLOAT32-None] - AssertionError: 0.0016529608407457653
+assert 0.0016529608407457653 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[96-DataType.FLOAT32-None] - AssertionError: 0.001476903139583955
+assert 0.001476903139583955 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_pre.py::test_mhc_pre[2048-DataType.FLOAT32-None] - AssertionError: 0.0013421527042916097
+assert 0.0013421527042916097 < 1e-05
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_bf16] - assert (0.9999999054174266 > 0.99999 and 0.0013447110187694289 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[32-fn_fp32] - assert (0.9999998241302038 > 0.99999 and 0.0013447110187694289 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_bf16] - assert (0.9999999041673244 > 0.99999 and 0.0015300921819845215 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[64-fn_fp32] - assert (0.9999998153549331 > 0.99999 and 0.0015300921819845215 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_bf16] - assert (0.9999998971161056 > 0.99999 and 0.0015487263242531801 < 1e-05)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_mix.py::test_mhc_mix[2048-fn_fp32] - assert (0.9999998011423965 > 0.99999 and 0.0015487263242531801 < 1e-05)
+======================== 20 failed, 19 passed in 22.59s ========================
+nanobind: leaked 2 instances!
+ - leaked instance 0x74d9ec59f648 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x74d9ec06c848 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function "disable_and_clear_program_cache"
+ - leaked function ""
+ - leaked function "to_json"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "from_json"
+ - leaked function ""
+ - leaked function "__ne__"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Fri Oct 16 06:44:48 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
