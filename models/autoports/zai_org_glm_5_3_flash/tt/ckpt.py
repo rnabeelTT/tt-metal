@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 
@@ -144,25 +145,49 @@ class CheckpointReader:
             return int(self.config["text_config"].get("mtp_n_routed_experts", 288))
         return self.num_experts
 
-    def layer_state(self, layer: int, dtype=torch.bfloat16, experts: bool = True) -> dict[str, torch.Tensor]:
-        """All tensors of one layer keyed by checkpoint suffix (FP8 dequantized; fp32 params keep fp32)."""
+    def _layer_item(self, layer: int, suffix: str, dtype) -> torch.Tensor:
+        t = self.raw(LAYER_PREFIX.format(layer) + suffix)
+        if t.dtype == torch.float32:
+            return self._router_rows(LAYER_PREFIX.format(layer) + suffix, t)
+        return self.layer_tensor(layer, suffix, dtype)
+
+    def layer_state(self, layer: int, dtype=torch.bfloat16, experts: bool = True, lazy: bool = False):
+        """All tensors of one layer keyed by checkpoint suffix (FP8 dequantized; fp32 params keep fp32).
+        lazy: a LazyMap that reads / dequantizes a tensor only when it is looked up (the weight cache skips the reads
+        of every weight it already holds)."""
         sd = {}
         for suffix in self.layer_names(layer):
-            t = self.raw(LAYER_PREFIX.format(layer) + suffix)
-            if t.dtype == torch.float32:
-                sd[suffix] = self._router_rows(LAYER_PREFIX.format(layer) + suffix, t)
-            else:
-                sd[suffix] = self.layer_tensor(layer, suffix, dtype)
+            sd[suffix] = lambda s=suffix: self._layer_item(layer, s, dtype)
         if experts and self.has(self._expert_name(layer, 0, "gate_proj.weight")):
             for e in range(self.num_layer_experts(layer)):
                 for proj in ("gate_proj", "up_proj", "down_proj"):
-                    sd[f"mlp.experts.{e}.{proj}.weight"] = self.expert(layer, e, proj, dtype)
-        return sd
+                    sd[f"mlp.experts.{e}.{proj}.weight"] = lambda e=e, p=proj: self.expert(layer, e, p, dtype)
+        lz = LazyMap(sd)
+        return lz if lazy else {k: lz[k] for k in lz}
 
     def top(self, name: str, dtype=torch.bfloat16) -> torch.Tensor:
         """embed_tokens.weight / norm.weight (text model) or lm_head.weight."""
         full = name if name.startswith("lm_head") else TEXT_PREFIX + name
         return self.get(full, dtype)
+
+
+class LazyMap(Mapping):
+    """Read-only mapping name -> tensor whose values are computed by a thunk on every lookup (nothing is kept)."""
+
+    def __init__(self, thunks: dict):
+        self._thunks = thunks
+
+    def __getitem__(self, key):
+        return self._thunks[key]()
+
+    def __iter__(self):
+        return iter(self._thunks)
+
+    def __len__(self):
+        return len(self._thunks)
+
+    def __contains__(self, key):
+        return key in self._thunks
 
 
 @lru_cache(maxsize=None)

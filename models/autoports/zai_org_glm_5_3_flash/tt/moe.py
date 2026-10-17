@@ -44,6 +44,9 @@ from loguru import logger
 import ttnn
 
 _MOE_DEBUG = __import__("os").environ.get("GLM53_MOE_DEBUG") == "1"
+_FAULT_ROUTED_SCALE = (
+    float(os.environ["GLM53_FAULT_ROUTED_SCALE"]) if os.environ.get("GLM53_FAULT_ROUTED_SCALE") else None
+)
 
 TILE = 32
 # functional router: top-k on the logits then softmax over the selected k (2 ops) instead of softmax -> top-k -> sum -> div
@@ -164,7 +167,12 @@ class Qwen35MoE:
         assert self.inter % (tp * TILE) == 0, f"moe_intermediate_size {self.inter} must split into tiles over TP={tp}"
         self.inter_local = self.inter // tp
 
+        # tensor_cache_path: a tt/weight_cache.WeightCache (final device tensors; the state_dict values are read only on
+        # a miss, so `t` below may be a thunk) or a directory for ttnn.as_tensor's host-side cache
         cache = tensor_cache_path
+        wcache = cache if hasattr(cache, "get") and hasattr(cache, "store") else None
+        if wcache is not None:
+            cache = None
 
         def cache_name(name):
             return str(cache / f"mlp.{name}") if cache else None
@@ -172,6 +180,12 @@ class Qwen35MoE:
         mapper = (lambda dim: ttnn.ShardTensorToMesh(mesh_device, dim=dim)) if tp > 1 else (lambda dim: None)
 
         def upload(t, dtype, name, dim=None, layout=ttnn.TILE_LAYOUT, tile=None):
+            if wcache is not None and tile is None:
+                return wcache.get(f"mlp.{name}", lambda: upload(t, dtype, name, dim, layout, tile=False))
+            if tile is False:
+                tile = None
+            if callable(t):
+                t = t()
             kw = {}
             mm = mapper(dim) if dim is not None else (ttnn.ReplicateTensorToMesh(mesh_device) if tp > 1 else None)
             if mm is not None:
@@ -206,9 +220,11 @@ class Qwen35MoE:
             # The selection bias of GLM-4.5-Air sits at ~16-20 with a spread of ~0.02-0.05 (layer 2: 19.69 +- 0.023): in
             # bf16 (0.125 apart at 19.7) it would erase the selection. Selection is invariant to a constant shift, so the
             # per-layer mean is subtracted and the selection chain runs in fp32.
-            b = state_dict["gate.e_score_correction_bias"].to(torch.float64)
-            b = (b - b.mean()).to(torch.float32).reshape(1, 1, 1, -1)
-            self.router_bias = upload(b, ttnn.float32, "gate.e_score_correction_bias.centered")
+            def centered_bias():
+                b = state_dict["gate.e_score_correction_bias"].to(torch.float64)
+                return (b - b.mean()).to(torch.float32).reshape(1, 1, 1, -1)
+
+            self.router_bias = upload(centered_bias, ttnn.float32, "gate.e_score_correction_bias.centered")
             self._expert_iota = ttnn.from_torch(  # [1,1,1,E] expert ids for the one-hot weight select
                 torch.arange(self.num_experts, dtype=torch.float32).reshape(1, 1, 1, -1),
                 dtype=ttnn.float32,
@@ -216,7 +232,7 @@ class Qwen35MoE:
                 device=mesh_device,
                 **({"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if tp > 1 else {}),
             )
-        self.router_w = upload(state_dict["gate.weight"].T.contiguous(), self.prec.router, "gate.weight")
+        self.router_w = upload(lambda: state_dict["gate.weight"].T.contiguous(), self.prec.router, "gate.weight")
         # Decode router as a DRAM-sharded matmul (turn 6): the stock linear ran the [32, 3072] x [3072, 256] router on
         # 7-8 cores (one per N tile) at 71 us per layer at width 8 - the 1.5 MB bf16 weight streamed through 8 cores;
         # the DRAM-sharded decode kernel splits K over the DRAM-bank cores like every other decode projection (~10 us).
@@ -241,32 +257,39 @@ class Qwen35MoE:
             )
 
         # ---- routed experts (HF fused: gate_up [E, 2N, H] = [gate; up] rows, down [E, H, N]) -------
-        gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
-        down = state_dict["experts.down_proj"]  # [E, H, N]
         E, N, H = self.num_experts, self.inter, self.hidden
-        assert tuple(gate_up.shape) == (E, 2 * N, H) and tuple(down.shape) == (E, H, N)
-        gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
-        up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
-        # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
         Nl = self.inter_local
-        packed = torch.cat(
-            [
-                torch.cat([up_t[:, :, d * Nl : (d + 1) * Nl], gate_t[:, :, d * Nl : (d + 1) * Nl]], dim=-1)
-                for d in range(tp)
-            ],
-            dim=-1,
-        )  # [E, H, tp*2*Nl]
+
+        def packed_up_gate():
+            gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
+            assert tuple(gate_up.shape) == (E, 2 * N, H), gate_up.shape
+            gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
+            up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
+            # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
+            packed = torch.cat(
+                [
+                    torch.cat([up_t[:, :, d * Nl : (d + 1) * Nl], gate_t[:, :, d * Nl : (d + 1) * Nl]], dim=-1)
+                    for d in range(tp)
+                ],
+                dim=-1,
+            )  # [E, H, tp*2*Nl]
+            return packed.unsqueeze(0).contiguous()
+
+        def down_t():
+            down = state_dict["experts.down_proj"]  # [E, H, N]
+            assert tuple(down.shape) == (E, H, N), down.shape
+            return down.transpose(1, 2).unsqueeze(0).contiguous()  # [1, E, N, H]
+
         # stage-5 probe: a 16-wide output tile on the gather-mode gate/up needs the weight stored with 16-wide tiles
         # (matmul: out_tile_shape[1] % in1_tile_w == 0).
         _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
         self.up_gate = upload(
-            packed.unsqueeze(0).contiguous(),
+            packed_up_gate,
             self.prec.routed_gate_up,
             "experts.up_gate",
             dim=-1,
             tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
         )
-        down_t = down.transpose(1, 2).unsqueeze(0).contiguous()  # [1, E, N, H]
         # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
         self.down = upload(
             down_t,
@@ -275,28 +298,35 @@ class Qwen35MoE:
             dim=-2,
             tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
         )
-        del gate_t, up_t, packed, down_t
 
         # ---- shared expert (dense SwiGLU, TP column/row parallel) + sigmoid gate -----------------------
-        self.shared_w1 = upload(
-            state_dict["shared_expert.gate_proj.weight"].T.contiguous(),
-            self.prec.shared,
-            "shared_expert.gate_proj",
-            dim=-1,
-        )
-        self.shared_w3 = upload(
-            state_dict["shared_expert.up_proj.weight"].T.contiguous(), self.prec.shared, "shared_expert.up_proj", dim=-1
-        )
+        # a subclass that packs the shared expert's gate / up (Qwen35MoEFused, FusionFlags.shared_expert_packed) frees
+        # these right away: not built at all then
+        packed_shared = getattr(getattr(self, "flags", None), "shared_expert_packed", False)
+        self.shared_w1 = self.shared_w3 = self.shared_gate_w = None
+        if not packed_shared:
+            self.shared_w1 = upload(
+                lambda: state_dict["shared_expert.gate_proj.weight"].T.contiguous(),
+                self.prec.shared,
+                "shared_expert.gate_proj",
+                dim=-1,
+            )
+            self.shared_w3 = upload(
+                lambda: state_dict["shared_expert.up_proj.weight"].T.contiguous(),
+                self.prec.shared,
+                "shared_expert.up_proj",
+                dim=-1,
+            )
         self.shared_w2 = upload(
-            state_dict["shared_expert.down_proj.weight"].T.contiguous(),
+            lambda: state_dict["shared_expert.down_proj.weight"].T.contiguous(),
             self.prec.shared,
             "shared_expert.down_proj",
             dim=-2,
         )
         self.shared_gated = bool(getattr(args, "shared_expert_gated", True))
         self.shared_gate_w = (
-            upload(state_dict["shared_expert_gate.weight"].T.contiguous(), ttnn.bfloat16, "shared_expert_gate")
-            if self.shared_gated
+            upload(lambda: state_dict["shared_expert_gate.weight"].T.contiguous(), ttnn.bfloat16, "shared_expert_gate")
+            if self.shared_gated and not packed_shared
             else None
         )  # [H, 1]
 
@@ -382,6 +412,8 @@ class Qwen35MoE:
             routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
+        if _FAULT_ROUTED_SCALE is not None:  # test-only fault injection (stage-1 gate evidence): the review #1 bug
+            routed = ttnn.multiply(routed, _FAULT_ROUTED_SCALE, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         shared = self._shared(x4)
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
@@ -398,8 +430,10 @@ class Qwen35MoE:
                 self.tt_ccl,
                 cluster_axis=0,
                 dim=3,
+                # links / decode output memory: the multichip decoder's MCOpts (tt/multichip_decoder.py), if installed
+                num_reduce_scatter_links=getattr(self.args, "ccl_num_links", lambda: None)(),
                 topology=self.args.ccl_topology(),
-                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                memory_config=getattr(self.args, "ccl_out_memory_config", lambda t: ttnn.DRAM_MEMORY_CONFIG)(out),
                 dtype=ttnn.bfloat16,
             )
             orig = orig[:-1] + [out.shape[-1]]

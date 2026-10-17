@@ -28,7 +28,8 @@ from models.common.lightweightmodule import LightweightModule
 from models.demos.deepseek_v3_d_p.reference.kda.config import KDAConfig
 from models.demos.deepseek_v3_d_p.tt.kda.config import KDAProgramConfig, KDARecurrenceProgramConfig
 from models.demos.deepseek_v3_d_p.tt.kda.kda import KdaState, ttKDA
-from models.demos.deepseek_v3_d_p.tt.kda.weights import load_kda_weights
+
+from .weight_cache import load_kda_weights_cached
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 KDA_CHUNK = 32
@@ -126,7 +127,8 @@ class GlmKDA(LightweightModule):
         prefill_lengths=(128, 512, 2048),
         max_batch: int = 32,
         tt_ccl=None,
-        weight_cache_path=None,
+        weight_cache=None,
+        dtypes=None,
     ):
         self.mesh = mesh_device
         self.layer_idx = layer_idx
@@ -138,14 +140,8 @@ class GlmKDA(LightweightModule):
         self.V = self.cfg.head_v_dim
         self.W = self.H * (2 * self.K + self.V)  # local conv width (q|k|v)
         self.max_batch = max_batch
-        self.weights = load_kda_weights(
-            mesh_device,
-            self.cfg,
-            kda_state_dict(layer_sd),
-            weight_cache_path,
-            cache_name_prefix=f"layer_{layer_idx}.kda",
-            tensor_parallel_axis=1,
-        )
+        # weight_cache: the layer's tt/weight_cache.WeightCache; dtypes: (input, output) projection dtypes (policy)
+        self.weights = load_kda_weights_cached(mesh_device, self.cfg, layer_sd, weight_cache, *(dtypes or (None, None)))
         self.prefill_lengths = tuple(sorted(prefill_lengths))
         self._prefill = {
             n: _GlmPrefillKDA(

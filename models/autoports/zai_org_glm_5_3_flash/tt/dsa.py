@@ -39,6 +39,8 @@ import torch
 import ttnn
 from models.common.lightweightmodule import LightweightModule
 
+from .weight_cache import cached
+
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 DENSE_MAX_POSITION = 2050  # query positions <= this attend to every visible key
 BLOCK = 128  # page block (tokens); its 32 pool keys are one tile row of the pooled-key cache
@@ -62,12 +64,19 @@ class GlmDSA(LightweightModule):
         weight_dtype=ttnn.bfloat8_b,
         num_blocks: int | None = None,  # page blocks (incl. the dummy block); default: every slot at max_context
         block_size: int = BLOCK,
+        weight_cache=None,  # the layer's tt/weight_cache.WeightCache (sd is read only on a miss)
+        bmm_dtype=None,  # W_UK / W_UV dtype of the precision policy (retyped on device at load; None = bf16)
     ):
         self.mesh = mesh_device
         self.layer_idx = layer_idx
         self.tp = tuple(mesh_device.shape)[1]
-        assert self.tp == 1, "functional DSA: single device (TP is added in the multichip stage)"
-        self.H = tc["num_attention_heads"]
+        # TP (multichip decoder): each device owns H / tp query heads (q_b columns, W_UK / W_UV heads, o_proj rows); the
+        # latent cache, the pooled index keys and the indexer are replicated (computed on every device), so top-k pool
+        # selection needs no collective. With tp > 1 the output projection returns per-device partial sums (the caller
+        # reduces).
+        H_all = tc["num_attention_heads"]
+        assert H_all % self.tp == 0, (H_all, self.tp)
+        self.H = H_all // self.tp  # local query heads
         self.Dn = tc["qk_nope_head_dim"]  # 256
         self.Dv = tc["v_head_dim"]  # 256
         self.R = tc["kv_lora_rank"]  # 512
@@ -90,15 +99,25 @@ class GlmDSA(LightweightModule):
         rep = ttnn.ReplicateTensorToMesh(mesh_device)
         self._rep = rep
 
-        def w(t, dtype=weight_dtype):
-            return ttnn.from_torch(
-                t.contiguous(),
-                dtype=dtype,
-                layout=ttnn.TILE_LAYOUT,
-                device=mesh_device,
-                memory_config=DRAM,
-                mesh_mapper=rep,
-            )
+        def w(name, t, dtype=weight_dtype, shard_dim=None, retype=None):
+            mapper = rep if shard_dim is None or self.tp == 1 else ttnn.ShardTensorToMesh(mesh_device, dim=shard_dim)
+
+            def build():
+                out = ttnn.from_torch(
+                    t().contiguous(),
+                    dtype=dtype,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh_device,
+                    memory_config=DRAM,
+                    mesh_mapper=mapper,
+                )
+                if retype is not None and retype != dtype:
+                    out2 = ttnn.typecast(out, retype)
+                    ttnn.deallocate(out)
+                    out = out2
+                return out
+
+            return cached(weight_cache, f"dsa.{name}", build)
 
         def norm_w(t):
             return ttnn.from_torch(
@@ -110,26 +129,46 @@ class GlmDSA(LightweightModule):
             )
 
         a = "self_attn."
-        self.w_q_a = w(sd[a + "q_a_proj.weight"].T)
+        self.w_q_a = w("q_a", lambda: sd[a + "q_a_proj.weight"].T)
         self.q_a_norm = norm_w(sd[a + "q_a_layernorm.weight"])
-        self.w_q_b = w(sd[a + "q_b_proj.weight"].T)  # [1536, 64*256]
-        self.w_kv_a = w(sd[a + "kv_a_proj_with_mqa.weight"].T)  # [4096, 512]
+        self.w_q_b = w("q_b", lambda: sd[a + "q_b_proj.weight"].T, shard_dim=-1)  # [1536, 64*256], head-major columns
+        self.w_kv_a = w("kv_a", lambda: sd[a + "kv_a_proj_with_mqa.weight"].T)  # [4096, 512]
         self.kv_a_norm = norm_w(sd[a + "kv_a_layernorm.weight"])
-        kvb = sd[a + "kv_b_proj.weight"].float().reshape(self.H, self.Dn + self.Dv, self.R)
-        self.w_uk = w(kvb[:, : self.Dn, :].reshape(1, self.H, self.Dn, self.R), ttnn.bfloat16)  # q_abs = q @ W_UK
-        self.w_uv_t = w(kvb[:, self.Dn :, :].transpose(1, 2).reshape(1, self.H, self.R, self.Dv), ttnn.bfloat16)
-        self.w_o = w(sd[a + "o_proj.weight"].T)  # [64*256, 4096]
+        kvb = lambda: sd[a + "kv_b_proj.weight"].float().reshape(H_all, self.Dn + self.Dv, self.R)
+        # q_abs = q @ W_UK; o = o_lat @ W_UV^T (per head)
+        self.w_uk = w(
+            "w_uk",
+            lambda: kvb()[:, : self.Dn, :].reshape(1, H_all, self.Dn, self.R),
+            ttnn.bfloat16,
+            shard_dim=1,
+            retype=bmm_dtype,
+        )
+        self.w_uv_t = w(
+            "w_uv_t",
+            lambda: kvb()[:, self.Dn :, :].transpose(1, 2).reshape(1, H_all, self.R, self.Dv),
+            ttnn.bfloat16,
+            shard_dim=1,
+            retype=bmm_dtype,
+        )
+        self.w_o = w("o", lambda: sd[a + "o_proj.weight"].T, shard_dim=-2)  # [64*256, 4096], head-major rows
         self.bmm_reuse = False  # per-head matmuls on an explicit full-grid reuse config (optimized decoder)
         self.decode_mm = None  # (x, w, role, ckc, mc) -> out | None: decode program-config hook (optimized decoder)
+        # head split / concat with the nlp_create_qkv_heads / nlp_concat_heads data-movement ops instead of reshape +
+        # permute (fused decoder; bit-identical, tools/fusing_probe.py)
+        self.heads_op = False
         # indexer (bf16 in the checkpoint; kept bf16)
         ix = a + "indexer."
-        self.w_iq = w(sd[ix + "wq_b.weight"].T, ttnn.bfloat16)  # [1536, 32*128]
-        self.w_ik = w(sd[ix + "wk.weight"].T, ttnn.bfloat16)  # [4096, 128]
-        self.ik_norm_w = w(sd[ix + "k_norm.weight"].reshape(1, 1, 1, -1), ttnn.bfloat16)
-        self.ik_norm_b = w(sd[ix + "k_norm.bias"].reshape(1, 1, 1, -1), ttnn.bfloat16)
+        self.w_iq = w("iq", lambda: sd[ix + "wq_b.weight"].T, ttnn.bfloat16)  # [1536, 32*128]
+        self.w_ik = w("ik", lambda: sd[ix + "wk.weight"].T, ttnn.bfloat16)  # [4096, 128]
+        self.ik_norm_w = w("ik_norm_w", lambda: sd[ix + "k_norm.weight"].reshape(1, 1, 1, -1), ttnn.bfloat16)
+        self.ik_norm_b = w("ik_norm_b", lambda: sd[ix + "k_norm.bias"].reshape(1, 1, 1, -1), ttnn.bfloat16)
         # head weights with both scales folded: relu(a x) = a relu(x) for a = 1/sqrt(128) > 0
-        self.w_iw = w(sd[ix + "weights_proj.weight"].float().T * (self.IH**-0.5) * (self.ID**-0.5), ttnn.bfloat16)
-        self.w_ig = w(sd[ix + "index_kpool_compress_gate"].T, ttnn.bfloat16)  # [4096, 128]
+        self.w_iw = w(
+            "iw",
+            lambda: sd[ix + "weights_proj.weight"].float().T * (self.IH**-0.5) * (self.ID**-0.5),
+            ttnn.bfloat16,
+        )
+        self.w_ig = w("ig", lambda: sd[ix + "index_kpool_compress_gate"].T, ttnn.bfloat16)  # [4096, 128]
         self.ape = sd[ix + "index_kpool_compress_ape"].float()  # [4, 128] host copy
         self.ckc = ttnn.init_device_compute_kernel_config(
             mesh_device.arch(),
@@ -143,8 +182,13 @@ class GlmDSA(LightweightModule):
         self.latent = None
 
     # ----------------------------------------------------------------------------------------------- caches
-    def allocate_decode_state(self, batch: int | None = None):
+    def allocate_decode_state(self, batch: int | None = None, num_blocks: int | None = None):
+        """num_blocks (vLLM serving): page blocks incl. the dummy block, known only after construction; overrides
+        the constructor's count when given before the first allocation."""
         S = self.S
+        if num_blocks is not None and self.latent is None:
+            self.NB = int(num_blocks)
+            self.dummy_block = self.NB - 1
         if self.latent is None:
             self.latent = ttnn.zeros(
                 (1, 1, self.NB * BLOCK, self.R),
@@ -162,8 +206,15 @@ class GlmDSA(LightweightModule):
                 device=self.mesh,
                 memory_config=DRAM,
             )
-            self.page_table = self._dev(self.default_page_table(), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
-            self.page_table_host = self.default_page_table()
+            # a pool smaller than S full contexts (vLLM) starts with every column on the dummy block
+            fits = self.S * (self.T // BLOCK) + 1 <= self.NB
+            pt0 = (
+                self.default_page_table()
+                if fits
+                else self.complete_page_table(torch.zeros(self.S, 0, dtype=torch.int32))
+            )
+            self.page_table = self._dev(pt0, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
+            self.page_table_host = pt0
             z = lambda: ttnn.zeros(
                 (1, 1, S, self.ID), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=DRAM
             )
@@ -223,10 +274,12 @@ class GlmDSA(LightweightModule):
         return ttnn.linear(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
 
     def _bmm(self, x, w, rows: int):
-        """Per-head matmul [1,H,rows,K] x [1,H,K,N]. With bmm_reuse: one (head, M block) per core, the full N per core
-        (the default config puts 64 heads on 8 - 16 cores; tools/dsa_bmm_probe.py)."""
+        """Per-head matmul [1,H,rows,K] x [1,H,K,N]. With bmm_reuse (decode): one head per core, the full N per core (the
+        default config puts 64 heads on 8 - 16 cores; tools/dsa_bmm_probe.py)."""
         kw = {}
-        if self.bmm_reuse:
+        # decode rows only (one tile of users): the configuration was measured there; a 2048-row prefill on it hung the
+        # device (2026-10-16), and prefill is not weight-read bound
+        if self.bmm_reuse and rows <= 32:
             grid = self.mesh.compute_with_storage_grid_size()
             Kt, Nt, Mt = w.shape[-2] // 32, w.shape[-1] // 32, -(-rows // 32)
             kw["program_config"] = ttnn.MatmulMultiCoreReuseProgramConfig(
@@ -234,16 +287,53 @@ class GlmDSA(LightweightModule):
                 in0_block_w=min(Kt, 8),
                 out_subblock_h=1,
                 out_subblock_w=max(d for d in (4, 2, 1) if Nt % d == 0),
-                per_core_M=max(d for d in (4, 2, 1) if Mt % d == 0),
+                per_core_M=Mt,
                 per_core_N=Nt,
             )
         return ttnn.matmul(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
+
+    def _heads_op_rows(self, rows: int) -> bool:
+        """nlp_create_qkv_heads / nlp_concat_heads split their work by 32-row blocks: one decode tile of rows runs on one
+        core and is slower than reshape + permute (H 64: 209 vs 187 us), so only prefill rows take them."""
+        return self.heads_op and rows % 32 == 0 and rows > 32
+
+    def _split_heads(self, t, rows: int, heads: int, dim: int):
+        """[1,1,rows,heads*dim] (head-major columns) -> [1,heads,rows,dim]."""
+        if self._heads_op_rows(rows):
+            q, k, v = ttnn.experimental.nlp_create_qkv_heads(
+                t, num_heads=heads, num_kv_heads=0, transpose_k_heads=False, memory_config=DRAM
+            )
+            for e in (k, v):
+                ttnn.deallocate(e)
+            return q
+        return ttnn.permute(ttnn.reshape(t, (1, rows, heads, dim)), (0, 2, 1, 3), memory_config=DRAM)
+
+    def _concat_heads(self, t, rows: int):
+        """[1,H,rows,Dv] -> [1,1,rows,H*Dv] (head-major columns)."""
+        if self._heads_op_rows(rows):
+            # nlp_concat_heads holds every head of a 32-row block in L1 (double-buffered): 64 x 256 needs 2.2 MB > 1.5 MB,
+            # so groups of <= 16 heads (a free leading-dim view; 4 groups beat 2: 1043 vs 1101 us at 2048 rows), then the
+            # group outputs side by side
+            groups = max(1, self.H // 16)
+            if groups == 1:
+                return ttnn.experimental.nlp_concat_heads(t, memory_config=DRAM)
+            hg = self.H // groups
+            x = ttnn.experimental.nlp_concat_heads(ttnn.reshape(t, (groups, hg, rows, self.Dv)), memory_config=DRAM)
+            parts = [
+                ttnn.slice(x, (i, 0, 0, 0), (i + 1, 1, rows, hg * self.Dv), memory_config=DRAM) for i in range(groups)
+            ]
+            ttnn.deallocate(x)
+            out = ttnn.concat(parts, dim=-1, memory_config=DRAM)
+            for p_ in parts:
+                ttnn.deallocate(p_)
+            return out
+        return ttnn.reshape(ttnn.permute(t, (0, 2, 1, 3), memory_config=DRAM), (1, 1, rows, self.H * self.Dv))
 
     def _q_abs(self, x, rows: int):
         """x [1,1,rows,hidden] -> (q_abs [1, H, rows, 512], q_r [1,1,rows,1536])."""
         qr = self._rms(self._mm(x, self.w_q_a), self.q_a_norm)
         q = self._mm(qr, self.w_q_b)  # [1,1,rows,H*256]
-        q = ttnn.permute(ttnn.reshape(q, (1, rows, self.H, self.Dn)), (0, 2, 1, 3), memory_config=DRAM)
+        q = self._split_heads(q, rows, self.H, self.Dn)
         q_abs = self._bmm(q, self.w_uk, rows)  # [1,H,rows,512]
         ttnn.deallocate(q)
         return q_abs, qr
@@ -266,7 +356,7 @@ class GlmDSA(LightweightModule):
     def _out(self, o_lat, rows: int):
         """o_lat [1, H, rows, 512] (TILE) -> [1,1,rows,hidden]."""
         o = self._bmm(o_lat, self.w_uv_t, rows)  # [1,H,rows,256]
-        o = ttnn.reshape(ttnn.permute(o, (0, 2, 1, 3), memory_config=DRAM), (1, 1, rows, self.H * self.Dv))
+        o = self._concat_heads(o, rows)
         out = self.decode_mm(o, self.w_o, "o", self.ckc, DRAM) if self.decode_mm is not None else None
         return out if out is not None else self._mm(o, self.w_o)
 
@@ -348,7 +438,12 @@ class GlmDSA(LightweightModule):
         """q_abs [1,H,rows,512] TILE; index_f32 [1,1,rows,IDX_WIDTH] fp32 logical positions (sentinel 2**32) ->
         o_lat TILE [1,H,rows,512]. Page-table row: cache_batch_idx (prefill) or the query row (decode, one per slot)."""
         idx = ttnn.to_layout(ttnn.typecast(index_f32, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT)
-        q_rm = ttnn.to_layout(q_abs, ttnn.ROW_MAJOR_LAYOUT)
+        H = q_abs.shape[1]
+        pad = -H % 32  # sparse_sdpa takes whole 32-head tiles: TP leaves 16 heads per die -> zero heads, sliced off
+        q_p = ttnn.pad(q_abs, [(0, 0), (0, pad), (0, 0), (0, 0)], 0.0) if pad else q_abs
+        q_rm = ttnn.to_layout(q_p, ttnn.ROW_MAJOR_LAYOUT)
+        if pad:
+            ttnn.deallocate(q_p)
         o = ttnn.transformer.sparse_sdpa(
             q_rm,
             self.latent,
@@ -364,6 +459,10 @@ class GlmDSA(LightweightModule):
         )
         ttnn.deallocate(idx)
         ttnn.deallocate(q_rm)
+        if pad:
+            o_h = ttnn.slice(o, (0, 0, 0, 0), (o.shape[0], H, o.shape[2], o.shape[3]))
+            ttnn.deallocate(o)
+            o = o_h
         return ttnn.to_layout(o, ttnn.TILE_LAYOUT)
 
     def index_row_block(self, n: int) -> int:
@@ -490,7 +589,7 @@ class GlmDSA(LightweightModule):
                 for r0 in range(0, n, rb):
                     sl = lambda t, w: ttnn.slice(t, (0, 0, r0, 0), (1, 1, r0 + rb, w)) if rb < n else t
                     qi = sl(qi_all, self.IH * self.ID)
-                    qi = ttnn.permute(ttnn.reshape(qi, (1, rb, self.IH, self.ID)), (0, 2, 1, 3), memory_config=DRAM)
+                    qi = self._split_heads(qi, rb, self.IH, self.ID)
                     wi = sl(wi_all, self.IH)
                     scores = ttnn.experimental.indexer_score_dsa(
                         qi,

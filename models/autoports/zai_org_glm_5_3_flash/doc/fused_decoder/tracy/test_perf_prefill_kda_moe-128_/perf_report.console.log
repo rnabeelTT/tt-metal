@@ -6,8 +6,8 @@ Using operations after 'PERF_PREFILL'.
 Using operations until 'PERF_PREFILL_END'.
 Detected data from 1 devices. Merging device data...
 Warning: SparseMatmulDeviceOperation rows without numeric nnz were found. Their DRAM/FLOP utilization is omitted; pass --active-experts K to model K active experts per input batch group.
-Writing CSV output to models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report.csv
-Overall DRAM roofline (modeled ops): 3.7% (19 GB/s)
+Writing CSV output to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report.csv
+Overall DRAM roofline (modeled ops): 3.8% (20 GB/s)
 Warning: Unclassified operation 'MhcMixDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcSplitSinkhornDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcPreDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
@@ -23,5 +23,5 @@ Warning: Unclassified operation 'MoeSortedDispatchDeviceOperation' found. Please
 Warning: Unclassified operation 'UntilizeCodegenDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MoeGatherRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MoeGatherAddRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Writing CSV stacked report to models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report_stacked.csv
-Plotting PNG stacked report to models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report_stacked.png
+Writing CSV stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report_stacked.csv
+Plotting PNG stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/fused_decoder/tracy/test_perf_prefill_kda_moe-128_/perf_report_stacked.png

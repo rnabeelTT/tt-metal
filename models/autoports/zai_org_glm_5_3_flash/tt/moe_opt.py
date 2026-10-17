@@ -80,6 +80,28 @@ class Qwen35MoEFused(Qwen35MoE):
         (it may be a persistent output buffer)."""
         if self.swiglu_limit is None:
             return ttnn.swiglu(fused, memory_config=memory_config)
+        if getattr(self, "fused_swiglu_act", False) and tuple(fused.tile.tile_shape) == (32, 32):
+            # fused decoder: clamps and SiLU as input activations of one multiply (2 slices + 1 multiply instead of
+            # minimum + tensor maximum + swiglu's slice / slice / silu / multiply; bit-identical, tools/fusing_probe.py:
+            # 1307 -> 665 us at 32 decode users, 4635 -> 2352 us at 2048 prefill rows)
+            L = float(self.swiglu_limit)
+            shp = list(fused.shape)
+            nl = shp[-1] // 2
+            up = ttnn.slice(fused, [0] * len(shp), shp[:-1] + [nl], memory_config=memory_config)
+            gate = ttnn.slice(fused, [0] * (len(shp) - 1) + [nl], shp, memory_config=memory_config)
+            out = ttnn.multiply(
+                up,
+                gate,
+                input_tensor_a_activations=[ttnn.UnaryWithParam(ttnn.UnaryOpType.HARDTANH, -L, L)],
+                input_tensor_b_activations=[
+                    ttnn.UnaryWithParam((ttnn.UnaryOpType.MINIMUM, L)),
+                    ttnn.UnaryWithParam(ttnn.UnaryOpType.SILU),
+                ],
+                memory_config=memory_config,
+            )
+            ttnn.deallocate(up)
+            ttnn.deallocate(gate)
+            return out
         c = ttnn.minimum(fused, float(self.swiglu_limit))
         c2 = ttnn.maximum(c, self._clamp_lo)
         ttnn.deallocate(c)
@@ -134,33 +156,47 @@ class Qwen35MoEFused(Qwen35MoE):
 
             S = self.shared_inter
             Sl = S // tp
-            w1 = state_dict["shared_expert.gate_proj.weight"].T  # [H, S]
-            w3 = state_dict["shared_expert.up_proj.weight"].T  # [H, S]
-            # per TP shard: [gate_d | up_d | sg] so each device slices its own columns; sg replicated. Ungated shared
-            # expert (GLM): [gate_d | up_d].
-            wg = [state_dict["shared_expert_gate.weight"].T] if self.shared_gated else []  # [H, 1]
-            packed = torch.cat(
-                [
-                    torch.cat([w1[:, d * Sl : (d + 1) * Sl], w3[:, d * Sl : (d + 1) * Sl], *wg], dim=-1)
-                    for d in range(tp)
-                ],
-                dim=-1,
-            ).contiguous()
-            self.shared_packed_width = 2 * Sl + len(wg)
+            self.shared_packed_width = 2 * Sl + (1 if self.shared_gated else 0)
+
+            def packed_shared():
+                w1 = state_dict["shared_expert.gate_proj.weight"].T  # [H, S]
+                w3 = state_dict["shared_expert.up_proj.weight"].T  # [H, S]
+                # per TP shard: [gate_d | up_d | sg] so each device slices its own columns; sg replicated. Ungated shared
+                # expert (GLM): [gate_d | up_d].
+                wg = [state_dict["shared_expert_gate.weight"].T] if self.shared_gated else []  # [H, 1]
+                return torch.cat(
+                    [
+                        torch.cat([w1[:, d * Sl : (d + 1) * Sl], w3[:, d * Sl : (d + 1) * Sl], *wg], dim=-1)
+                        for d in range(tp)
+                    ],
+                    dim=-1,
+                ).contiguous()
+
+            name = "mlp.shared_expert.packed" if self.shared_gated else "mlp.shared_expert.packed_ng"
             kw = {"mesh_mapper": ttnn.ShardTensorToMesh(mesh_device, dim=-1)} if tp > 1 else {}
-            self.shared_packed = ttnn.as_tensor(
-                packed,
-                dtype=self.prec.shared,
-                layout=ttnn.TILE_LAYOUT,
-                device=mesh_device,
-                memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                cache_file_name=(
-                    str(cache / ("mlp.shared_expert.packed" if self.shared_gated else "mlp.shared_expert.packed_ng"))
-                    if cache
-                    else None
-                ),
-                **kw,
-            )
+            # tt/weight_cache.WeightCache: the final device tensor, state_dict read on a miss
+            if hasattr(cache, "store"):
+                self.shared_packed = cache.get(
+                    name,
+                    lambda: ttnn.from_torch(
+                        packed_shared(),
+                        dtype=self.prec.shared,
+                        layout=ttnn.TILE_LAYOUT,
+                        device=mesh_device,
+                        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                        **kw,
+                    ),
+                )
+            else:
+                self.shared_packed = ttnn.as_tensor(
+                    packed_shared(),
+                    dtype=self.prec.shared,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh_device,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                    cache_file_name=str(cache / name) if cache else None,
+                    **kw,
+                )
             for name in ("shared_w1", "shared_w3", "shared_gate_w"):
                 if getattr(self, name) is not None:
                     ttnn.deallocate(getattr(self, name))
@@ -983,9 +1019,11 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         out_dn = self._alloc_dev(
             (1, G, gs, H),
             act,
-            layout=ttnn.ROW_MAJOR_LAYOUT
-            if (grouped and getattr(self, "_cfg_grouped_down_untilize", False))
-            else ttnn.TILE_LAYOUT,
+            layout=(
+                ttnn.ROW_MAJOR_LAYOUT
+                if (grouped and getattr(self, "_cfg_grouped_down_untilize", False))
+                else ttnn.TILE_LAYOUT
+            ),
         )
         down = ttnn.sparse_matmul(
             din,

@@ -24,6 +24,7 @@ import torch
 import ttnn
 from models.common.lightweightmodule import LightweightModule
 
+from .ckpt import LazyMap
 from .kda import GlmKDA
 from .mhc import HyperConnection, hc_config
 from .mlp import DenseMLP
@@ -68,20 +69,29 @@ def moe_args(tc: dict, tp: int, num_experts: int = 192, opt: OptimizationConfig 
     )
 
 
-def moe_state_dict(layer_sd: dict[str, torch.Tensor], num_experts: int) -> dict[str, torch.Tensor]:
-    """Checkpoint suffixes -> the Qwen35MoE names (HF-fused expert tensors, singular shared_expert)."""
-    gate = [layer_sd[f"mlp.experts.{e}.gate_proj.weight"] for e in range(num_experts)]
-    up = [layer_sd[f"mlp.experts.{e}.up_proj.weight"] for e in range(num_experts)]
-    down = [layer_sd[f"mlp.experts.{e}.down_proj.weight"] for e in range(num_experts)]
-    return {
-        "gate.weight": layer_sd["mlp.gate.weight"],
-        "gate.e_score_correction_bias": layer_sd["mlp.gate.e_score_correction_bias"].float(),
-        "experts.gate_up_proj": torch.stack([torch.cat([g, u], dim=0) for g, u in zip(gate, up)], dim=0),
-        "experts.down_proj": torch.stack(down, dim=0),
-        "shared_expert.gate_proj.weight": layer_sd["mlp.shared_experts.gate_proj.weight"],
-        "shared_expert.up_proj.weight": layer_sd["mlp.shared_experts.up_proj.weight"],
-        "shared_expert.down_proj.weight": layer_sd["mlp.shared_experts.down_proj.weight"],
-    }
+def moe_state_dict(layer_sd: dict[str, torch.Tensor], num_experts: int) -> LazyMap:
+    """Checkpoint suffixes -> the Qwen35MoE names (HF-fused expert tensors, singular shared_expert). Lazy: a tensor
+    (the 192-expert stacks above all) is read from layer_sd only when looked up (weight-cache misses)."""
+    E = range(num_experts)
+    return LazyMap(
+        {
+            "gate.weight": lambda: layer_sd["mlp.gate.weight"],
+            "gate.e_score_correction_bias": lambda: layer_sd["mlp.gate.e_score_correction_bias"].float(),
+            "experts.gate_up_proj": lambda: torch.stack(
+                [
+                    torch.cat(
+                        [layer_sd[f"mlp.experts.{e}.gate_proj.weight"], layer_sd[f"mlp.experts.{e}.up_proj.weight"]]
+                    )
+                    for e in E
+                ],
+                dim=0,
+            ),
+            "experts.down_proj": lambda: torch.stack([layer_sd[f"mlp.experts.{e}.down_proj.weight"] for e in E], dim=0),
+            "shared_expert.gate_proj.weight": lambda: layer_sd["mlp.shared_experts.gate_proj.weight"],
+            "shared_expert.up_proj.weight": lambda: layer_sd["mlp.shared_experts.up_proj.weight"],
+            "shared_expert.down_proj.weight": lambda: layer_sd["mlp.shared_experts.down_proj.weight"],
+        }
+    )
 
 
 class FunctionalDecoder(LightweightModule):
@@ -101,10 +111,14 @@ class FunctionalDecoder(LightweightModule):
         max_batch: int = 32,
         prefill_lengths=(128, 512, 2048),
         dsa_kwargs: dict | None = None,
-        weight_cache_path=None,
+        weight_cache=None,
         tt_ccl=None,
         moe_opt=None,
+        kda_dtypes=None,
+        dsa_bmm_dtype=None,
     ):
+        """weight_cache: tt/weight_cache.WeightCache of the model (None = no cache); kda_dtypes (input, output
+        projection) and dsa_bmm_dtype (W_UK / W_UV): the precision policy's dtypes, applied at load (None = bf16)."""
         self.mesh = mesh_device
         self.tc = tc
         self.layer_idx = layer_idx
@@ -137,7 +151,8 @@ class FunctionalDecoder(LightweightModule):
         )
         self.input_norm_w = norm_w(sd["input_layernorm.weight"])
         self.post_norm_w = norm_w(sd["post_attention_layernorm.weight"])
-        cache = lambda name: (str(weight_cache_path / f"layer_{layer_idx}.{name}") if weight_cache_path else None)
+        # per-component cache scopes (a source edit of one component's weight build re-keys only that component)
+        wc = (lambda kind: weight_cache.sub(f"layer_{layer_idx}").component(kind)) if weight_cache is not None else None
 
         if self.attn_kind == "kda":
             self.attn = GlmKDA(
@@ -148,7 +163,8 @@ class FunctionalDecoder(LightweightModule):
                 prefill_lengths=prefill_lengths,
                 max_batch=max_batch,
                 tt_ccl=tt_ccl,
-                weight_cache_path=weight_cache_path,
+                weight_cache=wc and wc("kda"),
+                dtypes=kda_dtypes,
             )
         else:
             from .dsa import GlmDSA
@@ -157,16 +173,25 @@ class FunctionalDecoder(LightweightModule):
             if T is not None:  # every prefill chunk occupies a whole constructed length of the per-slot caches
                 assert T % max(prefill_lengths) == 0, f"max_context {T} must be a multiple of {max(prefill_lengths)}"
 
-            self.attn = GlmDSA(mesh_device, tc, sd, layer_idx, max_batch=max_batch, **(dsa_kwargs or {}))
+            self.attn = GlmDSA(
+                mesh_device,
+                tc,
+                sd,
+                layer_idx,
+                max_batch=max_batch,
+                weight_cache=wc and wc("dsa"),
+                bmm_dtype=dsa_bmm_dtype,
+                **(dsa_kwargs or {}),
+            )
 
         if self.mlp_kind == "dense":
             self.mlp = DenseMLP(
                 mesh_device,
-                sd["mlp.gate_proj.weight"],
-                sd["mlp.up_proj.weight"],
-                sd["mlp.down_proj.weight"],
+                lambda: sd["mlp.gate_proj.weight"],
+                lambda: sd["mlp.up_proj.weight"],
+                lambda: sd["mlp.down_proj.weight"],
                 tc["swiglu_limit"],
-                cache_prefix=cache("mlp"),
+                cache=wc and wc("mlp"),
             )
         else:
             num_experts = sd["mlp.gate.weight"].shape[0]
@@ -174,7 +199,7 @@ class FunctionalDecoder(LightweightModule):
                 mesh_device,
                 moe_args(tc, self.tp, num_experts, opt=moe_opt or FUNCTIONAL_MOE),
                 moe_state_dict(sd, num_experts),
-                tensor_cache_path=None,
+                tensor_cache_path=wc and wc("moe"),
                 tt_ccl=tt_ccl,
                 layer_num=layer_idx,
             )

@@ -54,6 +54,7 @@ def main():
     ap.add_argument("--grouped-in0", type=int, default=None, help="K block (tiles) of the grouped sparse matmuls")
     ap.add_argument("--no-grouped", action="store_true", help="non-grouped sorted sparse matmuls")
     ap.add_argument("--skip-ref", action="store_true", help="TT only (reuse the printed reference numbers)")
+    ap.add_argument("--policy", default=None, help="MoE policy of a tt/optimized_decoder.CANDIDATES entry")
     ap.add_argument("--mode", default="prefill", choices=("prefill", "decode"), help="MoE path (decode: 32-row tiles)")
     a = ap.parse_args()
     rd = CheckpointReader()
@@ -78,6 +79,10 @@ def main():
         import dataclasses
 
         opt = FUNCTIONAL_MOE
+        if a.policy:
+            from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES
+
+            opt = CANDIDATES[a.policy].moe
         if a.grouped_in0:
             opt = dataclasses.replace(opt, grouped_gate_up_in0=a.grouped_in0, grouped_down_in0=a.grouped_in0)
         if a.no_grouped:
@@ -110,6 +115,9 @@ def main():
         )
         print(
             f"tt vs ref_q8: routed rms {rat(rt, q8_r):.4f} PCC {pcc(rt, q8_r):.6f}; shared rms {rat(sh, q8_s):.4f} PCC {pcc(sh, q8_s):.6f}"
+        )
+        print(
+            f"tt vs ref_q4: routed rms {rat(rt, q4_r):.4f} PCC {pcc(rt, q4_r):.6f}; shared rms {rat(sh, q4_s):.4f} PCC {pcc(sh, q4_s):.6f}"
         )
     finally:
         ttnn.close_mesh_device(mesh)

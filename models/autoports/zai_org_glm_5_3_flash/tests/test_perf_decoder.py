@@ -16,7 +16,14 @@ import pytest
 import torch
 
 import ttnn
-from models.autoports.zai_org_glm_5_3_flash.tests.harness import H4, DecodeRunner, build_layer, open_mesh
+from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
+    H4,
+    DecodeRunner,
+    build_layer,
+    close_mesh,
+    open_mesh,
+    stream_in,
+)
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
 
 
@@ -24,8 +31,11 @@ def _decoder_cls():
     """GLM53_DECODER=fused: tt/fused_decoder.FusedDecoder (FusedFlags from GLM53_FUSED_OFF=comma list of flags to turn
     off, for before / after measurements); default the functional decoder."""
     kind = os.environ.get("GLM53_DECODER", "functional")
-    if kind == "optimized":
+    if kind in ("optimized", "multichip"):  # multichip: run with GLM53_TP=4 (a (1, 4) mesh)
         from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES, SELECTED, OptimizedDecoder
+
+        if kind == "multichip":
+            from models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder import MultichipDecoder as OptimizedDecoder
 
         opt = CANDIDATES[os.environ["GLM53_OPT"]] if os.environ.get("GLM53_OPT") else SELECTED
         print(f"optimized decoder policy: {opt.describe()}")
@@ -41,7 +51,8 @@ def _decoder_cls():
     from models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder import FusedDecoder, FusedFlags
 
     off = [f for f in os.environ.get("GLM53_FUSED_OFF", "").split(",") if f]
-    flags = FusedFlags(**{f: False for f in off})
+    on = [f for f in os.environ.get("GLM53_FUSED_ON", "").split(",") if f]
+    flags = FusedFlags(**{f: False for f in off}, **{f: True for f in on})
 
     class _Fused(FusedDecoder):
         @classmethod
@@ -83,7 +94,7 @@ def test_perf_prefill(kind, rows):
         dec = build_layer(
             mesh, rd, KINDS[kind], batch=8, prefill_lengths=(rows,), max_context=4096, decoder_cls=_decoder_cls()
         )
-        X = ttnn.from_torch(_x(rows, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+        X = stream_in(mesh, _x(rows, 1))
         inputs = dec.prefill_inputs(rows, start=0, length=rows, slot=0)
         Y, _ = dec.prefill_forward(X, inputs=inputs)  # compile
         ttnn.deallocate(Y)
@@ -97,7 +108,7 @@ def test_perf_prefill(kind, rows):
         signpost("PERF_PREFILL_END")
         print(f"PERF {kind} prefill {rows} rows: {dt * 1e3:.2f} ms host wall (warmed)")
     finally:
-        ttnn.close_mesh_device(mesh)
+        close_mesh(mesh)
 
 
 @pytest.mark.parametrize("batch", [1, 32])
@@ -130,4 +141,4 @@ def test_perf_traced_decode(kind, batch):
         )
         runner.release()
     finally:
-        ttnn.close_mesh_device(mesh)
+        close_mesh(mesh)

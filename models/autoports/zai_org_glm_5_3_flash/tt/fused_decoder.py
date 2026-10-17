@@ -13,6 +13,10 @@ Rewrites (doc/fused_decoder/README.md has the before / after op tables and measu
     ttnn.transformer.fused_recurrent_gated_delta_rule with a per-key-channel decay) instead of the q / k / v slices,
     two reshape + L2-norm pairs and the 12-op fp32 recurrence over [B, H, K, V]; it reads the head rows straight out of
     the conv output and updates the state in place.
+  * Stage-2 review #1 (bit-identical data movement / activation folds; tools/fusing_probe.py, tools/fused_flag_check.py):
+    DSA head split / concat on nlp_create_qkv_heads / nlp_concat_heads at prefill rows (dsa_heads_op); dense MLP gate /
+    up packed and the swiglu_limit clamps + SiLU folded into one multiply, also on the routed experts (mlp_act_fold);
+    KDA decode conv on addcmul, in-place history shift and the output gate in [B, H*V] order (kda_decode_fold).
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ class FusedFlags:
         mhc_sumsq_op: bool = False,
         kda_recurrent_op: bool = True,
         mhc_mix_op: bool = True,
+        dsa_heads_op: bool = True,
+        mlp_act_fold: bool = True,
+        kda_decode_fold: bool = True,
     ):
         self.mhc_pre_op = mhc_pre_op
         # mhc_sumsq_op: rms_norm_pre_all_gather on the 16384-wide fp32 stream sizes its CBs by the row width (8.5 MB
@@ -44,6 +51,16 @@ class FusedFlags:
         # mhc_mix_op: split-K mix projection + row sum of squares (ttnn.experimental.deepseek_prefill.mhc_mix) over
         # many cores instead of a single-core matmul and a single-core mean
         self.mhc_mix_op = mhc_mix_op
+        # dsa_heads_op: DSA head split / concat (q_b output, indexer queries, W_UV output) with nlp_create_qkv_heads /
+        # nlp_concat_heads instead of reshape + permute (bit-identical data movement)
+        self.dsa_heads_op = dsa_heads_op
+        # mlp_act_fold: dense MLP gate / up packed into one matmul, and (dense MLP and routed experts) the swiglu_limit
+        # clamps and SiLU folded into the multiply as input activations (bit-identical)
+        self.mlp_act_fold = mlp_act_fold
+        # kda_decode_fold (KDA decode, bit-identical, tools/fusing_probe.py kda2): short conv as multiply + 3 addcmul on
+        # fp32 tap constants; conv history shifted by `where` straight into the history buffers (no copies); output gate
+        # applied in the [B, H*V] order with the sigmoid as an input activation of the multiply (no gate relayout)
+        self.kda_decode_fold = kda_decode_fold
 
 
 def mix_chunks(T: int, k_tiles: int) -> int:
@@ -156,6 +173,29 @@ class FusedGlmKDA(GlmKDA):
     def __init__(self, base: GlmKDA, flags: FusedFlags):
         self.__dict__.update(base.__dict__)
         self.flags = flags
+        if flags.kda_decode_fold:
+            self.taps32 = [ttnn.typecast(_tap4(t), ttnn.float32) for t in self.weights.convolution_taps]
+            self.sigmoid_act = [ttnn.UnaryWithParam(ttnn.UnaryOpType.SIGMOID)]
+
+    def _conv_fold(self, cur: ttnn.Tensor, dstate: KdaDecodeState) -> ttnn.Tensor:
+        """acc = cur * tap3 + sum_j h_j * tap_j in fp32 (fp32 tap constants, one addcmul per history row)."""
+        acc = ttnn.multiply(cur, self.taps32[3], dtype=ttnn.float32, memory_config=DRAM)
+        for j in range(3):
+            h32 = ttnn.typecast(dstate.conv[j], ttnn.float32)
+            nxt = ttnn.addcmul(acc, h32, self.taps32[j], memory_config=DRAM)
+            ttnn.deallocate(h32)
+            ttnn.deallocate(acc)
+            acc = nxt
+        return acc
+
+    @staticmethod
+    def _shift_in_place(dstate: KdaDecodeState, cur: ttnn.Tensor, active_bf: ttnn.Tensor):
+        """h0 <- h1, h1 <- h2, h2 <- current (active slots), each `where` written straight into its history buffer. Order
+        matters: h_j is rewritten before h_{j+1}, which it reads."""
+        h0, h1, h2 = dstate.conv
+        ttnn.where(active_bf, h1, h0, output_tensor=h0)
+        ttnn.where(active_bf, h2, h1, output_tensor=h1)
+        ttnn.where(active_bf, cur, h2, output_tensor=h2)
 
     def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
         if not self.flags.kda_recurrent_op:
@@ -168,21 +208,28 @@ class FusedGlmKDA(GlmKDA):
 
         # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU
         cur = ttnn.slice(proj, (0, 0, 0, 0), (1, 1, B, W), memory_config=DRAM)
-        taps = w.convolution_taps
-        acc = ttnn.multiply(cur, _tap4(taps[3]), dtype=ttnn.float32, memory_config=DRAM)
-        for j in range(3):
-            acc = ttnn.add(
-                acc,
-                ttnn.multiply(dstate.conv[j], _tap4(taps[j]), dtype=ttnn.float32, memory_config=DRAM),
-                memory_config=DRAM,
-            )
+        fold = self.flags.kda_decode_fold
+        if fold:
+            acc = self._conv_fold(cur, dstate)
+        else:
+            taps = w.convolution_taps
+            acc = ttnn.multiply(cur, _tap4(taps[3]), dtype=ttnn.float32, memory_config=DRAM)
+            for j in range(3):
+                acc = ttnn.add(
+                    acc,
+                    ttnn.multiply(dstate.conv[j], _tap4(taps[j]), dtype=ttnn.float32, memory_config=DRAM),
+                    memory_config=DRAM,
+                )
         qkv = ttnn.silu(acc, memory_config=DRAM)  # [1,1,B,W] fp32
         # inactive slots: zero q / k / v (a select, so non-finite rows of an idle slot cannot reach its state)
         qkv_all = qkv
         qkv = ttnn.where(inputs["active"], qkv_all, 0.0, memory_config=DRAM)
         ttnn.deallocate(qkv_all)
         ttnn.deallocate(acc)
-        self.shift_conv_history(dstate, cur, inputs["active_bf"])
+        if fold:
+            self._shift_in_place(dstate, cur, inputs["active_bf"])
+        else:
+            self.shift_conv_history(dstate, cur, inputs["active_bf"])
         ttnn.deallocate(cur)
 
         # ---- gates
@@ -219,11 +266,20 @@ class FusedGlmKDA(GlmKDA):
         o = ttnn.rms_norm(
             o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
         )
-        og = ttnn.sigmoid(ttnn.typecast(ttnn.reshape(ogate, (1, 1, B * H, V)), ttnn.float32), memory_config=DRAM)
-        o = ttnn.multiply(o, og, memory_config=DRAM)
-        ttnn.deallocate(og)
-        ttnn.deallocate(ogate)
-        o = ttnn.typecast(ttnn.reshape(o, (1, 1, B, H * V)), ttnn.bfloat16)
+        if fold:
+            og = ttnn.typecast(ogate, ttnn.float32)
+            o = ttnn.multiply(
+                ttnn.reshape(o, (1, 1, B, H * V)), og, input_tensor_b_activations=self.sigmoid_act, memory_config=DRAM
+            )
+            ttnn.deallocate(og)
+            ttnn.deallocate(ogate)
+            o = ttnn.typecast(o, ttnn.bfloat16)
+        else:
+            og = ttnn.sigmoid(ttnn.typecast(ttnn.reshape(ogate, (1, 1, B * H, V)), ttnn.float32), memory_config=DRAM)
+            o = ttnn.multiply(o, og, memory_config=DRAM)
+            ttnn.deallocate(og)
+            ttnn.deallocate(ogate)
+            o = ttnn.typecast(ttnn.reshape(o, (1, 1, B, H * V)), ttnn.bfloat16)
         y = decode_linear(self, o, w.output_projection, "o", cc)
         ttnn.deallocate(o)
         return y
@@ -238,6 +294,13 @@ class FusedDecoder(FunctionalDecoder):
         dec.ffn_hc = FusedHyperConnection(dec.ffn_hc, dec.flags)
         if dec.attn_kind == "kda":
             dec.attn = FusedGlmKDA(dec.attn, dec.flags)
+        else:
+            dec.attn.heads_op = dec.flags.dsa_heads_op
+        if dec.flags.mlp_act_fold:
+            if dec.mlp_kind == "dense":
+                dec.mlp.pack()
+            else:
+                dec.mlp.fused_swiglu_act = True
         return dec
 
     def allocate_decode_state(self, batch: int | None = None):
