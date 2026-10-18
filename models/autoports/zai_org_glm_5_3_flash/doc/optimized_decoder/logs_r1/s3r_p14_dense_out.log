@@ -1,0 +1,120 @@
+=== start Sat Oct 17 03:27:06 PM UTC 2026 : timeout -k 60 2400 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r_probe_dense --only out_ds
+2026-10-17 15:27:07.665 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+grid 11 10
+===== out_ds
+kda_out BFLOAT8_B HiFi4 decode 1d c64                     :     102.9 us    347 GB/s  PCC 0.999999
+kda_out BFLOAT8_B HiFi4 decode 1d c96                     :     101.9 us    350 GB/s  PCC 0.999999
+kda_out BFLOAT8_B HiFi4 decode 1d c110                    :     101.7 us    351 GB/s  PCC 0.999999
+kda_out BFLOAT8_B HiFi4 decode DS c32 in0 8 r1            :     222.1 us    161 GB/s  PCC 0.999999
+kda_out BFLOAT8_B HiFi4 decode DS c32 in0 8 r2            :     131.9 us    270 GB/s  PCC 0.999999
+2026-10-17 15:27:10.438 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT8_B HiFi4 decode DS c32 in0 8 r4            : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT8_B HiFi4 decode DS c64 in0 4 r1            :     231.6 us    154 GB/s  PCC 0.999999
+kda_out BFLOAT8_B HiFi4 decode DS c64 in0 4 r2            :     130.0 us    274 GB/s  PCC 0.999999
+2026-10-17 15:27:11.326 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT8_B HiFi4 decode DS c64 in0 4 r4            : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT8_B LoFi decode 1d c64                      :      99.4 us    359 GB/s  PCC 0.999913
+kda_out BFLOAT8_B LoFi decode 1d c96                      :      99.4 us    359 GB/s  PCC 0.999913
+kda_out BFLOAT8_B LoFi decode 1d c110                     :      99.4 us    359 GB/s  PCC 0.999913
+kda_out BFLOAT8_B LoFi decode DS c32 in0 8 r1             :      80.4 us    444 GB/s  PCC 0.999913
+kda_out BFLOAT8_B LoFi decode DS c32 in0 8 r2             :     127.1 us    281 GB/s  PCC 0.999913
+2026-10-17 15:27:12.611 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT8_B LoFi decode DS c32 in0 8 r4             : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT8_B LoFi decode DS c64 in0 4 r1             :      86.8 us    411 GB/s  PCC 0.999913
+kda_out BFLOAT8_B LoFi decode DS c64 in0 4 r2             :      78.6 us    453 GB/s  PCC 0.999913
+2026-10-17 15:27:13.455 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT8_B LoFi decode DS c64 in0 4 r4             : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT8_B HiFi4 prefill2048 interleaved default   :    3872.3 us      9 GB/s  PCC nan
+kda_out BFLOAT8_B HiFi4 prefill2048 interleaved 2D        :    2415.9 us     15 GB/s  PCC 1.000000
+kda_out BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D       :    2419.6 us     15 GB/s  PCC 1.000000
+kda_out BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 8):    2722.0 us     13 GB/s  PCC 1.000000
+kda_out BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(11, 10):    1857.8 us     19 GB/s  PCC nan
+kda_out BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 10):    2420.6 us     15 GB/s  PCC 1.000000
+kda_out BFLOAT4_B HiFi4 decode 1d c64                     :      71.0 us    266 GB/s  PCC 0.999999
+kda_out BFLOAT4_B HiFi4 decode 1d c96                     :      70.6 us    267 GB/s  PCC 0.999999
+kda_out BFLOAT4_B HiFi4 decode 1d c110                    :      70.7 us    267 GB/s  PCC 0.999999
+kda_out BFLOAT4_B HiFi4 decode DS c32 in0 8 r1            :     220.6 us     86 GB/s  PCC 0.999999
+kda_out BFLOAT4_B HiFi4 decode DS c32 in0 8 r2            :     120.6 us    157 GB/s  PCC 0.999999
+2026-10-17 15:27:17.535 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT4_B HiFi4 decode DS c32 in0 8 r4            : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT4_B HiFi4 decode DS c64 in0 4 r1            :     230.3 us     82 GB/s  PCC 0.999999
+kda_out BFLOAT4_B HiFi4 decode DS c64 in0 4 r2            :     128.4 us    147 GB/s  PCC 0.999999
+2026-10-17 15:27:18.420 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT4_B HiFi4 decode DS c64 in0 4 r4            : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT4_B LoFi decode 1d c64                      :      68.6 us    275 GB/s  PCC 0.999994
+kda_out BFLOAT4_B LoFi decode 1d c96                      :      68.8 us    274 GB/s  PCC 0.999994
+kda_out BFLOAT4_B LoFi decode 1d c110                     :      68.5 us    275 GB/s  PCC 0.999994
+kda_out BFLOAT4_B LoFi decode DS c32 in0 8 r1             :      72.1 us    262 GB/s  PCC 0.999994
+kda_out BFLOAT4_B LoFi decode DS c32 in0 8 r2             :      72.4 us    261 GB/s  PCC 0.999994
+2026-10-17 15:27:19.684 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT4_B LoFi decode DS c32 in0 8 r4             : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT4_B LoFi decode DS c64 in0 4 r1             :      81.9 us    231 GB/s  PCC 0.999994
+kda_out BFLOAT4_B LoFi decode DS c64 in0 4 r2             :      62.1 us    304 GB/s  PCC 0.999994
+2026-10-17 15:27:20.536 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+kda_out BFLOAT4_B LoFi decode DS c64 in0 4 r4             : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+kda_out BFLOAT4_B HiFi4 prefill2048 interleaved default   :    3794.4 us      5 GB/s  PCC nan
+kda_out BFLOAT4_B HiFi4 prefill2048 interleaved 2D        :    2388.5 us      8 GB/s  PCC 1.000000
+kda_out BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D       :    2389.7 us      8 GB/s  PCC 1.000000
+kda_out BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 8):    2686.7 us      7 GB/s  PCC 1.000000
+kda_out BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(11, 10):    1835.3 us     10 GB/s  PCC nan
+kda_out BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 10):    2393.4 us      8 GB/s  PCC 1.000000
+dsa_o BFLOAT8_B HiFi4 decode 1d c64                       :     199.3 us    358 GB/s  PCC 0.999999
+dsa_o BFLOAT8_B HiFi4 decode 1d c96                       :     199.0 us    358 GB/s  PCC 0.999999
+dsa_o BFLOAT8_B HiFi4 decode 1d c110                      :     198.9 us    359 GB/s  PCC 0.999999
+dsa_o BFLOAT8_B HiFi4 decode DS c32 in0 8 r1              :     435.2 us    164 GB/s  PCC 0.999999
+dsa_o BFLOAT8_B HiFi4 decode DS c32 in0 8 r2              :     252.3 us    283 GB/s  PCC 0.999999
+2026-10-17 15:27:25.414 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT8_B HiFi4 decode DS c32 in0 8 r4              : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT8_B HiFi4 decode DS c64 in0 8 r1              :     435.3 us    164 GB/s  PCC 0.999999
+dsa_o BFLOAT8_B HiFi4 decode DS c64 in0 8 r2              :     234.9 us    304 GB/s  PCC 0.999999
+2026-10-17 15:27:25.933 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT8_B HiFi4 decode DS c64 in0 8 r4              : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT8_B LoFi decode 1d c64                        :     196.9 us    362 GB/s  PCC 0.999913
+dsa_o BFLOAT8_B LoFi decode 1d c96                        :     196.8 us    362 GB/s  PCC 0.999913
+dsa_o BFLOAT8_B LoFi decode 1d c110                       :     196.5 us    363 GB/s  PCC 0.999913
+dsa_o BFLOAT8_B LoFi decode DS c32 in0 8 r1               :     152.2 us    468 GB/s  PCC 0.999913
+dsa_o BFLOAT8_B LoFi decode DS c32 in0 8 r2               :     247.1 us    289 GB/s  PCC 0.999913
+2026-10-17 15:27:27.231 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT8_B LoFi decode DS c32 in0 8 r4               : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT8_B LoFi decode DS c64 in0 8 r1               :     151.9 us    469 GB/s  PCC 0.999913
+dsa_o BFLOAT8_B LoFi decode DS c64 in0 8 r2               :     150.6 us    474 GB/s  PCC 0.999913
+2026-10-17 15:27:27.250 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT8_B LoFi decode DS c64 in0 8 r4               : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT8_B HiFi4 prefill2048 interleaved default     :    7683.5 us      9 GB/s  PCC nan
+dsa_o BFLOAT8_B HiFi4 prefill2048 interleaved 2D          :    4839.7 us     15 GB/s  PCC 1.000000
+dsa_o BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D         :    4831.3 us     15 GB/s  PCC 1.000000
+dsa_o BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 8):    5398.0 us     13 GB/s  PCC 1.000000
+dsa_o BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(11, 10):    3736.6 us     19 GB/s  PCC nan
+dsa_o BFLOAT8_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 10):    4833.6 us     15 GB/s  PCC 1.000000
+dsa_o BFLOAT4_B HiFi4 decode 1d c64                       :     136.6 us    276 GB/s  PCC 0.999999
+dsa_o BFLOAT4_B HiFi4 decode 1d c96                       :     136.6 us    276 GB/s  PCC 0.999999
+dsa_o BFLOAT4_B HiFi4 decode 1d c110                      :     136.5 us    277 GB/s  PCC 0.999999
+dsa_o BFLOAT4_B HiFi4 decode DS c32 in0 8 r1              :     433.7 us     87 GB/s  PCC 0.999999
+dsa_o BFLOAT4_B HiFi4 decode DS c32 in0 8 r2              :     232.5 us    162 GB/s  PCC 0.999999
+2026-10-17 15:27:31.481 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT4_B HiFi4 decode DS c32 in0 8 r4              : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT4_B HiFi4 decode DS c64 in0 8 r1              :     433.6 us     87 GB/s  PCC 0.999999
+dsa_o BFLOAT4_B HiFi4 decode DS c64 in0 8 r2              :     231.2 us    163 GB/s  PCC 0.999999
+2026-10-17 15:27:32.006 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT4_B HiFi4 decode DS c64 in0 8 r4              : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT4_B LoFi decode 1d c64                        :     132.5 us    285 GB/s  PCC 0.999994
+dsa_o BFLOAT4_B LoFi decode 1d c96                        :     132.7 us    284 GB/s  PCC 0.999994
+dsa_o BFLOAT4_B LoFi decode 1d c110                       :     132.2 us    285 GB/s  PCC 0.999994
+dsa_o BFLOAT4_B LoFi decode DS c32 in0 8 r1               :     136.4 us    277 GB/s  PCC 0.999994
+dsa_o BFLOAT4_B LoFi decode DS c32 in0 8 r2               :     137.0 us    276 GB/s  PCC 0.999994
+2026-10-17 15:27:33.294 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT4_B LoFi decode DS c32 in0 8 r4               : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT4_B LoFi decode DS c64 in0 8 r1               :     136.1 us    277 GB/s  PCC 0.999994
+dsa_o BFLOAT4_B LoFi decode DS c64 in0 8 r2               :      85.4 us    442 GB/s  PCC 0.999994
+2026-10-17 15:27:33.308 | critical |          Always | TT_FATAL: num_workers_per_dram_bank must be in [1, 3], got 4 (assert.hpp:104)
+dsa_o BFLOAT4_B LoFi decode DS c64 in0 8 r4               : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/utilities/matmul_utilities.cpp:345: workers_per_bank >= 1 && workers_per_bank <= 3 | info: | num_workers_per_dram_bank must be in [1, 3], got 4 | --- void tt::assert::detail::tt_throw_impl<fmt::v11::fstring<unsigned long const&>, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&>
+dsa_o BFLOAT4_B HiFi4 prefill2048 interleaved default     :    7526.0 us      5 GB/s  PCC nan
+dsa_o BFLOAT4_B HiFi4 prefill2048 interleaved 2D          :    4770.2 us      8 GB/s  PCC 1.000000
+dsa_o BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D         :    4767.1 us      8 GB/s  PCC 1.000000
+dsa_o BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 8):    5320.1 us      7 GB/s  PCC 1.000000
+dsa_o BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(11, 10):    3667.2 us     10 GB/s  PCC nan
+dsa_o BFLOAT4_B HiFi4 prefill2048 DRAM-sharded 2D grid(8, 10):    4756.7 us      8 GB/s  PCC 1.000000
+=== exit code: 0 Sat Oct 17 03:27:37 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

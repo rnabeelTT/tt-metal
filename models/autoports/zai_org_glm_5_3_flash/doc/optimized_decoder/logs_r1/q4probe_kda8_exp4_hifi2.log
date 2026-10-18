@@ -1,0 +1,15 @@
+=== start Fri Oct 16 04:59:03 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.moe_scale_probe --layer 4 --rows 128 --policy kda8_exp4_hifi2
+2026-10-16 16:59:04.774 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-16 17:00:47.674 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:360 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+layer 4, 128 rows (routing identical in ref / ref_q8: 128/128)
+ref_q8 vs ref: routed rms 0.9995 PCC 0.999926; shared rms 0.9986
+ref_q4 vs ref: routed rms 1.0275 PCC 0.982576; shared rms 0.9975
+config: sorted_grouped=True grouped_in0=4/4
+per-row routed rms ratio: mean 1.0224 min 1.0099 max 1.0317
+tt vs ref:    routed rms 1.0225 PCC 0.982548; shared rms 0.9905 PCC 0.999960
+tt vs ref_q8: routed rms 1.0229 PCC 0.982331; shared rms 0.9919 PCC 0.999989
+tt vs ref_q4: routed rms 0.9951 PCC 0.999969; shared rms 0.9930 PCC 0.992403
+=== exit code: 0 Fri Oct 16 05:00:51 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

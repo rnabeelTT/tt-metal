@@ -1,0 +1,80 @@
+=== start Sat Oct 17 09:47:29 PM UTC 2026 : timeout -k 60 5400 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1] /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1] /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+2026-10-17 21:47:30.749 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 3 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1] 2026-10-17 21:47:34.150 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 21:47:34.180 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+optimized decoder policy: {'name': 'opt_s5', 'kda_in': 'DataType.BFLOAT8_B', 'kda_out': 'DataType.BFLOAT8_B', 'dsa_bmm': 'DataType.BFLOAT8_B reuse', 'out_proj': '1d', 'routed': 'DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi', 'shared': 'DataType.BFLOAT8_B MathFidelity.HiFi4', 'dsa_proj': 'loaded', 'mlp': 'loaded', 'single_die_mc': True, 'mix_chunks_decode': 0}
+PERF kda_dense traced decode batch 1: 9.829 ms/step host wall (3 replays, incl. input copies)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1] 2026-10-17 21:47:59.459 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-17 21:48:01.188 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 21:48:01.226 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+optimized decoder policy: {'name': 'opt_s5', 'kda_in': 'DataType.BFLOAT8_B', 'kda_out': 'DataType.BFLOAT8_B', 'dsa_bmm': 'DataType.BFLOAT8_B reuse', 'out_proj': '1d', 'routed': 'DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi', 'shared': 'DataType.BFLOAT8_B MathFidelity.HiFi4', 'dsa_proj': 'loaded', 'mlp': 'loaded', 'single_die_mc': True, 'mix_chunks_decode': 0}
+PERF kda_moe traced decode batch 1: 12.446 ms/step host wall (3 replays, incl. input copies)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1] 2026-10-17 21:48:26.017 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+2026-10-17 21:48:26.218 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 21:48:26.269 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+optimized decoder policy: {'name': 'opt_s5', 'kda_in': 'DataType.BFLOAT8_B', 'kda_out': 'DataType.BFLOAT8_B', 'dsa_bmm': 'DataType.BFLOAT8_B reuse', 'out_proj': '1d', 'routed': 'DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi', 'shared': 'DataType.BFLOAT8_B MathFidelity.HiFi4', 'dsa_proj': 'loaded', 'mlp': 'loaded', 'single_die_mc': True, 'mix_chunks_decode': 0}
+PERF dsa_moe traced decode batch 1: 16.972 ms/step host wall (3 replays, incl. input copies)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+26.98s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+24.86s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+2.58s call     models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_dense-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[kda_moe-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]
+============================== 3 passed in 54.96s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x75e17409c8a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x75e1747dee98 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function "memory_config"
+ - leaked function "create_descriptor"
+ - leaked function ""
+ - leaked function "subtract"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 09:48:28 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

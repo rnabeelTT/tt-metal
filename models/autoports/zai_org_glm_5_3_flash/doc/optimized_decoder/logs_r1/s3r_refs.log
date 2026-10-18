@@ -1,0 +1,15 @@
+97 requests, 3 workers
+0241272aa71ffb37cdd5ca1b.req.pt: 286 s
+0858ac29214b6cc2d77d3a53.req.pt: 304 s
+0ab9213be6679010645ebf39.req.pt: 289 s
+batch (3, '"real"') part 0: 52 requests
+batch (3, '{"stats": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/weight_stats.json", "synthetic": 0}') part 0: 2 requests
+batch (4, '"real"') part 0: 38 requests
+batch (4, '{"stats": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/weight_stats.json", "synthetic": 0}') part 0: 2 requests
+hf_quant_ref layer 3 done in 79.9 s
+ [transformers] You tried to access the `ExpertsInterface` with a `config._experts_implementation` set to `None`. This is expected if you use an Expert Module as a standalone Module. If this is not the case, something went wrong with the dispatch of `config._experts_implementation`
+
+batches done (rc 0); 0 requests left
+check y: batch == single True
+check route_margin: batch == single True
+exit 0

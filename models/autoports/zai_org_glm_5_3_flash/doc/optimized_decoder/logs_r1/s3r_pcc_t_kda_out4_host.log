@@ -1,0 +1,1492 @@
+=== start Sat Oct 17 09:02:53 PM UTC 2026 : timeout -k 60 7200 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k (test_real_weights or test_batched_users or test_batch32_all_active or test_lengths) and (kda_dense or kda_moe)
+2026-10-17 21:02:55.486 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 28 deselected / 16 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:02:58.482 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 5 prefill 100: delta PCC 0.998756 full PCC 0.997502 update rms ratio 0.9850
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:03:07.013 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 21:03:18.929 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 slot 5 prefill 100: delta PCC 0.995881 full PCC 0.999860 update rms ratio 0.9904
+L4 slot 5 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.988156 update rms ratio 1.0025
+L4 slot 5 decode pos 100: delta PCC 0.999002 full PCC 0.999972 update rms ratio 0.9952 (HF router margin 3.3e-03)
+L4 slot 5 decode pos 100: vs checkpoint ref (quantization delta): delta PCC 0.992699 update rms ratio 1.0078
+L4 slot 5 decode pos 101: delta PCC 0.999449 full PCC 0.999991 update rms ratio 0.9978 (HF router margin 2.6e-03)
+L4 slot 5 decode pos 101: vs checkpoint ref (quantization delta): delta PCC 0.997508 update rms ratio 1.0005
+L4 slot 5 decode pos 102: delta PCC 0.973807 full PCC 0.999157 update rms ratio 0.9912 (HF router margin 2.0e-03)
+L4 slot 5 decode pos 102: vs checkpoint ref (quantization delta): delta PCC 0.964886 update rms ratio 1.0039
+L4 slot 5 decode pos 102: vs y_swap (8th expert -> 9th): delta PCC 0.997970 full PCC 0.999934 update rms ratio 0.9920
+L4 slot 5 decode pos 102: matched y_swap (router near-tie)
+PASSEDrouter near-tie y_swap matches: 1 of 3 MoE decode tokens (cap 1); module total 1 of 3 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:03:19.979 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 1 prefill 1: delta PCC 0.996006 full PCC 0.997492 update rms ratio 0.9961
+L0 slot 1 decode pos 1: delta PCC 0.998615 full PCC 0.997062 update rms ratio 0.9871
+L0 slot 1 decode pos 2: delta PCC 0.998636 full PCC 0.998223 update rms ratio 0.9898
+L0 slot 1 decode pos 3: delta PCC 0.997391 full PCC 0.997647 update rms ratio 0.9906
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 31: delta PCC 0.998696 full PCC 0.997386 update rms ratio 0.9844
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 33: delta PCC 0.998772 full PCC 0.997624 update rms ratio 0.9851
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 128: delta PCC 0.998802 full PCC 0.997550 update rms ratio 0.9853
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 129: delta PCC 0.998779 full PCC 0.997638 update rms ratio 0.9857
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 2047: delta PCC 0.998853 full PCC 0.997565 update rms ratio 0.9850
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 2049: delta PCC 0.998848 full PCC 0.997551 update rms ratio 0.9848
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 4000: delta PCC 0.998849 full PCC 0.997566 update rms ratio 0.9851
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:03:29.024 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 21:03:41.333 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 slot 1 prefill 33: delta PCC 0.998168 full PCC 0.999933 update rms ratio 0.9948
+L4 slot 1 prefill 33: vs checkpoint ref (quantization delta): delta PCC 0.988012 update rms ratio 1.0110
+L4 slot 1 decode pos 33: delta PCC 0.999717 full PCC 0.999988 update rms ratio 0.9954 (HF router margin 1.4e-03)
+L4 slot 1 decode pos 33: vs checkpoint ref (quantization delta): delta PCC 0.996723 update rms ratio 0.9970
+L4 slot 1 decode pos 34: delta PCC 0.997690 full PCC 0.999961 update rms ratio 1.0028 (HF router margin 4.7e-03)
+L4 slot 1 decode pos 34: vs checkpoint ref (quantization delta): delta PCC 0.996409 update rms ratio 1.0040
+L4 slot 1 decode pos 35: delta PCC 0.999349 full PCC 0.999975 update rms ratio 0.9956 (HF router margin 4.8e-03)
+L4 slot 1 decode pos 35: vs checkpoint ref (quantization delta): delta PCC 0.995660 update rms ratio 1.0023
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 1 of 6 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L4 slot 1 prefill 2049: delta PCC 0.996915 full PCC 0.999922 update rms ratio 0.9972
+L4 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC 0.991455 update rms ratio 1.0057
+L4 slot 1 decode pos 2049: delta PCC 0.998653 full PCC 0.999969 update rms ratio 0.9954 (HF router margin 2.6e-05)
+L4 slot 1 decode pos 2049: vs checkpoint ref (quantization delta): delta PCC 0.998066 update rms ratio 0.9960
+L4 slot 1 decode pos 2050: delta PCC 0.996930 full PCC 0.999953 update rms ratio 1.0084 (HF router margin 2.0e-03)
+L4 slot 1 decode pos 2050: vs checkpoint ref (quantization delta): delta PCC 0.995131 update rms ratio 1.0120
+L4 slot 1 decode pos 2051: delta PCC 0.999464 full PCC 0.999992 update rms ratio 0.9958 (HF router margin 1.1e-02)
+L4 slot 1 decode pos 2051: vs checkpoint ref (quantization delta): delta PCC 0.998331 update rms ratio 0.9978
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 1 of 9 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:03:43.255 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 user slot 1 prefill 37: delta PCC 0.998642 full PCC 0.997462 update rms ratio 0.9857
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:03:48.705 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 21:04:01.213 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 user slot 1 prefill 37: delta PCC 0.995403 full PCC 0.999860 update rms ratio 0.9986
+L4 user slot 1 prefill 37: vs checkpoint ref (quantization delta): delta PCC 0.988007 update rms ratio 1.0106
+L4 user slot 3 prefill 100: delta PCC 0.997257 full PCC 0.999914 update rms ratio 0.9959
+L4 user slot 3 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.989921 update rms ratio 1.0080
+L4 user slot 4 prefill 300: delta PCC 0.996213 full PCC 0.999885 update rms ratio 0.9970
+L4 user slot 4 prefill 300: vs checkpoint ref (quantization delta): delta PCC 0.989452 update rms ratio 1.0077
+L4 user slot 6 prefill 64: delta PCC 0.992394 full PCC 0.999812 update rms ratio 0.9944
+L4 user slot 6 prefill 64: vs checkpoint ref (quantization delta): delta PCC 0.985328 update rms ratio 1.0045
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:04:02.329 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 32-slot decode slot 0 pos 37: delta PCC 0.998438 full PCC 0.996676 update rms ratio 0.9944
+L0 32-slot decode slot 1 pos 37: delta PCC 0.998529 full PCC 0.996465 update rms ratio 0.9849
+L0 32-slot decode slot 2 pos 37: delta PCC 0.998510 full PCC 0.998051 update rms ratio 0.9883
+L0 32-slot decode slot 3 pos 37: delta PCC 0.998792 full PCC 0.997095 update rms ratio 0.9880
+L0 32-slot decode slot 4 pos 37: delta PCC 0.998701 full PCC 0.997331 update rms ratio 0.9880
+L0 32-slot decode slot 5 pos 37: delta PCC 0.998943 full PCC 0.998293 update rms ratio 0.9969
+L0 32-slot decode slot 6 pos 37: delta PCC 0.998767 full PCC 0.997247 update rms ratio 0.9884
+L0 32-slot decode slot 7 pos 37: delta PCC 0.998743 full PCC 0.997419 update rms ratio 0.9846
+L0 32-slot decode slot 8 pos 129: delta PCC 0.999122 full PCC 0.998212 update rms ratio 0.9863
+L0 32-slot decode slot 9 pos 129: delta PCC 0.998573 full PCC 0.996297 update rms ratio 0.9861
+L0 32-slot decode slot 10 pos 129: delta PCC 0.998758 full PCC 0.997855 update rms ratio 0.9876
+L0 32-slot decode slot 11 pos 129: delta PCC 0.999079 full PCC 0.997951 update rms ratio 0.9850
+L0 32-slot decode slot 12 pos 129: delta PCC 0.998779 full PCC 0.997380 update rms ratio 0.9912
+L0 32-slot decode slot 13 pos 129: delta PCC 0.998738 full PCC 0.997309 update rms ratio 0.9843
+L0 32-slot decode slot 14 pos 129: delta PCC 0.998375 full PCC 0.996004 update rms ratio 0.9828
+L0 32-slot decode slot 15 pos 129: delta PCC 0.999002 full PCC 0.997951 update rms ratio 0.9921
+L0 32-slot decode slot 16 pos 300: delta PCC 0.998509 full PCC 0.996286 update rms ratio 0.9933
+L0 32-slot decode slot 17 pos 300: delta PCC 0.998882 full PCC 0.997966 update rms ratio 0.9863
+L0 32-slot decode slot 18 pos 300: delta PCC 0.999016 full PCC 0.997882 update rms ratio 0.9852
+L0 32-slot decode slot 19 pos 300: delta PCC 0.998933 full PCC 0.997876 update rms ratio 0.9864
+L0 32-slot decode slot 20 pos 300: delta PCC 0.998956 full PCC 0.997570 update rms ratio 0.9922
+L0 32-slot decode slot 21 pos 300: delta PCC 0.998782 full PCC 0.997673 update rms ratio 0.9863
+L0 32-slot decode slot 22 pos 300: delta PCC 0.998898 full PCC 0.997536 update rms ratio 0.9842
+L0 32-slot decode slot 23 pos 300: delta PCC 0.998944 full PCC 0.997673 update rms ratio 0.9841
+L0 32-slot decode slot 24 pos 700: delta PCC 0.999054 full PCC 0.997852 update rms ratio 0.9864
+L0 32-slot decode slot 25 pos 700: delta PCC 0.999113 full PCC 0.998313 update rms ratio 0.9909
+L0 32-slot decode slot 26 pos 700: delta PCC 0.998836 full PCC 0.997402 update rms ratio 0.9841
+L0 32-slot decode slot 27 pos 700: delta PCC 0.998876 full PCC 0.997977 update rms ratio 0.9842
+L0 32-slot decode slot 28 pos 700: delta PCC 0.999206 full PCC 0.998502 update rms ratio 0.9853
+L0 32-slot decode slot 29 pos 700: delta PCC 0.999136 full PCC 0.998357 update rms ratio 0.9857
+L0 32-slot decode slot 30 pos 700: delta PCC 0.998591 full PCC 0.996742 update rms ratio 0.9914
+L0 32-slot decode slot 31 pos 700: delta PCC 0.999027 full PCC 0.997745 update rms ratio 0.9856
+L0 32-slot decode slot 0 pos 38: delta PCC 0.998947 full PCC 0.997554 update rms ratio 0.9878
+L0 32-slot decode slot 1 pos 38: delta PCC 0.998728 full PCC 0.996984 update rms ratio 0.9878
+L0 32-slot decode slot 2 pos 38: delta PCC 0.998642 full PCC 0.997942 update rms ratio 0.9855
+L0 32-slot decode slot 3 pos 38: delta PCC 0.998539 full PCC 0.997549 update rms ratio 0.9848
+L0 32-slot decode slot 4 pos 38: delta PCC 0.998737 full PCC 0.997001 update rms ratio 0.9885
+L0 32-slot decode slot 5 pos 38: delta PCC 0.998186 full PCC 0.997160 update rms ratio 0.9904
+L0 32-slot decode slot 6 pos 38: delta PCC 0.998859 full PCC 0.998103 update rms ratio 0.9879
+L0 32-slot decode slot 7 pos 38: delta PCC 0.998763 full PCC 0.997150 update rms ratio 0.9840
+L0 32-slot decode slot 8 pos 130: delta PCC 0.998924 full PCC 0.997828 update rms ratio 0.9881
+L0 32-slot decode slot 9 pos 130: delta PCC 0.998772 full PCC 0.997164 update rms ratio 0.9858
+L0 32-slot decode slot 10 pos 130: delta PCC 0.998997 full PCC 0.998461 update rms ratio 0.9911
+L0 32-slot decode slot 11 pos 130: delta PCC 0.998966 full PCC 0.998055 update rms ratio 0.9923
+L0 32-slot decode slot 12 pos 130: delta PCC 0.999082 full PCC 0.998286 update rms ratio 0.9894
+L0 32-slot decode slot 13 pos 130: delta PCC 0.999061 full PCC 0.998211 update rms ratio 0.9821
+L0 32-slot decode slot 14 pos 130: delta PCC 0.999090 full PCC 0.998009 update rms ratio 0.9861
+L0 32-slot decode slot 15 pos 130: delta PCC 0.999108 full PCC 0.998360 update rms ratio 0.9859
+L0 32-slot decode slot 16 pos 301: delta PCC 0.998998 full PCC 0.997988 update rms ratio 0.9894
+L0 32-slot decode slot 17 pos 301: delta PCC 0.998430 full PCC 0.996106 update rms ratio 0.9921
+L0 32-slot decode slot 18 pos 301: delta PCC 0.998812 full PCC 0.997993 update rms ratio 0.9846
+L0 32-slot decode slot 19 pos 301: delta PCC 0.998938 full PCC 0.997531 update rms ratio 0.9852
+L0 32-slot decode slot 20 pos 301: delta PCC 0.998045 full PCC 0.996555 update rms ratio 0.9774
+L0 32-slot decode slot 21 pos 301: delta PCC 0.998951 full PCC 0.997957 update rms ratio 0.9839
+L0 32-slot decode slot 22 pos 301: delta PCC 0.998870 full PCC 0.997422 update rms ratio 0.9866
+L0 32-slot decode slot 23 pos 301: delta PCC 0.999144 full PCC 0.998263 update rms ratio 0.9884
+L0 32-slot decode slot 24 pos 701: delta PCC 0.998747 full PCC 0.997114 update rms ratio 0.9807
+L0 32-slot decode slot 25 pos 701: delta PCC 0.998861 full PCC 0.997330 update rms ratio 0.9875
+L0 32-slot decode slot 26 pos 701: delta PCC 0.998787 full PCC 0.997334 update rms ratio 0.9901
+L0 32-slot decode slot 27 pos 701: delta PCC 0.998504 full PCC 0.996407 update rms ratio 0.9889
+L0 32-slot decode slot 28 pos 701: delta PCC 0.998769 full PCC 0.997058 update rms ratio 0.9833
+L0 32-slot decode slot 29 pos 701: delta PCC 0.998661 full PCC 0.997120 update rms ratio 0.9934
+L0 32-slot decode slot 30 pos 701: delta PCC 0.998422 full PCC 0.997531 update rms ratio 0.9829
+L0 32-slot decode slot 31 pos 701: delta PCC 0.999032 full PCC 0.997834 update rms ratio 0.9852
+L0 32-slot decode slot 0 pos 39: delta PCC 0.999009 full PCC 0.997965 update rms ratio 0.9888
+L0 32-slot decode slot 1 pos 39: delta PCC 0.998999 full PCC 0.997765 update rms ratio 0.9864
+L0 32-slot decode slot 2 pos 39: delta PCC 0.998454 full PCC 0.996193 update rms ratio 0.9959
+L0 32-slot decode slot 3 pos 39: delta PCC 0.998475 full PCC 0.996516 update rms ratio 0.9924
+L0 32-slot decode slot 4 pos 39: delta PCC 0.994182 full PCC 0.991695 update rms ratio 0.9753
+FAILEDdecode update rms ratio mean 0.9874 over 68 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py ERROR
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:04:10.928 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 21:04:23.081 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 32-slot decode slot 0 pos 37: delta PCC 0.999645 full PCC 0.999992 update rms ratio 0.9993 (HF router margin 1.7e-03)
+L4 32-slot decode slot 0 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.998529 update rms ratio 1.0020
+L4 32-slot decode slot 1 pos 37: delta PCC 0.999431 full PCC 0.999991 update rms ratio 1.0089 (HF router margin 9.0e-04)
+L4 32-slot decode slot 1 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.997461 update rms ratio 1.0106
+L4 32-slot decode slot 2 pos 37: delta PCC 0.999184 full PCC 0.999990 update rms ratio 0.9964 (HF router margin 1.3e-02)
+L4 32-slot decode slot 2 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996031 update rms ratio 1.0011
+L4 32-slot decode slot 3 pos 37: delta PCC 0.998758 full PCC 0.999980 update rms ratio 1.0055 (HF router margin 3.4e-03)
+L4 32-slot decode slot 3 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.995294 update rms ratio 1.0095
+L4 32-slot decode slot 4 pos 37: delta PCC 0.999408 full PCC 0.999991 update rms ratio 0.9943 (HF router margin 1.2e-02)
+L4 32-slot decode slot 4 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996072 update rms ratio 0.9986
+L4 32-slot decode slot 5 pos 37: delta PCC 0.999308 full PCC 0.999986 update rms ratio 0.9981 (HF router margin 1.3e-02)
+L4 32-slot decode slot 5 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.994555 update rms ratio 1.0052
+L4 32-slot decode slot 6 pos 37: delta PCC 0.999401 full PCC 0.999993 update rms ratio 0.9989 (HF router margin 6.1e-03)
+L4 32-slot decode slot 6 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.997876 update rms ratio 1.0003
+L4 32-slot decode slot 7 pos 37: delta PCC 0.999681 full PCC 0.999992 update rms ratio 0.9973 (HF router margin 4.5e-03)
+L4 32-slot decode slot 7 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.997646 update rms ratio 1.0022
+L4 32-slot decode slot 8 pos 129: delta PCC 0.994410 full PCC 0.999892 update rms ratio 0.9997 (HF router margin 7.9e-04)
+L4 32-slot decode slot 8 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.992735 update rms ratio 1.0022
+L4 32-slot decode slot 8 pos 129: vs y_swap (8th expert -> 9th): delta PCC 0.999610 full PCC 0.999992 update rms ratio 0.9997
+L4 32-slot decode slot 8 pos 129: matched y_swap (router near-tie)
+L4 32-slot decode slot 9 pos 129: delta PCC 0.999546 full PCC 0.999994 update rms ratio 1.0037 (HF router margin 6.3e-03)
+L4 32-slot decode slot 9 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.999309 update rms ratio 1.0045
+L4 32-slot decode slot 10 pos 129: delta PCC 0.999559 full PCC 0.999991 update rms ratio 0.9972 (HF router margin 8.7e-03)
+L4 32-slot decode slot 10 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.997681 update rms ratio 0.9996
+L4 32-slot decode slot 11 pos 129: delta PCC 0.995380 full PCC 0.999916 update rms ratio 0.9958 (HF router margin 4.0e-03)
+L4 32-slot decode slot 11 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.994637 update rms ratio 0.9979
+L4 32-slot decode slot 12 pos 129: delta PCC 0.999649 full PCC 0.999988 update rms ratio 1.0023 (HF router margin 1.1e-02)
+L4 32-slot decode slot 12 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.997075 update rms ratio 1.0050
+L4 32-slot decode slot 13 pos 129: delta PCC 0.999365 full PCC 0.999974 update rms ratio 0.9978 (HF router margin 2.8e-03)
+L4 32-slot decode slot 13 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.993278 update rms ratio 1.0026
+L4 32-slot decode slot 14 pos 129: delta PCC 0.999548 full PCC 0.999993 update rms ratio 1.0061 (HF router margin 6.4e-03)
+L4 32-slot decode slot 14 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.998783 update rms ratio 1.0068
+L4 32-slot decode slot 15 pos 129: delta PCC 0.999554 full PCC 0.999993 update rms ratio 0.9979 (HF router margin 4.7e-03)
+L4 32-slot decode slot 15 pos 129: vs checkpoint ref (quantization delta): delta PCC 0.997411 update rms ratio 1.0016
+L4 32-slot decode slot 16 pos 300: delta PCC 0.999358 full PCC 0.999992 update rms ratio 0.9877 (HF router margin 4.5e-05)
+L4 32-slot decode slot 16 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.998327 update rms ratio 0.9904
+L4 32-slot decode slot 17 pos 300: delta PCC 0.999538 full PCC 0.999990 update rms ratio 0.9992 (HF router margin 2.4e-03)
+L4 32-slot decode slot 17 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995088 update rms ratio 1.0033
+L4 32-slot decode slot 18 pos 300: delta PCC 0.950915 full PCC 0.998664 update rms ratio 1.0168 (HF router margin 1.1e-04)
+L4 32-slot decode slot 18 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.950041 update rms ratio 1.0203
+L4 32-slot decode slot 18 pos 300: vs y_swap (8th expert -> 9th): delta PCC 0.999584 full PCC 0.999989 update rms ratio 0.9985
+L4 32-slot decode slot 18 pos 300: matched y_swap (router near-tie)
+L4 32-slot decode slot 19 pos 300: delta PCC 0.996627 full PCC 0.999446 update rms ratio 0.9856 (HF router margin 4.4e-03)
+L4 32-slot decode slot 19 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.982043 update rms ratio 1.0054
+L4 32-slot decode slot 20 pos 300: delta PCC 0.981798 full PCC 0.999645 update rms ratio 1.0158 (HF router margin 8.4e-04)
+L4 32-slot decode slot 20 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.979935 update rms ratio 1.0183
+L4 32-slot decode slot 20 pos 300: vs y_swap (8th expert -> 9th): delta PCC 0.983041 full PCC 0.999669 update rms ratio 1.0152
+FAILEDrouter near-tie y_swap matches: 2 of 21 MoE decode tokens (cap 1); module total 3 of 30 (cap 2)
+quantization delta (port vs the checkpoint reference, 37 checks): min delta PCC 0.950041, update rms ratio 0.9904 .. 1.0203
+module y_swap matches 3 of 30 MoE decode tokens (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py ERROR
+
+==================================== ERRORS ====================================
+___________ ERROR at teardown of test_batch32_all_active[kda_dense] ____________
+
+    @pytest.fixture(autouse=True)
+    def decode_scale_mean():
+        """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
+        DECODE_RATIOS.clear()
+        MOE_TOKENS.clear()
+        CKPT_Y.clear()
+        n_swaps = len(SWAPS)
+        yield
+        swaps = len(SWAPS) - n_swaps
+        SUITE["swaps"] += swaps
+        SUITE["moe_tokens"] += len(MOE_TOKENS)
+        if MOE_TOKENS:
+            cap = max(1, int(SWAP_MAX_FRAC * len(MOE_TOKENS)))
+            suite_cap = max(SWAP_SUITE_MIN, int(SWAP_SUITE_FRAC * SUITE["moe_tokens"]))
+            print(
+                f"router near-tie y_swap matches: {swaps} of {len(MOE_TOKENS)} MoE decode tokens (cap {cap}); "
+                f"module total {SUITE['swaps']} of {SUITE['moe_tokens']} (cap {suite_cap})"
+            )
+            assert swaps <= cap, f"{swaps} y_swap matches in {len(MOE_TOKENS)} MoE decode tokens > {cap}"
+        if len(DECODE_RATIOS) >= MEAN_MIN_TOKENS:
+            m = sum(r for _, r in DECODE_RATIOS) / len(DECODE_RATIOS)
+            print(f"decode update rms ratio mean {m:.4f} over {len(DECODE_RATIOS)} tokens")
+            tol = max([SEQ_RMS_TOL] + [BAR_OVERRIDES[ly]["seq"] for ly, _ in DECODE_RATIOS if ly in BAR_OVERRIDES])
+>           assert abs(m - 1) <= tol, f"decode update rms ratio mean {m:.4f} outside 1 +- {tol}"
+                   ^^^^^^^^^^^^^^^^^
+E           AssertionError: decode update rms ratio mean 0.9874 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:138: AssertionError
+____________ ERROR at teardown of test_batch32_all_active[kda_moe] _____________
+  + Exception Group Traceback (most recent call last):
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353, in from_call
+  |     result: TResult | None = func()
+  |                              ^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245, in <lambda>
+  |     lambda: runtest_hook(item=item, **kwds),
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 167, in _multicall
+  |     raise exception
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+  |     teardown.throw(exception)
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/logging.py", line 858, in pytest_runtest_teardown
+  |     yield
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+  |     teardown.throw(exception)
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 53, in run_old_style_hookwrapper
+  |     return result.get_result()
+  |            ^^^^^^^^^^^^^^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_result.py", line 103, in get_result
+  |     raise exc.with_traceback(tb)
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 38, in run_old_style_hookwrapper
+  |     res = yield
+  |           ^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 139, in _multicall
+  |     teardown.throw(exception)
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/capture.py", line 905, in pytest_runtest_teardown
+  |     return (yield)
+  |             ^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 194, in pytest_runtest_teardown
+  |     item.session._setupstate.teardown_exact(nextitem)
+  |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 568, in teardown_exact
+  |     raise BaseExceptionGroup("errors during test teardown", exceptions[::-1])
+  | ExceptionGroup: errors during test teardown (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 555, in teardown_exact
+    |     fin()
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 1053, in finish
+    |     raise exceptions[0]
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 1042, in finish
+    |     fin()
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 924, in _teardown_yield_fixture
+    |     next(it)
+    |   File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 112, in suite_swap_cap
+    |     assert SUITE["swaps"] <= suite_cap, f"module y_swap matches {SUITE['swaps']} > {suite_cap}"
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | AssertionError: module y_swap matches 3 > 2
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 555, in teardown_exact
+    |     fin()
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 1053, in finish
+    |     raise exceptions[0]
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 1042, in finish
+    |     fin()
+    |   File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/fixtures.py", line 924, in _teardown_yield_fixture
+    |     next(it)
+    |   File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 133, in decode_scale_mean
+    |     assert swaps <= cap, f"{swaps} y_swap matches in {len(MOE_TOKENS)} MoE decode tokens > {cap}"
+    |            ^^^^^^^^^^^^
+    | AssertionError: 2 y_swap matches in 21 MoE decode tokens > 1
+    +------------------------------------
+=================================== FAILURES ===================================
+_________________________ test_real_weights[kda_dense] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_real_weights(mesh, rd, kind):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1, prefill_len=100, decode_steps=3, slot=5)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:363:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 5 prefill 100'
+got = tensor([[ 0.0011,  0.0038,  0.0027,  ...,  0.0090,  0.0170,  0.0001],
+        [ 0.0011,  0.0003, -0.0009,  ..., -0.0062,  0.0051, -0.0091],
+        [-0.0091,  0.0139,  0.0173,  ..., -0.0042,  0.0051, -0.0138],
+        ...,
+        [-0.0112,  0.0059,  0.0081,  ...,  0.0046, -0.0050, -0.0006],
+        [-0.0108, -0.0004,  0.0113,  ...,  0.0017,  0.0073, -0.0037],
+        [-0.0096,  0.0007,  0.0091,  ..., -0.0036,  0.0152,  0.0026]])
+x = tensor([[-0.0030, -0.0034, -0.0088,  ...,  0.0091,  0.0208, -0.0004],
+        [ 0.0081, -0.0073, -0.0178,  ..., -0.0087,  0.0029, -0.0120],
+        [ 0.0028, -0.0182, -0.0003,  ..., -0.0093,  0.0064, -0.0217],
+        ...,
+        [-0.0101,  0.0082, -0.0104,  ...,  0.0074, -0.0153,  0.0046],
+        [ 0.0211,  0.0017, -0.0081,  ..., -0.0048,  0.0054, -0.0055],
+        [ 0.0139, -0.0009, -0.0068,  ..., -0.0048,  0.0209,  0.0025]])
+y = tensor([[ 0.0006,  0.0031,  0.0035,  ...,  0.0090,  0.0170,  0.0002],
+        [ 0.0003,  0.0004, -0.0008,  ..., -0.0059,  0.0048, -0.0094],
+        [-0.0106,  0.0148,  0.0164,  ..., -0.0041,  0.0046, -0.0139],
+        ...,
+        [-0.0104,  0.0050,  0.0084,  ...,  0.0048, -0.0054, -0.0009],
+        [-0.0106, -0.0008,  0.0106,  ...,  0.0018,  0.0068, -0.0038],
+        [-0.0098,  0.0002,  0.0095,  ..., -0.0034,  0.0148,  0.0031]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 5 prefill 100: update rms ratio 0.9850 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+__________________________ test_lengths[kda_dense-31] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 31
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 7 prefill 31'
+got = tensor([[ 0.0042,  0.0055,  0.0116,  ...,  0.0073,  0.0064,  0.0057],
+        [-0.0014,  0.0068,  0.0161,  ..., -0.0117, -0.0027,  0.0139],
+        [ 0.0003,  0.0050,  0.0097,  ..., -0.0156,  0.0094, -0.0103],
+        ...,
+        [-0.0077,  0.0086,  0.0115,  ..., -0.0004,  0.0105,  0.0305],
+        [-0.0043,  0.0048,  0.0010,  ..., -0.0013, -0.0054,  0.0040],
+        [-0.0180,  0.0125,  0.0043,  ...,  0.0038, -0.0020, -0.0003]])
+x = tensor([[ 0.0063,  0.0239,  0.0063,  ...,  0.0074,  0.0018, -0.0039],
+        [ 0.0120, -0.0221,  0.0132,  ..., -0.0148, -0.0025,  0.0130],
+        [-0.0006, -0.0212, -0.0206,  ..., -0.0253,  0.0156, -0.0131],
+        ...,
+        [-0.0094, -0.0175, -0.0183,  ..., -0.0051,  0.0142,  0.0459],
+        [ 0.0101,  0.0143,  0.0273,  ...,  0.0030, -0.0109, -0.0004],
+        [ 0.0249, -0.0134,  0.0039,  ...,  0.0045, -0.0014, -0.0027]])
+y = tensor([[ 4.6692e-03,  4.8218e-03,  1.2024e-02,  ...,  7.6294e-03,
+          5.8594e-03,  6.2256e-03],
+        [-7.9346e-04,  6.8359e-03,  1.6479e-02,  ..., -1.1414e-02,
+         -2.7924e-03,  1.3672e-02],
+        [ 7.3242e-04,  4.5166e-03,  9.7656e-03,  ..., -1.5625e-02,
+          9.2773e-03, -1.0376e-02],
+        ...,
+        [-8.0566e-03,  8.7891e-03,  1.2695e-02,  ...,  3.0518e-05,
+          1.0498e-02,  3.0762e-02],
+        [-4.3945e-03,  4.8218e-03,  6.1035e-04,  ..., -1.1292e-03,
+         -5.7983e-03,  3.1586e-03],
+        [-1.8311e-02,  1.4282e-02,  3.7842e-03,  ...,  3.9978e-03,
+         -1.6632e-03, -5.0354e-04]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 7 prefill 31: update rms ratio 0.9844 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+__________________________ test_lengths[kda_dense-33] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 33
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 1 prefill 33'
+got = tensor([[-0.0036,  0.0021,  0.0088,  ..., -0.0030, -0.0182,  0.0097],
+        [ 0.0039,  0.0039,  0.0125,  ...,  0.0084,  0.0047,  0.0101],
+        [ 0.0053,  0.0034,  0.0044,  ...,  0.0015,  0.0011, -0.0046],
+        ...,
+        [-0.0063, -0.0063,  0.0093,  ..., -0.0054,  0.0034, -0.0163],
+        [ 0.0057,  0.0135,  0.0100,  ...,  0.0070,  0.0032, -0.0055],
+        [-0.0040,  0.0030,  0.0116,  ...,  0.0027,  0.0082, -0.0042]])
+x = tensor([[-5.6458e-04,  2.7161e-03, -4.3945e-03,  ...,  5.6505e-05,
+         -2.2461e-02,  6.6223e-03],
+        [ 8.0566e-03, -2.0752e-03, -9.2773e-03,  ...,  1.1108e-02,
+          8.3008e-03,  1.2329e-02],
+        [ 1.2283e-03, -1.8997e-03, -1.2573e-02,  ...,  1.3046e-03,
+          5.4550e-04, -4.8828e-03],
+        ...,
+        [-1.8921e-02,  6.9885e-03, -4.6997e-03,  ..., -8.1787e-03,
+          5.9204e-03, -2.6855e-02],
+        [-3.9291e-04, -6.7139e-04, -7.0190e-03,  ...,  1.1047e-02,
+          5.1880e-03, -1.0193e-02],
+        [ 2.2411e-04, -1.3184e-02, -1.4343e-03,  ...,  5.1575e-03,
+          1.4099e-02, -9.4604e-03]])
+y = tensor([[-0.0033,  0.0024,  0.0077,  ..., -0.0032, -0.0181,  0.0096],
+        [ 0.0028,  0.0046,  0.0125,  ...,  0.0085,  0.0049,  0.0101],
+        [ 0.0049,  0.0035,  0.0049,  ...,  0.0015,  0.0010, -0.0045],
+        ...,
+        [-0.0061, -0.0062,  0.0089,  ..., -0.0051,  0.0031, -0.0164],
+        [ 0.0056,  0.0136,  0.0103,  ...,  0.0068,  0.0031, -0.0054],
+        [-0.0031,  0.0029,  0.0107,  ...,  0.0024,  0.0084, -0.0039]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 1 prefill 33: update rms ratio 0.9851 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_lengths[kda_dense-128] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 128
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 0 prefill 128'
+got = tensor([[ 0.0030, -0.0034,  0.0119,  ..., -0.0010, -0.0020,  0.0085],
+        [ 0.0031, -0.0009,  0.0104,  ..., -0.0036, -0.0033,  0.0019],
+        [ 0.0002,  0.0084, -0.0007,  ..., -0.0041, -0.0045,  0.0017],
+        ...,
+        [-0.0029,  0.0002,  0.0091,  ...,  0.0005, -0.0072, -0.0007],
+        [ 0.0002,  0.0014,  0.0097,  ...,  0.0126, -0.0100,  0.0012],
+        [-0.0040,  0.0035,  0.0090,  ..., -0.0072, -0.0054,  0.0137]])
+x = tensor([[ 1.3733e-02,  3.0136e-04,  5.2490e-03,  ..., -1.0986e-03,
+         -4.8523e-03,  7.6294e-03],
+        [-1.6235e-02,  1.0742e-02, -1.8158e-03,  ..., -5.1880e-03,
+         -2.4719e-03,  3.3569e-03],
+        [-1.4893e-02, -1.8921e-03,  6.7749e-03,  ..., -5.0964e-03,
+         -3.4027e-03, -2.2888e-03],
+        ...,
+        [ 1.3123e-02,  5.1575e-03,  1.5259e-03,  ..., -4.4584e-05,
+         -6.5613e-03, -3.6316e-03],
+        [ 1.1253e-04,  4.9133e-03, -1.5137e-02,  ...,  1.8188e-02,
+         -5.9509e-03, -2.2125e-03],
+        [ 1.7395e-03,  1.0300e-03,  2.6855e-03,  ..., -1.0498e-02,
+         -9.3994e-03,  2.0020e-02]])
+y = tensor([[ 0.0018, -0.0037,  0.0120,  ..., -0.0012, -0.0024,  0.0082],
+        [ 0.0030, -0.0016,  0.0107,  ..., -0.0036, -0.0034,  0.0022],
+        [ 0.0010,  0.0081,  0.0002,  ..., -0.0042, -0.0046,  0.0018],
+        ...,
+        [-0.0036, -0.0016,  0.0089,  ...,  0.0008, -0.0069, -0.0012],
+        [-0.0001,  0.0014,  0.0096,  ...,  0.0127, -0.0103,  0.0013],
+        [-0.0042,  0.0030,  0.0082,  ..., -0.0071, -0.0053,  0.0135]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 0 prefill 128: update rms ratio 0.9853 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_lengths[kda_dense-129] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 129
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 1 prefill 129'
+got = tensor([[ 0.0002, -0.0026,  0.0047,  ...,  0.0077, -0.0038,  0.0050],
+        [-0.0053,  0.0057,  0.0102,  ..., -0.0005, -0.0018,  0.0113],
+        [-0.0053,  0.0022,  0.0030,  ..., -0.0109,  0.0076, -0.0045],
+        ...,
+        [-0.0040,  0.0066,  0.0152,  ...,  0.0181,  0.0020,  0.0044],
+        [-0.0054, -0.0073,  0.0115,  ...,  0.0038,  0.0033,  0.0039],
+        [-0.0111,  0.0048,  0.0063,  ..., -0.0026, -0.0109,  0.0024]])
+x = tensor([[ 0.0035, -0.0038, -0.0227,  ...,  0.0129, -0.0008,  0.0046],
+        [-0.0030,  0.0087,  0.0030,  ..., -0.0025, -0.0005,  0.0110],
+        [ 0.0067, -0.0086,  0.0018,  ..., -0.0130,  0.0093, -0.0076],
+        ...,
+        [-0.0025, -0.0002, -0.0025,  ...,  0.0273,  0.0045,  0.0053],
+        [ 0.0073,  0.0153, -0.0080,  ...,  0.0098,  0.0052,  0.0035],
+        [ 0.0240, -0.0204,  0.0088,  ..., -0.0060, -0.0141,  0.0042]])
+y = tensor([[ 0.0007, -0.0037,  0.0060,  ...,  0.0075, -0.0039,  0.0050],
+        [-0.0051,  0.0062,  0.0105,  ..., -0.0007, -0.0017,  0.0109],
+        [-0.0052,  0.0028,  0.0035,  ..., -0.0104,  0.0072, -0.0047],
+        ...,
+        [-0.0042,  0.0070,  0.0155,  ...,  0.0181,  0.0018,  0.0041],
+        [-0.0053, -0.0065,  0.0109,  ...,  0.0034,  0.0035,  0.0031],
+        [-0.0119,  0.0039,  0.0065,  ..., -0.0024, -0.0110,  0.0026]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 1 prefill 129: update rms ratio 0.9857 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_lengths[kda_dense-2047] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 2047
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 7 prefill 2047'
+got = tensor([[ 0.0027, -0.0015, -0.0013,  ...,  0.0080,  0.0084,  0.0088],
+        [-0.0073,  0.0109,  0.0103,  ...,  0.0096, -0.0022, -0.0081],
+        [-0.0058,  0.0023,  0.0078,  ..., -0.0007,  0.0189,  0.0034],
+        ...,
+        [-0.0047,  0.0013,  0.0125,  ...,  0.0086,  0.0098,  0.0083],
+        [-0.0068,  0.0075,  0.0004,  ..., -0.0051,  0.0061,  0.0036],
+        [-0.0072,  0.0019,  0.0058,  ...,  0.0011, -0.0080, -0.0022]])
+x = tensor([[ 1.3657e-03, -9.1553e-03, -1.3916e-02,  ...,  1.5991e-02,
+          1.4587e-02, -3.0823e-03],
+        [-1.5747e-02,  1.3855e-02, -6.6833e-03,  ...,  8.7280e-03,
+         -3.4027e-03, -1.4587e-02],
+        [ 1.6602e-02, -2.8076e-03,  6.7749e-03,  ...,  2.6093e-03,
+          2.0630e-02,  1.1368e-03],
+        ...,
+        [ 3.7231e-03,  7.5817e-05, -1.4832e-02,  ...,  9.9487e-03,
+          1.0986e-02,  9.8877e-03],
+        [ 1.8616e-03, -2.9907e-03,  1.4191e-03,  ..., -9.9487e-03,
+          8.3618e-03,  2.1820e-03],
+        [ 5.4016e-03,  1.1902e-02,  6.0120e-03,  ...,  3.7231e-03,
+         -1.3123e-02, -8.6670e-03]])
+y = tensor([[ 0.0021, -0.0008, -0.0014,  ...,  0.0081,  0.0082,  0.0088],
+        [-0.0070,  0.0109,  0.0114,  ...,  0.0092, -0.0021, -0.0077],
+        [-0.0062,  0.0020,  0.0077,  ..., -0.0004,  0.0190,  0.0032],
+        ...,
+        [-0.0038,  0.0005,  0.0117,  ...,  0.0087,  0.0100,  0.0079],
+        [-0.0060,  0.0067,  0.0005,  ..., -0.0052,  0.0060,  0.0036],
+        [-0.0071,  0.0022,  0.0039,  ...,  0.0007, -0.0076, -0.0024]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 7 prefill 2047: update rms ratio 0.9850 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_lengths[kda_dense-2049] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 2049
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 1 prefill 2049'
+got = tensor([[ 0.0053, -0.0009, -0.0003,  ...,  0.0071, -0.0036,  0.0066],
+        [ 0.0110,  0.0061,  0.0097,  ..., -0.0067,  0.0043, -0.0056],
+        [-0.0006,  0.0021,  0.0058,  ...,  0.0066,  0.0117,  0.0066],
+        ...,
+        [-0.0030,  0.0104,  0.0053,  ..., -0.0034,  0.0008, -0.0005],
+        [-0.0062,  0.0019,  0.0061,  ..., -0.0136,  0.0095,  0.0098],
+        [-0.0047, -0.0027,  0.0096,  ..., -0.0069, -0.0106, -0.0036]])
+x = tensor([[ 0.0175,  0.0049, -0.0172,  ...,  0.0077, -0.0029,  0.0018],
+        [-0.0141,  0.0007, -0.0091,  ..., -0.0084,  0.0064, -0.0131],
+        [-0.0082,  0.0008,  0.0007,  ...,  0.0091,  0.0166,  0.0092],
+        ...,
+        [-0.0104, -0.0240,  0.0121,  ..., -0.0020,  0.0035,  0.0002],
+        [-0.0014, -0.0022,  0.0054,  ..., -0.0150,  0.0165,  0.0073],
+        [-0.0148,  0.0280, -0.0034,  ..., -0.0127, -0.0182, -0.0074]])
+y = tensor([[ 0.0042, -0.0015,  0.0004,  ...,  0.0070, -0.0033,  0.0069],
+        [ 0.0110,  0.0062,  0.0103,  ..., -0.0066,  0.0038, -0.0059],
+        [-0.0004,  0.0020,  0.0061,  ...,  0.0063,  0.0116,  0.0067],
+        ...,
+        [-0.0024,  0.0103,  0.0056,  ..., -0.0034,  0.0003, -0.0003],
+        [-0.0058,  0.0018,  0.0054,  ..., -0.0138,  0.0095,  0.0096],
+        [-0.0041, -0.0027,  0.0095,  ..., -0.0064, -0.0107, -0.0031]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 1 prefill 2049: update rms ratio 0.9848 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_lengths[kda_dense-4000] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense', length = 4000
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 slot 0 prefill 4000'
+got = tensor([[-3.5776e-04,  3.2213e-03, -2.6021e-03,  ...,  9.0937e-03,
+          6.1516e-06,  2.9674e-04],
+        [-5.6797e-03,  2.2140e-03,  1.3721e-02,  ...,  1.2562e-02,
+         -3.4479e-03,  5.6935e-03],
+        [-9.0233e-03,  1.8923e-03,  1.7063e-03,  ...,  2.8530e-03,
+         -8.8073e-04, -3.1451e-03],
+        ...,
+        [-2.5040e-03,  6.2316e-03,  1.3540e-02,  ..., -7.8965e-04,
+          7.6110e-03,  2.3805e-03],
+        [ 1.7858e-06, -6.6920e-03,  9.4802e-03,  ..., -1.2810e-03,
+          1.0111e-02,  1.5586e-02],
+        [ 5.5637e-03,  2.0301e-03,  1.0330e-02,  ...,  1.5085e-02,
+         -1.0630e-03,  4.0876e-03]])
+x = tensor([[ 0.0023, -0.0003, -0.0125,  ...,  0.0087, -0.0004, -0.0043],
+        [ 0.0128, -0.0039, -0.0203,  ...,  0.0175, -0.0056,  0.0061],
+        [ 0.0016,  0.0120,  0.0087,  ...,  0.0045, -0.0052, -0.0049],
+        ...,
+        [ 0.0029, -0.0092, -0.0129,  ..., -0.0032,  0.0136, -0.0033],
+        [-0.0151,  0.0317,  0.0038,  ...,  0.0025,  0.0153,  0.0203],
+        [-0.0139,  0.0085, -0.0093,  ...,  0.0242,  0.0028, -0.0012]])
+y = tensor([[-0.0009,  0.0024, -0.0013,  ...,  0.0090,  0.0002,  0.0005],
+        [-0.0053,  0.0010,  0.0148,  ...,  0.0128, -0.0037,  0.0059],
+        [-0.0085,  0.0018,  0.0027,  ...,  0.0026, -0.0009, -0.0036],
+        ...,
+        [-0.0023,  0.0060,  0.0142,  ..., -0.0005,  0.0080,  0.0019],
+        [ 0.0008, -0.0075,  0.0100,  ..., -0.0016,  0.0101,  0.0157],
+        [ 0.0043,  0.0020,  0.0106,  ...,  0.0142, -0.0017,  0.0037]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 slot 0 prefill 4000: update rms ratio 0.9851 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+________________________ test_batched_users[kda_dense] _________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batched_users(mesh, rd, kind):
+        """Four users with different prompt lengths in slots 1, 3, 4, 6 (other slots inactive) prefill one after another,
+        then decode three steps together (eager, then traced): every user must match its own HF sequence."""
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+        users = {1: 37, 3: 100, 4: 2100 if kind == "dsa_moe" else 300, 6: 64}
+        steps = 3
+        refs = {s: reference(layer, "real", 500 + s, n, steps) for s, n in users.items()}
+        for s, n in users.items():
+            x, y = refs[s]
+            out = prefill_user(dec, mesh, x, n, s)
+>           check(f"L{layer} user slot {s} prefill {n}", out, x[:n], y[:n])
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:458:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 user slot 1 prefill 37'
+got = tensor([[ 4.5424e-04, -8.0444e-04,  7.8783e-03,  ..., -5.6085e-03,
+         -7.2886e-03, -8.6944e-03],
+        [ 5.2754e-03, -3.3313e-03,  1.2324e-02,  ...,  4.6718e-05,
+         -2.9202e-03,  3.5628e-03],
+        [-5.9240e-03,  1.4660e-03,  3.3281e-03,  ...,  3.0072e-03,
+         -3.5913e-05,  5.7977e-03],
+        ...,
+        [ 4.6900e-03,  5.7844e-04,  7.6341e-03,  ..., -1.4254e-02,
+          2.7089e-03,  1.3529e-02],
+        [ 6.2763e-03, -8.1978e-03,  1.0144e-02,  ...,  4.7854e-03,
+          7.3227e-03,  1.0541e-02],
+        [-6.0704e-03,  1.4496e-03,  1.7418e-02,  ..., -7.3281e-03,
+         -6.0671e-03,  3.1875e-03]])
+x = tensor([[-1.0864e-02, -1.6479e-02, -7.0496e-03,  ..., -1.0559e-02,
+         -1.1292e-02, -1.4038e-02],
+        [-7.9956e-03,  7.0095e-05, -7.9956e-03,  ...,  3.2959e-03,
+         -3.3417e-03,  8.8120e-04],
+        [ 1.6975e-04, -1.3000e-02,  8.9722e-03,  ...,  6.6833e-03,
+         -3.9978e-03,  4.3640e-03],
+        ...,
+        [-3.6774e-03,  8.7891e-03,  4.1504e-03,  ..., -2.0508e-02,
+          5.4321e-03,  1.8555e-02],
+        [-2.4048e-02,  4.0771e-02, -1.3657e-03,  ...,  1.2268e-02,
+          1.0071e-02,  1.3428e-02],
+        [ 1.8433e-02, -3.2806e-03, -1.7090e-02,  ..., -1.0986e-02,
+         -5.5542e-03,  1.9073e-03]])
+y = tensor([[ 5.4932e-04, -1.6174e-03,  7.7515e-03,  ..., -5.2185e-03,
+         -7.2937e-03, -8.4229e-03],
+        [ 4.2725e-03, -2.8381e-03,  1.3123e-02,  ..., -4.2725e-04,
+         -2.6398e-03,  3.5095e-03],
+        [-5.4932e-03,  2.3804e-03,  3.4790e-03,  ...,  3.2349e-03,
+          6.1035e-05,  5.8594e-03],
+        ...,
+        [ 4.9438e-03,  4.0436e-04,  7.3853e-03,  ..., -1.4221e-02,
+          2.3346e-03,  1.3306e-02],
+        [ 6.5918e-03, -9.1553e-03,  1.0437e-02,  ...,  5.0964e-03,
+          7.0190e-03,  1.0559e-02],
+        [-6.2866e-03,  2.4414e-03,  1.8555e-02,  ..., -7.3547e-03,
+         -5.8289e-03,  3.3264e-03]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L0 user slot 1 prefill 37: update rms ratio 0.9857 outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+_________________________ test_batched_users[kda_moe] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batched_users(mesh, rd, kind):
+        """Four users with different prompt lengths in slots 1, 3, 4, 6 (other slots inactive) prefill one after another,
+        then decode three steps together (eager, then traced): every user must match its own HF sequence."""
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+        users = {1: 37, 3: 100, 4: 2100 if kind == "dsa_moe" else 300, 6: 64}
+        steps = 3
+        refs = {s: reference(layer, "real", 500 + s, n, steps) for s, n in users.items()}
+        for s, n in users.items():
+            x, y = refs[s]
+            out = prefill_user(dec, mesh, x, n, s)
+>           check(f"L{layer} user slot {s} prefill {n}", out, x[:n], y[:n])
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:458:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L4 user slot 6 prefill 64'
+got = tensor([[ 0.2526, -0.0934,  0.2592,  ..., -0.0011, -0.0013,  0.0054],
+        [ 0.0240,  0.0382,  0.1987,  ...,  0.0037,  0.0024,  0.0016],
+        [-0.1438,  0.1669, -0.0137,  ..., -0.0015, -0.0033,  0.0021],
+        ...,
+        [ 0.0047,  0.0044,  0.0694,  ...,  0.0023, -0.0036,  0.0010],
+        [-0.1746, -0.1918,  0.0369,  ...,  0.0031, -0.0040,  0.0021],
+        [ 0.0592, -0.2490,  0.0730,  ...,  0.0035, -0.0030, -0.0007]])
+x = tensor([[ 0.2412, -0.0977,  0.2656,  ..., -0.0200,  0.0024,  0.0068],
+        [ 0.0437,  0.0347,  0.2500,  ..., -0.0007,  0.0088, -0.0145],
+        [-0.1523,  0.1650, -0.0208,  ..., -0.0117,  0.0043, -0.0043],
+        ...,
+        [ 0.0120,  0.0107,  0.0718,  ...,  0.0062, -0.0036,  0.0015],
+        [-0.1729, -0.2051,  0.0525,  ...,  0.0055,  0.0069,  0.0039],
+        [ 0.0618, -0.2559,  0.0762,  ...,  0.0028, -0.0056,  0.0020]])
+y = tensor([[ 0.2520, -0.0933,  0.2578,  ..., -0.0011, -0.0013,  0.0054],
+        [ 0.0245,  0.0403,  0.1992,  ...,  0.0037,  0.0024,  0.0016],
+        [-0.1436,  0.1680, -0.0140,  ..., -0.0015, -0.0033,  0.0020],
+        ...,
+        [ 0.0049,  0.0044,  0.0693,  ...,  0.0022, -0.0036,  0.0010],
+        [-0.1758, -0.1924,  0.0378,  ...,  0.0031, -0.0040,  0.0021],
+        [ 0.0591, -0.2480,  0.0732,  ...,  0.0035, -0.0030, -0.0007]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+        assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+>       assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
+               ^^^^^^^^^^^^^^
+E       AssertionError: L4 user slot 6 prefill 64: delta PCC 0.992394 < 0.995
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:319: AssertionError
+______________________ test_batch32_all_active[kda_dense] ______________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batch32_all_active(mesh, rd, kind):
+        """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+        dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+        layer = KINDS[kind]
+        for k in list(_LAYERS):  # one layer resident (DRAM)
+            del _LAYERS[k]
+        dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+        lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+        steps = 3
+        rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+        refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
+        users = {}  # slot -> (seed, prompt length)
+        for slot in range(32):
+            users[slot] = (slot % 8, lengths[slot // 8])
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            prefill_user(dec, mesh, x, n, slot)
+        runner = DecodeRunner(dec, mesh, 32)
+        worst = 1.0
+        for i in range(steps):
+            pos = [n + i for _, (_, n) in sorted(users.items())]
+            rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+            if i == 0:
+                got = runner.eager_step(rows, pos)
+                runner.capture({slot: refs[seed][0][n + 1] for slot, (seed, n) in users.items()}, [p + 1 for p in pos])
+            else:
+                got = runner.traced_step(rows, pos)
+            for slot, (seed, n) in users.items():
+                x, y = refs[seed]
+>               d, _ = check(
+                    f"L{layer} 32-slot decode slot {slot} pos {n + i}",
+                    got[slot],
+                    x[n + i],
+                    y[n + i],
+                    margin=refs[seed].row_margin(n + i),
+                    y_alt=refs[seed].alt(n + i),
+                )
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:642:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 32-slot decode slot 4 pos 39'
+got = tensor([ 0.0069,  0.0097,  0.0037,  ...,  0.0014, -0.0015, -0.0036])
+x = tensor([-0.0011,  0.0007, -0.0019,  ...,  0.0017, -0.0014, -0.0069])
+y = tensor([ 0.0056,  0.0108,  0.0042,  ...,  0.0013, -0.0016, -0.0035])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+        assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+>       assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
+               ^^^^^^^^^^^^^^
+E       AssertionError: L0 32-slot decode slot 4 pos 39: delta PCC 0.994182 < 0.995
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:319: AssertionError
+_______________________ test_batch32_all_active[kda_moe] _______________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x70ca625a9b20>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batch32_all_active(mesh, rd, kind):
+        """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+        dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+        layer = KINDS[kind]
+        for k in list(_LAYERS):  # one layer resident (DRAM)
+            del _LAYERS[k]
+        dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+        lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+        steps = 3
+        rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+        refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
+        users = {}  # slot -> (seed, prompt length)
+        for slot in range(32):
+            users[slot] = (slot % 8, lengths[slot // 8])
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            prefill_user(dec, mesh, x, n, slot)
+        runner = DecodeRunner(dec, mesh, 32)
+        worst = 1.0
+        for i in range(steps):
+            pos = [n + i for _, (_, n) in sorted(users.items())]
+            rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+            if i == 0:
+                got = runner.eager_step(rows, pos)
+                runner.capture({slot: refs[seed][0][n + 1] for slot, (seed, n) in users.items()}, [p + 1 for p in pos])
+            else:
+                got = runner.traced_step(rows, pos)
+            for slot, (seed, n) in users.items():
+                x, y = refs[seed]
+>               d, _ = check(
+                    f"L{layer} 32-slot decode slot {slot} pos {n + i}",
+                    got[slot],
+                    x[n + i],
+                    y[n + i],
+                    margin=refs[seed].row_margin(n + i),
+                    y_alt=refs[seed].alt(n + i),
+                )
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:642:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L4 32-slot decode slot 20 pos 300'
+got = tensor([ 4.9066e-02, -2.5708e-01, -5.4764e-02,  ...,  3.8804e-03,
+        -1.6411e-04, -4.0264e-03])
+x = tensor([ 0.0610, -0.2793, -0.0552,  ...,  0.0050,  0.0104, -0.0068])
+y = tensor([ 5.1025e-02, -2.5195e-01, -5.3223e-02,  ...,  3.9062e-03,
+        -1.7548e-04, -4.0283e-03])
+delta_bar = 0.995, full_bar = 0.99, margin = 0.0008425712585449219
+y_alt = tensor([ 5.2734e-02, -2.5195e-01, -5.3467e-02,  ...,  3.9062e-03,
+        -1.7548e-04, -4.0283e-03])
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+>           assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+                   ^^^
+E           AssertionError: L4 32-slot decode slot 20 pos 300: matches neither y nor y_swap (HF router margin 8.4e-04)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:313: AssertionError
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+21.63s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe]
+20.07s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe]
+17.97s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe]
+17.62s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33]
+3.81s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense]
+1.38s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+1.33s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+0.98s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049]
+0.95s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000]
+0.74s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+0.72s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense]
+0.44s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049]
+0.43s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047]
+0.20s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049]
+ERROR models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] - AssertionError: decode update rms ratio mean 0.9874 outside 1 +- 0.01
+ERROR models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] - ExceptionGroup: errors during test teardown (2 sub-exceptions)
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense] - AssertionError: L0 slot 5 prefill 100: update rms ratio 0.9850 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31] - AssertionError: L0 slot 7 prefill 31: update rms ratio 0.9844 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33] - AssertionError: L0 slot 1 prefill 33: update rms ratio 0.9851 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128] - AssertionError: L0 slot 0 prefill 128: update rms ratio 0.9853 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129] - AssertionError: L0 slot 1 prefill 129: update rms ratio 0.9857 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047] - AssertionError: L0 slot 7 prefill 2047: update rms ratio 0.9850 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049] - AssertionError: L0 slot 1 prefill 2049: update rms ratio 0.9848 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000] - AssertionError: L0 slot 0 prefill 4000: update rms ratio 0.9851 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense] - AssertionError: L0 user slot 1 prefill 37: update rms ratio 0.9857 outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe] - AssertionError: L4 user slot 6 prefill 64: delta PCC 0.992394 < 0.995
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] - AssertionError: L0 32-slot decode slot 4 pos 39: delta PCC 0.994182 < 0.995
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] - AssertionError: L4 32-slot decode slot 20 pos 300: matches neither y nor y_swap (HF router margin 8.4e-04)
+======= 12 failed, 4 passed, 28 deselected, 2 errors in 91.27s (0:01:31) =======
+nanobind: leaked 4 instances!
+ - leaked instance 0x70ca8306d668 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x70ca2fa1eef8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x70ca8306d648 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x70ca2f4f48c8 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 22 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "__init__"
+ - leaked function "__repr__"
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - leaked function "set_program_cache_misses_allowed"
+ - leaked function "is_sharded"
+ - leaked function "logical_volume"
+ - leaked function ""
+ - leaked function "buffer_address"
+ - leaked function "__init__"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Sat Oct 17 09:04:30 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

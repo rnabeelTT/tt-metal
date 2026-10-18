@@ -1,0 +1,56 @@
+=== start Sat Oct 17 07:26:33 PM UTC 2026 : timeout -k 60 3600 python -m models.autoports.zai_org_glm_5_3_flash.tools.moe_scale_probe --layer 3 --rows 128 --policy opt --modes prefill,decode,decode1 --fidelities LoFi,HiFi3,HiFi4
+2026-10-17 19:26:35.343 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 19:28:14.817 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+layer 3, 128 rows (routing identical in ref / ref_q8: 128/128)
+ref_q8 vs ref: routed rms 0.9992 PCC 0.999931; shared rms 0.9980
+ref_q4 vs ref: routed rms 1.0245 PCC 0.983650; shared rms 1.0046
+config: sorted_grouped=True grouped_in0=4/4
+[prefill routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0198 min 1.0074 max 1.0328
+[prefill routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9953 min 0.9932 max 1.0040
+[prefill routed fidelity LoFi] tt vs ref:    routed rms 1.0197 PCC 0.983291; shared rms 0.9979 PCC 0.999959
+[prefill routed fidelity LoFi] tt vs ref_q8: routed rms 1.0205 PCC 0.983079; shared rms 0.9999 PCC 0.999993
+[prefill routed fidelity LoFi] tt vs ref_q4: routed rms 0.9954 PCC 0.999634; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0198 min 1.0074 max 1.0328
+[decode routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9953 min 0.9932 max 1.0040
+[decode routed fidelity LoFi] tt vs ref:    routed rms 1.0197 PCC 0.983291; shared rms 0.9979 PCC 0.999959
+[decode routed fidelity LoFi] tt vs ref_q8: routed rms 1.0205 PCC 0.983079; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity LoFi] tt vs ref_q4: routed rms 0.9954 PCC 0.999634; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0169 min 1.0043 max 1.0297
+[decode1 routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9924 min 0.9904 max 1.0009
+[decode1 routed fidelity LoFi] tt vs ref:    routed rms 1.0168 PCC 0.983297; shared rms 0.9979 PCC 0.999959
+[decode1 routed fidelity LoFi] tt vs ref_q8: routed rms 1.0176 PCC 0.983085; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity LoFi] tt vs ref_q4: routed rms 0.9924 PCC 0.999639; shared rms 0.9999 PCC 0.999993
+[prefill routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0285 min 1.0157 max 1.0418
+[prefill routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0038 min 1.0015 max 1.0124
+[prefill routed fidelity HiFi3] tt vs ref:    routed rms 1.0284 PCC 0.983298; shared rms 0.9979 PCC 0.999959
+[prefill routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0292 PCC 0.983086; shared rms 0.9999 PCC 0.999993
+[prefill routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0038 PCC 0.999646; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0285 min 1.0157 max 1.0418
+[decode routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0038 min 1.0015 max 1.0124
+[decode routed fidelity HiFi3] tt vs ref:    routed rms 1.0284 PCC 0.983298; shared rms 0.9979 PCC 0.999959
+[decode routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0292 PCC 0.983086; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0038 PCC 0.999646; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0255 min 1.0136 max 1.0386
+[decode1 routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0008 min 0.9989 max 1.0096
+[decode1 routed fidelity HiFi3] tt vs ref:    routed rms 1.0254 PCC 0.983305; shared rms 0.9979 PCC 0.999959
+[decode1 routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0262 PCC 0.983092; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0009 PCC 0.999651; shared rms 0.9999 PCC 0.999993
+[prefill routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0285 min 1.0157 max 1.0418
+[prefill routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0038 min 1.0015 max 1.0124
+[prefill routed fidelity HiFi4] tt vs ref:    routed rms 1.0284 PCC 0.983298; shared rms 0.9979 PCC 0.999959
+[prefill routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0292 PCC 0.983086; shared rms 0.9999 PCC 0.999993
+[prefill routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0038 PCC 0.999646; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0285 min 1.0157 max 1.0418
+[decode routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0038 min 1.0015 max 1.0124
+[decode routed fidelity HiFi4] tt vs ref:    routed rms 1.0284 PCC 0.983298; shared rms 0.9979 PCC 0.999959
+[decode routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0292 PCC 0.983086; shared rms 0.9999 PCC 0.999993
+[decode routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0038 PCC 0.999646; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0255 min 1.0136 max 1.0386
+[decode1 routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0008 min 0.9989 max 1.0096
+[decode1 routed fidelity HiFi4] tt vs ref:    routed rms 1.0254 PCC 0.983305; shared rms 0.9979 PCC 0.999959
+[decode1 routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0262 PCC 0.983092; shared rms 0.9999 PCC 0.999993
+[decode1 routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0009 PCC 0.999651; shared rms 0.9999 PCC 0.999993
+=== exit code: 0 Sat Oct 17 07:28:18 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

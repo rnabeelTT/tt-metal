@@ -1,0 +1,1504 @@
+=== start Sat Oct 17 03:09:37 PM UTC 2026 : timeout -k 60 7200 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k (test_real_weights or test_batched_users or test_batch32_all_active or test_lengths) and (kda_moe or dsa_moe)
+2026-10-17 15:09:39.516 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 29 deselected / 15 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:10:03.227 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 5 prefill 100: delta PCC 0.999810 full PCC 0.999907 update rms ratio 1.0027
+L3 slot 5 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.994854 update rms ratio 1.0145
+L3 slot 5 decode pos 100: delta PCC 0.999966 full PCC 0.999984 update rms ratio 0.9969 (HF router margin 7.8e-03)
+L3 slot 5 decode pos 100: vs checkpoint ref (quantization delta): delta PCC 0.997029 update rms ratio 0.9994
+L3 slot 5 decode pos 101: delta PCC 0.999972 full PCC 0.999984 update rms ratio 1.0015 (HF router margin 2.1e-03)
+L3 slot 5 decode pos 101: vs checkpoint ref (quantization delta): delta PCC 0.993470 update rms ratio 1.0202
+L3 slot 5 decode pos 102: delta PCC 0.999972 full PCC 0.999984 update rms ratio 0.9936 (HF router margin 1.5e-02)
+L3 slot 5 decode pos 102: vs checkpoint ref (quantization delta): delta PCC 0.996364 update rms ratio 0.9977
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 3 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:10:13.810 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 15:10:28.182 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 slot 5 prefill 100: delta PCC 0.999459 full PCC 0.999982 update rms ratio 1.0000
+L4 slot 5 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.991455 update rms ratio 1.0122
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-1] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:10:50.462 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 1 prefill 1: delta PCC 0.999972 full PCC 0.999978 update rms ratio 1.0020
+L3 slot 1 prefill 1: vs checkpoint ref (quantization delta): delta PCC 0.994272 update rms ratio 1.0170
+L3 slot 1 decode pos 1: delta PCC 0.999970 full PCC 0.999982 update rms ratio 1.0035 (HF router margin 5.0e-04)
+L3 slot 1 decode pos 1: vs checkpoint ref (quantization delta): delta PCC 0.995358 update rms ratio 0.9967
+L3 slot 1 decode pos 2: delta PCC 0.999955 full PCC 0.999986 update rms ratio 1.0019 (HF router margin 3.2e-03)
+L3 slot 1 decode pos 2: vs checkpoint ref (quantization delta): delta PCC 0.995460 update rms ratio 1.0107
+L3 slot 1 decode pos 3: delta PCC 0.999960 full PCC 0.999980 update rms ratio 1.0027 (HF router margin 7.6e-03)
+L3 slot 1 decode pos 3: vs checkpoint ref (quantization delta): delta PCC 0.994299 update rms ratio 1.0155
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 6 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 33: delta PCC 0.999866 full PCC 0.999925 update rms ratio 1.0028
+L3 slot 1 prefill 33: vs checkpoint ref (quantization delta): delta PCC 0.995121 update rms ratio 1.0090
+L3 slot 1 decode pos 33: delta PCC 0.999909 full PCC 0.999986 update rms ratio 0.9946 (HF router margin 2.3e-03)
+L3 slot 1 decode pos 33: vs checkpoint ref (quantization delta): delta PCC 0.996116 update rms ratio 1.0010
+L3 slot 1 decode pos 34: delta PCC 0.999958 full PCC 0.999977 update rms ratio 0.9942 (HF router margin 1.6e-03)
+L3 slot 1 decode pos 34: vs checkpoint ref (quantization delta): delta PCC 0.994003 update rms ratio 1.0113
+L3 slot 1 decode pos 35: delta PCC 0.999934 full PCC 0.999979 update rms ratio 1.0005 (HF router margin 4.5e-03)
+L3 slot 1 decode pos 35: vs checkpoint ref (quantization delta): delta PCC 0.993090 update rms ratio 1.0087
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 9 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-129] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 129: delta PCC 0.999869 full PCC 0.999935 update rms ratio 1.0021
+L3 slot 1 prefill 129: vs checkpoint ref (quantization delta): delta PCC 0.994744 update rms ratio 1.0133
+L3 slot 1 decode pos 129: delta PCC 0.999903 full PCC 0.999988 update rms ratio 0.9969 (HF router margin 5.5e-03)
+L3 slot 1 decode pos 129: vs checkpoint ref (quantization delta): delta PCC 0.992916 update rms ratio 1.0110
+L3 slot 1 decode pos 130: delta PCC 0.999650 full PCC 0.999788 update rms ratio 0.9868 (HF router margin 5.3e-05)
+L3 slot 1 decode pos 130: vs checkpoint ref (quantization delta): delta PCC 0.992861 update rms ratio 1.0003
+L3 slot 1 decode pos 131: delta PCC 0.999961 full PCC 0.999975 update rms ratio 0.9931 (HF router margin 5.8e-03)
+L3 slot 1 decode pos 131: vs checkpoint ref (quantization delta): delta PCC 0.993569 update rms ratio 1.0034
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 12 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 2049: delta PCC 0.999862 full PCC 0.999935 update rms ratio 0.9987
+L3 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC 0.994821 update rms ratio 1.0102
+L3 slot 1 decode pos 2049: delta PCC 0.999931 full PCC 0.999978 update rms ratio 1.0002 (HF router margin 1.3e-03)
+L3 slot 1 decode pos 2049: vs checkpoint ref (quantization delta): delta PCC 0.995924 update rms ratio 0.9947
+L3 slot 1 decode pos 2050: delta PCC 0.999956 full PCC 0.999979 update rms ratio 0.9965 (HF router margin 4.9e-03)
+L3 slot 1 decode pos 2050: vs checkpoint ref (quantization delta): delta PCC 0.995538 update rms ratio 1.0340
+L3 slot 1 decode pos 2051: delta PCC 0.999952 full PCC 0.999978 update rms ratio 1.0016 (HF router margin 8.2e-03)
+L3 slot 1 decode pos 2051: vs checkpoint ref (quantization delta): delta PCC 0.996514 update rms ratio 1.0171
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 15 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2051] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 3 prefill 2051: delta PCC 0.999842 full PCC 0.999927 update rms ratio 0.9985
+L3 slot 3 prefill 2051: vs checkpoint ref (quantization delta): delta PCC 0.994731 update rms ratio 1.0096
+L3 slot 3 decode pos 2051: delta PCC 0.999931 full PCC 0.999968 update rms ratio 0.9996 (HF router margin 4.4e-03)
+L3 slot 3 decode pos 2051: vs checkpoint ref (quantization delta): delta PCC 0.990635 update rms ratio 1.0187
+L3 slot 3 decode pos 2052: delta PCC 0.999907 full PCC 0.999978 update rms ratio 0.9941 (HF router margin 1.7e-03)
+L3 slot 3 decode pos 2052: vs checkpoint ref (quantization delta): delta PCC 0.995616 update rms ratio 1.0068
+L3 slot 3 decode pos 2053: delta PCC 0.999949 full PCC 0.999979 update rms ratio 0.9899 (HF router margin 6.4e-03)
+L3 slot 3 decode pos 2053: vs checkpoint ref (quantization delta): delta PCC 0.995894 update rms ratio 0.9979
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 18 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2177] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 1 prefill 2177: delta PCC 0.999847 full PCC 0.999929 update rms ratio 0.9992
+L3 slot 1 prefill 2177: vs checkpoint ref (quantization delta): delta PCC 0.994823 update rms ratio 1.0102
+L3 slot 1 decode pos 2177: delta PCC 0.999936 full PCC 0.999967 update rms ratio 1.0031 (HF router margin 5.1e-03)
+L3 slot 1 decode pos 2177: vs checkpoint ref (quantization delta): delta PCC 0.993987 update rms ratio 1.0291
+L3 slot 1 decode pos 2178: delta PCC 0.999971 full PCC 0.999983 update rms ratio 0.9985 (HF router margin 6.0e-03)
+L3 slot 1 decode pos 2178: vs checkpoint ref (quantization delta): delta PCC 0.996024 update rms ratio 1.0232
+L3 slot 1 decode pos 2179: delta PCC 0.999749 full PCC 0.999932 update rms ratio 1.0071 (HF router margin 6.8e-03)
+L3 slot 1 decode pos 2179: vs checkpoint ref (quantization delta): delta PCC 0.995950 update rms ratio 1.0173
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 21 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 0 prefill 4000: delta PCC 0.999808 full PCC 0.999911 update rms ratio 0.9998
+L3 slot 0 prefill 4000: vs checkpoint ref (quantization delta): delta PCC 0.994762 update rms ratio 1.0108
+L3 slot 0 decode pos 4000: delta PCC 0.999971 full PCC 0.999983 update rms ratio 1.0029 (HF router margin 4.0e-03)
+L3 slot 0 decode pos 4000: vs checkpoint ref (quantization delta): delta PCC 0.996274 update rms ratio 1.0194
+L3 slot 0 decode pos 4001: delta PCC 0.999961 full PCC 0.999984 update rms ratio 0.9998 (HF router margin 1.4e-02)
+L3 slot 0 decode pos 4001: vs checkpoint ref (quantization delta): delta PCC 0.995724 update rms ratio 1.0314
+L3 slot 0 decode pos 4002: delta PCC 0.999961 full PCC 0.999978 update rms ratio 0.9974 (HF router margin 4.9e-04)
+L3 slot 0 decode pos 4002: vs checkpoint ref (quantization delta): delta PCC 0.995020 update rms ratio 1.0078
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 24 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:11:03.799 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 15:11:17.255 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 slot 1 prefill 33: delta PCC 0.999810 full PCC 0.999993 update rms ratio 1.0012
+L4 slot 1 prefill 33: vs checkpoint ref (quantization delta): delta PCC 0.989620 update rms ratio 1.0175
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L4 slot 1 prefill 2049: delta PCC 0.999364 full PCC 0.999984 update rms ratio 1.0000
+L4 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC 0.993763 update rms ratio 1.0086
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:11:37.520 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 user slot 1 prefill 37: delta PCC 0.999927 full PCC 0.999964 update rms ratio 1.0014
+L3 user slot 1 prefill 37: vs checkpoint ref (quantization delta): delta PCC 0.995004 update rms ratio 1.0110
+L3 user slot 3 prefill 100: delta PCC 0.999774 full PCC 0.999893 update rms ratio 1.0023
+L3 user slot 3 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.994510 update rms ratio 1.0140
+L3 user slot 4 prefill 2100: delta PCC 0.999831 full PCC 0.999921 update rms ratio 0.9985
+L3 user slot 4 prefill 2100: vs checkpoint ref (quantization delta): delta PCC 0.994805 update rms ratio 1.0095
+L3 user slot 6 prefill 64: delta PCC 0.999868 full PCC 0.999929 update rms ratio 1.0021
+L3 user slot 6 prefill 64: vs checkpoint ref (quantization delta): delta PCC 0.995079 update rms ratio 1.0116
+L3 user slot 1 decode pos 37: delta PCC 0.999973 full PCC 0.999986 update rms ratio 0.9990 (HF router margin 1.6e-03)
+L3 user slot 1 decode pos 37: vs checkpoint ref (quantization delta): delta PCC 0.995849 update rms ratio 0.9948
+L3 user slot 3 decode pos 100: delta PCC 0.999967 full PCC 0.999980 update rms ratio 0.9984 (HF router margin 1.9e-03)
+L3 user slot 3 decode pos 100: vs checkpoint ref (quantization delta): delta PCC 0.995063 update rms ratio 1.0075
+L3 user slot 4 decode pos 2100: delta PCC 0.999938 full PCC 0.999972 update rms ratio 1.0031 (HF router margin 1.7e-02)
+L3 user slot 4 decode pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.991076 update rms ratio 1.0196
+L3 user slot 6 decode pos 64: delta PCC 0.999949 full PCC 0.999983 update rms ratio 1.0007 (HF router margin 6.5e-03)
+L3 user slot 6 decode pos 64: vs checkpoint ref (quantization delta): delta PCC 0.994034 update rms ratio 1.0216
+L3 user slot 1 decode pos 38: delta PCC 0.999968 full PCC 0.999979 update rms ratio 0.9959 (HF router margin 1.5e-03)
+L3 user slot 1 decode pos 38: vs checkpoint ref (quantization delta): delta PCC 0.995900 update rms ratio 1.0173
+L3 user slot 3 decode pos 101: delta PCC 0.999914 full PCC 0.999967 update rms ratio 0.9960 (HF router margin 1.1e-04)
+L3 user slot 3 decode pos 101: vs checkpoint ref (quantization delta): delta PCC 0.989834 update rms ratio 1.0161
+L3 user slot 4 decode pos 2101: delta PCC 0.999952 full PCC 0.999978 update rms ratio 1.0027 (HF router margin 1.5e-03)
+L3 user slot 4 decode pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.991964 update rms ratio 1.0187
+L3 user slot 6 decode pos 65: delta PCC 0.999968 full PCC 0.999982 update rms ratio 1.0022 (HF router margin 2.6e-04)
+L3 user slot 6 decode pos 65: vs checkpoint ref (quantization delta): delta PCC 0.996374 update rms ratio 1.0007
+L3 user slot 1 decode pos 39: delta PCC 0.999969 full PCC 0.999988 update rms ratio 0.9970 (HF router margin 2.7e-02)
+L3 user slot 1 decode pos 39: vs checkpoint ref (quantization delta): delta PCC 0.995674 update rms ratio 1.0050
+L3 user slot 3 decode pos 102: delta PCC 0.999972 full PCC 0.999985 update rms ratio 0.9994 (HF router margin 1.7e-03)
+L3 user slot 3 decode pos 102: vs checkpoint ref (quantization delta): delta PCC 0.995381 update rms ratio 1.0302
+L3 user slot 4 decode pos 2102: delta PCC 0.999927 full PCC 0.999988 update rms ratio 1.0001 (HF router margin 2.7e-03)
+L3 user slot 4 decode pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992211 update rms ratio 1.0158
+L3 user slot 6 decode pos 66: delta PCC 0.999927 full PCC 0.999983 update rms ratio 1.0037 (HF router margin 5.2e-04)
+L3 user slot 6 decode pos 66: vs checkpoint ref (quantization delta): delta PCC 0.994289 update rms ratio 1.0077
+PASSEDrouter near-tie y_swap matches: 0 of 12 MoE decode tokens (cap 1); module total 0 of 36 (cap 2)
+decode update rms ratio mean 0.9999 over 12 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:11:44.229 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 15:11:57.399 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L4 user slot 1 prefill 37: delta PCC 0.999517 full PCC 0.999985 update rms ratio 1.0024
+L4 user slot 1 prefill 37: vs checkpoint ref (quantization delta): delta PCC 0.992037 update rms ratio 1.0144
+L4 user slot 3 prefill 100: delta PCC 0.999677 full PCC 0.999990 update rms ratio 1.0003
+L4 user slot 3 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.992187 update rms ratio 1.0125
+L4 user slot 4 prefill 300: delta PCC 0.999432 full PCC 0.999983 update rms ratio 1.0009
+L4 user slot 4 prefill 300: vs checkpoint ref (quantization delta): delta PCC 0.992470 update rms ratio 1.0117
+L4 user slot 6 prefill 64: delta PCC 0.999569 full PCC 0.999989 update rms ratio 1.0010
+L4 user slot 6 prefill 64: vs checkpoint ref (quantization delta): delta PCC 0.992244 update rms ratio 1.0113
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:12:16.561 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 32-slot decode slot 0 pos 37: delta PCC 0.999942 full PCC 0.999976 update rms ratio 1.0068 (HF router margin 2.7e-03)
+L3 32-slot decode slot 0 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996967 update rms ratio 1.0056
+L3 32-slot decode slot 1 pos 37: delta PCC 0.999834 full PCC 0.999954 update rms ratio 1.0038 (HF router margin 2.0e-05)
+L3 32-slot decode slot 1 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993856 update rms ratio 1.0033
+L3 32-slot decode slot 2 pos 37: delta PCC 0.999974 full PCC 0.999981 update rms ratio 0.9994 (HF router margin 1.8e-03)
+L3 32-slot decode slot 2 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.994673 update rms ratio 1.0115
+L3 32-slot decode slot 3 pos 37: delta PCC 0.999966 full PCC 0.999980 update rms ratio 1.0011 (HF router margin 1.6e-03)
+L3 32-slot decode slot 3 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996316 update rms ratio 1.0076
+L3 32-slot decode slot 4 pos 37: delta PCC 0.999913 full PCC 0.999957 update rms ratio 1.0063 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992968 update rms ratio 1.0081
+L3 32-slot decode slot 5 pos 37: delta PCC 0.999954 full PCC 0.999974 update rms ratio 1.0043 (HF router margin 3.1e-03)
+L3 32-slot decode slot 5 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992936 update rms ratio 1.0284
+L3 32-slot decode slot 6 pos 37: delta PCC 0.999950 full PCC 0.999967 update rms ratio 1.0040 (HF router margin 6.2e-03)
+L3 32-slot decode slot 6 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993265 update rms ratio 1.0320
+L3 32-slot decode slot 7 pos 37: delta PCC 0.999944 full PCC 0.999976 update rms ratio 1.0005 (HF router margin 2.0e-02)
+L3 32-slot decode slot 7 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992616 update rms ratio 1.0142
+L3 32-slot decode slot 8 pos 300: delta PCC 0.999960 full PCC 0.999981 update rms ratio 1.0068 (HF router margin 3.1e-04)
+L3 32-slot decode slot 8 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995905 update rms ratio 1.0047
+L3 32-slot decode slot 9 pos 300: delta PCC 0.999955 full PCC 0.999978 update rms ratio 0.9965 (HF router margin 8.2e-04)
+L3 32-slot decode slot 9 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.993589 update rms ratio 1.0024
+L3 32-slot decode slot 10 pos 300: delta PCC 0.999958 full PCC 0.999984 update rms ratio 1.0026 (HF router margin 1.5e-02)
+L3 32-slot decode slot 10 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995771 update rms ratio 1.0113
+L3 32-slot decode slot 11 pos 300: delta PCC 0.999955 full PCC 0.999977 update rms ratio 1.0019 (HF router margin 4.7e-03)
+L3 32-slot decode slot 11 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994759 update rms ratio 1.0001
+L3 32-slot decode slot 12 pos 300: delta PCC 0.999965 full PCC 0.999985 update rms ratio 1.0070 (HF router margin 2.0e-02)
+L3 32-slot decode slot 12 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.997007 update rms ratio 1.0184
+L3 32-slot decode slot 13 pos 300: delta PCC 0.999943 full PCC 0.999988 update rms ratio 0.9976 (HF router margin 7.1e-03)
+L3 32-slot decode slot 13 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.996912 update rms ratio 1.0049
+L3 32-slot decode slot 14 pos 300: delta PCC 0.999185 full PCC 0.999679 update rms ratio 1.0007 (HF router margin 7.5e-04)
+L3 32-slot decode slot 14 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994476 update rms ratio 0.9938
+L3 32-slot decode slot 15 pos 300: delta PCC 0.999953 full PCC 0.999974 update rms ratio 1.0009 (HF router margin 9.0e-03)
+L3 32-slot decode slot 15 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.992353 update rms ratio 0.9998
+L3 32-slot decode slot 16 pos 2100: delta PCC 0.999917 full PCC 0.999963 update rms ratio 0.9933 (HF router margin 1.6e-03)
+L3 32-slot decode slot 16 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994151 update rms ratio 1.0016
+L3 32-slot decode slot 17 pos 2100: delta PCC 0.999910 full PCC 0.999973 update rms ratio 0.9980 (HF router margin 1.1e-03)
+L3 32-slot decode slot 17 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.992490 update rms ratio 1.0306
+L3 32-slot decode slot 18 pos 2100: delta PCC 0.999963 full PCC 0.999980 update rms ratio 0.9960 (HF router margin 8.6e-03)
+L3 32-slot decode slot 18 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995857 update rms ratio 1.0177
+L3 32-slot decode slot 19 pos 2100: delta PCC 0.999960 full PCC 0.999981 update rms ratio 0.9976 (HF router margin 1.0e-02)
+L3 32-slot decode slot 19 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.996151 update rms ratio 1.0044
+L3 32-slot decode slot 20 pos 2100: delta PCC 0.999953 full PCC 0.999982 update rms ratio 0.9945 (HF router margin 1.2e-03)
+L3 32-slot decode slot 20 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994484 update rms ratio 1.0186
+L3 32-slot decode slot 21 pos 2100: delta PCC 0.999955 full PCC 0.999983 update rms ratio 1.0039 (HF router margin 3.1e-03)
+L3 32-slot decode slot 21 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.993974 update rms ratio 1.0120
+L3 32-slot decode slot 22 pos 2100: delta PCC 0.999957 full PCC 0.999985 update rms ratio 1.0026 (HF router margin 4.4e-04)
+L3 32-slot decode slot 22 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995224 update rms ratio 1.0096
+L3 32-slot decode slot 23 pos 2100: delta PCC 0.999943 full PCC 0.999975 update rms ratio 1.0006 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.990564 update rms ratio 1.0164
+L3 32-slot decode slot 24 pos 2300: delta PCC 0.999962 full PCC 0.999984 update rms ratio 1.0020 (HF router margin 1.4e-02)
+L3 32-slot decode slot 24 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995803 update rms ratio 1.0038
+L3 32-slot decode slot 25 pos 2300: delta PCC 0.999901 full PCC 0.999986 update rms ratio 0.9962 (HF router margin 2.0e-03)
+L3 32-slot decode slot 25 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996118 update rms ratio 1.0020
+L3 32-slot decode slot 26 pos 2300: delta PCC 0.999875 full PCC 0.999978 update rms ratio 0.9993 (HF router margin 8.6e-03)
+L3 32-slot decode slot 26 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995315 update rms ratio 1.0044
+L3 32-slot decode slot 27 pos 2300: delta PCC 0.999943 full PCC 0.999971 update rms ratio 1.0034 (HF router margin 2.6e-03)
+L3 32-slot decode slot 27 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.993742 update rms ratio 1.0181
+L3 32-slot decode slot 28 pos 2300: delta PCC 0.999961 full PCC 0.999979 update rms ratio 1.0020 (HF router margin 2.9e-03)
+L3 32-slot decode slot 28 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995798 update rms ratio 0.9857
+L3 32-slot decode slot 29 pos 2300: delta PCC 0.995567 full PCC 0.998727 update rms ratio 0.9807 (HF router margin 3.0e-05)
+L3 32-slot decode slot 29 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.990621 update rms ratio 0.9811
+L3 32-slot decode slot 30 pos 2300: delta PCC 0.999958 full PCC 0.999980 update rms ratio 1.0009 (HF router margin 4.4e-03)
+L3 32-slot decode slot 30 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996527 update rms ratio 1.0039
+L3 32-slot decode slot 31 pos 2300: delta PCC 0.999968 full PCC 0.999985 update rms ratio 1.0024 (HF router margin 2.9e-03)
+L3 32-slot decode slot 31 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995622 update rms ratio 1.0330
+L3 32-slot decode slot 0 pos 38: delta PCC 0.999954 full PCC 0.999981 update rms ratio 0.9960 (HF router margin 3.7e-03)
+L3 32-slot decode slot 0 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996227 update rms ratio 1.0106
+L3 32-slot decode slot 1 pos 38: delta PCC 0.999955 full PCC 0.999976 update rms ratio 1.0040 (HF router margin 4.2e-03)
+L3 32-slot decode slot 1 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996419 update rms ratio 1.0174
+L3 32-slot decode slot 2 pos 38: delta PCC 0.982173 full PCC 0.997357 update rms ratio 0.9890 (HF router margin 8.0e-04)
+L3 32-slot decode slot 2 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.977849 update rms ratio 0.9936
+L3 32-slot decode slot 2 pos 38: vs y_swap (8th expert -> 9th): delta PCC 0.999889 full PCC 0.999986 update rms ratio 0.9961
+L3 32-slot decode slot 2 pos 38: matched y_swap (router near-tie)
+L3 32-slot decode slot 3 pos 38: delta PCC 0.999896 full PCC 0.999951 update rms ratio 1.0069 (HF router margin 1.9e-03)
+L3 32-slot decode slot 3 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.991180 update rms ratio 1.0100
+L3 32-slot decode slot 4 pos 38: delta PCC 0.999968 full PCC 0.999982 update rms ratio 0.9978 (HF router margin 6.4e-03)
+L3 32-slot decode slot 4 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.994896 update rms ratio 1.0076
+L3 32-slot decode slot 5 pos 38: delta PCC 0.999939 full PCC 0.999970 update rms ratio 1.0049 (HF router margin 1.0e-02)
+L3 32-slot decode slot 5 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.993624 update rms ratio 1.0045
+L3 32-slot decode slot 6 pos 38: delta PCC 0.999947 full PCC 0.999968 update rms ratio 1.0053 (HF router margin 9.5e-03)
+L3 32-slot decode slot 6 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.992295 update rms ratio 1.0148
+L3 32-slot decode slot 7 pos 38: delta PCC 0.999951 full PCC 0.999985 update rms ratio 0.9959 (HF router margin 1.9e-02)
+L3 32-slot decode slot 7 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.998747 update rms ratio 0.9988
+L3 32-slot decode slot 8 pos 301: delta PCC 0.999964 full PCC 0.999979 update rms ratio 1.0001 (HF router margin 6.2e-03)
+L3 32-slot decode slot 8 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.995678 update rms ratio 1.0069
+L3 32-slot decode slot 9 pos 301: delta PCC 0.999964 full PCC 0.999983 update rms ratio 1.0002 (HF router margin 2.0e-03)
+L3 32-slot decode slot 9 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.996342 update rms ratio 1.0064
+L3 32-slot decode slot 10 pos 301: delta PCC 0.999959 full PCC 0.999982 update rms ratio 0.9976 (HF router margin 4.1e-03)
+L3 32-slot decode slot 10 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994423 update rms ratio 0.9959
+L3 32-slot decode slot 11 pos 301: delta PCC 0.999956 full PCC 0.999976 update rms ratio 1.0053 (HF router margin 3.7e-03)
+L3 32-slot decode slot 11 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.993018 update rms ratio 1.0073
+L3 32-slot decode slot 12 pos 301: delta PCC 0.999939 full PCC 0.999985 update rms ratio 1.0023 (HF router margin 9.5e-03)
+L3 32-slot decode slot 12 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.991325 update rms ratio 1.0106
+L3 32-slot decode slot 13 pos 301: delta PCC 0.999956 full PCC 0.999975 update rms ratio 0.9984 (HF router margin 6.1e-03)
+L3 32-slot decode slot 13 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992887 update rms ratio 0.9997
+L3 32-slot decode slot 14 pos 301: delta PCC 0.999965 full PCC 0.999978 update rms ratio 0.9996 (HF router margin 3.6e-03)
+L3 32-slot decode slot 14 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992756 update rms ratio 0.9819
+L3 32-slot decode slot 15 pos 301: delta PCC 0.999946 full PCC 0.999967 update rms ratio 1.0000 (HF router margin 2.4e-03)
+L3 32-slot decode slot 15 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994400 update rms ratio 1.0109
+L3 32-slot decode slot 16 pos 2101: delta PCC 0.999618 full PCC 0.999784 update rms ratio 1.0017 (HF router margin 1.9e-04)
+L3 32-slot decode slot 16 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994749 update rms ratio 1.0060
+L3 32-slot decode slot 17 pos 2101: delta PCC 0.999960 full PCC 0.999981 update rms ratio 0.9972 (HF router margin 4.5e-03)
+L3 32-slot decode slot 17 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994421 update rms ratio 1.0323
+L3 32-slot decode slot 18 pos 2101: delta PCC 0.999942 full PCC 0.999967 update rms ratio 1.0016 (HF router margin 7.7e-03)
+L3 32-slot decode slot 18 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992924 update rms ratio 1.0045
+L3 32-slot decode slot 19 pos 2101: delta PCC 0.999955 full PCC 0.999978 update rms ratio 0.9964 (HF router margin 1.8e-03)
+L3 32-slot decode slot 19 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994880 update rms ratio 1.0026
+L3 32-slot decode slot 20 pos 2101: delta PCC 0.999882 full PCC 0.999947 update rms ratio 0.9985 (HF router margin 6.9e-04)
+L3 32-slot decode slot 20 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.996522 update rms ratio 1.0177
+L3 32-slot decode slot 21 pos 2101: delta PCC 0.999933 full PCC 0.999971 update rms ratio 0.9989 (HF router margin 2.8e-02)
+L3 32-slot decode slot 21 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992885 update rms ratio 1.0141
+L3 32-slot decode slot 22 pos 2101: delta PCC 0.999924 full PCC 0.999967 update rms ratio 1.0028 (HF router margin 7.0e-03)
+L3 32-slot decode slot 22 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992580 update rms ratio 0.9975
+L3 32-slot decode slot 23 pos 2101: delta PCC 0.999926 full PCC 0.999961 update rms ratio 1.0037 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.990933 update rms ratio 1.0233
+L3 32-slot decode slot 24 pos 2301: delta PCC 0.999974 full PCC 0.999985 update rms ratio 1.0020 (HF router margin 5.3e-03)
+L3 32-slot decode slot 24 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995249 update rms ratio 1.0206
+L3 32-slot decode slot 25 pos 2301: delta PCC 0.999960 full PCC 0.999978 update rms ratio 1.0021 (HF router margin 1.3e-03)
+L3 32-slot decode slot 25 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996198 update rms ratio 1.0064
+L3 32-slot decode slot 26 pos 2301: delta PCC 0.999915 full PCC 0.999968 update rms ratio 1.0051 (HF router margin 5.2e-03)
+L3 32-slot decode slot 26 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.994730 update rms ratio 1.0411
+L3 32-slot decode slot 27 pos 2301: delta PCC 0.999972 full PCC 0.999984 update rms ratio 1.0026 (HF router margin 6.2e-03)
+L3 32-slot decode slot 27 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.997011 update rms ratio 1.0148
+L3 32-slot decode slot 28 pos 2301: delta PCC 0.999963 full PCC 0.999981 update rms ratio 1.0053 (HF router margin 3.1e-03)
+L3 32-slot decode slot 28 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995737 update rms ratio 1.0150
+L3 32-slot decode slot 29 pos 2301: delta PCC 0.999939 full PCC 0.999979 update rms ratio 1.0014 (HF router margin 4.7e-03)
+L3 32-slot decode slot 29 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992761 update rms ratio 1.0273
+L3 32-slot decode slot 30 pos 2301: delta PCC 0.999915 full PCC 0.999960 update rms ratio 1.0030 (HF router margin 4.8e-03)
+L3 32-slot decode slot 30 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992114 update rms ratio 1.0194
+L3 32-slot decode slot 31 pos 2301: delta PCC 0.999914 full PCC 0.999973 update rms ratio 1.0028 (HF router margin 5.1e-04)
+L3 32-slot decode slot 31 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996460 update rms ratio 1.0075
+L3 32-slot decode slot 0 pos 39: delta PCC 0.999972 full PCC 0.999983 update rms ratio 1.0026 (HF router margin 2.0e-03)
+L3 32-slot decode slot 0 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994670 update rms ratio 1.0242
+L3 32-slot decode slot 1 pos 39: delta PCC 0.999970 full PCC 0.999977 update rms ratio 1.0044 (HF router margin 7.3e-03)
+L3 32-slot decode slot 1 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993958 update rms ratio 1.0129
+L3 32-slot decode slot 2 pos 39: delta PCC 0.998745 full PCC 0.999329 update rms ratio 1.0433 (HF router margin 1.9e-04)
+L3 32-slot decode slot 2 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993756 update rms ratio 1.0655
+L3 32-slot decode slot 3 pos 39: delta PCC 0.999920 full PCC 0.999979 update rms ratio 1.0013 (HF router margin 1.3e-03)
+L3 32-slot decode slot 3 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.996222 update rms ratio 1.0077
+L3 32-slot decode slot 4 pos 39: delta PCC 0.999890 full PCC 0.999944 update rms ratio 1.0033 (HF router margin 6.9e-03)
+L3 32-slot decode slot 4 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.989293 update rms ratio 1.0098
+L3 32-slot decode slot 5 pos 39: delta PCC 0.999930 full PCC 0.999977 update rms ratio 1.0009 (HF router margin 1.2e-02)
+L3 32-slot decode slot 5 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.988082 update rms ratio 1.0176
+L3 32-slot decode slot 6 pos 39: delta PCC 0.999967 full PCC 0.999980 update rms ratio 0.9981 (HF router margin 5.8e-03)
+L3 32-slot decode slot 6 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994887 update rms ratio 0.9937
+L3 32-slot decode slot 7 pos 39: delta PCC 0.999960 full PCC 0.999976 update rms ratio 1.0019 (HF router margin 1.2e-02)
+L3 32-slot decode slot 7 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.995385 update rms ratio 1.0212
+L3 32-slot decode slot 8 pos 302: delta PCC 0.999954 full PCC 0.999980 update rms ratio 1.0031 (HF router margin 1.3e-03)
+L3 32-slot decode slot 8 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994722 update rms ratio 1.0140
+L3 32-slot decode slot 9 pos 302: delta PCC 0.999970 full PCC 0.999987 update rms ratio 1.0017 (HF router margin 6.5e-03)
+L3 32-slot decode slot 9 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995374 update rms ratio 1.0303
+L3 32-slot decode slot 10 pos 302: delta PCC 0.999971 full PCC 0.999981 update rms ratio 0.9949 (HF router margin 7.7e-05)
+L3 32-slot decode slot 10 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994234 update rms ratio 1.0135
+L3 32-slot decode slot 11 pos 302: delta PCC 0.999970 full PCC 0.999983 update rms ratio 1.0029 (HF router margin 3.3e-03)
+L3 32-slot decode slot 11 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995757 update rms ratio 1.0025
+L3 32-slot decode slot 12 pos 302: delta PCC 0.999972 full PCC 0.999979 update rms ratio 1.0057 (HF router margin 1.0e-03)
+L3 32-slot decode slot 12 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993850 update rms ratio 1.0288
+L3 32-slot decode slot 13 pos 302: delta PCC 0.999940 full PCC 0.999980 update rms ratio 1.0026 (HF router margin 8.8e-03)
+L3 32-slot decode slot 13 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993919 update rms ratio 1.0054
+L3 32-slot decode slot 14 pos 302: delta PCC 0.999953 full PCC 0.999975 update rms ratio 1.0032 (HF router margin 1.8e-02)
+L3 32-slot decode slot 14 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993781 update rms ratio 0.9997
+L3 32-slot decode slot 15 pos 302: delta PCC 0.999903 full PCC 0.999983 update rms ratio 0.9997 (HF router margin 3.1e-03)
+L3 32-slot decode slot 15 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994278 update rms ratio 1.0046
+L3 32-slot decode slot 16 pos 2102: delta PCC 0.999137 full PCC 0.999674 update rms ratio 1.0008 (HF router margin 9.3e-05)
+L3 32-slot decode slot 16 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992219 update rms ratio 1.0165
+L3 32-slot decode slot 17 pos 2102: delta PCC 0.999948 full PCC 0.999977 update rms ratio 0.9996 (HF router margin 5.0e-03)
+L3 32-slot decode slot 17 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995171 update rms ratio 1.0132
+L3 32-slot decode slot 18 pos 2102: delta PCC 0.999937 full PCC 0.999969 update rms ratio 0.9973 (HF router margin 2.2e-04)
+L3 32-slot decode slot 18 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992706 update rms ratio 1.0252
+L3 32-slot decode slot 19 pos 2102: delta PCC 0.999955 full PCC 0.999973 update rms ratio 0.9919 (HF router margin 3.1e-03)
+L3 32-slot decode slot 19 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995894 update rms ratio 1.0080
+L3 32-slot decode slot 20 pos 2102: delta PCC 0.999957 full PCC 0.999981 update rms ratio 0.9886 (HF router margin 8.5e-03)
+L3 32-slot decode slot 20 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.997730 update rms ratio 0.9941
+L3 32-slot decode slot 21 pos 2102: delta PCC 0.999936 full PCC 0.999969 update rms ratio 1.0001 (HF router margin 8.8e-03)
+L3 32-slot decode slot 21 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.993901 update rms ratio 1.0194
+L3 32-slot decode slot 22 pos 2102: delta PCC 0.999192 full PCC 0.999541 update rms ratio 1.0027 (HF router margin 4.6e-04)
+L3 32-slot decode slot 22 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992002 update rms ratio 1.0163
+L3 32-slot decode slot 23 pos 2102: delta PCC 0.999950 full PCC 0.999973 update rms ratio 1.0001 (HF router margin 1.1e-02)
+L3 32-slot decode slot 23 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992158 update rms ratio 1.0191
+L3 32-slot decode slot 24 pos 2302: delta PCC 0.999948 full PCC 0.999971 update rms ratio 0.9961 (HF router margin 6.5e-03)
+L3 32-slot decode slot 24 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995037 update rms ratio 0.9949
+L3 32-slot decode slot 25 pos 2302: delta PCC 0.999898 full PCC 0.999978 update rms ratio 0.9949 (HF router margin 1.7e-03)
+L3 32-slot decode slot 25 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995583 update rms ratio 1.0031
+L3 32-slot decode slot 26 pos 2302: delta PCC 0.999947 full PCC 0.999983 update rms ratio 1.0066 (HF router margin 1.4e-03)
+L3 32-slot decode slot 26 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994679 update rms ratio 1.0182
+L3 32-slot decode slot 27 pos 2302: delta PCC 0.999962 full PCC 0.999983 update rms ratio 0.9923 (HF router margin 5.2e-03)
+L3 32-slot decode slot 27 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995713 update rms ratio 1.0061
+L3 32-slot decode slot 28 pos 2302: delta PCC 0.999971 full PCC 0.999982 update rms ratio 1.0060 (HF router margin 9.3e-03)
+L3 32-slot decode slot 28 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995769 update rms ratio 1.0168
+L3 32-slot decode slot 29 pos 2302: delta PCC 0.999924 full PCC 0.999961 update rms ratio 1.0013 (HF router margin 5.5e-04)
+L3 32-slot decode slot 29 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.996954 update rms ratio 1.0225
+L3 32-slot decode slot 30 pos 2302: delta PCC 0.999826 full PCC 0.999977 update rms ratio 0.9990 (HF router margin 1.3e-03)
+L3 32-slot decode slot 30 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.997214 update rms ratio 0.9994
+L3 32-slot decode slot 31 pos 2302: delta PCC 0.999919 full PCC 0.999968 update rms ratio 1.0009 (HF router margin 1.4e-03)
+L3 32-slot decode slot 31 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994108 update rms ratio 1.0078
+L3 32 active slots: min decode delta PCC 0.995567
+PASSEDrouter near-tie y_swap matches: 1 of 96 MoE decode tokens (cap 4); module total 1 of 132 (cap 3)
+decode update rms ratio mean 1.0010 over 96 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 15:12:30.324 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-17 15:12:43.955 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+FAILEDquantization delta (port vs the checkpoint reference, 151 checks): min delta PCC 0.977849, update rms ratio 0.9811 .. 1.0655
+module y_swap matches 1 of 132 MoE decode tokens (cap 3)
+
+
+=================================== FAILURES ===================================
+__________________________ test_real_weights[kda_moe] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7762497bfb00>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_real_weights(mesh, rd, kind):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1, prefill_len=100, decode_steps=3, slot=5)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:363:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:338: in run_user
+    o = runner.eager_step(rows, pos)[slot]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:226: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder.FusedGlmKDA object at 0x776201a22f60>
+x = ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 4096]), dtype=DataType::BFLOAT16, layout=Layout::TILE)
+dstate = KdaDecodeState(recurrent=ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             ...,
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([8, 64, 128, 128]), dtype=DataType::FLOAT32, layout=Layout::TILE), conv=[ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE)])
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+
+        # ---- gates
+        rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
+        sg = ttnn.linear(
+            rank_in,
+            w.decay_output_projection,
+            bias=w.decay_bias_flat,
+            activation="sigmoid",
+            dtype=ttnn.float32,
+            memory_config=DRAM,
+            compute_kernel_config=cc,
+        )
+        ttnn.deallocate(rank_in)
+        eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)  # [1,1,B,H*K]
+        ttnn.deallocate(sg)
+        beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
+        ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
+        ttnn.deallocate(proj)
+
+        # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
+        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        for t in (qkv, eg, beta):
+            ttnn.deallocate(t)
+
+        # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
+>       if fold:
+           ^^^^
+E       NameError: name 'fold' is not defined
+
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:310: NameError
+___________________________ test_lengths[kda_moe-33] ___________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7762497bfb00>
+kind = 'kda_moe', length = 33
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:338: in run_user
+    o = runner.eager_step(rows, pos)[slot]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:226: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder.FusedGlmKDA object at 0x7762497bf170>
+x = ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [-2.0898e-01, -1.1426e-01,  ...,  1.6699e-01,  4.3701e-02],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 4096]), dtype=DataType::BFLOAT16, layout=Layout::TILE)
+dstate = KdaDecodeState(recurrent=ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 1.5428e-04,  1.1394e-03,  ..., -2.0215e-04, -5.6098e-04],
+               [ 2.7241e-04,  7.1275e-04,  ..., -1.1268e-03, -7.3555e-04],
+               ...,
+               [-5.2970e-04,  1.3794e-03,  ...,  7.4676e-04, -1.6388e-03],
+               [-5.8102e-03,  6.5407e-04,  ..., -2.9100e-03,  5.0395e-04]],
+
+              [[-3.6413e-03, -2.6811e-03,  ..., -1.9384e-03, -2.2251e-03],
+               [ 7.2076e-04,  9.5286e-04,  ..., -3.0017e-03,  2.2340e-03],
+               ...,
+               [ 2.2604e-04,  2.4984e-03,  ...,  2.8584e-03,  3.0971e-03],
+               [-1.6872e-03, -5.3063e-03,  ..., -2.7228e-03,  6.6313e-04]],
+
+              ...,
+
+              [[ 5.4562e-03, -2.5853e-03,  ...,  1.4147e-02, -1.0943e-02],
+               [-5.2172e-03,  8.8634e-04,  ..., -2.9928e-03,  2.9260e-03],
+               ...,
+               [ 1.4606e-02,  8.2089e-04,  ..., -1.8025e-03, -3.8664e-03],
+               [-5.4050e-03,  1.5464e-03,  ..., -3.7685e-03,  7.3735e-04]],
+
+              [[ 2.6799e-04,  7.8790e-04,  ..., -3.0502e-04, -4.9066e-04],
+               [-1.0668e-03,  1.7892e-03,  ..., -4.2311e-04,  1.9552e-04],
+               ...,
+               [ 1.3122e-04,  1.4517e-04,  ..., -1.6514e-04, -6.2871e-05],
+               [-5.7097e-04, -5.8242e-04,  ...,  7.3187e-04,  3.1853e-04]]],
+
+             ...,
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([8, 64, 128, 128]), dtype=DataType::FLOAT32, layout=Layout::TILE), conv=[ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 3.5938e-01,  6.2891e-01,  ..., -2.1777e-01, -4.7607e-02],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 1.5430e-01,  1.6504e-01,  ..., -1.2598e-01,  6.6406e-02],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [-1.6895e-01,  9.7266e-01,  ...,  7.5000e-01,  5.2344e-01],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE)])
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+
+        # ---- gates
+        rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
+        sg = ttnn.linear(
+            rank_in,
+            w.decay_output_projection,
+            bias=w.decay_bias_flat,
+            activation="sigmoid",
+            dtype=ttnn.float32,
+            memory_config=DRAM,
+            compute_kernel_config=cc,
+        )
+        ttnn.deallocate(rank_in)
+        eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)  # [1,1,B,H*K]
+        ttnn.deallocate(sg)
+        beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
+        ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
+        ttnn.deallocate(proj)
+
+        # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
+        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        for t in (qkv, eg, beta):
+            ttnn.deallocate(t)
+
+        # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
+>       if fold:
+           ^^^^
+E       NameError: name 'fold' is not defined
+
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:310: NameError
+__________________________ test_lengths[kda_moe-2049] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7762497bfb00>
+kind = 'kda_moe', length = 2049
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:338: in run_user
+    o = runner.eager_step(rows, pos)[slot]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:226: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder.FusedGlmKDA object at 0x7762497bf170>
+x = ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 5.4199e-02, -2.4609e-01,  ..., -1.2305e-01,  3.0396e-02],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 4096]), dtype=DataType::BFLOAT16, layout=Layout::TILE)
+dstate = KdaDecodeState(recurrent=ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 1.8542e-03,  1.2029e-03,  ..., -5.9674e-05,  1.6423e-04],
+               [ 5.3628e-04,  1.4887e-03,  ...,  3.3809e-04, -2.7351e-04],
+               ...,
+               [ 2.2279e-03,  2.1127e-03,  ...,  9.2730e-06,  5.2120e-04],
+               [-4.1750e-03,  4.5303e-04,  ...,  1.1423e-03, -1.4767e-03]],
+
+              [[-1.4050e-03, -7.8442e-04,  ...,  1.2979e-03, -4.4833e-03],
+               [ 1.7671e-03, -2.5078e-04,  ..., -4.6820e-03,  1.8582e-03],
+               ...,
+               [-3.3204e-03,  5.7046e-03,  ..., -1.1893e-02,  1.5756e-02],
+               [ 2.9961e-03, -5.1673e-03,  ...,  6.9567e-03, -7.2309e-04]],
+
+              ...,
+
+              [[-7.9818e-03,  1.3716e-03,  ...,  1.3156e-02, -2.2255e-02],
+               [-2.7627e-04,  2.1849e-05,  ..., -2.2659e-04, -1.5520e-04],
+               ...,
+               [-1.0787e-02, -4.3767e-03,  ..., -6.1123e-03, -9.4096e-03],
+               [-1.3983e-02,  7.5907e-03,  ..., -7.9522e-03, -1.1967e-02]],
+
+              [[-3.6179e-04, -6.2245e-04,  ..., -1.7350e-03, -3.1211e-04],
+               [-4.1946e-04, -1.8250e-04,  ..., -1.5909e-03,  4.3261e-05],
+               ...,
+               [-1.1929e-05, -2.8532e-07,  ..., -4.1488e-05,  3.4143e-06],
+               [ 6.2446e-04,  2.1275e-04,  ...,  1.4566e-03, -1.8632e-04]]],
+
+             ...,
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([8, 64, 128, 128]), dtype=DataType::FLOAT32, layout=Layout::TILE), conv=[ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 2.8516e-01,  2.6367e-01,  ..., -5.9375e-01,  4.5508e-01],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 1.4941e-01,  4.5703e-01,  ...,  2.4023e-01, -4.4922e-01],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 3.3203e-02,  1.0312e+00,  ..., -4.9609e-01,  4.3555e-01],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE)])
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+
+        # ---- gates
+        rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
+        sg = ttnn.linear(
+            rank_in,
+            w.decay_output_projection,
+            bias=w.decay_bias_flat,
+            activation="sigmoid",
+            dtype=ttnn.float32,
+            memory_config=DRAM,
+            compute_kernel_config=cc,
+        )
+        ttnn.deallocate(rank_in)
+        eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)  # [1,1,B,H*K]
+        ttnn.deallocate(sg)
+        beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
+        ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
+        ttnn.deallocate(proj)
+
+        # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
+        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        for t in (qkv, eg, beta):
+            ttnn.deallocate(t)
+
+        # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
+>       if fold:
+           ^^^^
+E       NameError: name 'fold' is not defined
+
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:310: NameError
+_________________________ test_batched_users[kda_moe] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7762497bfb00>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batched_users(mesh, rd, kind):
+        """Four users with different prompt lengths in slots 1, 3, 4, 6 (other slots inactive) prefill one after another,
+        then decode three steps together (eager, then traced): every user must match its own HF sequence."""
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+        users = {1: 37, 3: 100, 4: 2100 if kind == "dsa_moe" else 300, 6: 64}
+        steps = 3
+        refs = {s: reference(layer, "real", 500 + s, n, steps) for s, n in users.items()}
+        for s, n in users.items():
+            x, y = refs[s]
+            out = prefill_user(dec, mesh, x, n, s)
+            check(f"L{layer} user slot {s} prefill {n}", out, x[:n], y[:n])
+        runner = DecodeRunner(dec, mesh, BATCH)
+        for i in range(steps):
+            pos = [-1] * BATCH
+            rows = {}
+            for s, n in users.items():
+                pos[s] = n + i
+                rows[s] = refs[s][0][n + i]
+            if i == 0:
+>               got = runner.eager_step(rows, pos)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:467:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:226: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder.FusedGlmKDA object at 0x7762497bf110>
+x = ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 5.2734e-02,  8.9355e-02,  ...,  1.4258e-01,  3.1445e-01],
+               ...,
+               [ 3.5352e-01, -3.4570e-01,  ..., -8.1543e-02,  1.7700e-02],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 4096]), dtype=DataType::BFLOAT16, layout=Layout::TILE)
+dstate = KdaDecodeState(recurrent=ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]],
+
+             [[[ 1.1769e-04, -2.1429e-04,  ..., -1.6946e-03, -4.8814e-04],
+               [-4.2027e-04,  6.8265e-05,  ...,  1.4631e-04, -1.2737e-03],
+               ...,
+               [-4.0027e-04, -3.1272e-04,  ..., -8.1802e-04,  1.0297e-04],
+               [ 3.7486e-03,  4.0523e-03,  ...,  1.0542e-02, -2.5840e-03]],
+
+              [[-7.9974e-04, -1.6659e-03,  ...,  2.0237e-03,  1.3452e-03],
+               [-1.8287e-03, -3.4925e-04,  ..., -1.1061e-03,  1.7910e-03],
+               ...,
+               [-3.8384e-03,  2.9589e-03,  ..., -1.7659e-03,  8.0066e-04],
+               [ 1.9751e-03, -1.7319e-03,  ...,  2.6422e-03,  3.1730e-04]],
+
+              ...,
+
+              [[ 5.0512e-03, -2.8490e-04,  ...,  4.5643e-03, -7.6014e-03],
+               [ 2.6908e-05, -2.3996e-05,  ..., -5.4351e-05, -2.2984e-05],
+               ...,
+               [ 1.0855e-03,  1.3985e-03,  ..., -6.9241e-03, -5.7170e-04],
+               [ 1.4238e-03,  1.3194e-03,  ..., -1.2468e-03,  1.9198e-04]],
+
+              [[-1.1234e-03, -9.0445e-04,  ..., -2.1596e-05, -2.2468e-03],
+               [-1.2515e-03, -3.7262e-04,  ...,  1.0241e-03, -1.5607e-03],
+               ...,
+               [ 1.6453e-03, -3.4138e-04,  ...,  6.3917e-04,  1.9531e-04],
+               [ 2.0166e-03, -5.8573e-04,  ...,  6.8658e-04,  2.8732e-04]]],
+
+             ...,
+
+             [[[-4.9903e-05,  7.1463e-04,  ...,  5.5914e-04,  1.5471e-04],
+               [ 5.0477e-04,  4.3832e-04,  ...,  7.3194e-04, -3.8073e-04],
+               ...,
+               [ 5.5443e-04, -1.3165e-03,  ..., -8.9772e-04, -7.3654e-04],
+               [ 2.2790e-03, -2.4335e-03,  ..., -2.4256e-03, -3.7557e-04]],
+
+              [[ 1.2513e-03, -1.9782e-03,  ...,  1.7321e-03, -6.8152e-04],
+               [ 4.2474e-03,  5.7359e-04,  ...,  1.2032e-03, -1.0283e-03],
+               ...,
+               [-2.4563e-03,  1.4724e-03,  ..., -2.0479e-04,  2.4565e-03],
+               [ 1.7146e-03, -7.1499e-03,  ...,  2.1957e-03, -6.7495e-04]],
+
+              ...,
+
+              [[ 4.0126e-03, -5.6162e-03,  ...,  1.3854e-02, -8.6503e-03],
+               [-7.7906e-04, -8.0146e-04,  ...,  1.4758e-03, -1.7683e-03],
+               ...,
+               [-1.0832e-02,  3.4825e-03,  ...,  3.5208e-03, -8.0512e-03],
+               [-1.7451e-03,  6.3160e-03,  ..., -1.2763e-02, -3.3338e-04]],
+
+              [[ 6.0590e-04, -2.5404e-04,  ..., -3.4135e-03, -8.0180e-04],
+               [ 8.7084e-04, -4.8654e-04,  ..., -2.2361e-03, -1.6265e-03],
+               ...,
+               [ 4.5052e-04, -1.5345e-04,  ..., -4.0789e-04, -5.1085e-04],
+               [-2.2703e-04,  1.2359e-03,  ...,  7.8793e-04,  7.3707e-04]]],
+
+             [[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              ...,
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]],
+
+              [[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               ...,
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([8, 64, 128, 128]), dtype=DataType::FLOAT32, layout=Layout::TILE), conv=[ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 6.5918e-02, -1.9629e-01,  ..., -3.6133e-01,  2.8906e-01],
+               ...,
+               [ 8.9355e-02,  9.3750e-02,  ..., -7.2754e-02,  2.2559e-01],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 2.4707e-01,  4.0039e-01,  ..., -2.8076e-02,  1.0547e-01],
+               ...,
+               [-3.5352e-01,  2.3633e-01,  ...,  5.6641e-01,  2.9102e-01],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [-2.7734e-01, -6.1523e-02,  ...,  3.1250e-02,  3.8867e-01],
+               ...,
+               [ 1.8848e-01,  7.3828e-01,  ..., -6.6895e-02,  4.4678e-02],
+               [ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00]]]], shape=Shape([1, 1, 8, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE)])
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+
+        # ---- gates
+        rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
+        sg = ttnn.linear(
+            rank_in,
+            w.decay_output_projection,
+            bias=w.decay_bias_flat,
+            activation="sigmoid",
+            dtype=ttnn.float32,
+            memory_config=DRAM,
+            compute_kernel_config=cc,
+        )
+        ttnn.deallocate(rank_in)
+        eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)  # [1,1,B,H*K]
+        ttnn.deallocate(sg)
+        beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
+        ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
+        ttnn.deallocate(proj)
+
+        # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
+        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        for t in (qkv, eg, beta):
+            ttnn.deallocate(t)
+
+        # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
+>       if fold:
+           ^^^^
+E       NameError: name 'fold' is not defined
+
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:310: NameError
+_______________________ test_batch32_all_active[kda_moe] _______________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7762497bfb00>
+kind = 'kda_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batch32_all_active(mesh, rd, kind):
+        """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+        dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+        layer = KINDS[kind]
+        for k in list(_LAYERS):  # one layer resident (DRAM)
+            del _LAYERS[k]
+        dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+        lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+        steps = 3
+        rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+        refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
+        users = {}  # slot -> (seed, prompt length)
+        for slot in range(32):
+            users[slot] = (slot % 8, lengths[slot // 8])
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            prefill_user(dec, mesh, x, n, slot)
+        runner = DecodeRunner(dec, mesh, 32)
+        worst = 1.0
+        for i in range(steps):
+            pos = [n + i for _, (_, n) in sorted(users.items())]
+            rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+            if i == 0:
+>               got = runner.eager_step(rows, pos)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:636:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:226: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <models.autoports.zai_org_glm_5_3_flash.tt.fused_decoder.FusedGlmKDA object at 0x7762497bf5c0>
+x = ttnn.Tensor([[[[ 7.0801e-02,  2.1484e-02,  ...,  2.1729e-02,  2.6953e-01],
+               [ 3.6865e-02, -2.3633e-01,  ...,  1.2451e-01,  1.3086e-01],
+               ...,
+               [ 1.3504e-03, -3.7598e-02,  ...,  1.0559e-02,  2.2217e-02],
+               [ 3.4961e-01, -1.8359e-01,  ..., -3.0859e-01, -1.4062e-01]]]], shape=Shape([1, 1, 32, 4096]), dtype=DataType::BFLOAT16, layout=Layout::TILE)
+dstate = KdaDecodeState(recurrent=ttnn.Tensor([[[[-2.5383e-04,  1.3568e-03,  ...,  5.2929e-05, -4.0813e-04],
+               [ 1.5177e-04,  6.4022e-04,  ..., -1.4811e-05, -7.0424e-04],
+               ...,
+               [ 1.2248e-03, -2.3983e-04,  ..., -6.7611e-04, -4.6416e-04],
+               [-2.5656e-03, -1.8836e-04,  ..., -1.2923e-03, -3.0831e-04]],
+
+              [[ 3.6331e-03, -3.6598e-03,  ..., -5.2151e-04, -3.1787e-03],
+               [ 2.8168e-03,  3.2368e-03,  ..., -2.6983e-03,  2.7830e-03],
+               ...,
+               [-4.2244e-03,  6.0551e-03,  ...,  1.3715e-03,  3.9039e-03],
+               [ 4.1367e-03, -6.8550e-03,  ..., -2.1050e-03, -3.7722e-03]],
+
+              ...,
+
+              [[ 1.6572e-03,  2.9910e-03,  ...,  9.7125e-03, -3.3656e-03],
+               [ 1.8332e-03,  2.4923e-05,  ...,  4.9344e-05,  1.0478e-03],
+               ...,
+               [ 2.7458e-04, -1.1515e-03,  ..., -2.0206e-03, -4.0987e-03],
+               [-1.0621e-04,  1.8404e-03,  ..., -4.3045e-03, -1.3555e-03]],
+
+              [[-5.3285e-04, -7.2729e-03,  ...,  2.0960e-03, -2.1729e-03],
+               [-4.2611e-04, -2.4791e-03,  ..., -1.3165e-04, -5.4229e-04],
+               ...,
+               [ 2.7893e-04,  9.4495e-05,  ...,  1.1467e-03,  8.1146e-05],
+               [-6.7691e-05,  1.5993e-03,  ..., -1.2098e-03,  6.4017e-05]]],
+
+             [[[ 1.0242e-03, -1.1761e-04,  ...,  1.1814e-03, -1.0616e-03],
+               [ 2.6217e-04,  1.9038e-04,  ...,  3.3638e-04,  8.0288e-05],
+               ...,
+               [ 1.1562e-03,  5.1715e-04,  ...,  8.9613e-05, -6.9945e-04],
+               [-5.6231e-03,  5.5814e-04,  ..., -4.6664e-03,  2.2468e-03]],
+
+              [[-5.8798e-04,  1.8850e-03,  ..., -2.4317e-04, -5.1860e-04],
+               [ 3.9263e-03, -1.5635e-03,  ..., -5.6815e-04,  7.1263e-05],
+               ...,
+               [-5.2998e-06, -8.7087e-04,  ...,  1.0523e-03,  9.4411e-04],
+               [-2.0241e-03, -2.0015e-03,  ...,  3.2853e-04,  5.7962e-04]],
+
+              ...,
+
+              [[-1.4024e-02,  5.2583e-04,  ...,  8.4292e-03,  1.4108e-03],
+               [-7.0384e-04, -2.4329e-05,  ..., -1.4665e-04,  4.6575e-04],
+               ...,
+               [-6.1115e-03,  3.0518e-03,  ..., -3.1952e-04, -9.0815e-03],
+               [-5.8822e-03, -6.5722e-04,  ..., -5.0278e-03,  2.8336e-03]],
+
+              [[ 2.6929e-03, -1.0363e-03,  ...,  8.7958e-04, -2.9704e-04],
+               [ 1.4581e-03, -1.2924e-03,  ...,  1.0511e-03, -2.6757e-04],
+               ...,
+               [ 1.1290e-04, -1.9462e-04,  ...,  4.0095e-05, -3.1581e-05],
+               [-1.1965e-03,  2.2782e-03,  ..., -7.0050e-04,  3.4760e-04]]],
+
+             ...,
+
+             [[[-8.9573e-04,  8.0513e-04,  ...,  1.6635e-03,  6.1259e-04],
+               [-9.4708e-04,  1.0096e-03,  ...,  8.3087e-04,  3.5472e-04],
+               ...,
+               [ 1.3276e-03,  1.1328e-03,  ...,  6.3541e-04, -3.8925e-05],
+               [ 4.5348e-03, -1.5157e-03,  ..., -3.1335e-03, -2.5034e-04]],
+
+              [[ 2.6458e-03, -4.1269e-03,  ...,  2.9180e-03, -4.6733e-04],
+               [ 1.2984e-03,  4.6749e-03,  ..., -2.3935e-03, -1.7068e-03],
+               ...,
+               [-9.7627e-04,  2.9874e-03,  ..., -7.5032e-03,  1.1202e-02],
+               [-1.5484e-03, -6.0866e-03,  ...,  2.4540e-03,  5.2177e-03]],
+
+              ...,
+
+              [[ 1.7625e-04, -8.6002e-03,  ...,  3.3221e-03, -2.2865e-02],
+               [-8.5487e-04,  3.6970e-04,  ...,  6.2509e-04, -1.3490e-04],
+               ...,
+               [ 3.0515e-03,  1.0656e-02,  ..., -6.3041e-03,  9.2976e-03],
+               [ 9.5852e-03, -3.0867e-03,  ..., -4.7341e-03,  1.5580e-02]],
+
+              [[-9.9710e-04, -2.7822e-03,  ...,  1.6912e-03, -8.3234e-05],
+               [-1.7218e-03, -3.7204e-03,  ...,  2.1905e-03,  4.0746e-05],
+               ...,
+               [ 3.7070e-04, -7.3003e-04,  ...,  8.5453e-04,  2.2581e-04],
+               [ 6.0486e-04,  2.1974e-03,  ..., -1.6023e-03, -2.4060e-04]]],
+
+             [[[-6.0770e-04, -1.3728e-03,  ...,  5.9120e-05, -1.0985e-03],
+               [-3.6333e-05, -5.7835e-04,  ...,  2.3299e-05,  3.1140e-04],
+               ...,
+               [ 2.7444e-03, -7.9603e-05,  ...,  2.0780e-03,  1.2821e-03],
+               [ 3.8307e-03,  2.2597e-04,  ..., -3.3517e-03,  4.0434e-03]],
+
+              [[-2.4174e-03, -1.5623e-03,  ...,  3.0452e-03, -2.2104e-03],
+               [ 6.1762e-03, -3.2602e-03,  ..., -6.1129e-03,  2.3707e-04],
+               ...,
+               [-3.4814e-03, -7.6079e-04,  ..., -1.0618e-02,  1.2786e-02],
+               [-5.1170e-04, -5.0406e-03,  ...,  6.4566e-03, -2.6236e-03]],
+
+              ...,
+
+              [[-7.4185e-03, -2.6402e-03,  ...,  6.4154e-03, -4.6824e-03],
+               [ 3.0302e-05,  4.5949e-05,  ..., -2.1337e-04,  1.3958e-04],
+               ...,
+               [ 7.0470e-03, -1.8752e-03,  ...,  6.4807e-03, -5.9253e-03],
+               [-8.2374e-03,  2.5706e-03,  ...,  6.9683e-03,  1.1461e-02]],
+
+              [[ 1.7776e-03, -6.3703e-04,  ...,  7.8545e-04,  6.1007e-04],
+               [ 2.9631e-03, -1.4023e-03,  ...,  1.5039e-03,  1.3465e-04],
+               ...,
+               [ 7.7288e-04, -3.1137e-04,  ...,  4.2145e-04,  2.1984e-04],
+               [-1.3558e-03,  1.7451e-03,  ..., -1.5058e-03,  3.3070e-04]]]], shape=Shape([32, 64, 128, 128]), dtype=DataType::FLOAT32, layout=Layout::TILE), conv=[ttnn.Tensor([[[[-3.0078e-01,  7.1484e-01,  ...,  9.0234e-01, -1.0791e-01],
+               [ 1.9922e-01,  5.9766e-01,  ..., -8.2520e-02,  6.7871e-02],
+               ...,
+               [-2.9883e-01,  8.0566e-02,  ...,  6.1328e-01,  1.0681e-02],
+               [ 6.3965e-02,  3.1494e-02,  ...,  6.1719e-01,  2.5391e-01]]]], shape=Shape([1, 1, 32, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[-2.3828e-01,  6.4453e-01,  ...,  5.0049e-02,  1.0645e-01],
+               [ 5.7678e-03,  8.1250e-01,  ..., -1.1963e-01, -2.2583e-02],
+               ...,
+               [ 7.8201e-04,  6.4453e-01,  ...,  2.4707e-01, -1.9238e-01],
+               [ 2.6172e-01,  3.7695e-01,  ..., -4.4434e-02,  3.2959e-02]]]], shape=Shape([1, 1, 32, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE), ttnn.Tensor([[[[ 1.6016e-01,  7.3828e-01,  ...,  3.9258e-01,  1.3086e-01],
+               [-1.1035e-01,  5.1562e-01,  ..., -2.9102e-01,  2.4609e-01],
+               ...,
+               [-1.0986e-01,  6.0547e-01,  ..., -8.6060e-03,  2.2217e-02],
+               [ 2.2656e-01,  2.5000e-01,  ..., -2.6172e-01, -2.5000e-01]]]], shape=Shape([1, 1, 32, 24576]), dtype=DataType::BFLOAT16, layout=Layout::TILE)])
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+
+        # ---- gates
+        rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)
+        sg = ttnn.linear(
+            rank_in,
+            w.decay_output_projection,
+            bias=w.decay_bias_flat,
+            activation="sigmoid",
+            dtype=ttnn.float32,
+            memory_config=DRAM,
+            compute_kernel_config=cc,
+        )
+        ttnn.deallocate(rank_in)
+        eg = ttnn.exp(ttnn.multiply(sg, GATE_LOWER_BOUND, memory_config=DRAM), memory_config=DRAM)  # [1,1,B,H*K]
+        ttnn.deallocate(sg)
+        beta_logit = ttnn.slice(proj, (0, 0, 0, self.off_beta), (1, 1, B, self.off_beta + H), memory_config=DRAM)
+        beta_all = ttnn.sigmoid(ttnn.typecast(beta_logit, ttnn.float32), memory_config=DRAM)  # [1,1,B,H]
+        # inactive slots: beta = 0 and decay = 1 leave the recurrent state unchanged
+        beta = ttnn.where(inputs["active"], beta_all, 0.0, memory_config=DRAM)  # select: a NaN idle row stays out
+        eg_all = eg
+        eg = ttnn.where(inputs["active"], eg_all, 1.0, memory_config=DRAM)
+        ttnn.deallocate(beta_all)
+        ttnn.deallocate(eg_all)
+        ogate = ttnn.slice(proj, (0, 0, 0, self.off_gate), (1, 1, B, self.off_gate + H * V), memory_config=DRAM)
+        ttnn.deallocate(proj)
+
+        # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
+        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        for t in (qkv, eg, beta):
+            ttnn.deallocate(t)
+
+        # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = ttnn.rms_norm(
+            o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
+        )
+>       if fold:
+           ^^^^
+E       NameError: name 'fold' is not defined
+
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:310: NameError
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+27.30s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[dsa_moe]
+23.38s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[dsa_moe]
+23.24s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe]
+23.21s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe]
+22.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-1]
+20.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[dsa_moe]
+18.99s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33]
+18.82s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe]
+1.94s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+1.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[dsa_moe]
+1.23s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-129]
+1.20s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2177]
+1.05s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+1.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2051]
+0.98s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[dsa_moe]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2177]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2051]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-33]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[dsa_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-129]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2051]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2177]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[dsa_moe]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[dsa_moe]
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_moe] - NameError: name 'fold' is not defined
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-33] - NameError: name 'fold' is not defined
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_moe-2049] - NameError: name 'fold' is not defined
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_moe] - NameError: name 'fold' is not defined
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_moe] - NameError: name 'fold' is not defined
+=========== 5 failed, 10 passed, 29 deselected in 188.66s (0:03:08) ============
+nanobind: leaked 4 instances!
+ - leaked instance 0x7762103ac868 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x776263e81648 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x776263e81628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7762108d6f88 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 22 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - leaked function "buffer_address"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "from_json"
+ - leaked function "from_json"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Sat Oct 17 03:12:52 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

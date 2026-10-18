@@ -1,0 +1,17 @@
+=== start Sat Oct 17 09:24:04 PM UTC 2026 : timeout -k 60 1800 python -m models.autoports.zai_org_glm_5_3_flash.tools.kda_split_probe
+2026-10-17 21:24:06.421 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+kda in-proj bfp8 rows 2048         packed + slice + untilize:    6550.4 us
+kda in-proj bfp8 rows 2048         qkv + rest + untilize :    5908.0 us  bit-exact vs packed + slice + untilize: True
+kda in-proj bfp8 rows 2048         packed proj alone     :    5550.5 us  bit-exact vs packed + slice + untilize: False (shape (1, 1, 2048, 32960) vs (1, 1, 2048, 24576))
+kda in-proj bfp8 rows 2048         qkv proj alone        :    3909.4 us  bit-exact vs packed + slice + untilize: True
+kda in-proj bfp8 rows 2048         rest proj alone       :    1411.1 us  bit-exact vs packed + slice + untilize: False (shape (1, 1, 2048, 8384) vs (1, 1, 2048, 24576))
+kda in-proj bfp8 rows 32           packed (one matmul)   :     410.2 us
+kda in-proj bfp8 rows 32           qkv + rest (two matmuls):     398.3 us  bit-exact vs packed (one matmul): True
+kda in-proj bfp8 rows 32           packed proj alone     :     400.5 us  bit-exact vs packed (one matmul): False (shape (1, 1, 32, 32960) vs (1, 1, 32, 24576))
+kda in-proj bfp8 rows 1            packed (one matmul)   :     408.9 us
+kda in-proj bfp8 rows 1            qkv + rest (two matmuls):     397.7 us  bit-exact vs packed (one matmul): True
+kda in-proj bfp8 rows 1            packed proj alone     :     399.8 us  bit-exact vs packed (one matmul): False (shape (1, 1, 1, 32960) vs (1, 1, 1, 24576))
+=== exit code: 0 Sat Oct 17 09:24:11 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

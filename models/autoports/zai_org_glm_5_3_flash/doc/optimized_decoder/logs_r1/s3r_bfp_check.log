@@ -1,0 +1,45 @@
+=== start Sat Oct 17 02:13:55 PM UTC 2026 : timeout -k 60 1800 python -m models.autoports.zai_org_glm_5_3_flash.tools.bfp_check --layer 4
+2026-10-17 14:13:56.627 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+mlp.experts.0.gate_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.0.gate_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.0.up_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.0.up_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.0.down_proj.weight bfp4: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.0.down_proj.weight bfp8: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.gate_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.gate_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.up_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.up_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.down_proj.weight bfp4: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.57.down_proj.weight bfp8: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.gate_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.gate_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.up_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.up_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.down_proj.weight bfp4: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.experts.191.down_proj.weight bfp8: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.gate_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.gate_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.up_proj.weight bfp4: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.up_proj.weight bfp8: (2048, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.down_proj.weight bfp4: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+mlp.shared_experts.down_proj.weight bfp8: (4096, 2048) mismatches 0 (max |d| 0.000e+00)
+4-D packed up|gate bfp4 (1, 2, 4096, 4096): mismatches 0
+TOTAL mismatches 0
+=== exit code: 0 Sat Oct 17 02:14:04 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== start Sat Oct 17 03:25:25 PM UTC 2026 : timeout -k 60 1800 python -m models.autoports.zai_org_glm_5_3_flash.tools.bfp_check --layer 0
+2026-10-17 15:25:26.971 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+mlp.gate_proj.weight bfp4: (12288, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.gate_proj.weight bfp8: (12288, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.up_proj.weight bfp4: (12288, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.up_proj.weight bfp8: (12288, 4096) mismatches 0 (max |d| 0.000e+00)
+mlp.down_proj.weight bfp4: (4096, 12288) mismatches 0 (max |d| 0.000e+00)
+mlp.down_proj.weight bfp8: (4096, 12288) mismatches 0 (max |d| 0.000e+00)
+TOTAL mismatches 0
+=== exit code: 0 Sat Oct 17 03:25:36 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

@@ -1,0 +1,169 @@
+=== start Thu Oct 15 09:08:25 PM UTC 2026 : timeout 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.dense_decode_probe
+2026-10-15 21:08:27.185 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-15 21:08:29.743 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:32.020 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:32.022 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:32.023 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:34.220 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:34.221 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:34.222 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:36.400 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:36.402 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:37.287 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:39.520 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:39.521 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:39.523 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:41.696 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:41.697 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:41.698 | WARNING  | models.demos.blackhole.qwen36.tt.tp_common:create_dram_sharded_matmul_program_config:143 - dram_sharded N=32960: 129 tiles/bank not divisible by 2 readers -> 1
+2026-10-15 21:08:43.867 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:08:43.868 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+grid 11 10
+kda_in    BFLOAT8_B  HiFi4 default         :   401.7 us    357 GB/s  PCC 0.999999
+kda_in    BFLOAT8_B  HiFi4 1d c32          :   473.1 us    303 GB/s  PCC 0.999999
+kda_in    BFLOAT8_B  HiFi4 1d c64          :   431.3 us    333 GB/s  PCC 0.999999
+kda_in    BFLOAT8_B  HiFi4 1d c110         :   408.8 us    351 GB/s  PCC 0.999999
+kda_in    BFLOAT8_B  HiFi4 dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT8_B  HiFi4 dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT8_B  HiFi2 default         :   398.1 us    360 GB/s  PCC 0.999994
+kda_in    BFLOAT8_B  HiFi2 1d c32          :   419.1 us    342 GB/s  PCC 0.999994
+kda_in    BFLOAT8_B  HiFi2 1d c64          :   409.0 us    351 GB/s  PCC 0.999994
+kda_in    BFLOAT8_B  HiFi2 1d c110         :   399.8 us    359 GB/s  PCC 0.999994
+kda_in    BFLOAT8_B  HiFi2 dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT8_B  HiFi2 dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT8_B  LoFi  default         :   399.3 us    359 GB/s  PCC 0.999913
+kda_in    BFLOAT8_B  LoFi  1d c32          :   410.6 us    349 GB/s  PCC 0.999913
+kda_in    BFLOAT8_B  LoFi  1d c64          :   405.7 us    354 GB/s  PCC 0.999913
+kda_in    BFLOAT8_B  LoFi  1d c110         :   398.7 us    360 GB/s  PCC 0.999913
+kda_in    BFLOAT8_B  LoFi  dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT8_B  LoFi  dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  HiFi4 default         :   269.2 us    282 GB/s  PCC 0.999999
+kda_in    BFLOAT4_B  HiFi4 1d c32          :   340.8 us    223 GB/s  PCC 0.999999
+kda_in    BFLOAT4_B  HiFi4 1d c64          :   314.5 us    241 GB/s  PCC 0.999999
+kda_in    BFLOAT4_B  HiFi4 1d c110         :   289.4 us    262 GB/s  PCC 0.999999
+kda_in    BFLOAT4_B  HiFi4 dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  HiFi4 dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  HiFi2 default         :   264.9 us    287 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  HiFi2 1d c32          :   318.5 us    238 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  HiFi2 1d c64          :   292.1 us    260 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  HiFi2 1d c110         :   278.5 us    273 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  HiFi2 dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  HiFi2 dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  LoFi  default         :   263.6 us    288 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  LoFi  1d c32          :   313.2 us    242 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  LoFi  1d c64          :   290.6 us    261 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  LoFi  1d c110         :   277.9 us    273 GB/s  PCC 0.999994
+kda_in    BFLOAT4_B  LoFi  dram_sharded r1 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_in    BFLOAT4_B  LoFi  dram_sharded r2 : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+kda_out   BFLOAT8_B  HiFi4 default         :   147.4 us    242 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi4 1d c32          :    99.9 us    357 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi4 1d c64          :   102.9 us    347 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi4 1d c110         :   102.3 us    349 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi4 dram_sharded r1 :   217.1 us    164 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi4 dram_sharded r2 :   117.0 us    305 GB/s  PCC 0.999999
+kda_out   BFLOAT8_B  HiFi2 default         :   146.7 us    243 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  HiFi2 1d c32          :   102.4 us    348 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  HiFi2 1d c64          :    99.6 us    358 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  HiFi2 1d c110         :    99.5 us    358 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  HiFi2 dram_sharded r1 :   120.0 us    297 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  HiFi2 dram_sharded r2 :    89.8 us    397 GB/s  PCC 0.999994
+kda_out   BFLOAT8_B  LoFi  default         :   146.7 us    243 GB/s  PCC 0.999912
+kda_out   BFLOAT8_B  LoFi  1d c32          :    98.8 us    361 GB/s  PCC 0.999912
+kda_out   BFLOAT8_B  LoFi  1d c64          :    99.3 us    359 GB/s  PCC 0.999912
+kda_out   BFLOAT8_B  LoFi  1d c110         :    99.2 us    359 GB/s  PCC 0.999912
+kda_out   BFLOAT8_B  LoFi  dram_sharded r1 :    75.5 us    472 GB/s  PCC 0.999912
+kda_out   BFLOAT8_B  LoFi  dram_sharded r2 :    88.1 us    405 GB/s  PCC 0.999912
+kda_out   BFLOAT4_B  HiFi4 default         :   146.7 us    129 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi4 1d c32          :    66.1 us    286 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi4 1d c64          :    69.6 us    271 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi4 1d c110         :    69.9 us    270 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi4 dram_sharded r1 :   215.7 us     87 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi4 dram_sharded r2 :   114.6 us    165 GB/s  PCC 0.999999
+kda_out   BFLOAT4_B  HiFi2 default         :   146.8 us    129 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  HiFi2 1d c32          :    65.3 us    289 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  HiFi2 1d c64          :    70.8 us    266 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  HiFi2 1d c110         :    70.8 us    267 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  HiFi2 dram_sharded r1 :   118.6 us    159 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  HiFi2 dram_sharded r2 :    66.1 us    286 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  default         :   146.8 us    129 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  1d c32          :    67.7 us    279 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  1d c64          :    68.1 us    277 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  1d c110         :    68.0 us    278 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  dram_sharded r1 :    67.0 us    282 GB/s  PCC 0.999994
+kda_out   BFLOAT4_B  LoFi  dram_sharded r2 :    47.4 us    398 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi4 default         :    76.0 us    234 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi4 1d c32          :    52.8 us    338 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi4 1d c64          :    53.8 us    332 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi4 1d c110         :    53.7 us    332 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi4 dram_sharded r1 :   115.4 us    154 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi4 dram_sharded r2 :    65.6 us    272 GB/s  PCC 0.999999
+sq_4096   BFLOAT8_B  HiFi2 default         :    75.4 us    236 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi2 1d c32          :    53.6 us    333 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi2 1d c64          :    52.4 us    340 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi2 1d c110         :    52.4 us    340 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi2 dram_sharded r1 :    66.8 us    267 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  HiFi2 dram_sharded r2 :    46.9 us    380 GB/s  PCC 0.999994
+sq_4096   BFLOAT8_B  LoFi  default         :    75.5 us    236 GB/s  PCC 0.999913
+sq_4096   BFLOAT8_B  LoFi  1d c32          :    52.3 us    341 GB/s  PCC 0.999913
+sq_4096   BFLOAT8_B  LoFi  1d c64          :    52.2 us    342 GB/s  PCC 0.999913
+sq_4096   BFLOAT8_B  LoFi  1d c110         :    52.2 us    341 GB/s  PCC 0.999913
+sq_4096   BFLOAT8_B  LoFi  dram_sharded r1 :    42.7 us    417 GB/s  PCC 0.999913
+sq_4096   BFLOAT8_B  LoFi  dram_sharded r2 :    47.0 us    380 GB/s  PCC 0.999913
+sq_4096   BFLOAT4_B  HiFi4 default         :    75.7 us    125 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi4 1d c32          :    35.8 us    264 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi4 1d c64          :    36.8 us    257 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi4 1d c110         :    36.7 us    257 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi4 dram_sharded r1 :   114.6 us     82 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi4 dram_sharded r2 :    63.6 us    148 GB/s  PCC 0.999999
+sq_4096   BFLOAT4_B  HiFi2 default         :    75.5 us    125 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  HiFi2 1d c32          :    34.8 us    271 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  HiFi2 1d c64          :    37.5 us    252 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  HiFi2 1d c110         :    37.5 us    252 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  HiFi2 dram_sharded r1 :    65.8 us    143 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  HiFi2 dram_sharded r2 :    39.8 us    237 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  default         :    75.2 us    125 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  1d c32          :    34.6 us    273 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  1d c64          :    36.3 us    260 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  1d c110         :    36.3 us    260 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  dram_sharded r1 :    40.2 us    234 GB/s  PCC 0.999994
+sq_4096   BFLOAT4_B  LoFi  dram_sharded r2 :    30.5 us    310 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi4 default         :    39.9 us    224 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi4 1d c32          :    29.0 us    308 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi4 1d c64          :    29.3 us    305 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi4 1d c110         :    29.2 us    305 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi4 dram_sharded r1 :    64.4 us    138 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi4 dram_sharded r2 :    39.0 us    229 GB/s  PCC 0.999999
+down_2048 BFLOAT8_B  HiFi2 default         :    39.7 us    225 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi2 1d c32          :    28.1 us    317 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi2 1d c64          :    28.2 us    316 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi2 1d c110         :    28.4 us    314 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi2 dram_sharded r1 :    40.2 us    222 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  HiFi2 dram_sharded r2 :    28.9 us    309 GB/s  PCC 0.999994
+down_2048 BFLOAT8_B  LoFi  default         :    39.7 us    225 GB/s  PCC 0.999913
+down_2048 BFLOAT8_B  LoFi  1d c32          :    28.3 us    315 GB/s  PCC 0.999913
+down_2048 BFLOAT8_B  LoFi  1d c64          :    28.2 us    316 GB/s  PCC 0.999913
+down_2048 BFLOAT8_B  LoFi  1d c110         :    28.2 us    316 GB/s  PCC 0.999913
+down_2048 BFLOAT8_B  LoFi  dram_sharded r1 :    34.9 us    256 GB/s  PCC 0.999913
+down_2048 BFLOAT8_B  LoFi  dram_sharded r2 :    28.3 us    315 GB/s  PCC 0.999913
+down_2048 BFLOAT4_B  HiFi4 default         :    39.9 us    118 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi4 1d c32          :    20.5 us    230 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi4 1d c64          :    20.6 us    229 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi4 1d c110         :    20.6 us    229 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi4 dram_sharded r1 :    64.1 us     74 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi4 dram_sharded r2 :    37.9 us    125 GB/s  PCC 0.999999
+down_2048 BFLOAT4_B  HiFi2 default         :    39.7 us    119 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  HiFi2 1d c32          :    19.5 us    242 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  HiFi2 1d c64          :    20.6 us    229 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  HiFi2 1d c110         :    20.4 us    231 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  HiFi2 dram_sharded r1 :    39.7 us    119 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  HiFi2 dram_sharded r2 :    28.5 us    166 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  default         :    39.6 us    119 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  1d c32          :    18.8 us    251 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  1d c64          :    20.0 us    236 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  1d c110         :    20.0 us    236 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  dram_sharded r1 :    33.0 us    143 GB/s  PCC 0.999994
+down_2048 BFLOAT4_B  LoFi  dram_sharded r2 :    28.1 us    168 GB/s  PCC 0.999994
+=== exit code: 0 Thu Oct 15 09:09:21 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

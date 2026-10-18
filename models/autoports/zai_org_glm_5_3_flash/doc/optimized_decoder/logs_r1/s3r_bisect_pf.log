@@ -1,0 +1,478 @@
+=== GLM53_PF_OFF=bmm,o2d 2026-10-17T23:17:03+00:00
+2026-10-17 23:17:05.023 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 42 deselected / 2 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 23:17:26.865 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 1 prefill 2049: delta PCC 0.999876 full PCC 0.999939 update rms ratio 0.9930
+L3 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC 0.994865 update rms ratio 1.0044
+L3 slot 1 decode pos 2049: delta PCC 0.999935 full PCC 0.999979 update rms ratio 0.9955 (HF router margin 1.3e-03)
+L3 slot 1 decode pos 2049: vs checkpoint ref (quantization delta): delta PCC 0.995890 update rms ratio 0.9901
+L3 slot 1 decode pos 2050: delta PCC 0.999945 full PCC 0.999967 update rms ratio 0.9861 (HF router margin 4.9e-03)
+L3 slot 1 decode pos 2050: vs checkpoint ref (quantization delta): delta PCC 0.995568 update rms ratio 1.0232
+L3 slot 1 decode pos 2051: delta PCC 0.999936 full PCC 0.999972 update rms ratio 0.9955 (HF router margin 8.2e-03)
+L3 slot 1 decode pos 2051: vs checkpoint ref (quantization delta): delta PCC 0.996537 update rms ratio 1.0109
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 3 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 0 prefill 4000: delta PCC 0.999814 full PCC 0.999912 update rms ratio 0.9938
+L3 slot 0 prefill 4000: vs checkpoint ref (quantization delta): delta PCC 0.994795 update rms ratio 1.0047
+L3 slot 0 decode pos 4000: delta PCC 0.999959 full PCC 0.999977 update rms ratio 0.9940 (HF router margin 4.0e-03)
+L3 slot 0 decode pos 4000: vs checkpoint ref (quantization delta): delta PCC 0.996291 update rms ratio 1.0103
+L3 slot 0 decode pos 4001: delta PCC 0.999951 full PCC 0.999973 update rms ratio 0.9870 (HF router margin 1.4e-02)
+L3 slot 0 decode pos 4001: vs checkpoint ref (quantization delta): delta PCC 0.995808 update rms ratio 1.0182
+L3 slot 0 decode pos 4002: delta PCC 0.999493 full PCC 0.999707 update rms ratio 0.9915 (HF router margin 4.9e-04)
+L3 slot 0 decode pos 4002: vs checkpoint ref (quantization delta): delta PCC 0.994574 update rms ratio 1.0019
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 6 (cap 2)
+quantization delta (port vs the checkpoint reference, 8 checks): min delta PCC 0.994574, update rms ratio 0.9901 .. 1.0232
+module y_swap matches 0 of 6 MoE decode tokens (cap 2)
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+21.43s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+2.48s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+1.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.01s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+====================== 2 passed, 42 deselected in 25.61s =======================
+nanobind: leaked 119 instances!
+ - leaked instance 0x7fe1f6935608 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f69f31f8 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c27a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f67c22c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f69f2c58 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c23e8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f67c2778 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f67c2f28 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fc03df0c408 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c27d8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f67c2898 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f69f3888 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c2178 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f6935548 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7fe1f67c2478 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f69f36a8 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c1878 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f69f2e38 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fe1f67c0eb8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fe1f6935578 of type "ttnn._ttnn.tensor.Tensor"
+ - ... skipped remainder
+nanobind: leaked 76 keep_alive records!
+nanobind: leaked 40 types!
+ - leaked type "DispatchCoreAxis"
+ - leaked type "ttnn._ttnn.device.SubDeviceManagerId"
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 356 functions!
+ - leaked function "create_submesh"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__repr__"
+ - leaked function "matmul_select_program_factory"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "GetDefaultDevice"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== GLM53_PF_OFF=flash,o2d 2026-10-17T23:18:23+00:00
+2026-10-17 23:18:25.198 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 42 deselected / 2 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 23:18:47.145 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 1 prefill 2049: delta PCC -0.000050 full PCC -0.000030 update rms ratio inf
+L3 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC -0.000050 update rms ratio inf
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 0 prefill 4000: delta PCC nan full PCC nan update rms ratio inf
+L3 slot 0 prefill 4000: vs checkpoint ref (quantization delta): delta PCC nan update rms ratio inf
+FAILEDquantization delta (port vs the checkpoint reference, 2 checks): min delta PCC -0.000050, update rms ratio inf .. inf
+
+
+=================================== FAILURES ===================================
+__________________________ test_lengths[dsa_moe-2049] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x778ec038d430>
+kind = 'dsa_moe', length = 2049
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L3 slot 1 prefill 2049'
+got = tensor([[ 1.3770e-01, -9.7655e-02,  1.9508e-01,  ..., -6.8075e-03,
+         -1.0265e-02,  1.2549e-02],
+        [-8.5718e-02, -2.0904e-01,  9.1904e-02,  ..., -2.0388e-02,
+          4.7160e-03,  3.7769e-04],
+        [-2.4643e-01, -1.8474e-01,  1.0686e-01,  ..., -2.0745e-03,
+          5.7492e-03,  5.6923e-03],
+        ...,
+        [ 8.1765e+32, -2.4500e+32,  1.5657e+33,  ..., -2.6050e+35,
+         -2.3638e+35,  7.6885e+33],
+        [ 4.6956e+32, -6.4870e+32, -6.0799e+32,  ...,  1.1137e+35,
+         -1.3562e+35,  1.4395e+35],
+        [-1.9357e-04, -3.0487e-02,  5.1231e-02,  ...,  1.6620e-03,
+          2.4862e-03, -2.5140e-03]])
+x = tensor([[ 0.0198,  0.0079,  0.0820,  ..., -0.0075, -0.0140,  0.0209],
+        [-0.0427, -0.0747,  0.0977,  ..., -0.0216,  0.0032,  0.0013],
+        [ 0.0154, -0.0347,  0.0537,  ..., -0.0058,  0.0034,  0.0087],
+        ...,
+        [ 0.0308,  0.0164,  0.0356,  ...,  0.0015, -0.0007, -0.0023],
+        [ 0.0459, -0.0410,  0.0645,  ..., -0.0089,  0.0052,  0.0016],
+        [ 0.0149, -0.0334,  0.0378,  ..., -0.0032, -0.0075, -0.0027]])
+y = tensor([[ 1.3965e-01, -9.9121e-02,  1.9531e-01,  ..., -6.8359e-03,
+         -1.0254e-02,  1.2573e-02],
+        [-8.4961e-02, -2.0703e-01,  9.1309e-02,  ..., -2.0386e-02,
+          4.6997e-03,  4.3297e-04],
+        [-2.5195e-01, -1.8555e-01,  1.0742e-01,  ..., -2.1362e-03,
+          5.7678e-03,  5.7068e-03],
+        ...,
+        [ 4.7119e-02, -9.4238e-02,  2.8320e-02,  ...,  8.7891e-03,
+          5.7678e-03,  2.3193e-03],
+        [-3.1738e-03, -8.1055e-02,  8.3008e-02,  ..., -7.8964e-04,
+          9.7656e-03,  2.9144e-03],
+        [ 6.1035e-05, -3.0396e-02,  5.0781e-02,  ...,  1.6174e-03,
+          2.7008e-03, -2.4872e-03]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L3 slot 1 prefill 2049: update rms ratio inf outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+__________________________ test_lengths[dsa_moe-4000] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x778ec038d430>
+kind = 'dsa_moe', length = 4000
+
+    @pytest.mark.parametrize("kind,length", LENGTHS, ids=[f"{k}-{n}" for k, n in LENGTHS])
+    def test_lengths(mesh, rd, kind, length):
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+>       run_user(mesh, dec, layer, "real", seed=1000 + length, prefill_len=length, decode_steps=3, slot=length % BATCH)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:442:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:330: in run_user
+    check(f"L{layer} slot {slot} prefill {prefill_len}", out, x[:prefill_len], y[:prefill_len])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L3 slot 0 prefill 4000'
+got = tensor([[ 1.5306e-01, -1.2718e-01,  1.4504e-01,  ..., -8.6042e-04,
+         -4.1923e-03, -2.7155e-04],
+        [ 3.8430e-02, -5.8137e-02,  3.0073e-01,  ...,  1.1517e-02,
+         -3.4684e-03,  5.7725e-03],
+        [-3.8312e-04, -1.9789e-01,  9.7773e-02,  ...,  6.2803e-03,
+          3.8907e-03, -2.2896e-03],
+        ...,
+        [-4.7558e+24,  4.5475e+24, -4.1874e+23,  ...,  5.5274e+26,
+         -3.0791e+26, -5.4823e+25],
+        [-4.1913e+24,  3.7672e+24,  9.8546e+23,  ..., -4.1815e+26,
+          1.5001e+25,  1.0801e+27],
+        [ 9.5053e-03, -1.3044e+24, -5.8866e+24,  ..., -6.7466e+26,
+         -4.8829e+26, -7.6412e+26]])
+x = tensor([[ 0.0166, -0.0060,  0.0579,  ..., -0.0055, -0.0002,  0.0035],
+        [ 0.0144,  0.0065,  0.1367,  ..., -0.0002,  0.0020,  0.0075],
+        [ 0.0267, -0.0732, -0.0020,  ..., -0.0038,  0.0033, -0.0029],
+        ...,
+        [ 0.0391, -0.0518,  0.0830,  ...,  0.0017,  0.0106, -0.0007],
+        [ 0.0442, -0.0464,  0.0620,  ...,  0.0038,  0.0059,  0.0054],
+        [ 0.0097,  0.0009,  0.0474,  ...,  0.0130,  0.0024,  0.0024]])
+y = tensor([[ 1.5625e-01, -1.2891e-01,  1.4551e-01,  ..., -8.7738e-04,
+         -4.2114e-03, -3.2043e-04],
+        [ 3.7598e-02, -5.7129e-02,  3.0078e-01,  ...,  1.1536e-02,
+         -3.4485e-03,  5.5542e-03],
+        [-7.3242e-04, -1.9727e-01,  9.8633e-02,  ...,  6.1646e-03,
+          3.9368e-03, -2.2736e-03],
+        ...,
+        [ 2.7344e-02, -1.4258e-01,  1.1719e-01,  ...,  7.0496e-03,
+          1.2207e-02, -2.7657e-04],
+        [ 5.9570e-02, -2.8198e-02,  8.8867e-02,  ...,  7.3547e-03,
+          1.5198e-02,  4.8523e-03],
+        [ 1.3965e-01,  1.3867e-01, -5.4932e-02,  ...,  1.7212e-02,
+          7.1106e-03,  5.7373e-03]])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+>       assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: L3 slot 0 prefill 4000: update rms ratio inf outside 1 +- 0.01
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:318: AssertionError
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+21.34s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+2.32s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+1.25s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.01s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049] - AssertionError: L3 slot 1 prefill 2049: update rms ratio inf outside 1 +- 0.01
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000] - AssertionError: L3 slot 0 prefill 4000: update rms ratio inf outside 1 +- 0.01
+====================== 2 failed, 42 deselected in 25.19s =======================
+nanobind: leaked 112 instances!
+ - leaked instance 0x778ec03a1188 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a17b8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2358 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x778e829a88a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x778ec03a1398 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2ce8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2568 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2388 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a1668 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x778ed6631628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x778ec05cfc48 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x778ec03a2808 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec05cf1f8 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x778ec03a01c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec038f3a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a1998 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a0198 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2c58 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2148 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x778ec03a2328 of type "ttnn._ttnn.tensor.Tensor"
+ - ... skipped remainder
+nanobind: leaked 76 keep_alive records!
+nanobind: leaked 39 types!
+ - leaked type "DispatchCoreAxis"
+ - leaked type "ttnn._ttnn.device.SubDeviceManagerId"
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 342 functions!
+ - leaked function "__eq__"
+ - leaked function "reshape"
+ - leaked function "worker_core_from_logical_core"
+ - leaked function "terminate_fast_dispatch"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "to_json"
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== GLM53_PF_OFF=flash,bmm 2026-10-17T23:19:43+00:00
+2026-10-17 23:19:45.125 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 42 deselected / 2 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 23:20:07.018 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+L3 slot 1 prefill 2049: delta PCC 0.999853 full PCC 0.999927 update rms ratio 0.9916
+L3 slot 1 prefill 2049: vs checkpoint ref (quantization delta): delta PCC 0.994839 update rms ratio 1.0030
+L3 slot 1 decode pos 2049: delta PCC 0.999935 full PCC 0.999979 update rms ratio 0.9955 (HF router margin 1.3e-03)
+L3 slot 1 decode pos 2049: vs checkpoint ref (quantization delta): delta PCC 0.995890 update rms ratio 0.9901
+L3 slot 1 decode pos 2050: delta PCC 0.999945 full PCC 0.999967 update rms ratio 0.9861 (HF router margin 4.9e-03)
+L3 slot 1 decode pos 2050: vs checkpoint ref (quantization delta): delta PCC 0.995568 update rms ratio 1.0232
+L3 slot 1 decode pos 2051: delta PCC 0.999936 full PCC 0.999972 update rms ratio 0.9955 (HF router margin 8.2e-03)
+L3 slot 1 decode pos 2051: vs checkpoint ref (quantization delta): delta PCC 0.996537 update rms ratio 1.0109
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 3 (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L3 slot 0 prefill 4000: delta PCC 0.999802 full PCC 0.999906 update rms ratio 0.9930
+L3 slot 0 prefill 4000: vs checkpoint ref (quantization delta): delta PCC 0.994784 update rms ratio 1.0039
+L3 slot 0 decode pos 4000: delta PCC 0.999959 full PCC 0.999977 update rms ratio 0.9940 (HF router margin 4.0e-03)
+L3 slot 0 decode pos 4000: vs checkpoint ref (quantization delta): delta PCC 0.996291 update rms ratio 1.0103
+L3 slot 0 decode pos 4001: delta PCC 0.999951 full PCC 0.999973 update rms ratio 0.9870 (HF router margin 1.4e-02)
+L3 slot 0 decode pos 4001: vs checkpoint ref (quantization delta): delta PCC 0.995808 update rms ratio 1.0182
+L3 slot 0 decode pos 4002: delta PCC 0.999493 full PCC 0.999707 update rms ratio 0.9915 (HF router margin 4.9e-04)
+L3 slot 0 decode pos 4002: vs checkpoint ref (quantization delta): delta PCC 0.994574 update rms ratio 1.0019
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 6 (cap 2)
+quantization delta (port vs the checkpoint reference, 8 checks): min delta PCC 0.994574, update rms ratio 0.9901 .. 1.0232
+module y_swap matches 0 of 6 MoE decode tokens (cap 2)
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+21.61s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+2.51s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+1.23s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[dsa_moe-4000]
+====================== 2 passed, 42 deselected in 25.71s =======================
+nanobind: leaked 118 instances!
+ - leaked instance 0x788cdefc41c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdf1357e8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x788cdefc63b8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc50c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc5938 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdf1358a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc5428 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x33df1350 of type "ttnn._ttnn.multi_device.CppTensorToMesh"
+ - leaked instance 0x788cdefc6898 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefaf408 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc6928 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc6388 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc4378 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdf1f36a8 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x788cdefaf4f8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc6c88 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x788cdefc5ae8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdf1f3978 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x788cdf135728 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x788cdefc5f08 of type "ttnn._ttnn.tensor.Tensor"
+ - ... skipped remainder
+nanobind: leaked 76 keep_alive records!
+nanobind: leaked 39 types!
+ - leaked type "DispatchCoreAxis"
+ - leaked type "ttnn._ttnn.device.SubDeviceManagerId"
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 342 functions!
+ - leaked function ""
+ - leaked function "host_buffer"
+ - leaked function ""
+ - leaked function "to_torch"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html

@@ -1,0 +1,206 @@
+=== start Sat Oct 17 02:15:33 PM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r_probe_dense --only kda_in_ds
+2026-10-17 14:15:35.244 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+grid 11 10
+===== kda_in_ds
+kda_in BFLOAT8_B HiFi4 default (interleaved)              :     401.3 us    357 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 1d c64 in0 8                       :     432.0 us    332 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 1d c110 in0 8                      :     408.9 us    351 GB/s  PCC 0.999999
+2026-10-17 14:15:39.426 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4323840 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 8 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4323840 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:15:39.866 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 14 clash with L1 buffers on core range [0-0 - 10-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1537536 (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 8 r3             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 14 clash with L1 buffers on core range [0-0 - 10-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1537536 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail
+2026-10-17 14:15:40.307 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 4 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 4 r3             :     502.1 us    286 GB/s  PCC 0.999999
+2026-10-17 14:15:41.215 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1772928 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 2 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1772928 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 2 r3             :     489.1 us    293 GB/s  PCC 0.999999
+2026-10-17 14:15:42.133 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 26 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1347776 (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 1 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 26 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1347776 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail:
+kda_in BFLOAT8_B HiFi4 DS natural c8 in0 1 r3             :     484.5 us    296 GB/s  PCC 0.999999
+2026-10-17 14:15:43.422 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2662400 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 4 r1           : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2662400 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 4 r2           :     527.7 us    279 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 4 r3           :     511.0 us    288 GB/s  PCC 0.999999
+2026-10-17 14:15:44.788 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1792512 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 2 r1           : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1792512 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 2 r2           :     512.7 us    287 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 2 r3           :     497.8 us    295 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 1 r1           :     944.1 us    156 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 1 r2           :     506.0 us    291 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 DS padN1056 c32 in0 1 r3           :     491.7 us    299 GB/s  PCC 0.999999
+2026-10-17 14:15:47.866 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 4 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:15:47.868 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 4 r2 + 1D         :     541.3 us    265 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     510.3 us    279 GB/s  PCC 0.999999
+2026-10-17 14:15:49.065 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 2 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:15:49.066 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 2 r2 + 1D         :     526.1 us    273 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     494.3 us    289 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 1 r1 + 1D         :     946.3 us    152 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     915.3 us    156 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 split DS c32 in0 1 r2 + 1D         :     520.8 us    275 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     489.6 us    291 GB/s  PCC 0.999999
+2026-10-17 14:15:50.851 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4 split DS c64 in0 2 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:15:50.853 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi4   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi4 split DS c64 in0 2 r2 + 1D         :     486.8 us    295 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     456.0 us    313 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 split DS c64 in0 1 r1 + 1D         :     949.6 us    151 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     917.3 us    155 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4 split DS c64 in0 1 r2 + 1D         :     512.7 us    280 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi4   (DS part only)                   :     481.4 us    296 GB/s  PCC 0.999999
+kda_in BFLOAT8_B HiFi2 default (interleaved)              :     398.3 us    360 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 1d c64 in0 8                       :     409.0 us    351 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 1d c110 in0 8                      :     398.5 us    360 GB/s  PCC 0.999994
+2026-10-17 14:15:53.576 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4323840 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 8 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4323840 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:15:54.005 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 90 clash with L1 buffers on core range [0-0 - 10-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1537536 (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 8 r3             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 90 clash with L1 buffers on core range [0-0 - 10-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1537536 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail
+2026-10-17 14:15:54.443 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 4 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2623232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 4 r3             :     489.5 us    293 GB/s  PCC 0.999994
+2026-10-17 14:15:55.343 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1772928 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 2 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1772928 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 2 r3             :     488.0 us    294 GB/s  PCC 0.999994
+2026-10-17 14:15:56.242 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 100 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1347776 (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 1 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 100 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1347776 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail
+kda_in BFLOAT8_B HiFi2 DS natural c8 in0 1 r3             :     484.5 us    296 GB/s  PCC 0.999994
+2026-10-17 14:15:57.546 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2662400 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 4 r1           : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2662400 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 4 r2           :     514.1 us    286 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 4 r3           :     498.0 us    295 GB/s  PCC 0.999994
+2026-10-17 14:15:58.914 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1792512 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 2 r1           : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1792512 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 2 r2           :     505.8 us    291 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 2 r3           :     496.5 us    296 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 1 r1           :     783.5 us    188 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 1 r2           :     510.5 us    288 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 DS padN1056 c32 in0 1 r3           :     493.3 us    298 GB/s  PCC 0.999994
+2026-10-17 14:16:01.928 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 4 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:16:01.929 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 4 r2 + 1D         :     530.9 us    270 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     499.5 us    285 GB/s  PCC 0.999994
+2026-10-17 14:16:03.300 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 2 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:16:03.302 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 2 r2 + 1D         :     520.2 us    276 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     489.2 us    291 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 1 r1 + 1D         :     791.8 us    181 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     760.8 us    187 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 split DS c32 in0 1 r2 + 1D         :     525.1 us    273 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     496.1 us    287 GB/s  PCC 0.999994
+2026-10-17 14:16:04.811 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2 split DS c64 in0 2 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:16:04.812 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT8_B HiFi2   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT8_B HiFi2 split DS c64 in0 2 r2 + 1D         :     333.5 us    430 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     302.8 us    471 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 split DS c64 in0 1 r1 + 1D         :     793.1 us    181 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     762.5 us    187 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2 split DS c64 in0 1 r2 + 1D         :     430.3 us    333 GB/s  PCC 0.999994
+kda_in BFLOAT8_B HiFi2   (DS part only)                   :     398.8 us    358 GB/s  PCC 0.999994
+kda_in BFLOAT4_B HiFi4 default (interleaved)              :     269.1 us    282 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 1d c64 in0 8                       :     314.6 us    241 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 1d c110 in0 8                      :     289.4 us    262 GB/s  PCC 0.999999
+2026-10-17 14:16:07.459 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2738688 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 8 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2738688 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 8 r3             :     327.4 us    232 GB/s  PCC 0.999999
+2026-10-17 14:16:08.361 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 4 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 4 r3             :     315.9 us    240 GB/s  PCC 0.999999
+2026-10-17 14:16:09.272 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 160 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1376640 (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 2 r1             : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 160 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1376640 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 2 r3             :     320.9 us    237 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 1 r1             :     925.9 us     82 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS natural c8 in0 1 r3             :     342.8 us    222 GB/s  PCC 0.999999
+2026-10-17 14:16:11.483 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1851392 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 4 r1           : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1851392 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 4 r2           :     455.6 us    171 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 4 r3           :     321.5 us    242 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 2 r1           :     897.8 us     87 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 2 r2           :     465.6 us    167 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 2 r3           :     325.8 us    239 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 1 r1           :     941.1 us     83 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 1 r2           :     497.7 us    156 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 DS padN1056 c32 in0 1 r3           :     347.0 us    224 GB/s  PCC 0.999999
+2026-10-17 14:16:15.953 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 4 r1 + 1D         : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:16:15.954 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B HiFi4   (DS part only)                   : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 4 r2 + 1D         :     473.5 us    160 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     443.4 us    170 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 2 r1 + 1D         :     902.3 us     84 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     871.0 us     87 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 2 r2 + 1D         :     483.1 us    157 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     452.3 us    167 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 1 r1 + 1D         :     943.8 us     80 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     912.4 us     83 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c32 in0 1 r2 + 1D         :     512.3 us    148 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     478.2 us    158 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c64 in0 2 r1 + 1D         :     904.2 us     84 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     873.2 us     86 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c64 in0 2 r2 + 1D         :     483.0 us    157 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     452.5 us    167 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c64 in0 1 r1 + 1D         :     945.2 us     80 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     914.8 us     83 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4 split DS c64 in0 1 r2 + 1D         :     509.6 us    149 GB/s  PCC 0.999999
+kda_in BFLOAT4_B HiFi4   (DS part only)                   :     478.8 us    158 GB/s  PCC 0.999999
+kda_in BFLOAT4_B LoFi default (interleaved)               :     263.4 us    288 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi 1d c64 in0 8                        :     290.8 us    261 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi 1d c110 in0 8                       :     277.4 us    274 GB/s  PCC 0.999994
+2026-10-17 14:16:21.995 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2738688 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B LoFi DS natural c8 in0 8 r1              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2738688 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B LoFi DS natural c8 in0 8 r3              :     272.4 us    279 GB/s  PCC 0.999994
+2026-10-17 14:16:22.859 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B LoFi DS natural c8 in0 4 r1              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1830656 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B LoFi DS natural c8 in0 4 r3              :     270.7 us    281 GB/s  PCC 0.999994
+2026-10-17 14:16:23.747 | critical |          Always | TT_THROW: Statically allocated circular buffers in program 222 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1376640 (assert.hpp:104)
+kda_in BFLOAT4_B LoFi DS natural c8 in0 2 r1              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2122: tt::exception | info: | Statically allocated circular buffers in program 222 clash with L1 buffers on core range [0-0 - 7-9]. L1 buffer allocated at 1251328 and static circular buffer region ends at 1376640 | --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fd393) [0x74270c3fd393] | --- tt::tt_metal::detail
+kda_in BFLOAT4_B LoFi DS natural c8 in0 2 r3              :     270.1 us    281 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS natural c8 in0 1 r1              :     775.1 us     98 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS natural c8 in0 1 r3              :     284.1 us    267 GB/s  PCC 0.999994
+2026-10-17 14:16:25.928 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1851392 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 4 r1            : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1851392 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 4 r2            :     279.5 us    279 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 4 r3            :     274.5 us    284 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 2 r1            :     417.5 us    186 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 2 r2            :     277.5 us    281 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 2 r3            :     273.9 us    284 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 1 r1            :     785.6 us     99 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 1 r2            :     412.6 us    189 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi DS padN1056 c32 in0 1 r3            :     283.2 us    275 GB/s  PCC 0.999994
+2026-10-17 14:16:30.256 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B LoFi split DS c32 in0 4 r1 + 1D          : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+2026-10-17 14:16:30.258 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in BFLOAT4_B LoFi   (DS part only)                    : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1799168 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x258cbea) [0x74270f58cbea] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevi
+kda_in BFLOAT4_B LoFi split DS c32 in0 4 r2 + 1D          :     300.7 us    253 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     270.1 us    280 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c32 in0 2 r1 + 1D          :     435.9 us    174 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     405.2 us    186 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c32 in0 2 r2 + 1D          :     299.5 us    254 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     268.8 us    281 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c32 in0 1 r1 + 1D          :     785.8 us     97 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     754.9 us    100 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c32 in0 1 r2 + 1D          :     422.4 us    180 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     391.6 us    193 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c64 in0 2 r1 + 1D          :     437.8 us    173 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     407.7 us    185 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c64 in0 2 r2 + 1D          :     246.5 us    308 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     215.6 us    350 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c64 in0 1 r1 + 1D          :     787.8 us     96 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     756.9 us    100 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi split DS c64 in0 1 r2 + 1D          :     426.0 us    178 GB/s  PCC 0.999994
+kda_in BFLOAT4_B LoFi   (DS part only)                    :     392.7 us    192 GB/s  PCC 0.999994
+=== exit code: 0 Sat Oct 17 02:16:34 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

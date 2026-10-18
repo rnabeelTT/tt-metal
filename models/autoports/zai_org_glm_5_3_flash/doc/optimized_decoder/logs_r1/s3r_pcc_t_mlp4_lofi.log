@@ -1,0 +1,324 @@
+=== start Sat Oct 17 09:22:14 PM UTC 2026 : timeout -k 60 7200 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k (test_real_weights or test_batched_users or test_batch32_all_active or test_lengths) and (kda_dense)
+2026-10-17 21:22:16.314 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 33 deselected / 11 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:22:18.968 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 5 prefill 100: delta PCC 0.998023 full PCC 0.996327 update rms ratio 0.9979
+L0 slot 5 decode pos 100: delta PCC 0.997803 full PCC 0.995545 update rms ratio 0.9989
+L0 slot 5 decode pos 101: delta PCC 0.998176 full PCC 0.996310 update rms ratio 1.0016
+L0 slot 5 decode pos 102: delta PCC 0.997843 full PCC 0.995811 update rms ratio 0.9993
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 1: delta PCC 0.998067 full PCC 0.998785 update rms ratio 0.9963
+L0 slot 1 decode pos 1: delta PCC 0.998685 full PCC 0.997330 update rms ratio 0.9965
+L0 slot 1 decode pos 2: delta PCC 0.997905 full PCC 0.997344 update rms ratio 0.9982
+L0 slot 1 decode pos 3: delta PCC 0.997686 full PCC 0.997918 update rms ratio 1.0003
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 31: delta PCC 0.998124 full PCC 0.996528 update rms ratio 0.9979
+L0 slot 7 decode pos 31: delta PCC 0.998649 full PCC 0.997237 update rms ratio 1.0000
+L0 slot 7 decode pos 32: delta PCC 0.997605 full PCC 0.994993 update rms ratio 0.9978
+L0 slot 7 decode pos 33: delta PCC 0.998593 full PCC 0.996521 update rms ratio 0.9989
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 33: delta PCC 0.998076 full PCC 0.996558 update rms ratio 0.9983
+L0 slot 1 decode pos 33: delta PCC 0.998112 full PCC 0.997399 update rms ratio 1.0013
+L0 slot 1 decode pos 34: delta PCC 0.998364 full PCC 0.996383 update rms ratio 0.9976
+L0 slot 1 decode pos 35: delta PCC 0.998522 full PCC 0.996871 update rms ratio 1.0002
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 128: delta PCC 0.998028 full PCC 0.996271 update rms ratio 0.9976
+L0 slot 0 decode pos 128: delta PCC 0.998069 full PCC 0.995408 update rms ratio 1.0001
+L0 slot 0 decode pos 129: delta PCC 0.998269 full PCC 0.996120 update rms ratio 1.0019
+L0 slot 0 decode pos 130: delta PCC 0.998298 full PCC 0.996848 update rms ratio 1.0002
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 129: delta PCC 0.997960 full PCC 0.996328 update rms ratio 0.9980
+L0 slot 1 decode pos 129: delta PCC 0.997447 full PCC 0.994921 update rms ratio 0.9971
+L0 slot 1 decode pos 130: delta PCC 0.997878 full PCC 0.996629 update rms ratio 1.0026
+L0 slot 1 decode pos 131: delta PCC 0.998006 full PCC 0.996228 update rms ratio 1.0007
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 7 prefill 2047: delta PCC 0.997821 full PCC 0.995751 update rms ratio 0.9980
+L0 slot 7 decode pos 2047: delta PCC 0.997634 full PCC 0.995199 update rms ratio 0.9997
+L0 slot 7 decode pos 2048: delta PCC 0.996866 full PCC 0.995581 update rms ratio 1.0001
+L0 slot 7 decode pos 2049: delta PCC 0.997612 full PCC 0.995602 update rms ratio 0.9995
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 1 prefill 2049: delta PCC 0.997813 full PCC 0.995738 update rms ratio 0.9978
+L0 slot 1 decode pos 2049: delta PCC 0.997118 full PCC 0.995283 update rms ratio 0.9978
+L0 slot 1 decode pos 2050: delta PCC 0.998230 full PCC 0.996157 update rms ratio 0.9996
+L0 slot 1 decode pos 2051: delta PCC 0.997653 full PCC 0.995314 update rms ratio 1.0007
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 slot 0 prefill 4000: delta PCC 0.997807 full PCC 0.995736 update rms ratio 0.9981
+L0 slot 0 decode pos 4000: delta PCC 0.998309 full PCC 0.996179 update rms ratio 0.9998
+L0 slot 0 decode pos 4001: delta PCC 0.997775 full PCC 0.995607 update rms ratio 1.0004
+L0 slot 0 decode pos 4002: delta PCC 0.997183 full PCC 0.994293 update rms ratio 1.0017
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py L0 user slot 1 prefill 37: delta PCC 0.998124 full PCC 0.996712 update rms ratio 0.9976
+L0 user slot 3 prefill 100: delta PCC 0.998007 full PCC 0.996253 update rms ratio 0.9978
+L0 user slot 4 prefill 300: delta PCC 0.997946 full PCC 0.996097 update rms ratio 0.9978
+L0 user slot 6 prefill 64: delta PCC 0.997956 full PCC 0.996355 update rms ratio 0.9977
+L0 user slot 1 decode pos 37: delta PCC 0.997378 full PCC 0.995390 update rms ratio 0.9980
+L0 user slot 3 decode pos 100: delta PCC 0.997902 full PCC 0.995858 update rms ratio 0.9995
+L0 user slot 4 decode pos 300: delta PCC 0.997435 full PCC 0.995066 update rms ratio 0.9996
+L0 user slot 6 decode pos 64: delta PCC 0.998013 full PCC 0.995913 update rms ratio 0.9987
+L0 user slot 1 decode pos 38: delta PCC 0.997464 full PCC 0.995384 update rms ratio 1.0010
+L0 user slot 3 decode pos 101: delta PCC 0.997357 full PCC 0.996672 update rms ratio 1.0010
+L0 user slot 4 decode pos 301: delta PCC 0.998407 full PCC 0.996141 update rms ratio 1.0024
+L0 user slot 6 decode pos 65: delta PCC 0.997777 full PCC 0.995820 update rms ratio 1.0001
+L0 user slot 1 decode pos 39: delta PCC 0.997938 full PCC 0.995577 update rms ratio 1.0029
+L0 user slot 3 decode pos 102: delta PCC 0.998176 full PCC 0.996331 update rms ratio 1.0004
+L0 user slot 4 decode pos 302: delta PCC 0.997589 full PCC 0.994869 update rms ratio 0.9998
+L0 user slot 6 decode pos 66: delta PCC 0.997989 full PCC 0.996072 update rms ratio 0.9972
+PASSEDdecode update rms ratio mean 1.0000 over 12 tokens
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-17 21:22:28.315 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 32-slot decode slot 0 pos 37: delta PCC 0.998808 full PCC 0.997461 update rms ratio 1.0020
+L0 32-slot decode slot 1 pos 37: delta PCC 0.998987 full PCC 0.997723 update rms ratio 1.0005
+L0 32-slot decode slot 2 pos 37: delta PCC 0.997346 full PCC 0.996662 update rms ratio 0.9995
+L0 32-slot decode slot 3 pos 37: delta PCC 0.998333 full PCC 0.996178 update rms ratio 1.0010
+L0 32-slot decode slot 4 pos 37: delta PCC 0.998243 full PCC 0.996579 update rms ratio 1.0018
+L0 32-slot decode slot 5 pos 37: delta PCC 0.997913 full PCC 0.996629 update rms ratio 1.0041
+L0 32-slot decode slot 6 pos 37: delta PCC 0.998357 full PCC 0.996496 update rms ratio 1.0006
+L0 32-slot decode slot 7 pos 37: delta PCC 0.998093 full PCC 0.996389 update rms ratio 0.9990
+L0 32-slot decode slot 8 pos 129: delta PCC 0.998036 full PCC 0.996337 update rms ratio 1.0015
+L0 32-slot decode slot 9 pos 129: delta PCC 0.998751 full PCC 0.996939 update rms ratio 1.0003
+L0 32-slot decode slot 10 pos 129: delta PCC 0.997663 full PCC 0.996180 update rms ratio 0.9978
+L0 32-slot decode slot 11 pos 129: delta PCC 0.998012 full PCC 0.996006 update rms ratio 1.0008
+L0 32-slot decode slot 12 pos 129: delta PCC 0.998409 full PCC 0.996678 update rms ratio 1.0001
+L0 32-slot decode slot 13 pos 129: delta PCC 0.997601 full PCC 0.995307 update rms ratio 0.9990
+L0 32-slot decode slot 14 pos 129: delta PCC 0.998370 full PCC 0.996286 update rms ratio 0.9991
+L0 32-slot decode slot 15 pos 129: delta PCC 0.998086 full PCC 0.996173 update rms ratio 1.0027
+L0 32-slot decode slot 16 pos 300: delta PCC 0.998898 full PCC 0.997283 update rms ratio 1.0008
+L0 32-slot decode slot 17 pos 300: delta PCC 0.997783 full PCC 0.996264 update rms ratio 0.9988
+L0 32-slot decode slot 18 pos 300: delta PCC 0.997973 full PCC 0.996011 update rms ratio 0.9992
+L0 32-slot decode slot 19 pos 300: delta PCC 0.998121 full PCC 0.996534 update rms ratio 0.9998
+L0 32-slot decode slot 20 pos 300: delta PCC 0.997878 full PCC 0.995214 update rms ratio 0.9996
+L0 32-slot decode slot 21 pos 300: delta PCC 0.997916 full PCC 0.996271 update rms ratio 0.9983
+L0 32-slot decode slot 22 pos 300: delta PCC 0.997771 full PCC 0.995467 update rms ratio 1.0020
+L0 32-slot decode slot 23 pos 300: delta PCC 0.997508 full PCC 0.995026 update rms ratio 0.9998
+L0 32-slot decode slot 24 pos 700: delta PCC 0.997544 full PCC 0.994867 update rms ratio 0.9992
+L0 32-slot decode slot 25 pos 700: delta PCC 0.997680 full PCC 0.995762 update rms ratio 1.0000
+L0 32-slot decode slot 26 pos 700: delta PCC 0.997375 full PCC 0.994650 update rms ratio 1.0026
+L0 32-slot decode slot 27 pos 700: delta PCC 0.997581 full PCC 0.996034 update rms ratio 0.9975
+L0 32-slot decode slot 28 pos 700: delta PCC 0.997347 full PCC 0.995546 update rms ratio 1.0000
+L0 32-slot decode slot 29 pos 700: delta PCC 0.997263 full PCC 0.995295 update rms ratio 0.9964
+L0 32-slot decode slot 30 pos 700: delta PCC 0.998140 full PCC 0.995798 update rms ratio 1.0004
+L0 32-slot decode slot 31 pos 700: delta PCC 0.997730 full PCC 0.995197 update rms ratio 0.9985
+L0 32-slot decode slot 0 pos 38: delta PCC 0.997994 full PCC 0.995614 update rms ratio 1.0001
+L0 32-slot decode slot 1 pos 38: delta PCC 0.998300 full PCC 0.996174 update rms ratio 0.9984
+L0 32-slot decode slot 2 pos 38: delta PCC 0.997136 full PCC 0.995939 update rms ratio 0.9960
+L0 32-slot decode slot 3 pos 38: delta PCC 0.997713 full PCC 0.996438 update rms ratio 1.0002
+L0 32-slot decode slot 4 pos 38: delta PCC 0.998432 full PCC 0.996445 update rms ratio 0.9998
+L0 32-slot decode slot 5 pos 38: delta PCC 0.997749 full PCC 0.996542 update rms ratio 1.0009
+L0 32-slot decode slot 6 pos 38: delta PCC 0.997954 full PCC 0.996784 update rms ratio 0.9996
+L0 32-slot decode slot 7 pos 38: delta PCC 0.998077 full PCC 0.995937 update rms ratio 0.9994
+L0 32-slot decode slot 8 pos 130: delta PCC 0.997571 full PCC 0.995392 update rms ratio 1.0021
+L0 32-slot decode slot 9 pos 130: delta PCC 0.997858 full PCC 0.995385 update rms ratio 0.9998
+L0 32-slot decode slot 10 pos 130: delta PCC 0.997456 full PCC 0.996238 update rms ratio 1.0008
+L0 32-slot decode slot 11 pos 130: delta PCC 0.997806 full PCC 0.995968 update rms ratio 1.0026
+L0 32-slot decode slot 12 pos 130: delta PCC 0.997745 full PCC 0.996009 update rms ratio 1.0021
+L0 32-slot decode slot 13 pos 130: delta PCC 0.997284 full PCC 0.995524 update rms ratio 1.0009
+L0 32-slot decode slot 14 pos 130: delta PCC 0.997861 full PCC 0.995726 update rms ratio 1.0008
+L0 32-slot decode slot 15 pos 130: delta PCC 0.997723 full PCC 0.996176 update rms ratio 0.9985
+L0 32-slot decode slot 16 pos 301: delta PCC 0.997584 full PCC 0.995363 update rms ratio 1.0010
+L0 32-slot decode slot 17 pos 301: delta PCC 0.999114 full PCC 0.997833 update rms ratio 1.0005
+L0 32-slot decode slot 18 pos 301: delta PCC 0.997218 full PCC 0.995694 update rms ratio 0.9965
+L0 32-slot decode slot 19 pos 301: delta PCC 0.997889 full PCC 0.995530 update rms ratio 1.0004
+L0 32-slot decode slot 20 pos 301: delta PCC 0.995431 full PCC 0.992478 update rms ratio 0.9919
+L0 32-slot decode slot 21 pos 301: delta PCC 0.997594 full PCC 0.995799 update rms ratio 1.0015
+L0 32-slot decode slot 22 pos 301: delta PCC 0.997786 full PCC 0.995275 update rms ratio 1.0011
+L0 32-slot decode slot 23 pos 301: delta PCC 0.997723 full PCC 0.995670 update rms ratio 0.9979
+L0 32-slot decode slot 24 pos 701: delta PCC 0.997248 full PCC 0.994291 update rms ratio 0.9962
+L0 32-slot decode slot 25 pos 701: delta PCC 0.997619 full PCC 0.994751 update rms ratio 0.9999
+L0 32-slot decode slot 26 pos 701: delta PCC 0.997728 full PCC 0.995197 update rms ratio 1.0006
+L0 32-slot decode slot 27 pos 701: delta PCC 0.998657 full PCC 0.996885 update rms ratio 1.0009
+L0 32-slot decode slot 28 pos 701: delta PCC 0.997465 full PCC 0.994421 update rms ratio 0.9997
+L0 32-slot decode slot 29 pos 701: delta PCC 0.997858 full PCC 0.995467 update rms ratio 1.0015
+L0 32-slot decode slot 30 pos 701: delta PCC 0.996818 full PCC 0.995383 update rms ratio 0.9988
+L0 32-slot decode slot 31 pos 701: delta PCC 0.997541 full PCC 0.995003 update rms ratio 0.9995
+L0 32-slot decode slot 0 pos 39: delta PCC 0.998132 full PCC 0.996372 update rms ratio 1.0019
+L0 32-slot decode slot 1 pos 39: delta PCC 0.998099 full PCC 0.996082 update rms ratio 1.0004
+L0 32-slot decode slot 2 pos 39: delta PCC 0.999047 full PCC 0.997660 update rms ratio 0.9995
+L0 32-slot decode slot 3 pos 39: delta PCC 0.998681 full PCC 0.997047 update rms ratio 1.0000
+L0 32-slot decode slot 4 pos 39: delta PCC 0.993051 full PCC 0.990274 update rms ratio 1.0042
+FAILEDdecode update rms ratio mean 0.9999 over 68 tokens
+
+
+=================================== FAILURES ===================================
+______________________ test_batch32_all_active[kda_dense] ______________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x787b8c395070>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batch32_all_active(mesh, rd, kind):
+        """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+        dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+        layer = KINDS[kind]
+        for k in list(_LAYERS):  # one layer resident (DRAM)
+            del _LAYERS[k]
+        dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+        lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+        steps = 3
+        rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+        refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
+        users = {}  # slot -> (seed, prompt length)
+        for slot in range(32):
+            users[slot] = (slot % 8, lengths[slot // 8])
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            prefill_user(dec, mesh, x, n, slot)
+        runner = DecodeRunner(dec, mesh, 32)
+        worst = 1.0
+        for i in range(steps):
+            pos = [n + i for _, (_, n) in sorted(users.items())]
+            rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+            if i == 0:
+                got = runner.eager_step(rows, pos)
+                runner.capture({slot: refs[seed][0][n + 1] for slot, (seed, n) in users.items()}, [p + 1 for p in pos])
+            else:
+                got = runner.traced_step(rows, pos)
+            for slot, (seed, n) in users.items():
+                x, y = refs[seed]
+>               d, _ = check(
+                    f"L{layer} 32-slot decode slot {slot} pos {n + i}",
+                    got[slot],
+                    x[n + i],
+                    y[n + i],
+                    margin=refs[seed].row_margin(n + i),
+                    y_alt=refs[seed].alt(n + i),
+                )
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:642:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L0 32-slot decode slot 4 pos 39'
+got = tensor([ 0.0073,  0.0090,  0.0041,  ...,  0.0011, -0.0017, -0.0036])
+x = tensor([-0.0011,  0.0007, -0.0019,  ...,  0.0017, -0.0014, -0.0069])
+y = tensor([ 0.0056,  0.0108,  0.0042,  ...,  0.0013, -0.0016, -0.0035])
+delta_bar = 0.995, full_bar = 0.99, margin = None, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+        assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+>       assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
+               ^^^^^^^^^^^^^^
+E       AssertionError: L0 32-slot decode slot 4 pos 39: delta PCC 0.993051 < 0.995
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:319: AssertionError
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+5.75s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense]
+3.43s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+1.23s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000]
+1.22s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+1.15s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129]
+0.67s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049]
+0.65s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047]
+0.31s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense]
+0.19s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense]
+0.18s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense]
+0.05s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+0.02s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_real_weights[kda_dense]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-31]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-33]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-128]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-129]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2047]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-2049]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_lengths[kda_dense-4000]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batched_users[kda_dense]
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_batch32_all_active[kda_dense] - AssertionError: L0 32-slot decode slot 4 pos 39: delta PCC 0.993051 < 0.995
+================= 1 failed, 10 passed, 33 deselected in 16.43s =================
+nanobind: leaked 4 instances!
+ - leaked instance 0x787ba0f75648 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x787b4d4b48a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x787b4dbdece8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x787ba0f75628 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 22 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "empty"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function "get_layout"
+ - leaked function "reset_sub_device_stall_group"
+ - leaked function ""
+ - leaked function "get_tile"
+ - leaked function "dram_grid_size"
+ - leaked function ""
+ - leaked function "arch"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Sat Oct 17 09:22:35 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

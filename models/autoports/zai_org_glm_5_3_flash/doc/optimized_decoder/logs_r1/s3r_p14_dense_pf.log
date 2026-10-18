@@ -1,0 +1,38 @@
+=== start Sat Oct 17 07:29:47 PM UTC 2026 : timeout -k 60 1800 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r_probe_dense --only prefill_fid
+2026-10-17 19:29:48.942 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+grid 11 10
+===== prefill_fid
+kda_in bfp8 HiFi4 prefill2048 default                     :   10114.8 us     14 GB/s  PCC nan
+2026-10-17 19:29:51.813 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in bfp8 HiFi4 prefill2048 2D 11x10 in0 4              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+kda_in bfp8 HiFi2 prefill2048 default                     :    7951.4 us     18 GB/s  PCC 0.999993
+2026-10-17 19:29:53.120 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in bfp8 HiFi2 prefill2048 2D 11x10 in0 4              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+kda_in bfp8 LoFi prefill2048 default                      :    6918.9 us     21 GB/s  PCC 0.999912
+2026-10-17 19:29:54.493 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in bfp8 LoFi prefill2048 2D 11x10 in0 4               : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+mlp_gu bfp8 HiFi4 prefill2048 default                     :    7094.3 us     15 GB/s  PCC nan
+2026-10-17 19:29:55.639 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu bfp8 HiFi4 prefill2048 2D 11x10 in0 4              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+mlp_gu bfp8 HiFi2 prefill2048 default                     :    5593.8 us     19 GB/s  PCC 0.999993
+2026-10-17 19:29:56.843 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu bfp8 HiFi2 prefill2048 2D 11x10 in0 4              : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+mlp_gu bfp8 LoFi prefill2048 default                      :    4885.9 us     22 GB/s  PCC 0.999912
+2026-10-17 19:29:58.031 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu bfp8 LoFi prefill2048 2D 11x10 in0 4               : ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259efda) [0x7370e9d9efda] | --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDev
+mlp_dn bfp8 HiFi4 prefill2048 default                     :    5791.8 us      9 GB/s  PCC nan
+mlp_dn bfp8 HiFi4 prefill2048 2D 11x10 in0 4              :    2777.8 us     19 GB/s  PCC 1.000000
+mlp_dn bfp8 HiFi2 prefill2048 default                     :    4946.6 us     11 GB/s  PCC 0.999993
+mlp_dn bfp8 HiFi2 prefill2048 2D 11x10 in0 4              :    1939.7 us     28 GB/s  PCC 0.999993
+mlp_dn bfp8 LoFi prefill2048 default                      :    4534.1 us     12 GB/s  PCC 0.999912
+mlp_dn bfp8 LoFi prefill2048 2D 11x10 in0 4               :    1528.6 us     35 GB/s  PCC 0.999912
+dsa_o bfp8 HiFi4 prefill2048 default                      :    7707.2 us      9 GB/s  PCC nan
+dsa_o bfp8 HiFi4 prefill2048 2D 11x10 in0 4               :    3708.2 us     19 GB/s  PCC 1.000000
+dsa_o bfp8 HiFi2 prefill2048 default                      :    6546.2 us     11 GB/s  PCC 0.999993
+dsa_o bfp8 HiFi2 prefill2048 2D 11x10 in0 4               :    2593.1 us     27 GB/s  PCC 0.999993
+dsa_o bfp8 LoFi prefill2048 default                       :    6027.6 us     12 GB/s  PCC 0.999912
+dsa_o bfp8 LoFi prefill2048 2D 11x10 in0 4                :    2016.2 us     35 GB/s  PCC 0.999912
+=== exit code: 0 Sat Oct 17 07:30:04 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

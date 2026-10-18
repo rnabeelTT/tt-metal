@@ -1,0 +1,14 @@
+=== start Sat Oct 17 09:49:58 PM UTC 2026 : timeout -k 60 600 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r_probe_dsa --case bmm --pm 8
+2026-10-17 21:49:59.754 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+q_abs rows 2048 bfp8 default: start
+q_abs rows 2048 bfp8 default                 :    1898.2 us  PCC 0.999999
+q_abs rows 2048 bfp8 reuse M8 N16 in0 8: start
+q_abs rows 2048 bfp8 reuse M8 N16 in0 8      :     764.6 us  PCC 0.999999
+o_uv rows 2048 bfp8 default: start
+o_uv rows 2048 bfp8 default                 :    2092.2 us  PCC 0.999999
+o_uv rows 2048 bfp8 reuse M8 N8 in0 8: start
+o_uv rows 2048 bfp8 reuse M8 N8 in0 8       :     665.4 us  PCC 0.999999
+=== exit code: 0 Sat Oct 17 09:50:04 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

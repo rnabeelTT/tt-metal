@@ -1,0 +1,71 @@
+=== start Sat Oct 17 05:47:20 PM UTC 2026 : timeout -k 60 3600 python -m models.autoports.zai_org_glm_5_3_flash.tools.moe_scale_probe --layer 4 --rows 128 --policy opt --modes prefill,decode,decode1 --fidelities LoFi,HiFi2,HiFi3,HiFi4
+2026-10-17 17:47:21.877 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 17:49:04.172 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+layer 4, 128 rows (routing identical in ref / ref_q8: 128/128)
+ref_q8 vs ref: routed rms 0.9995 PCC 0.999926; shared rms 0.9986
+ref_q4 vs ref: routed rms 1.0275 PCC 0.982576; shared rms 0.9975
+config: sorted_grouped=True grouped_in0=4/4
+[prefill routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0224 min 1.0100 max 1.0317
+[prefill routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9951 min 0.9931 max 0.9972
+[prefill routed fidelity LoFi] tt vs ref:    routed rms 1.0225 PCC 0.982549; shared rms 0.9985 PCC 0.999967
+[prefill routed fidelity LoFi] tt vs ref_q8: routed rms 1.0229 PCC 0.982331; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity LoFi] tt vs ref_q4: routed rms 0.9951 PCC 0.999969; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0224 min 1.0100 max 1.0317
+[decode routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9951 min 0.9931 max 0.9972
+[decode routed fidelity LoFi] tt vs ref:    routed rms 1.0225 PCC 0.982549; shared rms 0.9985 PCC 0.999967
+[decode routed fidelity LoFi] tt vs ref_q8: routed rms 1.0229 PCC 0.982331; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity LoFi] tt vs ref_q4: routed rms 0.9951 PCC 0.999969; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity LoFi] per-row routed rms ratio vs ref: mean 1.0193 min 1.0071 max 1.0289
+[decode1 routed fidelity LoFi] per-row routed rms ratio vs ref_q4: mean 0.9921 min 0.9903 max 0.9939
+[decode1 routed fidelity LoFi] tt vs ref:    routed rms 1.0194 PCC 0.982555; shared rms 0.9985 PCC 0.999967
+[decode1 routed fidelity LoFi] tt vs ref_q8: routed rms 1.0198 PCC 0.982338; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity LoFi] tt vs ref_q4: routed rms 0.9921 PCC 0.999975; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi2] per-row routed rms ratio vs ref: mean 1.0224 min 1.0100 max 1.0317
+[prefill routed fidelity HiFi2] per-row routed rms ratio vs ref_q4: mean 0.9951 min 0.9931 max 0.9972
+[prefill routed fidelity HiFi2] tt vs ref:    routed rms 1.0225 PCC 0.982549; shared rms 0.9985 PCC 0.999967
+[prefill routed fidelity HiFi2] tt vs ref_q8: routed rms 1.0229 PCC 0.982331; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi2] tt vs ref_q4: routed rms 0.9951 PCC 0.999969; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi2] per-row routed rms ratio vs ref: mean 1.0224 min 1.0100 max 1.0317
+[decode routed fidelity HiFi2] per-row routed rms ratio vs ref_q4: mean 0.9951 min 0.9931 max 0.9972
+[decode routed fidelity HiFi2] tt vs ref:    routed rms 1.0225 PCC 0.982549; shared rms 0.9985 PCC 0.999967
+[decode routed fidelity HiFi2] tt vs ref_q8: routed rms 1.0229 PCC 0.982331; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi2] tt vs ref_q4: routed rms 0.9951 PCC 0.999969; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi2] per-row routed rms ratio vs ref: mean 1.0193 min 1.0071 max 1.0289
+[decode1 routed fidelity HiFi2] per-row routed rms ratio vs ref_q4: mean 0.9921 min 0.9903 max 0.9939
+[decode1 routed fidelity HiFi2] tt vs ref:    routed rms 1.0194 PCC 0.982555; shared rms 0.9985 PCC 0.999967
+[decode1 routed fidelity HiFi2] tt vs ref_q8: routed rms 1.0198 PCC 0.982338; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi2] tt vs ref_q4: routed rms 0.9921 PCC 0.999975; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0310 min 1.0183 max 1.0408
+[prefill routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0035 min 1.0017 max 1.0052
+[prefill routed fidelity HiFi3] tt vs ref:    routed rms 1.0311 PCC 0.982558; shared rms 0.9985 PCC 0.999967
+[prefill routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0315 PCC 0.982340; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0035 PCC 0.999982; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0310 min 1.0183 max 1.0408
+[decode routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0035 min 1.0017 max 1.0052
+[decode routed fidelity HiFi3] tt vs ref:    routed rms 1.0311 PCC 0.982558; shared rms 0.9985 PCC 0.999967
+[decode routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0315 PCC 0.982340; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0035 PCC 0.999982; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi3] per-row routed rms ratio vs ref: mean 1.0279 min 1.0154 max 1.0374
+[decode1 routed fidelity HiFi3] per-row routed rms ratio vs ref_q4: mean 1.0005 min 0.9987 max 1.0023
+[decode1 routed fidelity HiFi3] tt vs ref:    routed rms 1.0280 PCC 0.982560; shared rms 0.9985 PCC 0.999967
+[decode1 routed fidelity HiFi3] tt vs ref_q8: routed rms 1.0284 PCC 0.982343; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi3] tt vs ref_q4: routed rms 1.0005 PCC 0.999987; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0310 min 1.0183 max 1.0408
+[prefill routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0035 min 1.0017 max 1.0052
+[prefill routed fidelity HiFi4] tt vs ref:    routed rms 1.0311 PCC 0.982558; shared rms 0.9985 PCC 0.999967
+[prefill routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0315 PCC 0.982340; shared rms 0.9999 PCC 0.999995
+[prefill routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0035 PCC 0.999982; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0310 min 1.0183 max 1.0408
+[decode routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0035 min 1.0017 max 1.0052
+[decode routed fidelity HiFi4] tt vs ref:    routed rms 1.0311 PCC 0.982558; shared rms 0.9985 PCC 0.999967
+[decode routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0315 PCC 0.982340; shared rms 0.9999 PCC 0.999995
+[decode routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0035 PCC 0.999982; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi4] per-row routed rms ratio vs ref: mean 1.0279 min 1.0154 max 1.0374
+[decode1 routed fidelity HiFi4] per-row routed rms ratio vs ref_q4: mean 1.0005 min 0.9987 max 1.0023
+[decode1 routed fidelity HiFi4] tt vs ref:    routed rms 1.0280 PCC 0.982560; shared rms 0.9985 PCC 0.999967
+[decode1 routed fidelity HiFi4] tt vs ref_q8: routed rms 1.0284 PCC 0.982343; shared rms 0.9999 PCC 0.999995
+[decode1 routed fidelity HiFi4] tt vs ref_q4: routed rms 1.0005 PCC 0.999987; shared rms 0.9999 PCC 0.999995
+=== exit code: 0 Sat Oct 17 05:49:12 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

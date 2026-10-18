@@ -1,0 +1,99 @@
+=== start Thu Oct 15 09:07:07 PM UTC 2026 : timeout 1200 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.dsa_bmm_probe
+2026-10-15 21:07:09.209 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-15 21:07:11.277 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:11.278 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:12.207 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:12.208 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:13.908 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:13.909 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:14.627 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:14.627 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:15.037 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 5-9] grow to 4830208 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:07:15.038 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:15.039 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:16.713 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:16.713 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:17.425 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:17.426 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:17.833 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 5-9] grow to 4584448 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:07:17.834 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (8) (assert.hpp:104)
+2026-10-15 21:07:17.835 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (16) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:18.768 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:18.768 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:19.698 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:19.698 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:21.263 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:21.264 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:21.880 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:21.881 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:22.308 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 5-9] grow to 2995200 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:07:22.309 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:22.310 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:23.774 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:23.774 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:24.391 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:24.391 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+2026-10-15 21:07:24.818 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 5-9] grow to 2872320 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+2026-10-15 21:07:24.819 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (4) (assert.hpp:104)
+2026-10-15 21:07:24.820 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseProgramConfig: N (8) must equal per_core_N (2) (assert.hpp:104)
+grid 11 10
+q_abs rows    32 DataType.BFLOAT16      default         :    222.8 us  PCC 0.999999
+q_abs rows    32 DataType.BFLOAT16      reuse M1 N16    :     79.5 us  PCC 0.999999
+q_abs rows    32 DataType.BFLOAT16      reuse M1 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows    32 DataType.BFLOAT16      reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows    32 DataType.BFLOAT8_B     default         :    221.7 us  PCC 0.999999
+q_abs rows    32 DataType.BFLOAT8_B     reuse M1 N16    :     47.9 us  PCC 0.999999
+q_abs rows    32 DataType.BFLOAT8_B     reuse M1 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows    32 DataType.BFLOAT8_B     reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      default         :    873.7 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT16      reuse M1 N16    :   2331.8 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT16      reuse M1 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      reuse M4 N16    :    681.9 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT16      reuse M4 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      reuse M4 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      reuse M32 N16   : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+q_abs rows  1024 DataType.BFLOAT16      reuse M32 N8    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT16      reuse M32 N4    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     default         :    867.4 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M1 N16    :   1285.4 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M1 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M4 N16    :    464.8 us  PCC 0.999999
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M4 N8     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M4 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M32 N16   : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M32 N8    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+q_abs rows  1024 DataType.BFLOAT8_B     reuse M32 N4    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows    32 DataType.BFLOAT16      default         :    381.5 us  PCC 0.999999
+o_uv rows    32 DataType.BFLOAT16      reuse M1 N8     :     76.4 us  PCC 0.999999
+o_uv rows    32 DataType.BFLOAT16      reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows    32 DataType.BFLOAT16      reuse M1 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows    32 DataType.BFLOAT8_B     default         :    381.0 us  PCC 0.999999
+o_uv rows    32 DataType.BFLOAT8_B     reuse M1 N8     :     44.7 us  PCC 0.999999
+o_uv rows    32 DataType.BFLOAT8_B     reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows    32 DataType.BFLOAT8_B     reuse M1 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      default         :   1174.2 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT16      reuse M1 N8     :   2249.0 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT16      reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      reuse M1 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      reuse M4 N8     :    637.4 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT16      reuse M4 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      reuse M4 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      reuse M32 N8    : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+o_uv rows  1024 DataType.BFLOAT16      reuse M32 N4    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT16      reuse M32 N2    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     default         :   1170.2 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M1 N8     :   1240.2 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M1 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M1 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M4 N8     :    431.5 us  PCC 0.999999
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M4 N4     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M4 N2     : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M32 N8    : error TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M32 N4    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+o_uv rows  1024 DataType.BFLOAT8_B     reuse M32 N2    : error TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1675: N ==
+=== exit code: 0 Thu Oct 15 09:07:25 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
