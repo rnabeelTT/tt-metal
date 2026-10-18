@@ -1,0 +1,9 @@
+measured: prompt[0] greedy_completion ('Write a haiku about machine learning.') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 667, 'adjacent_duplication': 0.015, 'trigram_loop_fraction': 0.0405}
+measured: prompt[1] greedy_completion ('Explain the difference between supervised and unsupervised l') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 763, 'adjacent_duplication': 0.0013, 'trigram_loop_fraction': 0.0157}
+measured: prompt[2] greedy_completion ('Complete this story: Once upon a time, in a faraway kingdom,') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 1562, 'adjacent_duplication': 0.0, 'trigram_loop_fraction': 0.025}
+measured: prompt[3] greedy_completion ('What are the three laws of thermodynamics?') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 821, 'adjacent_duplication': 0.0024, 'trigram_loop_fraction': 0.0219}
+measured: prompt[4] greedy_completion ('Translate the following to French: "Hello, how are you today') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 183, 'adjacent_duplication': 0.0, 'trigram_loop_fraction': 0.1803}
+measured: prompt[5] greedy_completion ('Write a Python function to calculate the Fibonacci sequence.') [models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/qualitative_outputs.json] {'source': 'words', 'num_tokens': 1194, 'adjacent_duplication': 0.0201, 'trigram_loop_fraction': 0.0201}
+
+No degenerate output detected.
+exit code: 0

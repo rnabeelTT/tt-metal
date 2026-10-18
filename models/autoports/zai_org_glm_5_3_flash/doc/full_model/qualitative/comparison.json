@@ -1,0 +1,74 @@
+[
+  {
+    "id": "q1",
+    "prompt": "Write a haiku about machine learning.",
+    "compared_tokens": 128,
+    "first_divergence": 38,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 1170,
+    "tt_stopped_on_eos": true,
+    "hf_text": "The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me think about machine learning themes: training data, neural networks, patterns, learning from examples, weights, gradients, errors, predictions, models improving over time.\n\nLet me draft some options:\n\nOption 1:\n\"Data flows like streams\" (5 syllables: Da-ta flows like streams)\n\"Neurons learn from every mistake\" (7? Neur-ons learn from ev-ery mis-take = 8, too many)\nLet me count: Neur-ons (",
+    "tt_text_same_budget": "The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me think about machine learning themes: data, patterns, training, neural networks, algorithms, learning from examples, predictions, errors, gradients, weights, models.\n\nLet me draft some options:\n\nOption 1:\n\"Data flows like streams\" (5 syllables: Da-ta flows like streams = 5)\n\"Patterns hidden, slowly learned\" (Pat-terns hid-den, slow-ly learned = 7)\n\"The model awakes\" (The mod-el a-w"
+  },
+  {
+    "id": "q2",
+    "prompt": "Explain the difference between supervised and unsupervised learning in simple terms.",
+    "compared_tokens": 128,
+    "first_divergence": 75,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 1022,
+    "tt_stopped_on_eos": true,
+    "hf_text": "The user is asking for a simple explanation of the difference between supervised and unsupervised learning. This is a common machine learning concept question. Let me think about how to explain this clearly and simply.\n\n**Supervised Learning:**\n- The algorithm learns from labeled data (data with known answers/outcomes)\n- Like a student learning with an answer key\n- Examples: spam detection (emails labeled spam/not spam), image classification (photos labeled \"cat\" or \"dog\"), predicting house prices (with known prices)\n- Two main types: classification (categories) and regression (continuous values)\n- The goal is to learn a mapping from inputs",
+    "tt_text_same_budget": "The user is asking for a simple explanation of the difference between supervised and unsupervised learning. This is a common machine learning concept question. Let me think about how to explain this clearly and simply.\n\n**Supervised Learning:**\n- The algorithm learns from labeled data (data with known answers/outcomes)\n- Like a student learning with an answer key\n- Examples: spam email detection (emails labeled spam/not spam), image classification (images labeled \"cat\" or \"dog\"), predicting house prices (with known prices)\n- Two main types: classification (categories) and regression (continuous values)\n- The model learns the mapping from inputs to"
+  },
+  {
+    "id": "q3",
+    "prompt": "Complete this story: Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered",
+    "compared_tokens": 128,
+    "first_divergence": 10,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 2048,
+    "tt_stopped_on_eos": false,
+    "hf_text": "The user wants me to complete a story that begins with: \"Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered...\"\n\nThis is a creative writing task. I should write a complete, engaging story. Let me think about what would make a good story here:\n\n1. The protagonist is a \"curious young inventor\" - so they should have some invention or discovery at the heart of the story\n2. It's set in a \"faraway kingdom\" - fairy tale/fantasy setting\n3. The sentence ends with \"who discovered\" - so I need to complete that thought first\n\n",
+    "tt_text_same_budget": "The user wants me to complete a story that begins: \"Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered...\"\n\nThis is a creative writing task. I should write a complete, engaging story that follows from this opening. Let me think about what would make a good story:\n\n1. The protagonist is a \"curious young inventor\" - so they should have some inventive skills and curiosity\n2. They \"discovered\" something - I need to decide what they discovered\n3. It's set in a \"faraway kingdom\" - so a fantasy setting\n\nLet me brainstorm some ideas:\n"
+  },
+  {
+    "id": "q4",
+    "prompt": "What are the three laws of thermodynamics?",
+    "compared_tokens": 128,
+    "first_divergence": 27,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 1035,
+    "tt_stopped_on_eos": true,
+    "hf_text": "The user is asking about the three laws of thermodynamics. This is a classic physics/science question. Let me think about what the laws actually are and how to present them clearly.\n\nThe laws of thermodynamics:\n\n**Zeroth Law of Thermodynamics** (sometimes counted, but the user asked for three):\nIf two systems are each in thermal equilibrium with a third system, then they are in thermal equilibrium with each other. This establishes temperature as a meaningful, measurable quantity.\n\n**First Law of Thermodynamics:**\nEnergy conservation. Energy cannot be created or destroyed, only transformed from one form to another. Mathematically: ΔU =",
+    "tt_text_same_budget": "The user is asking about the three laws of thermodynamics. This is a classic physics/science question. Let me think about what the three laws actually are, and also consider whether I should mention the \"zeroth law\" since it's often discussed.\n\nThe laws of thermodynamics:\n\n**Zeroth Law** (sometimes mentioned as a prerequisite): If two systems are each in thermal equilibrium with a third system, they are in thermal equilibrium with each other. This establishes the concept of temperature.\n\n**First Law**: Energy conservation. Energy cannot be created or destroyed; it can only change forms. The change in internal energy of a system equals the"
+  },
+  {
+    "id": "q5",
+    "prompt": "Translate the following to French: \"Hello, how are you today?\"",
+    "compared_tokens": 128,
+    "first_divergence": 31,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 257,
+    "tt_stopped_on_eos": true,
+    "hf_text": "The user wants me to translate \"Hello, how are you today?\" into French.\n\nThe translation would be:\n\"Bonjour, how are you today?\" - but I need to translate the whole thing.\n\n\"Hello\" = \"Bonjour\" (or \"Salut\" for informal)\n\"How are you today?\" = \"How are you today?\" = \"How are you today?\" \n\nIn French: \"How are you today?\" = \"How are you today?\"\n\nSo the full translation: \"Bonjour, how are you today?\"\n\nOr more naturally: \"Bonjour, how are you today?\"\n\nAlternative: \"Hello, how are you today?\" -",
+    "tt_text_same_budget": "The user wants me to translate \"Hello, how are you today?\" into French.\n\nThe translation would be:\n\"Bonjour, how are you today?\" - \"Bonjour\" is the standard French greeting for \"Hello\"\n\n\"How are you today?\" - \"How are you?\" in French is \"How are you?\" (informal) or \"How are you?\" (formal). \"Today\" is \"today\".\n\nSo the full translation would be:\n\"Bonjour, how are you today?\"\n\nOr with the formal \"you\":\n\"Bonjour, how are you today?\"\n\nThe informal version is more common for everyday greetings. Let me provide the translation"
+  },
+  {
+    "id": "q6",
+    "prompt": "Write a Python function to calculate the Fibonacci sequence.",
+    "compared_tokens": 128,
+    "first_divergence": 29,
+    "identical_prefix": false,
+    "hf_tokens": 128,
+    "tt_tokens": 2048,
+    "tt_stopped_on_eos": false,
+    "hf_text": "The user wants a Python function to calculate the Fibonacci sequence. This is a classic programming question. Let me think about the best way to present this.\n\nThe Fibonacci sequence is: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...\n\nEach number is the sum of the two preceding ones, starting from 0 and 1.\n\nThere are several approaches:\n1. **Recursive** (naive) - simple but exponential time complexity O(2^n)\n2. **Recursive with memoization** - O(n) time\n3. **Iter",
+    "tt_text_same_budget": "The user wants a Python function to calculate the Fibonacci sequence. This is a classic programming question. Let me think about the best way to present this comprehensively but clearly.\n\nThe Fibonacci sequence is: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...\n\nEach number is the sum of the two preceding ones, starting from 0 and 1.\n\nThere are several approaches to implement this:\n\n1. **Recursive approach** (naive):\n```python\ndef fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci"
+  }
+]

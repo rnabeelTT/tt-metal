@@ -1,0 +1,25 @@
+{
+  "args": {
+    "slots": 8,
+    "seq_len": 4096,
+    "do": "tracy",
+    "prompts": "128,2048",
+    "active": "1",
+    "ptcheck": "100,128,161",
+    "steps": 20,
+    "tracy_prefill": 128,
+    "reference": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": null,
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/tracy/after_s8_l0/probe.json"
+  },
+  "layers": "0",
+  "env_mc": "",
+  "build_s": 10.868035316467285,
+  "trace_alloc_per_bank": 237568,
+  "trace_total_per_bank": 8388608,
+  "dram_free_per_bank": 4182217408,
+  "dram_alloc_per_bank": 81735360,
+  "tracy_decode_ms": 2.3945090360939503,
+  "tracy_prefill_ms": 3.724125912413001
+}

@@ -1,0 +1,2362 @@
+{
+ "mode": "reduced",
+ "layers": "0,3,4",
+ "S": 32,
+ "max_context": 131072,
+ "bank_size": 4205232512,
+ "banks": 8,
+ "die_allocatable_bytes": 33641860096,
+ "trace_region_bytes": 536870912,
+ "after_open": {
+  "allocated": 0,
+  "free": 33641860096,
+  "largest_free_block_per_bank": 4205232512,
+  "trace_allocated": 0
+ },
+ "after_build": {
+  "allocated": 6768081408,
+  "free": 26873778688,
+  "largest_free_block_per_bank": 3355501952,
+  "trace_allocated": 0
+ },
+ "layers_construct": {
+  "0": {
+   "kind": "kda+dense",
+   "construct_bytes": 92659712,
+   "decode_state_total_bytes": 35717120,
+   "attn_state_bytes": 34734080
+  },
+  "3": {
+   "kind": "dsa+moe",
+   "construct_bytes": 743857152,
+   "decode_state_total_bytes": 4576577536,
+   "attn_state_bytes": 4564027392
+  },
+  "4": {
+   "kind": "kda+moe",
+   "construct_bytes": 741633024,
+   "decode_state_total_bytes": 35684352,
+   "attn_state_bytes": 34734080
+  }
+ },
+ "model_level_bytes": 541952512,
+ "dsa_NB": 32769,
+ "dsa_P_alloc": 32800,
+ "bit_identity_last_logits_vs_s0_b128": {
+  "warm": true,
+  "s1024_b128": true,
+  "s1024_b32": true,
+  "s1024_b16": true,
+  "s0_b128": true,
+  "s512_b32": true
+ },
+ "bit_identity_last_logits_c1024_vs_c1024_s0_b128": true,
+ "prefill_runs": {
+  "warm": {
+   "bucket": 2048,
+   "moe_sorted_rows": 1024,
+   "dsa_index_block_mb": 32,
+   "wall_seconds": 3.277,
+   "peak_over_entry_bytes_max": 311558144,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 205571584,
+     "seconds": [
+      0.125,
+      0.0333,
+      0.0359
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 196.0,
+     "seconds_min": 0.0333
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 311111680,
+     "seconds": [
+      0.184
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 296.7,
+     "seconds_min": 0.184
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 311558144,
+     "seconds": [
+      0.0643,
+      0.07,
+      0.0689
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 297.1,
+     "seconds_min": 0.0643
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 310362112,
+     "seconds": [
+      2.0402,
+      0.1724
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 296.0,
+     "seconds_min": 0.1724
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 14075392,
+     "seconds": [
+      0.0937
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 13.4,
+     "seconds_min": 0.0937
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 121075712,
+     "seconds": [
+      0.205
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 115.5,
+     "seconds_min": 0.205
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.061
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.061
+    }
+   }
+  },
+  "s1024_b128": {
+   "bucket": 2048,
+   "moe_sorted_rows": 1024,
+   "dsa_index_block_mb": 128,
+   "wall_seconds": 1.017,
+   "peak_over_entry_bytes_max": 429457408,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 204801536,
+     "seconds": [
+      0.0423,
+      0.042,
+      0.0415
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 195.3,
+     "seconds_min": 0.0415
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 309264384,
+     "seconds": [
+      0.0936
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 294.9,
+     "seconds_min": 0.0936
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 311558144,
+     "seconds": [
+      0.0829,
+      0.0819,
+      0.0819
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 297.1,
+     "seconds_min": 0.0819
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 429457408,
+     "seconds": [
+      0.1569,
+      0.1238
+     ],
+     "peak_op": "ttnn.typecast",
+     "peak_over_entry_MiB": 409.6,
+     "seconds_min": 0.1238
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0417
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0417
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.0968
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.0968
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0629
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0629
+    }
+   }
+  },
+  "s1024_b32": {
+   "bucket": 2048,
+   "moe_sorted_rows": 1024,
+   "dsa_index_block_mb": 32,
+   "wall_seconds": 1.186,
+   "peak_over_entry_bytes_max": 311558144,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 204801536,
+     "seconds": [
+      0.0426,
+      0.0429,
+      0.043
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 195.3,
+     "seconds_min": 0.0426
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 309264384,
+     "seconds": [
+      0.0924
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 294.9,
+     "seconds_min": 0.0924
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 311558144,
+     "seconds": [
+      0.085,
+      0.0845,
+      0.0857
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 297.1,
+     "seconds_min": 0.0845
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 309264384,
+     "seconds": [
+      0.2088,
+      0.2111
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 294.9,
+     "seconds_min": 0.2088
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0424
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0424
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1041
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1041
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0678
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0678
+    }
+   }
+  },
+  "s1024_b16": {
+   "bucket": 2048,
+   "moe_sorted_rows": 1024,
+   "dsa_index_block_mb": 16,
+   "wall_seconds": 1.766,
+   "peak_over_entry_bytes_max": 311558144,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 204801536,
+     "seconds": [
+      0.0437,
+      0.0432,
+      0.0452
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 195.3,
+     "seconds_min": 0.0432
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 309264384,
+     "seconds": [
+      0.097
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 294.9,
+     "seconds_min": 0.097
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 311558144,
+     "seconds": [
+      0.0863,
+      0.0902,
+      0.0888
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 297.1,
+     "seconds_min": 0.0863
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 310067200,
+     "seconds": [
+      0.6574,
+      0.3255
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 295.7,
+     "seconds_min": 0.3255
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0448
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0448
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1045
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1045
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0683
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0683
+    }
+   }
+  },
+  "s0_b128": {
+   "bucket": 2048,
+   "moe_sorted_rows": 0,
+   "dsa_index_block_mb": 128,
+   "wall_seconds": 1.001,
+   "peak_over_entry_bytes_max": 437190656,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 204801536,
+     "seconds": [
+      0.0463,
+      0.0446,
+      0.0454
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 195.3,
+     "seconds_min": 0.0446
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 435679232,
+     "seconds": [
+      0.1274
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 415.5,
+     "seconds_min": 0.1274
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 437190656,
+     "seconds": [
+      0.0693,
+      0.071,
+      0.0699
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 416.9,
+     "seconds_min": 0.0693
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 434896896,
+     "seconds": [
+      0.1154,
+      0.1166
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 414.8,
+     "seconds_min": 0.1154
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.046
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.046
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1078
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1078
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0729
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0729
+    }
+   }
+  },
+  "s512_b32": {
+   "bucket": 2048,
+   "moe_sorted_rows": 512,
+   "dsa_index_block_mb": 32,
+   "wall_seconds": 1.553,
+   "peak_over_entry_bytes_max": 240025600,
+   "peaks": {
+    "kda+dense/2048/kda": {
+     "peak_over_entry_bytes": 204801536,
+     "seconds": [
+      0.0482,
+      0.0462,
+      0.0465
+     ],
+     "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+     "peak_over_entry_MiB": 195.3,
+     "seconds_min": 0.0462
+    },
+    "dsa+moe/2048/flash": {
+     "peak_over_entry_bytes": 238456832,
+     "seconds": [
+      0.1999
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 227.4,
+     "seconds_min": 0.1999
+    },
+    "kda+moe/2048/kda": {
+     "peak_over_entry_bytes": 240025600,
+     "seconds": [
+      0.1283,
+      0.1277,
+      0.1286
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 228.9,
+     "seconds_min": 0.1277
+    },
+    "dsa+moe/2048/sparse": {
+     "peak_over_entry_bytes": 237731840,
+     "seconds": [
+      0.2634,
+      0.2655
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 226.7,
+     "seconds_min": 0.2634
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0467
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0467
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1076
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1076
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0704
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0704
+    }
+   }
+  },
+  "c1024_b32": {
+   "bucket": 1024,
+   "moe_sorted_rows": 1024,
+   "dsa_index_block_mb": 32,
+   "wall_seconds": 2.184,
+   "peak_over_entry_bytes_max": 268763136,
+   "peaks": {
+    "kda+dense/1024/kda": {
+     "peak_over_entry_bytes": 100075008,
+     "seconds": [
+      0.132,
+      0.0491,
+      0.0487,
+      0.0504,
+      0.0502,
+      0.05
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 95.4,
+     "seconds_min": 0.0487
+    },
+    "dsa+moe/1024/flash": {
+     "peak_over_entry_bytes": 267386880,
+     "seconds": [
+      0.183
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 255.0,
+     "seconds_min": 0.183
+    },
+    "kda+moe/1024/kda": {
+     "peak_over_entry_bytes": 268763136,
+     "seconds": [
+      0.0751,
+      0.0754,
+      0.0771,
+      0.0773,
+      0.0786,
+      0.0786
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 256.3,
+     "seconds_min": 0.0751
+    },
+    "dsa+moe/1024/dense": {
+     "peak_over_entry_bytes": 266665984,
+     "seconds": [
+      0.1182
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 254.3,
+     "seconds_min": 0.1182
+    },
+    "dsa+moe/1024/sparse": {
+     "peak_over_entry_bytes": 266780672,
+     "seconds": [
+      0.1806,
+      0.1606,
+      0.1617,
+      0.1655
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 254.4,
+     "seconds_min": 0.1606
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0505
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0505
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1289
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1289
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0792
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0792
+    }
+   }
+  },
+  "c1024_s0_b128": {
+   "bucket": 1024,
+   "moe_sorted_rows": 0,
+   "dsa_index_block_mb": 128,
+   "wall_seconds": 1.755,
+   "peak_over_entry_bytes_max": 382337024,
+   "peaks": {
+    "kda+dense/1024/kda": {
+     "peak_over_entry_bytes": 99354112,
+     "seconds": [
+      0.0516,
+      0.0503,
+      0.0507,
+      0.0505,
+      0.0507,
+      0.0511
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 94.8,
+     "seconds_min": 0.0503
+    },
+    "dsa+moe/1024/flash": {
+     "peak_over_entry_bytes": 266469376,
+     "seconds": [
+      0.0923
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 254.1,
+     "seconds_min": 0.0923
+    },
+    "kda+moe/1024/kda": {
+     "peak_over_entry_bytes": 268763136,
+     "seconds": [
+      0.0797,
+      0.0788,
+      0.0784,
+      0.0782,
+      0.0799,
+      0.0806
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 256.3,
+     "seconds_min": 0.0782
+    },
+    "dsa+moe/1024/dense": {
+     "peak_over_entry_bytes": 266469376,
+     "seconds": [
+      0.095
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 254.1,
+     "seconds_min": 0.095
+    },
+    "dsa+moe/1024/sparse": {
+     "peak_over_entry_bytes": 382337024,
+     "seconds": [
+      0.1125,
+      0.1117,
+      0.1123,
+      0.1127
+     ],
+     "peak_op": "ttnn.typecast",
+     "peak_over_entry_MiB": 364.6,
+     "seconds_min": 0.1117
+    },
+    "kda+dense/128/kda": {
+     "peak_over_entry_bytes": 13321728,
+     "seconds": [
+      0.0499
+     ],
+     "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+     "peak_over_entry_MiB": 12.7,
+     "seconds_min": 0.0499
+    },
+    "dsa+moe/128/sparse": {
+     "peak_over_entry_bytes": 119144448,
+     "seconds": [
+      0.1238
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 113.6,
+     "seconds_min": 0.1238
+    },
+    "kda+moe/128/kda": {
+     "peak_over_entry_bytes": 120291328,
+     "seconds": [
+      0.0824
+     ],
+     "peak_op": "ttnn.moe_gather_add_rows",
+     "peak_over_entry_MiB": 114.7,
+     "seconds_min": 0.0824
+    }
+   }
+  }
+ },
+ "prefill_rows": [
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6802112512,
+   "peak_bytes": 7007684096,
+   "peak_over_entry_bytes": 205571584,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3321734528,
+   "seconds": 0.125,
+   "run": "warm"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6804307968,
+   "peak_bytes": 7115419648,
+   "peak_over_entry_bytes": 311111680,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3313538432,
+   "seconds": 0.184,
+   "run": "warm"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6806335488,
+   "peak_bytes": 7117893632,
+   "peak_over_entry_bytes": 311558144,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3311701376,
+   "seconds": 0.0643,
+   "run": "warm"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6825357312,
+   "peak_bytes": 7029011968,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3317228928,
+   "seconds": 0.0333,
+   "run": "warm"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6825357312,
+   "peak_bytes": 7135719424,
+   "peak_over_entry_bytes": 310362112,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3309112704,
+   "seconds": 2.0402,
+   "run": "warm"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6826455040,
+   "peak_bytes": 7136866304,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3309112704,
+   "seconds": 0.07,
+   "run": "warm"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6826455040,
+   "peak_bytes": 7030109696,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3317058944,
+   "seconds": 0.0359,
+   "run": "warm"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6826455040,
+   "peak_bytes": 7135719424,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3309362560,
+   "seconds": 0.1724,
+   "run": "warm"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6826455040,
+   "peak_bytes": 7136866304,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3309362560,
+   "seconds": 0.0689,
+   "run": "warm"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6778159104,
+   "peak_bytes": 6792234496,
+   "peak_over_entry_bytes": 14075392,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354860928,
+   "seconds": 0.0937,
+   "run": "warm"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6779076608,
+   "peak_bytes": 6900152320,
+   "peak_over_entry_bytes": 121075712,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340283264,
+   "seconds": 0.205,
+   "run": "warm"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6781106176,
+   "peak_bytes": 6901397504,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340270976,
+   "seconds": 0.061,
+   "run": "warm"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6809823232,
+   "peak_bytes": 7014624768,
+   "peak_over_entry_bytes": 204801536,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3319883136,
+   "seconds": 0.0423,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6810970112,
+   "peak_bytes": 7120234496,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312952704,
+   "seconds": 0.0936,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6810970112,
+   "peak_bytes": 7122528256,
+   "peak_over_entry_bytes": 311558144,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312952704,
+   "seconds": 0.0829,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6829942784,
+   "peak_bytes": 7033597440,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3317720448,
+   "seconds": 0.042,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6829942784,
+   "peak_bytes": 7259400192,
+   "peak_over_entry_bytes": 429457408,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3292538240,
+   "seconds": 0.1569,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7140698112,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3310747008,
+   "seconds": 0.0819,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7033941504,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316596096,
+   "seconds": 0.0415,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7259416576,
+   "peak_over_entry_bytes": 429129728,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3292503424,
+   "seconds": 0.1238,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7140698112,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308899712,
+   "seconds": 0.0819,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6795214336,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354525056,
+   "seconds": 0.0417,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6901037056,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340172672,
+   "seconds": 0.0968,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6902183936,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340172672,
+   "seconds": 0.0629,
+   "run": "s1024_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6810167296,
+   "peak_bytes": 7014968832,
+   "peak_over_entry_bytes": 204801536,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3319840128,
+   "seconds": 0.0426,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6811314176,
+   "peak_bytes": 7120578560,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312909696,
+   "seconds": 0.0924,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6811314176,
+   "peak_bytes": 7122872320,
+   "peak_over_entry_bytes": 311558144,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312909696,
+   "seconds": 0.085,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7033941504,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3317677440,
+   "seconds": 0.0429,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7139551232,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308649856,
+   "seconds": 0.2088,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7140698112,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3310747008,
+   "seconds": 0.0845,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7033941504,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316596096,
+   "seconds": 0.043,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7139551232,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308899712,
+   "seconds": 0.2111,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7140698112,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308899712,
+   "seconds": 0.0857,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6795214336,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354525056,
+   "seconds": 0.0424,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6901037056,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340172672,
+   "seconds": 0.1041,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6781892608,
+   "peak_bytes": 6902183936,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340172672,
+   "seconds": 0.0678,
+   "run": "s1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6810167296,
+   "peak_bytes": 7014968832,
+   "peak_over_entry_bytes": 204801536,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3319840128,
+   "seconds": 0.0437,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6811314176,
+   "peak_bytes": 7120578560,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312909696,
+   "seconds": 0.097,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6811314176,
+   "peak_bytes": 7122872320,
+   "peak_over_entry_bytes": 311558144,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3312909696,
+   "seconds": 0.0863,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7033941504,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3317677440,
+   "seconds": 0.0432,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6830286848,
+   "peak_bytes": 7140354048,
+   "peak_over_entry_bytes": 310067200,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308549504,
+   "seconds": 0.6574,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831089664,
+   "peak_bytes": 7141500928,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3310646656,
+   "seconds": 0.0902,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831089664,
+   "peak_bytes": 7034744320,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316495744,
+   "seconds": 0.0452,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6831089664,
+   "peak_bytes": 7140354048,
+   "peak_over_entry_bytes": 309264384,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308799360,
+   "seconds": 0.3255,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831089664,
+   "peak_bytes": 7141500928,
+   "peak_over_entry_bytes": 310411264,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3308799360,
+   "seconds": 0.0888,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6782695424,
+   "peak_bytes": 6796017152,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354424704,
+   "seconds": 0.0448,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6782695424,
+   "peak_bytes": 6901839872,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340072320,
+   "seconds": 0.1045,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6782695424,
+   "peak_bytes": 6902986752,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340072320,
+   "seconds": 0.0683,
+   "run": "s1024_b16"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6810970112,
+   "peak_bytes": 7015771648,
+   "peak_over_entry_bytes": 204801536,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3319739776,
+   "seconds": 0.0463,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6812116992,
+   "peak_bytes": 7247796224,
+   "peak_over_entry_bytes": 435679232,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3293121920,
+   "seconds": 0.1274,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6812899328,
+   "peak_bytes": 7250089984,
+   "peak_over_entry_bytes": 437190656,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3293121920,
+   "seconds": 0.0693,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7035526656,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316481408,
+   "seconds": 0.0446,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7266768896,
+   "peak_over_entry_bytes": 434896896,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3288862080,
+   "seconds": 0.1154,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7267915776,
+   "peak_over_entry_bytes": 436043776,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3288862080,
+   "seconds": 0.071,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7035526656,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316448640,
+   "seconds": 0.0454,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7266768896,
+   "peak_over_entry_bytes": 434896896,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3290926464,
+   "seconds": 0.1166,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6831872000,
+   "peak_bytes": 7267915776,
+   "peak_over_entry_bytes": 436043776,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3290926464,
+   "seconds": 0.0699,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6783477760,
+   "peak_bytes": 6796799488,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354377600,
+   "seconds": 0.046,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6783477760,
+   "peak_bytes": 6902622208,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340025216,
+   "seconds": 0.1078,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6783477760,
+   "peak_bytes": 6903769088,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3340025216,
+   "seconds": 0.0729,
+   "run": "s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6811752448,
+   "peak_bytes": 7016553984,
+   "peak_over_entry_bytes": 204801536,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3318644096,
+   "seconds": 0.0482,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "flash",
+   "entry_bytes": 6812899328,
+   "peak_bytes": 7051356160,
+   "peak_over_entry_bytes": 238456832,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3321083264,
+   "seconds": 0.1999,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6813640704,
+   "peak_bytes": 7053666304,
+   "peak_over_entry_bytes": 240025600,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318574464,
+   "seconds": 0.1283,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7036268032,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316411776,
+   "seconds": 0.0462,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7070345216,
+   "peak_over_entry_bytes": 237731840,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3316428160,
+   "seconds": 0.2634,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7071492096,
+   "peak_over_entry_bytes": 238878720,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3316821376,
+   "seconds": 0.1277,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7036268032,
+   "peak_over_entry_bytes": 203654656,
+   "peak_op": "ttnn.experimental.kda.recurrent_chunk_scan",
+   "min_largest_free_block_per_bank": 3316379008,
+   "seconds": 0.0465,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "sparse",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7070345216,
+   "peak_over_entry_bytes": 237731840,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3314298240,
+   "seconds": 0.2655,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 2048,
+   "dsa_path": "kda",
+   "entry_bytes": 6832613376,
+   "peak_bytes": 7071492096,
+   "peak_over_entry_bytes": 238878720,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3316379008,
+   "seconds": 0.1286,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6784219136,
+   "peak_bytes": 6797540864,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3354307968,
+   "seconds": 0.0467,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6784219136,
+   "peak_bytes": 6903363584,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339955584,
+   "seconds": 0.1076,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6784219136,
+   "peak_bytes": 6904510464,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339955584,
+   "seconds": 0.0704,
+   "run": "s512_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6795618304,
+   "peak_bytes": 6895693312,
+   "peak_over_entry_bytes": 100075008,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3337911680,
+   "seconds": 0.132,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "flash",
+   "entry_bytes": 6797649920,
+   "peak_bytes": 7065036800,
+   "peak_over_entry_bytes": 267386880,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318750592,
+   "seconds": 0.183,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6798665728,
+   "peak_bytes": 7067428864,
+   "peak_over_entry_bytes": 268763136,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3319786880,
+   "seconds": 0.0751,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6808365056,
+   "peak_bytes": 6906572288,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336699264,
+   "seconds": 0.0491,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "dense",
+   "entry_bytes": 6808365056,
+   "peak_bytes": 7075031040,
+   "peak_over_entry_bytes": 266665984,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3317644672,
+   "seconds": 0.1182,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6808561664,
+   "peak_bytes": 7076177920,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318693248,
+   "seconds": 0.0754,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6808954880,
+   "peak_bytes": 6907162112,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336658304,
+   "seconds": 0.0487,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6808954880,
+   "peak_bytes": 7075735552,
+   "peak_over_entry_bytes": 266780672,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3316540800,
+   "seconds": 0.1806,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318637952,
+   "seconds": 0.0771,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336635776,
+   "seconds": 0.0504,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7075735552,
+   "peak_over_entry_bytes": 266469376,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3317605760,
+   "seconds": 0.1606,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318654336,
+   "seconds": 0.0773,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336619392,
+   "seconds": 0.0502,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7075735552,
+   "peak_over_entry_bytes": 266469376,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3316540800,
+   "seconds": 0.1617,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318637952,
+   "seconds": 0.0786,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336635776,
+   "seconds": 0.05,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7075735552,
+   "peak_over_entry_bytes": 266469376,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3317605760,
+   "seconds": 0.1655,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318654336,
+   "seconds": 0.0786,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6800047616,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3353994624,
+   "seconds": 0.0505,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6905870336,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339642240,
+   "seconds": 0.1289,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6907017216,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339642240,
+   "seconds": 0.0792,
+   "run": "c1024_b32"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6798059520,
+   "peak_bytes": 6897413632,
+   "peak_over_entry_bytes": 99354112,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3337700736,
+   "seconds": 0.0516,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "flash",
+   "entry_bytes": 6799206400,
+   "peak_bytes": 7065675776,
+   "peak_over_entry_bytes": 266469376,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318670720,
+   "seconds": 0.0923,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 0,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6799206400,
+   "peak_bytes": 7067969536,
+   "peak_over_entry_bytes": 268763136,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3319719296,
+   "seconds": 0.0797,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6808872960,
+   "peak_bytes": 6907080192,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336635776,
+   "seconds": 0.0503,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "dense",
+   "entry_bytes": 6808872960,
+   "peak_bytes": 7075342336,
+   "peak_over_entry_bytes": 266469376,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3317605760,
+   "seconds": 0.095,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 1,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6808872960,
+   "peak_bytes": 7076489216,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318654336,
+   "seconds": 0.0788,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336619392,
+   "seconds": 0.0507,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7191603200,
+   "peak_over_entry_bytes": 382337024,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3303589248,
+   "seconds": 0.1125,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 2,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318637952,
+   "seconds": 0.0784,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336635776,
+   "seconds": 0.0505,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7191603200,
+   "peak_over_entry_bytes": 382337024,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3304654208,
+   "seconds": 0.1117,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 3,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318654336,
+   "seconds": 0.0782,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336619392,
+   "seconds": 0.0507,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7191603200,
+   "peak_over_entry_bytes": 382337024,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3303589248,
+   "seconds": 0.1123,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 4,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318637952,
+   "seconds": 0.0799,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 6907473408,
+   "peak_over_entry_bytes": 98207232,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3336635776,
+   "seconds": 0.0511,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "sparse",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7191603200,
+   "peak_over_entry_bytes": 382337024,
+   "peak_op": "ttnn.typecast",
+   "min_largest_free_block_per_bank": 3304654208,
+   "seconds": 0.1127,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 5,
+   "rows": 1024,
+   "dsa_path": "kda",
+   "entry_bytes": 6809266176,
+   "peak_bytes": 7076882432,
+   "peak_over_entry_bytes": 267616256,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3318654336,
+   "seconds": 0.0806,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 0,
+   "kind": "kda+dense",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6800047616,
+   "peak_over_entry_bytes": 13321728,
+   "peak_op": "ttnn.experimental.reduce_scatter_minimal_async",
+   "min_largest_free_block_per_bank": 3353994624,
+   "seconds": 0.0499,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 3,
+   "kind": "dsa+moe",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "sparse",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6905870336,
+   "peak_over_entry_bytes": 119144448,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339642240,
+   "seconds": 0.1238,
+   "run": "c1024_s0_b128"
+  },
+  {
+   "layer": 4,
+   "kind": "kda+moe",
+   "chunk": 6,
+   "rows": 128,
+   "dsa_path": "kda",
+   "entry_bytes": 6786725888,
+   "peak_bytes": 6907017216,
+   "peak_over_entry_bytes": 120291328,
+   "peak_op": "ttnn.moe_gather_add_rows",
+   "min_largest_free_block_per_bank": 3339642240,
+   "seconds": 0.0824,
+   "run": "c1024_s0_b128"
+  }
+ ],
+ "moe_layer_direct": {
+  "layer": 3,
+  "peaks": {
+   "0": {
+    "peak_over_entry_bytes": 384040960,
+    "seconds": 0.0327,
+    "peak_op": "ttnn.moe_gather_add_rows"
+   },
+   "1024": {
+    "peak_over_entry_bytes": 258408448,
+    "seconds": 0.0552,
+    "peak_op": "ttnn.moe_gather_add_rows"
+   },
+   "512": {
+    "peak_over_entry_bytes": 186875904,
+    "seconds": 0.0953,
+    "peak_op": "ttnn.moe_gather_add_rows"
+   }
+  },
+  "bit_identical_1024": true,
+  "bit_identical_512": true
+ },
+ "decode_step_eager": {
+  "peak_over_entry_bytes": 107266560,
+  "peak_op": "ttnn.moe_gather_add_rows"
+ },
+ "after_decode_warm": {
+  "allocated": 6785157120,
+  "free": 26856702976,
+  "largest_free_block_per_bank": 3353527680,
+  "trace_allocated": 0
+ },
+ "decode_trace_per_layer": {
+  "0": {
+   "kind": "kda+dense",
+   "trace_bytes": 720896
+  },
+  "3": {
+   "kind": "dsa+moe",
+   "trace_bytes": 1507328
+  },
+  "4": {
+   "kind": "kda+moe",
+   "trace_bytes": 983040
+  }
+ },
+ "model_trace_bytes": 3932160,
+ "model_trace_persistent_dram_bytes": 2490368,
+ "sampler_trace_bytes_total": 262144,
+ "after_traces": {
+  "allocated": 6787647488,
+  "free": 26854212608,
+  "largest_free_block_per_bank": 3353527680,
+  "trace_allocated": 4194304
+ },
+ "model_trace_minus_layers_bytes": 720896,
+ "hook_samples": 29868,
+ "hook_seconds": 6.06
+}

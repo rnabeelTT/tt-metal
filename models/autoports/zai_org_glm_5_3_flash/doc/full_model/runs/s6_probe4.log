@@ -1,0 +1,58 @@
+=== start Fri Oct 16 10:20:30 PM UTC 2026 : timeout 1500 python_env/bin/pytest -sv -x models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py -p no:cacheprovider --timeout 1200
+2026-10-16 22:20:32.672 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 1200.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 3 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host 2026-10-16 22:20:38.632 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 22:20:39.434 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 0 (kda/dense) loaded in 1.5s
+2026-10-16 22:21:07.200 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-16 22:21:07.363 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 3 (dsa/moe) loaded in 27.9s
+2026-10-16 22:21:15.649 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 22:21:42.144 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-16 22:21:42.250 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 4 (kda/moe) loaded in 34.9s
+2026-10-16 22:21:42.308 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:141 - model weights loaded in 67.8s (no weight cache)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-16 22:21:44.429 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:118 - decode traces captured (model + sampler)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager traced [67404, 67404, 91886, 88190, 88190, 67404] eager [67404, 67404, 91886, 88190, 88190, 67404]
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+
+=============================== warnings summary ===============================
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+71.23s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+0.52s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.28s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.21s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.21s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+=================== 3 passed, 2 warnings in 72.85s (0:01:12) ===================
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+=== exit code: 0 Fri Oct 16 10:21:48 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

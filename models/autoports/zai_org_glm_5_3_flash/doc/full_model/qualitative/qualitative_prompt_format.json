@@ -1,0 +1,23 @@
+{
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer_class": "TokenizersBackend",
+  "chat_template_present": true,
+  "chat_template_source": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8/chat_template.jinja",
+  "prompt_mode": "chat",
+  "rendering": "tokenizer.apply_chat_template([{'role': 'user', 'content': prompt}], tokenize=False, add_generation_prompt=True) (default kwargs: reasoning_effort -> 'max', thinking on: the generation prompt ends '<|assistant|><think>'); token ids = apply_chat_template(..., tokenize=True) == encode(rendered, add_special_tokens=False)",
+  "roles": "single user message per prompt, no system message (the template inserts '<|system|>Reasoning Effort: Max')",
+  "prompt_source": "/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime/readiness_check/vllm_prompts.txt",
+  "prompt_split": "blank-line separated, as readiness_check.run_vllm_server",
+  "generation": {
+    "do_sample": false,
+    "greedy": true,
+    "stop_ids": [
+      154820,
+      154827,
+      154829
+    ]
+  },
+  "transformers": "5.19.0"
+}

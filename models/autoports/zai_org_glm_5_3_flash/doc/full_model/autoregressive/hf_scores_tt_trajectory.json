@@ -1,0 +1,7489 @@
+{
+  "source": "tools/hf_full_ref.py --mode score-trajectory",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --threads 12 --expert-cache-gb 48 --mode score-trajectory",
+  "note": "CPU HF reference (tools/hf_full_ref.py): unmodified HF Glm5NextTextModel, E192-masked routed experts FP8->bf16 dequantized lazily, non-expert weights bf16; greedy argmax of fp32 last-position logits with a DynamicCache (model.generate(do_sample=False) equivalent).",
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "threads": 12,
+  "expert_cache_gb": 48.0,
+  "trajectory": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/full_model/autoregressive/autoregressive_meta.json",
+  "side": "tt",
+  "num_tokens": 256,
+  "hf_top1_agreement": 0.9765625,
+  "hf_top5_agreement": 0.99609375,
+  "worst_ranks": [
+    [
+      5,
+      12
+    ],
+    [
+      3,
+      9
+    ],
+    [
+      2,
+      8
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      1,
+      24
+    ],
+    [
+      1,
+      19
+    ],
+    [
+      0,
+      255
+    ],
+    [
+      0,
+      254
+    ],
+    [
+      0,
+      253
+    ],
+    [
+      0,
+      252
+    ]
+  ],
+  "hf_greedy_first_divergence": 1,
+  "rows": [
+    {
+      "i": 0,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        2494,
+        458,
+        279,
+        429
+      ],
+      "hf_top5_str": [
+        " a",
+        " something",
+        " an",
+        " the",
+        " that"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        18.625,
+        17.25,
+        16.875,
+        16.0
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 1,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        2613,
+        14876,
+        33794,
+        54799,
+        25304
+      ],
+      "hf_top5_str": [
+        " small",
+        " strange",
+        " stranger",
+        " butterfly",
+        " mysterious"
+      ],
+      "hf_top5_logits": [
+        15.312,
+        15.062,
+        14.188,
+        14.188,
+        13.875
+      ],
+      "emitted_logit": 14.188,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 2,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        39898,
+        4268,
+        27871,
+        83558
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " resting",
+        " land",
+        " dancing",
+        " drifting"
+      ],
+      "hf_top5_logits": [
+        17.0,
+        15.25,
+        14.75,
+        14.688,
+        14.438
+      ],
+      "emitted_logit": 17.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 3,
+      "emitted": 287,
+      "emitted_str": "ing",
+      "hf_top5": [
+        287,
+        3267,
+        3941,
+        553,
+        504
+      ],
+      "hf_top5_str": [
+        "ing",
+        " past",
+        " across",
+        " by",
+        " from"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        19.0,
+        16.875,
+        16.75,
+        15.812
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 4,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        1526,
+        3143,
+        3941,
+        77871
+      ],
+      "hf_top5_str": [
+        " past",
+        " through",
+        " near",
+        " across",
+        " gracefully"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        17.25,
+        16.875,
+        16.625,
+        16.5
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 5,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        13,
+        323,
+        11,
+        279
+      ],
+      "hf_top5_str": [
+        " her",
+        ".",
+        " and",
+        ",",
+        " the"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        17.375,
+        16.875,
+        16.625,
+        16.25
+      ],
+      "emitted_logit": 18.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 6,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        7541,
+        16863,
+        1968,
+        13
+      ],
+      "hf_top5_str": [
+        " window",
+        " feet",
+        " shoulder",
+        " head",
+        "."
+      ],
+      "hf_top5_logits": [
+        17.0,
+        14.5,
+        14.5,
+        13.812,
+        13.375
+      ],
+      "emitted_logit": 17.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 7,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        323,
+        11,
+        1959,
+        382
+      ],
+      "hf_top5_str": [
+        ".",
+        " and",
+        ",",
+        " —",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        18.125,
+        16.25,
+        16.25,
+        15.375,
+        14.312
+      ],
+      "emitted_logit": 18.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 8,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        576,
+        2932,
+        68076,
+        1634,
+        1084
+      ],
+      "hf_top5_str": [
+        " The",
+        " She",
+        " Elena",
+        " As",
+        " It"
+      ],
+      "hf_top5_logits": [
+        15.5,
+        14.812,
+        14.75,
+        13.875,
+        13.812
+      ],
+      "emitted_logit": 14.75,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.688
+    },
+    {
+      "i": 9,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        29939,
+        30425,
+        15372,
+        11,
+        1030
+      ],
+      "hf_top5_str": [
+        " wondered",
+        " smiled",
+        " watched",
+        ",",
+        " had"
+      ],
+      "hf_top5_logits": [
+        16.375,
+        16.375,
+        16.25,
+        15.75,
+        15.312
+      ],
+      "emitted_logit": 15.75,
+      "emitted_rank": 3,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 10,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        2677,
+        879,
+        3512,
+        448
+      ],
+      "hf_top5_str": [
+        " being",
+        " always",
+        " who",
+        " ever",
+        " with"
+      ],
+      "hf_top5_logits": [
+        17.875,
+        16.5,
+        16.125,
+        15.375,
+        14.812
+      ],
+      "emitted_logit": 17.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 11,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        22153,
+        3512,
+        17687,
+        458
+      ],
+      "hf_top5_str": [
+        " a",
+        " curious",
+        " ever",
+        " naturally",
+        " an"
+      ],
+      "hf_top5_logits": [
+        16.125,
+        16.125,
+        15.875,
+        15.812,
+        15.625
+      ],
+      "emitted_logit": 16.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 12,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        7904,
+        22153,
+        30437,
+        3743,
+        42422
+      ],
+      "hf_top5_str": [
+        " dream",
+        " curious",
+        " lover",
+        " girl",
+        " thoughtful"
+      ],
+      "hf_top5_logits": [
+        16.125,
+        16.0,
+        15.562,
+        14.75,
+        14.5
+      ],
+      "emitted_logit": 14.25,
+      "emitted_rank": 5,
+      "hf_top1_margin": 0.125
+    },
+    {
+      "i": 13,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        323,
+        7904,
+        5458,
+        55353
+      ],
+      "hf_top5_str": [
+        " observer",
+        " and",
+        " dream",
+        " student",
+        " watcher"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        15.938,
+        15.875,
+        15.5,
+        15.0
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.312
+    },
+    {
+      "i": 14,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        315,
+        553,
+        323,
+        2474
+      ],
+      "hf_top5_str": [
+        ",",
+        " of",
+        " by",
+        " and",
+        " since"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        22.0,
+        17.75,
+        16.25,
+        15.438
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 15,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        6139,
+        15372,
+        29939,
+        15031,
+        8109
+      ],
+      "hf_top5_str": [
+        " wrote",
+        " watched",
+        " wondered",
+        " realized",
+        " followed"
+      ],
+      "hf_top5_logits": [
+        18.75,
+        18.75,
+        17.625,
+        17.25,
+        17.0
+      ],
+      "emitted_logit": 18.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 16,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        432,
+        15504
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        " it",
+        " carefully"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        19.0,
+        18.375,
+        18.25,
+        17.625
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 17,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        80022,
+        1181
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        " butterflies",
+        " its"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        19.5,
+        17.125,
+        16.625,
+        14.562
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 18,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        13664,
+        25908,
+        35027,
+        80022
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " tiny",
+        " insect",
+        " delicate",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        15.938,
+        15.75,
+        15.688,
+        15.438
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.938
+    },
+    {
+      "i": 19,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        83060,
+        73209,
+        90796,
+        26039,
+        55591
+      ],
+      "hf_top5_str": [
+        " danced",
+        " flutter",
+        " drifted",
+        " landed",
+        " dart"
+      ],
+      "hf_top5_logits": [
+        17.875,
+        17.5,
+        16.25,
+        15.875,
+        15.375
+      ],
+      "emitted_logit": 17.5,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 20,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        504,
+        3267,
+        73209
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " from",
+        " past",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        15.438,
+        14.562,
+        14.375,
+        14.125
+      ],
+      "emitted_logit": 19.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.438
+    },
+    {
+      "i": 21,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        504,
+        77871,
+        29164,
+        1526
+      ],
+      "hf_top5_str": [
+        " past",
+        " from",
+        " gracefully",
+        " gently",
+        " through"
+      ],
+      "hf_top5_logits": [
+        17.75,
+        17.375,
+        17.125,
+        16.25,
+        16.125
+      ],
+      "emitted_logit": 17.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 22,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        1549,
+        11,
+        264
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        " again",
+        ",",
+        " a"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        17.875,
+        16.75,
+        16.5,
+        15.938
+      ],
+      "emitted_logit": 18.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 23,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        6930,
+        1549,
+        11,
+        4916
+      ],
+      "hf_top5_str": [
+        " window",
+        " favorite",
+        " again",
+        ",",
+        " tree"
+      ],
+      "hf_top5_logits": [
+        17.125,
+        13.812,
+        13.188,
+        12.875,
+        12.438
+      ],
+      "emitted_logit": 17.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.312
+    },
+    {
+      "i": 24,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        1549,
+        13,
+        323,
+        11,
+        3055
+      ],
+      "hf_top5_str": [
+        " again",
+        ".",
+        " and",
+        ",",
+        " once"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        17.875,
+        17.0,
+        16.625,
+        16.125
+      ],
+      "emitted_logit": 17.875,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 25,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        576,
+        24809,
+        758
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " The",
+        " Later",
+        " In"
+      ],
+      "hf_top5_logits": [
+        16.75,
+        15.375,
+        15.188,
+        14.375,
+        13.188
+      ],
+      "emitted_logit": 16.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 26,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        29939,
+        572,
+        594
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " wondered",
+        " was",
+        "'s"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        16.625,
+        15.375,
+        15.25,
+        15.0
+      ],
+      "emitted_logit": 18.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 27,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        264,
+        2677,
+        458,
+        879
+      ],
+      "hf_top5_str": [
+        " being",
+        " a",
+        " always",
+        " an",
+        " who"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        16.125,
+        14.625,
+        14.438,
+        14.375
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 28,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        458,
+        279,
+        22153,
+        26805
+      ],
+      "hf_top5_str": [
+        " a",
+        " an",
+        " the",
+        " curious",
+        " keen"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        16.625,
+        15.062,
+        14.812,
+        14.625
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.25
+    },
+    {
+      "i": 29,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        22153,
+        140141,
+        16569,
+        3974
+      ],
+      "hf_top5_str": [
+        " keen",
+        " curious",
+        "keen",
+        " careful",
+        " quick"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        16.0,
+        15.438,
+        14.688,
+        14.562
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 30,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        323,
+        11,
+        9279,
+        55353
+      ],
+      "hf_top5_str": [
+        " observer",
+        " and",
+        ",",
+        " observ",
+        " watcher"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        15.812,
+        15.562,
+        14.125,
+        14.0
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.438
+    },
+    {
+      "i": 31,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        315,
+        553,
+        323,
+        448
+      ],
+      "hf_top5_str": [
+        ",",
+        " of",
+        " by",
+        " and",
+        " with"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        18.375,
+        15.0,
+        14.625,
+        13.625
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 32,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        8109,
+        10337,
+        13677,
+        29939
+      ],
+      "hf_top5_str": [
+        " watched",
+        " followed",
+        " noted",
+        " noticed",
+        " wondered"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        17.375,
+        16.75,
+        16.625,
+        15.438
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 33,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        80022,
+        15504
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        " butterflies",
+        " carefully"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        18.125,
+        16.875,
+        16.25,
+        16.25
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 34,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        80022,
+        432,
+        264,
+        73209
+      ],
+      "hf_top5_str": [
+        " the",
+        " butterflies",
+        " it",
+        " a",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        17.75,
+        17.625,
+        15.625,
+        14.5
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 35,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        73209,
+        14091,
+        25908
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " flutter",
+        " butter",
+        " insect"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        18.75,
+        16.25,
+        15.188,
+        14.625
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 36,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        90796,
+        26039,
+        55591
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        " drifted",
+        " landed",
+        " dart"
+      ],
+      "hf_top5_logits": [
+        18.125,
+        17.125,
+        14.812,
+        14.688,
+        14.625
+      ],
+      "emitted_logit": 18.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 37,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        3267,
+        323,
+        504
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " past",
+        " and",
+        " from"
+      ],
+      "hf_top5_logits": [
+        20.0,
+        15.062,
+        14.438,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 20.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.938
+    },
+    {
+      "i": 38,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        504,
+        553,
+        77871,
+        323
+      ],
+      "hf_top5_str": [
+        " past",
+        " from",
+        " by",
+        " gracefully",
+        " and"
+      ],
+      "hf_top5_logits": [
+        17.75,
+        15.125,
+        15.125,
+        14.938,
+        14.688
+      ],
+      "emitted_logit": 17.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 39,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        11,
+        264
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        ",",
+        " a"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        16.625,
+        15.812,
+        15.688,
+        15.562
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 40,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        6930,
+        11025,
+        11
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        " favorite",
+        " windows",
+        ","
+      ],
+      "hf_top5_logits": [
+        19.375,
+        13.875,
+        13.812,
+        13.188,
+        12.625
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 41,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        1549,
+        11,
+        323
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        " again",
+        ",",
+        " and"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        16.875,
+        15.312,
+        15.125,
+        14.688
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 42,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        576,
+        24809,
+        1634
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " The",
+        " Later",
+        " As"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        14.688,
+        14.188,
+        13.938,
+        13.125
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.062
+    },
+    {
+      "i": 43,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        572,
+        29939,
+        594
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " was",
+        " wondered",
+        "'s"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        16.25,
+        14.75,
+        14.25,
+        14.188
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 44,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        264,
+        10094,
+        448,
+        458
+      ],
+      "hf_top5_str": [
+        " being",
+        " a",
+        " watching",
+        " with",
+        " an"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        15.625,
+        14.562,
+        14.375,
+        14.062
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 45,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        26805,
+        458,
+        2146,
+        1112
+      ],
+      "hf_top5_str": [
+        " a",
+        " keen",
+        " an",
+        "...\n\n",
+        "..."
+      ],
+      "hf_top5_logits": [
+        21.25,
+        14.938,
+        14.812,
+        14.25,
+        14.188
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.312
+    },
+    {
+      "i": 46,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        3093,
+        22153,
+        1962
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        " kind",
+        " curious",
+        " ke"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        15.438,
+        14.125,
+        14.062,
+        13.812
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.688
+    },
+    {
+      "i": 47,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        11,
+        9279,
+        271,
+        1508
+      ],
+      "hf_top5_str": [
+        " observer",
+        ",",
+        " observ",
+        "\n\n",
+        " ob"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        13.812,
+        13.75,
+        13.688,
+        13.5
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.562
+    },
+    {
+      "i": 48,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        2146,
+        13,
+        382,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        "...\n\n",
+        ".",
+        ".\n\n",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        15.75,
+        15.625,
+        14.75,
+        14.562
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 49,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        10337,
+        8109,
+        13677,
+        29939
+      ],
+      "hf_top5_str": [
+        " watched",
+        " noted",
+        " followed",
+        " noticed",
+        " wondered"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        17.375,
+        16.5,
+        15.812,
+        15.625
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 50,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        448,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        " with",
+        "."
+      ],
+      "hf_top5_logits": [
+        20.375,
+        18.0,
+        15.25,
+        14.75,
+        14.5
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 51,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        80022,
+        432,
+        264,
+        54799
+      ],
+      "hf_top5_str": [
+        " the",
+        " butterflies",
+        " it",
+        " a",
+        " butterfly"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        16.125,
+        16.125,
+        14.812,
+        14.125
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 52,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        7015,
+        73209,
+        14091
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " sun",
+        " flutter",
+        " butter"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        17.375,
+        16.625,
+        14.75,
+        14.75
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 53,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        55591,
+        90796,
+        30896
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        " dart",
+        " drifted",
+        " flew"
+      ],
+      "hf_top5_logits": [
+        17.625,
+        15.875,
+        13.562,
+        13.188,
+        13.0
+      ],
+      "emitted_logit": 17.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 54,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        3267,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " past",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        14.25,
+        13.438,
+        12.5,
+        11.875
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.25
+    },
+    {
+      "i": 55,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        1526,
+        382,
+        323
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " through",
+        ".\n\n",
+        " and"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        14.562,
+        14.5,
+        13.5,
+        13.5
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.438
+    },
+    {
+      "i": 56,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        13,
+        279,
+        382,
+        11
+      ],
+      "hf_top5_str": [
+        " her",
+        ".",
+        " the",
+        ".\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        20.25,
+        16.25,
+        15.625,
+        14.938,
+        14.188
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 57,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        382,
+        11025,
+        271
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        ".\n\n",
+        " windows",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        14.5,
+        13.688,
+        13.188,
+        12.75
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 58,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        323
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        " and"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        17.75,
+        15.312,
+        14.938,
+        14.188
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 59,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        24809,
+        576,
+        2938
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " Later",
+        " The",
+        " That"
+      ],
+      "hf_top5_logits": [
+        19.125,
+        14.812,
+        14.375,
+        14.062,
+        13.375
+      ],
+      "emitted_logit": 19.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.312
+    },
+    {
+      "i": 60,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        30425,
+        29939,
+        572
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " smiled",
+        " wondered",
+        " was"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        15.438,
+        15.0,
+        14.75,
+        14.312
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.062
+    },
+    {
+      "i": 61,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        448,
+        10094,
+        264,
+        26222
+      ],
+      "hf_top5_str": [
+        " being",
+        " with",
+        " watching",
+        " a",
+        " noting"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        13.812,
+        13.688,
+        13.438,
+        13.188
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.562
+    },
+    {
+      "i": 62,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        458,
+        11,
+        26805,
+        2146
+      ],
+      "hf_top5_str": [
+        " a",
+        " an",
+        ",",
+        " keen",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        13.75,
+        13.75,
+        13.5,
+        13.375
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 63,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        3093,
+        1962,
+        271
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        " kind",
+        " ke",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        15.062,
+        13.25,
+        12.625,
+        12.5
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.688
+    },
+    {
+      "i": 64,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        11,
+        271,
+        55353,
+        1508
+      ],
+      "hf_top5_str": [
+        " observer",
+        ",",
+        "\n\n",
+        " watcher",
+        " ob"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        13.75,
+        13.625,
+        13.562,
+        13.438
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.375
+    },
+    {
+      "i": 65,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        3554,
+        2146
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        ",\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        15.688,
+        15.188,
+        15.062,
+        14.875
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.562
+    },
+    {
+      "i": 66,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        10337,
+        29939,
+        13677,
+        572
+      ],
+      "hf_top5_str": [
+        " watched",
+        " noted",
+        " wondered",
+        " noticed",
+        " was"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        15.875,
+        15.75,
+        15.188,
+        14.312
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 67,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        448,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        " with",
+        "."
+      ],
+      "hf_top5_logits": [
+        20.125,
+        16.75,
+        15.188,
+        14.0,
+        13.875
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 68,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        80022,
+        264,
+        271
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " butterflies",
+        " a",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        16.625,
+        15.312,
+        14.312,
+        13.75
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.625
+    },
+    {
+      "i": 69,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        2632,
+        14091,
+        73209
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " little",
+        " butter",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        16.0,
+        14.562,
+        14.188,
+        14.188
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.875
+    },
+    {
+      "i": 70,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        55591,
+        13,
+        90796
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        " dart",
+        ".",
+        " drifted"
+      ],
+      "hf_top5_logits": [
+        18.0,
+        15.062,
+        13.438,
+        12.875,
+        12.688
+      ],
+      "emitted_logit": 18.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.938
+    },
+    {
+      "i": 71,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        3267,
+        323,
+        504
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " past",
+        " and",
+        " from"
+      ],
+      "hf_top5_logits": [
+        19.125,
+        13.438,
+        13.375,
+        13.312,
+        12.625
+      ],
+      "emitted_logit": 19.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.688
+    },
+    {
+      "i": 72,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        3123,
+        323,
+        1526,
+        553
+      ],
+      "hf_top5_str": [
+        " past",
+        " away",
+        " and",
+        " through",
+        " by"
+      ],
+      "hf_top5_logits": [
+        18.125,
+        15.125,
+        15.0,
+        14.562,
+        14.562
+      ],
+      "emitted_logit": 18.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 73,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        13,
+        11,
+        279,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        ".",
+        ",",
+        " the",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        15.75,
+        14.438,
+        14.312,
+        14.25
+      ],
+      "emitted_logit": 19.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 74,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        11025,
+        382,
+        11
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        " windows",
+        ".\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        20.25,
+        14.188,
+        13.5,
+        13.0,
+        12.5
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.062
+    },
+    {
+      "i": 75,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        323
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        " and"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        17.5,
+        14.75,
+        14.125,
+        14.0
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 76,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        1634
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " As"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        14.625,
+        14.438,
+        13.938,
+        13.5
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 77,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        29939,
+        30425,
+        594
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " wondered",
+        " smiled",
+        "'s"
+      ],
+      "hf_top5_logits": [
+        20.125,
+        15.125,
+        15.0,
+        14.688,
+        14.312
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 78,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        264,
+        10094,
+        10337,
+        448
+      ],
+      "hf_top5_str": [
+        " being",
+        " a",
+        " watching",
+        " noted",
+        " with"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        13.688,
+        13.625,
+        12.75,
+        12.75
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 79,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        458,
+        271,
+        11,
+        2146
+      ],
+      "hf_top5_str": [
+        " a",
+        " an",
+        "\n\n",
+        ",",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        14.125,
+        13.875,
+        13.438,
+        13.312
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 80,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1962,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " ke",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        15.312,
+        13.188,
+        12.188,
+        12.188
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.812
+    },
+    {
+      "i": 81,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        271,
+        1508,
+        2146,
+        9279
+      ],
+      "hf_top5_str": [
+        " observer",
+        "\n\n",
+        " ob",
+        "...\n\n",
+        " observ"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        15.0,
+        14.875,
+        14.188,
+        13.75
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 82,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        3554,
+        382,
+        2146
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ",\n\n",
+        ".\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        15.75,
+        15.312,
+        15.25,
+        14.188
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.625
+    },
+    {
+      "i": 83,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        10337,
+        8109,
+        13677
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " noted",
+        " followed",
+        " noticed"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        15.688,
+        15.438,
+        14.625,
+        14.562
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.312
+    },
+    {
+      "i": 84,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        432,
+        80022
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        " it",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        16.75,
+        15.062,
+        14.125,
+        13.875
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 85,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        80022,
+        264,
+        1181
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " butterflies",
+        " a",
+        " its"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        17.625,
+        15.438,
+        15.062,
+        13.5
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 86,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        7015,
+        14091,
+        73209
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " sun",
+        " butter",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        16.625,
+        15.5,
+        14.938,
+        14.5
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.875
+    },
+    {
+      "i": 87,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        55591,
+        1320,
+        90796
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        " dart",
+        " fl",
+        " drifted"
+      ],
+      "hf_top5_logits": [
+        18.75,
+        15.062,
+        13.625,
+        12.438,
+        12.375
+      ],
+      "emitted_logit": 18.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.688
+    },
+    {
+      "i": 88,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        3267,
+        13,
+        271
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " past",
+        ".",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        12.75,
+        12.125,
+        12.125,
+        12.0
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 89,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        1526,
+        271,
+        3123
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " through",
+        "\n\n",
+        " away"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        13.188,
+        13.0,
+        12.875,
+        12.625
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.188
+    },
+    {
+      "i": 90,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        13,
+        279,
+        382,
+        11
+      ],
+      "hf_top5_str": [
+        " her",
+        ".",
+        " the",
+        ".\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        20.125,
+        15.188,
+        15.0,
+        14.125,
+        13.438
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.938
+    },
+    {
+      "i": 91,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        11025,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        " windows",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        14.125,
+        13.5,
+        12.938,
+        12.438
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 92,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        323,
+        11
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        " and",
+        ","
+      ],
+      "hf_top5_logits": [
+        21.0,
+        17.75,
+        14.812,
+        14.375,
+        14.312
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.25
+    },
+    {
+      "i": 93,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        1634
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " As"
+      ],
+      "hf_top5_logits": [
+        20.125,
+        14.688,
+        14.438,
+        14.0,
+        13.625
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.438
+    },
+    {
+      "i": 94,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        15372,
+        30425,
+        594
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        " watched",
+        " smiled",
+        "'s"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        14.688,
+        14.562,
+        14.188,
+        14.125
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.062
+    },
+    {
+      "i": 95,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        448,
+        264,
+        14054
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " with",
+        " a",
+        " knowing"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        14.0,
+        13.0,
+        12.938,
+        12.75
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.75
+    },
+    {
+      "i": 96,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        2146,
+        64
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        "...\n\n",
+        "a"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        12.812,
+        12.625,
+        12.5,
+        11.562
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.562
+    },
+    {
+      "i": 97,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        1376,
+        1962,
+        48916
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        " key",
+        " ke",
+        " ken"
+      ],
+      "hf_top5_logits": [
+        26.375,
+        16.875,
+        15.125,
+        13.688,
+        13.438
+      ],
+      "emitted_logit": 26.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 98,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        271,
+        1508,
+        2146,
+        198
+      ],
+      "hf_top5_str": [
+        " observer",
+        "\n\n",
+        " ob",
+        "...\n\n",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        13.938,
+        13.5,
+        12.938,
+        12.812
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.062
+    },
+    {
+      "i": 99,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        345
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        ",\n"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        15.375,
+        15.125,
+        14.688,
+        13.812
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 100,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        10337,
+        13677,
+        29939,
+        3736
+      ],
+      "hf_top5_str": [
+        " watched",
+        " noted",
+        " noticed",
+        " wondered",
+        " watch"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.062,
+        14.5,
+        14.312,
+        14.312
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.938
+    },
+    {
+      "i": 101,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        80022,
+        432
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        " butterflies",
+        " it"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        16.375,
+        14.375,
+        13.625,
+        13.562
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.375
+    },
+    {
+      "i": 102,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        80022,
+        271
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        " butterflies",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        16.75,
+        15.0,
+        14.188,
+        14.062
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 103,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        14091,
+        7015,
+        73209
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " butter",
+        " sun",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        16.5,
+        15.375,
+        15.312,
+        14.812
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 104,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        271,
+        55591,
+        1320
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        "\n\n",
+        " dart",
+        " fl"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        14.438,
+        12.875,
+        12.5,
+        12.375
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.062
+    },
+    {
+      "i": 105,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        3267,
+        271,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        " past",
+        "\n\n",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.0,
+        13.25,
+        12.375,
+        12.312,
+        12.062
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 106,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        1526,
+        1494,
+        271
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " through",
+        " pass",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        13.875,
+        13.812,
+        13.125,
+        13.0
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 107,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.125,
+        15.562,
+        15.0,
+        14.125,
+        13.5
+      ],
+      "emitted_logit": 21.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.562
+    },
+    {
+      "i": 108,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        11025,
+        13,
+        54799,
+        271
+      ],
+      "hf_top5_str": [
+        " window",
+        " windows",
+        ".",
+        " butterfly",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        13.312,
+        13.0,
+        12.75,
+        12.438
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.188
+    },
+    {
+      "i": 109,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        17.875,
+        15.125,
+        14.688,
+        14.188
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 110,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        20.875,
+        14.75,
+        14.438,
+        14.062,
+        13.5
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.125
+    },
+    {
+      "i": 111,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        15372,
+        30425,
+        572
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        " watched",
+        " smiled",
+        " was"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        14.375,
+        14.188,
+        13.938,
+        13.938
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 112,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        8265,
+        6635,
+        572,
+        10094
+      ],
+      "hf_top5_str": [
+        " being",
+        " feeling",
+        " decided",
+        " was",
+        " watching"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        13.625,
+        13.5,
+        13.438,
+        13.0
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.75
+    },
+    {
+      "i": 113,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        198
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        13.625,
+        13.5,
+        12.812,
+        12.25
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 114,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1376,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " key",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        17.25,
+        13.375,
+        12.75,
+        12.125
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 115,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        1508,
+        7448,
+        271,
+        6604
+      ],
+      "hf_top5_str": [
+        " observer",
+        " ob",
+        " obs",
+        "\n\n",
+        " reader"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        14.25,
+        14.188,
+        14.0,
+        13.438
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.625
+    },
+    {
+      "i": 116,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        15.438,
+        15.25,
+        14.875,
+        13.938
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 117,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        3736,
+        10337,
+        13677
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " watch",
+        " noted",
+        " noticed"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        14.25,
+        14.188,
+        13.938,
+        13.5
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 118,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        15.5,
+        14.562,
+        13.562,
+        13.312
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.25
+    },
+    {
+      "i": 119,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1340,
+        271,
+        264,
+        80022
+      ],
+      "hf_top5_str": [
+        " the",
+        " she",
+        "\n\n",
+        " a",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        13.875,
+        13.812,
+        13.812,
+        13.25
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 120,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        14091,
+        11952,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " butter",
+        " bird",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        16.5,
+        15.25,
+        13.938,
+        13.812
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 121,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        1320,
+        30896,
+        83060,
+        15372
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " fl",
+        " flew",
+        " danced",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        13.75,
+        13.688,
+        13.5,
+        13.062
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 122,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        271,
+        287,
+        3267,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "\n\n",
+        "ing",
+        " past",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.25,
+        13.062,
+        12.812,
+        12.062,
+        11.875
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.188
+    },
+    {
+      "i": 123,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        73209,
+        271,
+        5823
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " flutter",
+        "\n\n",
+        " passed"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        13.938,
+        13.688,
+        13.562,
+        13.125
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.562
+    },
+    {
+      "i": 124,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        271,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        "\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        15.312,
+        14.688,
+        14.125,
+        14.062
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.438
+    },
+    {
+      "i": 125,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        11025,
+        382
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        " windows",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        13.812,
+        13.25,
+        12.938,
+        12.688
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.062
+    },
+    {
+      "i": 126,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        17.875,
+        15.25,
+        14.812,
+        14.312
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 127,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        20.75,
+        14.75,
+        14.5,
+        14.125,
+        13.625
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 128,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        15372,
+        1030,
+        572
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        " watched",
+        " had",
+        " was"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        14.688,
+        14.312,
+        13.875,
+        13.875
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.188
+    },
+    {
+      "i": 129,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        15372,
+        264,
+        279
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " watched",
+        " a",
+        " the"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        13.938,
+        13.5,
+        13.438,
+        13.125
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 130,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        26805,
+        11
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        " keen",
+        ","
+      ],
+      "hf_top5_logits": [
+        21.75,
+        14.188,
+        13.812,
+        13.25,
+        12.75
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.562
+    },
+    {
+      "i": 131,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1376,
+        3093
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " key",
+        " kind"
+      ],
+      "hf_top5_logits": [
+        27.875,
+        18.25,
+        14.5,
+        14.438,
+        13.688
+      ],
+      "emitted_logit": 27.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.625
+    },
+    {
+      "i": 132,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        7448,
+        1508,
+        271,
+        21876
+      ],
+      "hf_top5_str": [
+        " observer",
+        " obs",
+        " ob",
+        "\n\n",
+        " observation"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        14.562,
+        14.438,
+        13.625,
+        13.5
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 133,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        15.812,
+        15.438,
+        15.062,
+        14.5
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 134,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        10337,
+        13677,
+        3736
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " noted",
+        " noticed",
+        " watch"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        15.25,
+        14.625,
+        14.25,
+        13.875
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 135,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        1246,
+        271,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        " how",
+        "\n\n",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.625,
+        16.5,
+        14.25,
+        14.062,
+        13.5
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 136,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        271,
+        80022
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        "\n\n",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        16.0,
+        14.375,
+        14.125,
+        13.562
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 137,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        14091,
+        73209,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " butter",
+        " flutter",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        15.75,
+        15.562,
+        14.812,
+        14.25
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.875
+    },
+    {
+      "i": 138,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        55591,
+        271,
+        30896
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        " dart",
+        "\n\n",
+        " flew"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        14.5,
+        12.938,
+        12.562,
+        12.25
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 139,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        13,
+        11
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        ".",
+        ","
+      ],
+      "hf_top5_logits": [
+        21.75,
+        12.875,
+        12.562,
+        12.312,
+        11.938
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 140,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        553,
+        271,
+        1526
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " by",
+        "\n\n",
+        " through"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        13.688,
+        13.0,
+        13.0,
+        12.938
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.688
+    },
+    {
+      "i": 141,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        271,
+        264
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        "\n\n",
+        " a"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        15.312,
+        14.5,
+        13.688,
+        13.562
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.312
+    },
+    {
+      "i": 142,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        11025,
+        382
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        " windows",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        13.375,
+        12.938,
+        12.688,
+        12.438
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.125
+    },
+    {
+      "i": 143,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        18.0,
+        15.375,
+        14.938,
+        14.5
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.625
+    },
+    {
+      "i": 144,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        21.0,
+        14.5,
+        14.188,
+        14.0,
+        13.062
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 145,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        15372,
+        3381,
+        6635
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        " watched",
+        " thought",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        14.75,
+        14.438,
+        14.188,
+        14.188
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.25
+    },
+    {
+      "i": 146,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        1340,
+        10337,
+        6635
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " she",
+        " noted",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        13.625,
+        13.25,
+        12.938,
+        12.938
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 147,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        2146,
+        198
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        "...\n\n",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        14.0,
+        13.562,
+        12.875,
+        12.75
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.75
+    },
+    {
+      "i": 148,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1962,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " ke",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        16.125,
+        13.938,
+        12.625,
+        12.625
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 149,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        1508,
+        271,
+        9279,
+        198
+      ],
+      "hf_top5_str": [
+        " observer",
+        " ob",
+        "\n\n",
+        " observ",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        15.312,
+        14.938,
+        13.625,
+        13.375
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.812
+    },
+    {
+      "i": 150,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        15.5,
+        15.438,
+        15.062,
+        14.125
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 151,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        10337,
+        3736,
+        323
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " noted",
+        " watch",
+        " and"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        14.5,
+        14.188,
+        13.688,
+        13.312
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 152,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        1246,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        " how",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.5,
+        15.688,
+        14.188,
+        13.5,
+        13.188
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.812
+    },
+    {
+      "i": 153,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        80022,
+        264,
+        271
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " butterflies",
+        " a",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        14.688,
+        14.312,
+        14.125,
+        14.0
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.562
+    },
+    {
+      "i": 154,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        80022,
+        14091,
+        7015,
+        42739
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butterflies",
+        " butter",
+        " sun",
+        " sunset"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        17.375,
+        16.0,
+        14.0,
+        13.375
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 155,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        271,
+        1320,
+        30896
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        "\n\n",
+        " fl",
+        " flew"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        13.875,
+        13.125,
+        13.0,
+        12.812
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 156,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        3267,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        " past",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.0,
+        13.125,
+        12.75,
+        11.812,
+        11.75
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 157,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        271,
+        382,
+        5823
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        "\n\n",
+        ".\n\n",
+        " passed"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        13.812,
+        13.125,
+        12.812,
+        12.688
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 158,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.125,
+        14.062,
+        14.0,
+        13.5
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 159,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        11025,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        " windows",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        13.625,
+        12.875,
+        12.625,
+        12.5
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.25
+    },
+    {
+      "i": 160,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        17.875,
+        15.25,
+        14.625,
+        14.438
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 161,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        24809,
+        576,
+        1634
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " Later",
+        " The",
+        " As"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        14.688,
+        14.438,
+        14.0,
+        13.625
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.562
+    },
+    {
+      "i": 162,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        29939,
+        6635,
+        1660
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " wondered",
+        " decided",
+        " being"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        13.375,
+        13.312,
+        13.062,
+        12.938
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 163,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        572,
+        264,
+        1340
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " was",
+        " a",
+        " she"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        13.0,
+        12.875,
+        12.625,
+        12.438
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.125
+    },
+    {
+      "i": 164,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        26805,
+        11
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        " keen",
+        ","
+      ],
+      "hf_top5_logits": [
+        22.375,
+        14.062,
+        13.5,
+        13.125,
+        13.062
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.312
+    },
+    {
+      "i": 165,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1962,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " ke",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        16.875,
+        13.812,
+        12.875,
+        12.5
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 166,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        271,
+        1508,
+        198,
+        30609
+      ],
+      "hf_top5_str": [
+        " observer",
+        "\n\n",
+        " ob",
+        "\n",
+        "observer"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        14.312,
+        13.438,
+        12.812,
+        12.75
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.188
+    },
+    {
+      "i": 167,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        345
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        ",\n"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        15.562,
+        15.562,
+        15.062,
+        14.062
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.188
+    },
+    {
+      "i": 168,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        10337,
+        3736,
+        323
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " noted",
+        " watch",
+        " and"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        14.5,
+        14.25,
+        13.688,
+        13.25
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 169,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        1246,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        " how",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.5,
+        16.125,
+        13.938,
+        13.5,
+        13.188
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.375
+    },
+    {
+      "i": 170,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        271,
+        80022
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        "\n\n",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        16.125,
+        14.438,
+        13.75,
+        13.312
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 171,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        14091,
+        80022,
+        73209,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butter",
+        " butterflies",
+        " flutter",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.688,
+        15.375,
+        14.75,
+        14.375
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.312
+    },
+    {
+      "i": 172,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        271,
+        90796,
+        55591
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        "\n\n",
+        " drifted",
+        " dart"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        14.375,
+        12.562,
+        12.375,
+        12.25
+      ],
+      "emitted_logit": 19.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 173,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        13,
+        3267,
+        271
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        ".",
+        " past",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        12.625,
+        12.562,
+        12.375,
+        12.0
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.125
+    },
+    {
+      "i": 174,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        3123,
+        1526,
+        323,
+        13
+      ],
+      "hf_top5_str": [
+        " past",
+        " away",
+        " through",
+        " and",
+        "."
+      ],
+      "hf_top5_logits": [
+        20.0,
+        14.375,
+        14.375,
+        14.0,
+        13.25
+      ],
+      "emitted_logit": 20.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.625
+    },
+    {
+      "i": 175,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        11,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        ",",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        14.625,
+        14.562,
+        13.938,
+        13.75
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 176,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        382,
+        11025
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        ".\n\n",
+        " windows"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        13.312,
+        12.625,
+        12.375,
+        12.25
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.312
+    },
+    {
+      "i": 177,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        18.0,
+        15.375,
+        14.5,
+        14.312
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 178,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        21.125,
+        14.812,
+        13.938,
+        13.812,
+        13.125
+      ],
+      "emitted_logit": 21.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.312
+    },
+    {
+      "i": 179,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        594,
+        572,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        "'s",
+        " was",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        13.938,
+        13.875,
+        13.625,
+        13.562
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.438
+    },
+    {
+      "i": 180,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        572,
+        264,
+        1340
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " was",
+        " a",
+        " she"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        14.0,
+        13.438,
+        12.75,
+        12.562
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.0
+    },
+    {
+      "i": 181,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        198
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        13.5,
+        13.25,
+        13.0,
+        12.375
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 182,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        198,
+        1962
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        "\n",
+        " ke"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        15.688,
+        13.312,
+        12.25,
+        12.0
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.812
+    },
+    {
+      "i": 183,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        1508,
+        271,
+        30609,
+        198
+      ],
+      "hf_top5_str": [
+        " observer",
+        " ob",
+        "\n\n",
+        "observer",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        15.0,
+        14.75,
+        13.375,
+        13.375
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 184,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        15372,
+        382
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        " watched",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        15.062,
+        14.812,
+        14.375,
+        14.375
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.812
+    },
+    {
+      "i": 185,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        3736,
+        73209,
+        13677
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " watch",
+        " flutter",
+        " noticed"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        14.375,
+        14.188,
+        13.688,
+        13.562
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 186,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        1246,
+        432
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        " how",
+        " it"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.812,
+        14.188,
+        13.625,
+        13.062
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.188
+    },
+    {
+      "i": 187,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        271,
+        80022
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        "\n\n",
+        " butterflies"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        16.25,
+        14.375,
+        14.125,
+        13.25
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 188,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        14091,
+        80022,
+        73209,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butter",
+        " butterflies",
+        " flutter",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        15.688,
+        15.625,
+        15.312,
+        14.625
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.688
+    },
+    {
+      "i": 189,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        271,
+        30896,
+        90796
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        "\n\n",
+        " flew",
+        " drifted"
+      ],
+      "hf_top5_logits": [
+        20.125,
+        14.375,
+        12.812,
+        12.75,
+        12.438
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 190,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        12.125,
+        11.75,
+        10.938,
+        10.812
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.875
+    },
+    {
+      "i": 191,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        1526,
+        3123,
+        504,
+        323
+      ],
+      "hf_top5_str": [
+        " past",
+        " through",
+        " away",
+        " from",
+        " and"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        14.688,
+        13.938,
+        13.25,
+        13.0
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.062
+    },
+    {
+      "i": 192,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        11,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        ",",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        14.938,
+        14.875,
+        14.062,
+        13.938
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.062
+    },
+    {
+      "i": 193,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        11025,
+        382
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        " windows",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        13.125,
+        12.75,
+        12.5,
+        12.25
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 194,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        17.75,
+        15.125,
+        14.312,
+        14.25
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 195,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        576,
+        24809,
+        1634
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " The",
+        " Later",
+        " As"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        14.312,
+        13.938,
+        13.875,
+        13.312
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.312
+    },
+    {
+      "i": 196,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        271,
+        1660,
+        29939,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        "\n\n",
+        " being",
+        " wondered",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        13.438,
+        13.062,
+        13.0,
+        13.0
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 197,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        264,
+        15372,
+        1340
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " a",
+        " watched",
+        " she"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        13.188,
+        12.875,
+        12.812,
+        12.688
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.938
+    },
+    {
+      "i": 198,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        2146
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        14.188,
+        13.75,
+        13.188,
+        12.875
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 199,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        198,
+        3908
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        "\n",
+        " young"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        17.125,
+        13.938,
+        12.5,
+        12.375
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 200,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        271,
+        1508,
+        7448,
+        9279
+      ],
+      "hf_top5_str": [
+        " observer",
+        "\n\n",
+        " ob",
+        " obs",
+        " observ"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        14.938,
+        14.75,
+        13.812,
+        13.625
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 201,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        345
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        ",\n"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        15.75,
+        15.0,
+        14.875,
+        14.25
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 202,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        3736,
+        73209,
+        29939,
+        10337
+      ],
+      "hf_top5_str": [
+        " watched",
+        " watch",
+        " flutter",
+        " wondered",
+        " noted"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        14.75,
+        13.875,
+        13.875,
+        13.75
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 203,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        1246,
+        13
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        " how",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.125,
+        16.125,
+        14.188,
+        13.562,
+        13.312
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 204,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        264,
+        271,
+        54799
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " a",
+        "\n\n",
+        " butterfly"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        15.25,
+        14.312,
+        14.188,
+        13.812
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 205,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        14091,
+        80022,
+        73209,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butter",
+        " butterflies",
+        " flutter",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        16.125,
+        15.5,
+        14.188,
+        13.438
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.875
+    },
+    {
+      "i": 206,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        83060,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " flutter",
+        " danced",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        13.438,
+        13.0,
+        12.5,
+        12.25
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.938
+    },
+    {
+      "i": 207,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        3267,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        " past",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.5,
+        13.188,
+        12.875,
+        12.562,
+        12.125
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.312
+    },
+    {
+      "i": 208,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        271,
+        1526,
+        382
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        "\n\n",
+        " through",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        13.25,
+        13.25,
+        13.125,
+        12.562
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 209,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        14.812,
+        14.125,
+        14.062,
+        13.312
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.688
+    },
+    {
+      "i": 210,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        11025,
+        382
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        " windows",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        13.25,
+        13.0,
+        12.688,
+        12.312
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.125
+    },
+    {
+      "i": 211,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        17.875,
+        15.25,
+        14.562,
+        14.438
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 212,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        21.25,
+        14.375,
+        13.875,
+        13.812,
+        13.188
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 213,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        271,
+        29939,
+        3381,
+        572
+      ],
+      "hf_top5_str": [
+        ",",
+        "\n\n",
+        " wondered",
+        " thought",
+        " was"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        13.562,
+        13.375,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.812
+    },
+    {
+      "i": 214,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        572,
+        6635,
+        264
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " was",
+        " decided",
+        " a"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        13.625,
+        12.562,
+        12.375,
+        12.312
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.25
+    },
+    {
+      "i": 215,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        26805
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        " keen"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        14.062,
+        13.75,
+        12.938,
+        12.875
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.062
+    },
+    {
+      "i": 216,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1962,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " ke",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        16.75,
+        13.625,
+        12.938,
+        12.688
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.625
+    },
+    {
+      "i": 217,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        1508,
+        271,
+        7448,
+        11
+      ],
+      "hf_top5_str": [
+        " observer",
+        " ob",
+        "\n\n",
+        " obs",
+        ","
+      ],
+      "hf_top5_logits": [
+        22.75,
+        15.312,
+        15.125,
+        13.812,
+        13.75
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.438
+    },
+    {
+      "i": 218,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        345
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        ",\n"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        15.562,
+        14.688,
+        14.5,
+        14.125
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.062
+    },
+    {
+      "i": 219,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        3736,
+        29939,
+        323,
+        73209
+      ],
+      "hf_top5_str": [
+        " watched",
+        " watch",
+        " wondered",
+        " and",
+        " flutter"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        14.312,
+        14.0,
+        13.938,
+        13.562
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 220,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        15.938,
+        14.188,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.562
+    },
+    {
+      "i": 221,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        271,
+        264,
+        54799
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        "\n\n",
+        " a",
+        " butterfly"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        14.75,
+        14.375,
+        13.875,
+        13.188
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 222,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        14091,
+        80022,
+        73209,
+        7015
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butter",
+        " butterflies",
+        " flutter",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        15.812,
+        15.312,
+        14.625,
+        14.188
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.812
+    },
+    {
+      "i": 223,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        271,
+        83060,
+        382,
+        1320
+      ],
+      "hf_top5_str": [
+        " flutter",
+        "\n\n",
+        " danced",
+        ".\n\n",
+        " fl"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        13.375,
+        12.688,
+        12.375,
+        12.312
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 224,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        3267,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        " past",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.875,
+        13.562,
+        12.938,
+        12.375,
+        12.25
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.312
+    },
+    {
+      "i": 225,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        271,
+        73209,
+        1526
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        "\n\n",
+        " flutter",
+        " through"
+      ],
+      "hf_top5_logits": [
+        20.125,
+        13.625,
+        13.062,
+        13.0,
+        12.938
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 226,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        13,
+        279,
+        271,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        ".",
+        " the",
+        "\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        15.0,
+        14.938,
+        14.125,
+        14.062
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 227,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        13,
+        271,
+        11025,
+        382
+      ],
+      "hf_top5_str": [
+        " window",
+        ".",
+        "\n\n",
+        " windows",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        13.25,
+        12.75,
+        12.625,
+        12.312
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 228,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        17.25,
+        14.812,
+        14.5,
+        13.938
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 229,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        21.625,
+        14.312,
+        13.875,
+        13.625,
+        13.125
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.312
+    },
+    {
+      "i": 230,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        271,
+        1660,
+        29939,
+        572
+      ],
+      "hf_top5_str": [
+        ",",
+        "\n\n",
+        " being",
+        " wondered",
+        " was"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        13.625,
+        13.188,
+        13.125,
+        13.125
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 231,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        264,
+        10094,
+        438,
+        1340
+      ],
+      "hf_top5_str": [
+        " being",
+        " a",
+        " watching",
+        " as",
+        " she"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        13.438,
+        13.0,
+        12.75,
+        12.688
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.312
+    },
+    {
+      "i": 232,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        198
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        14.375,
+        13.5,
+        13.438,
+        12.812
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.875
+    },
+    {
+      "i": 233,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        271,
+        1962,
+        198
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        "\n\n",
+        " ke",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        17.125,
+        14.188,
+        12.938,
+        12.812
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 234,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        271,
+        1508,
+        54799,
+        55353
+      ],
+      "hf_top5_str": [
+        " observer",
+        "\n\n",
+        " ob",
+        " butterfly",
+        " watcher"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        14.188,
+        14.188,
+        13.312,
+        13.188
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.188
+    },
+    {
+      "i": 235,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        15.688,
+        15.188,
+        14.875,
+        14.375
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.188
+    },
+    {
+      "i": 236,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        3736,
+        29939,
+        73209,
+        10337
+      ],
+      "hf_top5_str": [
+        " watched",
+        " watch",
+        " wondered",
+        " flutter",
+        " noted"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        15.062,
+        14.75,
+        14.188,
+        14.0
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 237,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        13,
+        1246
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        ".",
+        " how"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.5,
+        14.312,
+        13.5,
+        13.375
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 238,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        271,
+        432,
+        264,
+        54799
+      ],
+      "hf_top5_str": [
+        " the",
+        "\n\n",
+        " it",
+        " a",
+        " butterfly"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        14.375,
+        14.25,
+        14.062,
+        13.438
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.5
+    },
+    {
+      "i": 239,
+      "emitted": 54799,
+      "emitted_str": " butterfly",
+      "hf_top5": [
+        54799,
+        14091,
+        73209,
+        80022,
+        271
+      ],
+      "hf_top5_str": [
+        " butterfly",
+        " butter",
+        " flutter",
+        " butterflies",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.438,
+        15.188,
+        14.875,
+        13.75
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.562
+    },
+    {
+      "i": 240,
+      "emitted": 73209,
+      "emitted_str": " flutter",
+      "hf_top5": [
+        73209,
+        271,
+        83060,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " flutter",
+        "\n\n",
+        " danced",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        13.375,
+        13.125,
+        12.688,
+        12.438
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 241,
+      "emitted": 291,
+      "emitted_str": "ed",
+      "hf_top5": [
+        291,
+        287,
+        271,
+        3267,
+        13
+      ],
+      "hf_top5_str": [
+        "ed",
+        "ing",
+        "\n\n",
+        " past",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.0,
+        13.375,
+        12.875,
+        12.188,
+        12.188
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.625
+    },
+    {
+      "i": 242,
+      "emitted": 3267,
+      "emitted_str": " past",
+      "hf_top5": [
+        3267,
+        13,
+        1526,
+        271,
+        3123
+      ],
+      "hf_top5_str": [
+        " past",
+        ".",
+        " through",
+        "\n\n",
+        " away"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        13.562,
+        13.375,
+        13.375,
+        12.938
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.062
+    },
+    {
+      "i": 243,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        13,
+        271,
+        382
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        ".",
+        "\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        14.688,
+        14.188,
+        14.0,
+        13.375
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.562
+    },
+    {
+      "i": 244,
+      "emitted": 3241,
+      "emitted_str": " window",
+      "hf_top5": [
+        3241,
+        271,
+        13,
+        382,
+        198
+      ],
+      "hf_top5_str": [
+        " window",
+        "\n\n",
+        ".",
+        ".\n\n",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        13.25,
+        13.0,
+        12.25,
+        12.062
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.75
+    },
+    {
+      "i": 245,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        17.625,
+        15.125,
+        14.562,
+        14.25
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.25
+    },
+    {
+      "i": 246,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        24809,
+        2932,
+        576,
+        330
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " Later",
+        " She",
+        " The",
+        " \""
+      ],
+      "hf_top5_logits": [
+        21.875,
+        13.938,
+        13.75,
+        13.562,
+        13.0
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.938
+    },
+    {
+      "i": 247,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        271,
+        29939,
+        1660,
+        3554
+      ],
+      "hf_top5_str": [
+        ",",
+        "\n\n",
+        " wondered",
+        " being",
+        ",\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        13.625,
+        13.5,
+        13.5,
+        13.125
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 248,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        10094,
+        387,
+        264,
+        279
+      ],
+      "hf_top5_str": [
+        " being",
+        " watching",
+        " be",
+        " a",
+        " the"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        13.125,
+        12.938,
+        12.625,
+        12.312
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.875
+    },
+    {
+      "i": 249,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        271,
+        458,
+        11,
+        198
+      ],
+      "hf_top5_str": [
+        " a",
+        "\n\n",
+        " an",
+        ",",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        14.312,
+        13.562,
+        13.312,
+        12.812
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.938
+    },
+    {
+      "i": 250,
+      "emitted": 26805,
+      "emitted_str": " keen",
+      "hf_top5": [
+        26805,
+        140141,
+        1376,
+        271,
+        1962
+      ],
+      "hf_top5_str": [
+        " keen",
+        "keen",
+        " key",
+        "\n\n",
+        " ke"
+      ],
+      "hf_top5_logits": [
+        26.625,
+        17.25,
+        14.188,
+        13.312,
+        13.0
+      ],
+      "emitted_logit": 26.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.375
+    },
+    {
+      "i": 251,
+      "emitted": 22012,
+      "emitted_str": " observer",
+      "hf_top5": [
+        22012,
+        1508,
+        271,
+        7448,
+        30609
+      ],
+      "hf_top5_str": [
+        " observer",
+        " ob",
+        "\n\n",
+        " obs",
+        "observer"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        15.188,
+        15.125,
+        14.438,
+        13.438
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 252,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        3554,
+        13,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        ",",
+        ",\n\n",
+        ".",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        15.688,
+        14.75,
+        14.562,
+        14.312
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.188
+    },
+    {
+      "i": 253,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        3736,
+        73209,
+        10094
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " watch",
+        " flutter",
+        " watching"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        14.812,
+        14.312,
+        13.812,
+        13.688
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 254,
+      "emitted": 438,
+      "emitted_str": " as",
+      "hf_top5": [
+        438,
+        279,
+        271,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " as",
+        " the",
+        "\n\n",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        15.625,
+        14.375,
+        13.625,
+        13.438
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 255,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        271,
+        264,
+        432,
+        54799
+      ],
+      "hf_top5_str": [
+        " the",
+        "\n\n",
+        " a",
+        " it",
+        " butterfly"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        14.312,
+        14.125,
+        14.062,
+        13.625
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.812
+    }
+  ]
+}

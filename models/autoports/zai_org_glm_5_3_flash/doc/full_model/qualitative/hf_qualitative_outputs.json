@@ -1,0 +1,32 @@
+[
+  {
+    "id": "q1",
+    "prompt": "Write a haiku about machine learning.",
+    "greedy_completion": "The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me think about machine learning themes: training data, neural networks, patterns, learning from examples, weights, gradients, errors, predictions, models improving over time.\n\nLet me draft some options:\n\nOption 1:\n\"Data flows like streams\" (5 syllables: Da-ta flows like streams)\n\"Neurons learn from every mistake\" (7? Neur-ons learn from ev-ery mis-take = 8, too many)\nLet me count: Neur-ons ("
+  },
+  {
+    "id": "q2",
+    "prompt": "Explain the difference between supervised and unsupervised learning in simple terms.",
+    "greedy_completion": "The user is asking for a simple explanation of the difference between supervised and unsupervised learning. This is a common machine learning concept question. Let me think about how to explain this clearly and simply.\n\n**Supervised Learning:**\n- The algorithm learns from labeled data (data with known answers/outcomes)\n- Like a student learning with an answer key\n- Examples: spam detection (emails labeled spam/not spam), image classification (photos labeled \"cat\" or \"dog\"), predicting house prices (with known prices)\n- Two main types: classification (categories) and regression (continuous values)\n- The goal is to learn a mapping from inputs"
+  },
+  {
+    "id": "q3",
+    "prompt": "Complete this story: Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered",
+    "greedy_completion": "The user wants me to complete a story that begins with: \"Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered...\"\n\nThis is a creative writing task. I should write a complete, engaging story. Let me think about what would make a good story here:\n\n1. The protagonist is a \"curious young inventor\" - so they should have some invention or discovery at the heart of the story\n2. It's set in a \"faraway kingdom\" - fairy tale/fantasy setting\n3. The sentence ends with \"who discovered\" - so I need to complete that thought first\n\n"
+  },
+  {
+    "id": "q4",
+    "prompt": "What are the three laws of thermodynamics?",
+    "greedy_completion": "The user is asking about the three laws of thermodynamics. This is a classic physics/science question. Let me think about what the laws actually are and how to present them clearly.\n\nThe laws of thermodynamics:\n\n**Zeroth Law of Thermodynamics** (sometimes counted, but the user asked for three):\nIf two systems are each in thermal equilibrium with a third system, then they are in thermal equilibrium with each other. This establishes temperature as a meaningful, measurable quantity.\n\n**First Law of Thermodynamics:**\nEnergy conservation. Energy cannot be created or destroyed, only transformed from one form to another. Mathematically: ΔU ="
+  },
+  {
+    "id": "q5",
+    "prompt": "Translate the following to French: \"Hello, how are you today?\"",
+    "greedy_completion": "The user wants me to translate \"Hello, how are you today?\" into French.\n\nThe translation would be:\n\"Bonjour, how are you today?\" - but I need to translate the whole thing.\n\n\"Hello\" = \"Bonjour\" (or \"Salut\" for informal)\n\"How are you today?\" = \"How are you today?\" = \"How are you today?\" \n\nIn French: \"How are you today?\" = \"How are you today?\"\n\nSo the full translation: \"Bonjour, how are you today?\"\n\nOr more naturally: \"Bonjour, how are you today?\"\n\nAlternative: \"Hello, how are you today?\" -"
+  },
+  {
+    "id": "q6",
+    "prompt": "Write a Python function to calculate the Fibonacci sequence.",
+    "greedy_completion": "The user wants a Python function to calculate the Fibonacci sequence. This is a classic programming question. Let me think about the best way to present this.\n\nThe Fibonacci sequence is: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...\n\nEach number is the sum of the two preceding ones, starting from 0 and 1.\n\nThere are several approaches:\n1. **Recursive** (naive) - simple but exponential time complexity O(2^n)\n2. **Recursive with memoization** - O(n) time\n3. **Iter"
+  }
+]

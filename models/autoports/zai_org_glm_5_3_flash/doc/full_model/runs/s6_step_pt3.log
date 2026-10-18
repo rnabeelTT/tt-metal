@@ -1,0 +1,28 @@
+=== start Fri Oct 16 09:34:03 PM UTC 2026 : timeout 2400 python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.model_step_probe
+2026-10-16 21:34:04.516 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-16 21:34:09.821 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 21:34:10.620 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 0 (kda/dense) loaded in 1.6s
+2026-10-16 21:34:38.600 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-16 21:34:38.764 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 3 (dsa/moe) loaded in 28.1s
+2026-10-16 21:34:47.090 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-16 21:35:13.556 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:388 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-16 21:35:13.653 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:134 - layer 4 (kda/moe) loaded in 34.9s
+2026-10-16 21:35:13.712 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:141 - model weights loaded in 68.0s (no weight cache)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-16 21:35:16.146 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:112 - decode traces captured (model + sampler)
+ok build + warm + model trace capture (70.4s)
+ok permuted page table (70.4s)
+ok eager refresh, all slots active (70.5s)
+ok reset (70.5s)
+ok prefill (first token 67404) (70.6s)
+ok eager decode step, slot 0 active (70.7s)
+eager argmax 67404
+ok model trace replay (70.7s)
+traced argmax 91886
+ok eager sampler -> 91886 (70.8s)
+ok sampler trace capture + replay -> 91886 (70.8s)
+ok replay with device feedback -> 88190 (70.8s)
+=== exit code: 0 Fri Oct 16 09:35:18 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

@@ -1,0 +1,162 @@
+{
+ "source": {
+  "reduced": "doc/full_model/memory/reduced_probe.json (+ .log)",
+  "capacity": "doc/full_model/memory/capacity_probe_1slot.json (+ capacity_probe.log)"
+ },
+ "die_dram_bytes": 34178731008,
+ "trace_region_bytes": 67108864,
+ "reserve_bytes": 134217728,
+ "weights_and_model_level_1slot_bytes": 32123120128,
+ "kda_state_per_slot_bytes": 35651584,
+ "kda_conv_state_fixed_bytes": 40108032,
+ "dsa_bytes_per_token": 11968.0,
+ "workspace_bytes": 551136256,
+ "workspace_parts": {
+  "dsa_constants_and_decode_inputs_at_bind": 137690112,
+  "warm_and_capture_persistent": 12331520,
+  "prefill_peak_over_steady_state": 401114624,
+  "decode_step_workspace": 107266560
+ },
+ "profiles": {
+  "1": {
+   "pool_tokens": 108544,
+   "max_model_len": 108544,
+   "kda_state_bytes": 75759616
+  },
+  "4": {
+   "pool_tokens": 99200,
+   "max_model_len": 98304,
+   "kda_state_bytes": 182714368
+  },
+  "8": {
+   "pool_tokens": 86784,
+   "max_model_len": 86016,
+   "kda_state_bytes": 325320704
+  },
+  "16": {
+   "pool_tokens": 61952,
+   "max_model_len": 61440,
+   "kda_state_bytes": 610533376
+  },
+  "32": {
+   "pool_tokens": 12288,
+   "max_model_len": 12288,
+   "kda_state_bytes": 1180958720
+  }
+ },
+ "MiB": {
+  "trace_region": 64.0,
+  "workspace": 525.6,
+  "per_slot": 34.0
+ },
+ "recommended_profiles_anchored_to_capacity_probe": {
+  "rule": "the 1-slot capacity probe's pool (818 blocks, peak prefill left 183 MB per die free) minus 23.3 blocks of KDA state per extra slot and vLLM's one block per user; max_model_len floored to the 2048-row prefill bucket (the model asserts max_context % 2048 == 0)",
+  "profiles": {
+   "1": {
+    "pool_blocks": 818,
+    "pool_tokens": 104448,
+    "max_model_len": 104448
+   },
+   "4": {
+    "pool_blocks": 748,
+    "pool_tokens": 95104,
+    "max_model_len": 94208
+   },
+   "8": {
+    "pool_blocks": 655,
+    "pool_tokens": 82688,
+    "max_model_len": 81920
+   },
+   "16": {
+    "pool_blocks": 469,
+    "pool_tokens": 57856,
+    "max_model_len": 57344
+   },
+   "32": {
+    "pool_blocks": 97,
+    "pool_tokens": 8192,
+    "max_model_len": 8192
+   }
+  }
+ },
+ "measurements": {
+  "die_dram_bytes": "34,178,731,008 per die (8 banks x 4,272,341,376 B before the trace region)",
+  "weights_and_model_level_after_load_1slot": "32,123,120,128 B (29.92 GiB): weights + embedding / LM head / sampler + 1 KDA slot + per-layer constants (stage-4 estimate 31.59 GB)",
+  "free_after_load_trace_64MiB": "1,988,502,016 B",
+  "per_layer_construct_bytes": {
+   "kda+dense": 92659712,
+   "kda+moe": 741633024,
+   "dsa+moe": 743857152,
+   "model_level (embed, lm_head, sampler, norms)": 541952512
+  },
+  "kda_state_per_slot_per_layer": "1,048,576 B fp32 [16,128,128] (+ 1,179,648 B conv rows, 32-row tile, fixed up to 32 slots); x34 layers = 35.65 MB per slot (estimate 36.9 MB)",
+  "dsa_per_token_all_layers": "11,968 B (latent 1024 + pool key 64 per layer x 11; measured 1,531,904 B per 128-token block) == estimate",
+  "decode_trace_bytes": {
+   "per_layer": {
+    "kda+dense": 720896,
+    "kda+moe": 983040,
+    "dsa+moe": 1507328
+   },
+   "model_45_layers": 47644672,
+   "sampler_greedy": 327680,
+   "total_captured": 47972352
+  },
+  "prefill_peak_over_layer_entry_MiB": {
+   "chunk 2048, before (MoE whole chunk, DSA index block 128 MB)": {
+    "kda+dense": 195.3,
+    "kda+moe": 416.9,
+    "dsa+moe flash": 414.8,
+    "dsa+moe sparse (max_context 131072)": 414.8,
+    "after MoE split only": 409.6
+   },
+   "chunk 2048, after (GLM53_MOE_SORTED_ROWS=1024, GLM53_DSA_INDEX_BLOCK_MB=32/64)": {
+    "kda+dense": 195.3,
+    "kda+moe": 297.1,
+    "dsa+moe flash": 295.2,
+    "dsa+moe sparse": 294.9
+   },
+   "chunk 2048, MoE rows 512": {
+    "kda+moe": 228.9,
+    "dsa+moe sparse": 226.7
+   },
+   "chunk 1024, before / after": {
+    "kda+moe": [
+     256.3,
+     256.3
+    ],
+    "dsa+moe sparse": [
+     364.6,
+     254.4
+    ]
+   },
+   "chunk 128": {
+    "kda+moe": 114.7,
+    "dsa+moe": 113.6
+   }
+  },
+  "prefill_time_cost_reduced_probe_s_per_layer_2048_chunk": {
+   "kda+moe whole / 1024 / 512 rows": [
+    0.069,
+    0.084,
+    0.128
+   ],
+   "dsa+moe sparse index block 128 / 32 / 16 MB (max_context 131072)": [
+    0.124,
+    0.209,
+    0.326
+   ]
+  },
+  "full_model_peak": "warm-up / capture peak 33,923,888,128 B; long-prefill peak 33,928,885,760 B of 34,111,622,144 allocatable (183 MB free, smallest largest-free-block 6.3 MB per bank)",
+  "bit_identity": "last-row logits of a 6221-token prefill (3 layers: flash + sparse chunks) bit-identical across MoE rows {0,1024,512} x index block {128,32,16} MB and at 1024-row chunks; one MoE layer's [2048,4096] output bit-identical at 1024 / 512 rows (reduced_probe.json)"
+ },
+ "path_to_1M": {
+  "today": "the latent pool (and pool keys) is replicated on all 4 dies: 11,968 B per token per die",
+  "sequence-sharded latent": "blocks of the paged pool distributed over the 4 dies (block b on die b % 4): 2,992 B per token per die -> ~4x tokens (~420K at 1 slot with today's free DRAM). Decode: each die runs the indexer on its own pool keys, all-gathers its top candidates (512 x 4 scores), selects the global top-512 pools, attends its local share of the selected tokens and returns (o, lse) partials; one cross-die LSE combine per DSA layer (the flash-decode merge). Prefill: the chunk's latent rows scatter to their home die; sparse_sdpa on per-die index lists + the same LSE merge. Cost: two small CCLs per DSA layer per step.",
+  "plus bfp8 latent (TILE, 544 B vs 1024 B per row)": "1,672 B per token per die with sharding -> ~760K tokens",
+  "plus host embedding lookup (frees 317 MB per die) and the prefill workspace trims of this stage": "~1.0M tokens at 1 slot (1,048,576 x 1,672 B = 1.75 GB per die)",
+  "not implemented": "pool-key sharding, bfp8 / fp8 latent, host embedding lookup",
+  "block-sharded latent (implemented, stage-4 review #1)": "MCOpts.dsa_shard / GLM53_DSA_SHARD=1 (tt/dsa_shard.py): global block b on die b % 4, 544-wide rows (latent + control columns for the cross-die softmax merge), pool keys / indexer / top-512 replicated: 3,696 B per token per die (473,088 B per 128-token block over 11 layers). Measured 1-slot capacity probe: 2199 blocks, 281,283-token prompt + 24 decode steps, copy 24/24, 335 MB free at the prefill peak (doc/multichip_decoder/dsa_shard/capacity/). Cost: decode +~0.41 ms per DSA layer per step.",
+  "sharded pool keys too": "2,992 B per token per die (+24 % tokens): needs a distributed top-512 (candidate all-gather + top-k); not implemented"
+ },
+ "dsa_bytes_per_token_block_sharded": 3696.0
+}

@@ -1,0 +1,45 @@
+2026-10-17 13:32:44.011 | INFO     | __main__:main:364 - Using port 8086
+2026-10-17 13:32:44.011 | INFO     | tracy:run_report_setup:91 - Verifying tracy profiling tools
+2026-10-17 13:32:44.309 | INFO     | tracy:run_report_setup:112 - Capture command: ('/home/raahem/tt-metal/build/tools/profiler/bin/tracy-capture -o /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy -f -p 8086',)
+Connecting to 127.0.0.1:8086...2026-10-17 13:32:44.315 | INFO     | __main__:run_workload:399 - Test process started
+2026-10-17 13:32:45.250 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-17 13:32:50.900 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-17 13:32:51.617 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:194 - layer 0 (kda/dense) loaded in 1.5s
+2026-10-17 13:32:51.672 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:206 - model weights loaded in 4.6s (no weight cache)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-17 13:32:54.495 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:149 - decode traces captured (model + sampler); prefill traces []
+S7 built S=1 seq=4096 in 7s
+2026-10-17 13:32:55.085 | INFO     | tracy:signpost:49 - PERF_DECODE
+2026-10-17 13:32:55.087 | INFO     | tracy:signpost:49 - PERF_DECODE_END
+PERF decode step (model + sampler replay): 2.183 ms host wall
+2026-10-17 13:32:55.266 | INFO     | tracy:signpost:49 - PERF_PREFILL
+2026-10-17 13:32:55.274 | INFO     | tracy:signpost:49 - PERF_PREFILL_END
+PERF prefill 128 rows: 6.78 ms host wall (dispatch 6.73 ms)
+S7_RESULT {"args": {"slots": 1, "seq_len": 4096, "do": "tracy", "prompts": "128,2048", "active": "1", "ptcheck": "100,128,161", "steps": 20, "tracy_prefill": 128, "reference": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt", "report_dir": null, "trace_region": 67108864, "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/tracy/before_s1_l0/probe.json"}, "layers": "0", "env_mc": "", "build_s": 7.4254231452941895, "trace_alloc_per_bank": 139264, "trace_total_per_bank": 8388608, "dram_free_per_bank": 4183673152, "dram_alloc_per_bank": 80279616, "tracy_decode_ms": 2.1829348988831043, "tracy_prefill_ms": 6.783564109355211}
+
+Timer resolution: 0 ns
+
+Frames: 2
+Time span: 21.58 s
+Zones: 8,887,794
+Elapsed time: 21.41 s
+Saving trace... done!
+Trace size 87.64 MB (20.18% ratio)
+2026-10-17 13:33:07.438 | INFO     | __main__:main:436 - Copying /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/models_autoports_zai_org_glm_5_3_flash_tools_2026_10_17_13_33_07.tracy
+2026-10-17 13:33:07.454 | INFO     | __main__:main:439 - Copied /home/raahem/tt-metal/generated/profiler/.logs/tracy_profile_log_host.tracy to /home/raahem/tt-metal/build/profiler/build_wasm/traces/models_autoports_zai_org_glm_5_3_flash_tools_2026_10_17_13_33_07.tracy
+2026-10-17 13:33:07.454 | INFO     | __main__:main:448 - embed.tracy -> traces/models_autoports_zai_org_glm_5_3_flash_tools_2026_10_17_13_33_07.tracy
+2026-10-17 13:33:07.454 | INFO     | tracy.serve_wasm:launch_server_subprocess:284 - Launching tracy web app GUI server subprocess...
+2026-10-17 13:33:07.454 | INFO     | tracy.serve_wasm:launch_server_subprocess:287 - Tracy WASM web UI (open in browser): http://localhost:8080/ (WebSocket for live reload: ws://localhost:8081/)
+2026-10-17 13:33:07.454 | INFO     | tracy.serve_wasm:launch_server_subprocess:294 - Tracy WASM server already serving port 8080; reusing it (live-reload refreshes the browser).
+2026-10-17 13:33:10.307 | INFO     | tracy:generate_report:162 - Host side ops time report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_times.csv
+2026-10-17 13:33:10.433 | INFO     | tracy:generate_report:173 - Host side ops data report generated at /home/raahem/tt-metal/generated/profiler/.logs/tracy_ops_data.csv
+2026-10-17 13:33:10.433 | INFO     | tracy.process_ops_logs:import_tracy_op_logs:422 - Importing ops logs
+/home/raahem/tt-metal/tools/tracy/process_ops_logs.py:527: DtypeWarning: Columns (3,4,8) have mixed types. Specify dtype option on import or set low_memory=False.
+  df = pd.read_csv(tracyOpTimesLog)
+2026-10-17 13:33:18.961 | INFO     | tracy.perf_counter_analysis:get_device_op_data:2143 - Getting device ops
+2026-10-17 13:33:18.963 | INFO     | tracy.process_ops_logs:append_device_data:1090 - Appending device data
+2026-10-17 13:33:29.017 | INFO     | tracy.process_ops_logs:generate_reports:1423 - OPs' perf analysis is finished! Generating reports ...
+2026-10-17 13:33:29.018 | INFO     | tracy.process_ops_logs:generate_reports:1443 - Copying runtime artifacts
+2026-10-17 13:33:29.196 | INFO     | tracy.process_ops_logs:generate_reports:1452 - Generating OPs CSV
+2026-10-17 13:33:31.405 | INFO     | tracy.process_ops_logs:generate_reports:1908 - OPs csv generated at: /home/raahem/tt-metal/generated/profiler/reports/2026_10_17_13_33_29/ops_perf_results_2026_10_17_13_33_29.csv

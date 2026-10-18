@@ -1,0 +1,4 @@
+measured: tt free-running completion [models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/autoregressive/autoregressive_meta.json] {'source': 'words', 'num_tokens': 222, 'adjacent_duplication': 0.0, 'trigram_loop_fraction': 0.0541}
+measured: hf/tt token agreement (informational) [models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/autoregressive/autoregressive_meta.json] {'matching_tokens': 5, 'compared_tokens': 256}
+
+No degenerate output detected.

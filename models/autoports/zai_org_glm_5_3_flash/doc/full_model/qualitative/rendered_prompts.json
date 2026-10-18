@@ -1,0 +1,231 @@
+[
+  {
+    "id": "q1",
+    "prompt": "Write a haiku about machine learning.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a haiku about machine learning."
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Write a haiku about machine learning.<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      7984,
+      264,
+      6386,
+      38038,
+      911,
+      5662,
+      6832,
+      13,
+      154828,
+      154841
+    ]
+  },
+  {
+    "id": "q2",
+    "prompt": "Explain the difference between supervised and unsupervised learning in simple terms.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain the difference between supervised and unsupervised learning in simple terms."
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Explain the difference between supervised and unsupervised learning in simple terms.<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      840,
+      20726,
+      279,
+      6672,
+      1948,
+      58582,
+      323,
+      6975,
+      454,
+      77364,
+      6832,
+      304,
+      4285,
+      3793,
+      13,
+      154828,
+      154841
+    ]
+  },
+  {
+    "id": "q3",
+    "prompt": "Complete this story: Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Complete this story: Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered"
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Complete this story: Once upon a time, in a faraway kingdom, there lived a curious young inventor who discovered<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      12542,
+      419,
+      3364,
+      25,
+      9642,
+      5193,
+      264,
+      882,
+      11,
+      304,
+      264,
+      3041,
+      13748,
+      25002,
+      11,
+      1052,
+      12157,
+      264,
+      22153,
+      3908,
+      70369,
+      879,
+      11100,
+      154828,
+      154841
+    ]
+  },
+  {
+    "id": "q4",
+    "prompt": "What are the three laws of thermodynamics?",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What are the three laws of thermodynamics?"
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>What are the three laws of thermodynamics?<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      3838,
+      525,
+      279,
+      2326,
+      6872,
+      315,
+      29729,
+      78278,
+      30,
+      154828,
+      154841
+    ]
+  },
+  {
+    "id": "q5",
+    "prompt": "Translate the following to French: \"Hello, how are you today?\"",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Translate the following to French: \"Hello, how are you today?\""
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Translate the following to French: \"Hello, how are you today?\"<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      27381,
+      279,
+      2701,
+      311,
+      8584,
+      25,
+      330,
+      9703,
+      11,
+      1246,
+      525,
+      498,
+      3351,
+      7521,
+      154828,
+      154841
+    ]
+  },
+  {
+    "id": "q6",
+    "prompt": "Write a Python function to calculate the Fibonacci sequence.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a Python function to calculate the Fibonacci sequence."
+      }
+    ],
+    "rendered_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Write a Python function to calculate the Fibonacci sequence.<|assistant|><think>",
+    "token_ids": [
+      154822,
+      154824,
+      154826,
+      25062,
+      287,
+      29905,
+      371,
+      25,
+      7487,
+      154827,
+      7984,
+      264,
+      13020,
+      729,
+      311,
+      11042,
+      279,
+      79043,
+      8499,
+      13,
+      154828,
+      154841
+    ]
+  }
+]
