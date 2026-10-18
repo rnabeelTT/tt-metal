@@ -57,3 +57,53 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
   dsa_moe-32 4536 µs; prefill 11670 / 24815 / 31488 µs. Final suite 45 passed (`s5_suite2.log`); watcher
   (`s5_watcher2.log`): all three kinds passed, no watcher assert, eth-core 29-25 timeout at mesh close (fabric-router
   teardown under the watcher on this board).
+
+## Review #1 rework (2026-10-17 afternoon, `artifacts/stage5_review_1.md`)
+
+- 14:00-15:30 Code: `perm_fidelity` attribute of `mhc_split_sinkhorn` (MHC_SINKHORN_PERM_FIDELITY, HiFi3 permutation
+  sums); new op `ttnn.experimental.deepseek_prefill.kda_decode_conv` (fused KDA decode conv step) + test; role decode
+  programs (`RoleMatmuls`, `DSMatmul` geometry / readers, `IL1DMatmul` in0 blocks / cores), dense-MLP / shared-expert /
+  KDA-out prefill 2D configs, router top-k padding, mHC mix chunk count, MoE grouped geometry, persistent all-gather
+  determinism runs, `tools/mc_matmul_sweep.py`, `tools/sinkhorn_fidelity_probe.py`, `GLM53_FABRIC` in the harness.
+- 15:34 Round 6 (`records/s5_round6.log`). ttnn rebuilt (`cmake --build build_Release --target ttnn`, 23 s with ccache);
+  the Python module `ttnn/ttnn/_ttnn.so` (Oct 15) replaced atomically by the rebuilt one (it carries the new binding;
+  backup in the session scratchpad). Sinkhorn: HiFi3 bit-identical to HiFi4 (autoport test 7/7, upstream 4/4, probe
+  T = 32 / 2048), HiFi2 0.8 % error. Fused conv test: qkv 1.2e-7 / 1.8e-7, history exact except an idle slot's NaN
+  -> Inf (bf16 packer); test updated to accept non-finite -> non-finite.
+- 15:41 Op-level matmul sweep (`records/mm6.jsonl`, 505 rows): DRAM-sharded never beats 1D at these shapes (any
+  activation geometry, 1-3 readers); best 1D per role recorded; HiFi2 saves <= 1 µs per decode call.
+- 15:42 A tool bug (a unit-check block pasted into `set_opts` by a global string replace) failed the first kda_dense
+  prefill trial; fixed and rerun at gate 1.
+- 15:50 Prefill trials (`records/pf6.jsonl`): `prefill_2d_ffn` kda_dense 12.22 -> 10.49 ms; MoE grouped in0 8
+  25.48 -> 25.09 ms; HiFi2 dense MLP rms 0.99735, shared 0.99964, DSA module 0.959: rejected. 1024-row KDA chunks
+  (chunk terms in L1) slower than one 2048-row chunk.
+- 15:51-16:02 Phase 2 (`records/ab6.jsonl`, `ab6_det.jsonl`): fused conv -85 / -81 µs (kda_moe / kda_dense, 1 user);
+  HiFi3 sinkhorn -7 to -18; mix 16 chunks -10; roles -4 to -34; top-k padding +38 (rejected); kda_conv_mixed refused
+  by addcmul (dtypes); pairs / masked MoE at 32 users no gain; persistent all-gather 2 x 120 replays bit-identical.
+  DEFAULT_MC updated.
+- 16:03 Final Tracy (`tracy/after`): decode 865 / 1064 / 1338 / 4433 / 4416 µs, prefill 10084 / 24411 / 30664 µs.
+- 16:26 Suite on that default: 5 failed. The persistent all-gather outputs lived in L1 (with `ccl_l1`): their
+  permanent allocation at the top of L1 clashed with the static CBs of later prefill programs (`TT_THROW ... clash with
+  L1 buffers`), and their lazy `ttnn.from_torch` creation inside the first decode pass tripped
+  `test_no_host_fallback`. Fix: the persistent buffers are DRAM tensors created with `ttnn.zeros` on device.
+- 16:43-16:57 Round 6 tail (`records/s5_round6.log`): 200-replay stress on the shipped build (`records/stress6.jsonl`,
+  all bit-identical); long position 130,000 of 131,072 (`records/longpos6.jsonl`): dsa_moe 1 user 2361 -> 1963 µs;
+  watcher on the 1-slot KDA, 32-user MoE and DSA sparse cases (`records/s5_watcher3.log`): 7 cases, 0 suspicious
+  lines (teardown abort = the known eth core timeout). The kda_dense stress was lost to a tool bug (bash `read` with
+  `IFS=:` dropped the trailing ":" of "fin:"); the probe now accepts an item without the colon.
+- 18:52-19:25 Round 7 (`records/s5_round7.log`): kernel tests 9 passed (`records/s5r_kernel_tests.log`); suite 44
+  passed, 1 failed (`records/s5_suite4.log`: the baseline compare refuses the stored baseline, policy 'opt' vs the
+  stage-3 rework's SELECTED 'opt_s5'); fault suite with `GLM53_FAULT_ROUTED_SCALE=0.9722`
+  (`records/s5_suite_fault2.log`): 17 failed + 2 errors, every MoE test caught the fault through the update-rms check,
+  the kda_dense tests (no routed experts) passed. kda_dense 200-replay stress: 895 µs, bit-identical. FABRIC_1D_RING vs
+  FABRIC_1D (`records/ring_fabric7.jsonl`): kda_moe 1104.8 vs 1103.1, dsa_moe 1407.6 vs 1407.0 µs: no change.
+  Decode Tracy refreshed with the DRAM persistent buffers (`tracy/after`, 19:17): 865 / 1070 / 1332 / 4323 / 4655 µs;
+  the h all-gather is ~2 µs slower than with the L1 buffers. Tracy ops.csv archives recompressed with xz (all < 200 KB).
+- 20:06 Round 8 (`records/s5_baseline8.log`): single-die 'opt_s5' baseline dumped (`refs/baseline_opt_s5_stage5.pt`),
+  TP4 compare 8 of 9 rows pass, kda_moe decode PCC 0.998790 / rms 0.99821 fails. Host comparison of the two single-die
+  baselines (`records/baseline8_rows.txt`): 'opt_s5' vs 'opt' differ in the same case by the same PCC (0.998795),
+  in one token (rel L2 0.0845, others <= 0.0025): a router near-tie on the single die, not a TP4 error (TP4 vs 'opt'
+  0.999993).
+- 21:06 Round 9 (`records/s5_baseline_fault9.log`): baseline compare with `GLM53_FAULT_ROUTED_SCALE=0.9722`: kda_dense
+  rows pass, dsa_moe prefill_a fails on the rms assert (PCC 0.999904 passes the bar; rms ratio 0.97828). The rms
+  assert catches the scale fault that the PCC bar misses.

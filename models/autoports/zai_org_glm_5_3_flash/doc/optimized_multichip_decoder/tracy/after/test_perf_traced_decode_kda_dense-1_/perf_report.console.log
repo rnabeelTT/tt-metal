@@ -6,13 +6,14 @@ Using operations after 'PERF_DECODE'.
 Using operations until 'PERF_DECODE_END'.
 Detected data from 4 devices. Merging device data...
 Writing CSV output to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_dense-1_/perf_report.csv
-Overall DRAM roofline (modeled ops): 16.4% (84 GB/s)
-Warning: Unclassified operation 'MhcPostDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Overall DRAM roofline (modeled ops): 18.6% (95 GB/s)
 Warning: Unclassified operation 'MhcMixDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'AllGatherAsyncDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'KdaRecurrentDecodeDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'ReduceScatterMinimalAsyncDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'MhcPreDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'MhcPostDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcSplitSinkhornDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'MhcPreDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'KdaDecodeConvDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'KdaRecurrentDecodeDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Writing CSV stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_dense-1_/perf_report_stacked.csv
 Plotting PNG stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_dense-1_/perf_report_stacked.png

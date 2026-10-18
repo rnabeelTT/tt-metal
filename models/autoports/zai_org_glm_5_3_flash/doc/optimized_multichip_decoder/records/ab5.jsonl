@@ -1,0 +1,22 @@
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2}
+{"kind": "dsa_moe", "batch": 1, "variant": "base", "spec": "", "eager_finite": true, "replay_us": 1804.9875895182292, "step_us": 1917.1396891276042, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "eager_finite": true, "replay_us": 1486.953099568685, "step_us": 1603.372891743978, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "variant": "a1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,pack_a_1d=1", "eager_finite": true, "replay_us": 1436.2732569376628, "step_us": 1534.7401301066081, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "variant": "q1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,dsa_1d=1", "eager_finite": true, "replay_us": 1480.6350072224936, "step_us": 1595.2825546264648, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "variant": "a1dq1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,pack_a_1d=1,dsa_1d=1", "eager_finite": true, "replay_us": 1431.6240946451824, "step_us": 1524.2815017700195, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "variant": "base2", "spec": "", "eager_finite": true, "replay_us": 1804.0657043457031, "step_us": 1906.5221150716147, "traced_finite": true}
+{"kind": "kda_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2}
+{"kind": "kda_moe", "batch": 1, "variant": "base", "spec": "", "eager_finite": true, "replay_us": 1371.0737228393555, "step_us": 1408.6405436197915, "traced_finite": true}
+{"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "eager_finite": true, "replay_us": 1212.8035227457683, "step_us": 1254.423459370931, "traced_finite": true}
+{"kind": "kda_moe", "batch": 1, "variant": "base2", "spec": "", "eager_finite": true, "replay_us": 1371.010144551595, "step_us": 1407.8299204508464, "traced_finite": true}
+{"kind": "kda_dense", "batch": 1, "usable_topology": "Topology.Ring", "links": 2}
+{"kind": "kda_dense", "batch": 1, "variant": "base", "spec": "", "eager_finite": true, "replay_us": 1166.542371114095, "step_us": 1190.4716491699219, "traced_finite": true}
+{"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "eager_finite": true, "replay_us": 1034.7763697306316, "step_us": 1064.9601618448892, "traced_finite": true}
+{"kind": "kda_dense", "batch": 1, "variant": "base2", "spec": "", "eager_finite": true, "replay_us": 1166.1370595296223, "step_us": 1185.9734853108723, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "usable_topology": "Topology.Ring", "links": 2}
+{"kind": "dsa_moe", "batch": 32, "variant": "base", "spec": "", "eager_finite": true, "replay_us": 5122.3039627075195, "step_us": 5266.896883646647, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "variant": "fin", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "eager_finite": true, "replay_us": 4799.7792561848955, "step_us": 5442.7385330200195, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "variant": "a1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,pack_a_1d=1", "eager_finite": true, "replay_us": 4758.453369140625, "step_us": 4898.500442504883, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "variant": "q1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,dsa_1d=1", "eager_finite": true, "replay_us": 4794.510205586752, "step_us": 4925.855000813802, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "variant": "a1dq1d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,pack_a_1d=1,dsa_1d=1", "eager_finite": true, "replay_us": 4752.500851949057, "step_us": 4898.214340209961, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 32, "variant": "base2", "spec": "", "eager_finite": true, "replay_us": 5120.78603108724, "step_us": 5652.403831481934, "traced_finite": true}

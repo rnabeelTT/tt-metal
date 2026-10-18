@@ -1,0 +1,17 @@
+single-die opt_s5 vs single-die opt: opt opt_s5
+kda_dense prefill_a (100, 16384) pcc 1.000000 rms 1.00000
+kda_dense prefill_b (64, 16384) pcc 1.000000 rms 1.00000
+kda_dense decode (3, 2, 16384) pcc 0.999997 rms 1.00055
+dsa_moe prefill_a (100, 16384) pcc 1.000000 rms 1.00000
+dsa_moe prefill_b (64, 16384) pcc 1.000000 rms 1.00000
+dsa_moe decode (3, 2, 16384) pcc 0.999987 rms 1.00010
+kda_moe prefill_a (100, 16384) pcc 1.000000 rms 1.00000
+kda_moe prefill_b (64, 16384) pcc 1.000000 rms 1.00000
+kda_moe decode (3, 2, 16384) pcc 0.998795 rms 1.00187
+kda_moe decode per row (step x slot):
+0 row pcc 1.000000 rel l2 0.0000
+1 row pcc 0.999997 rel l2 0.0025
+2 row pcc 0.996464 rel l2 0.0845
+3 row pcc 0.999997 rel l2 0.0025
+4 row pcc 0.999999 rel l2 0.0017
+5 row pcc 0.999998 rel l2 0.0020

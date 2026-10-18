@@ -1,0 +1,36 @@
+=== watcher test_real_weights[kda_dense] 2026-10-17T16:43:56+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2560918 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_real_weights[kda_dense] exit=134
+============================== 1 passed in 11.27s ==============================
+watcher suspicious lines: 0
+=== watcher test_real_weights[dsa_moe] 2026-10-17T16:45:22+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2567050 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_real_weights[dsa_moe] exit=134
+============================== 1 passed in 34.18s ==============================
+watcher suspicious lines: 0
+=== watcher test_real_weights[kda_moe] 2026-10-17T16:47:11+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2574003 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_real_weights[kda_moe] exit=134
+============================== 1 passed in 29.04s ==============================
+watcher suspicious lines: 0
+=== watcher test_single_slot_kda_decode 2026-10-17T16:48:55+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2579968 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_single_slot_kda_decode exit=134
+============================== 1 passed in 8.04s ===============================
+watcher suspicious lines: 0
+=== watcher test_batch32_all_active[kda_moe] 2026-10-17T16:50:18+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2585060 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_batch32_all_active[kda_moe] exit=134
+========================= 1 passed in 82.29s (0:01:22) =========================
+watcher suspicious lines: 0
+=== watcher test_batch32_all_active[dsa_moe] 2026-10-17T16:52:56+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2596700 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_batch32_all_active[dsa_moe] exit=134
+========================= 1 passed in 71.46s (0:01:11) =========================
+watcher suspicious lines: 0
+=== watcher test_lengths[dsa_moe-4000] 2026-10-17T16:55:22+00:00
+/home/raahem/glm53-flash-bringup/scripts/s5_watcher.sh: line 9: 2607945 Aborted                 GLM53_WORKER_L1_SIZE=${GLM53_WORKER_L1_SIZE:-1444864} TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=$OUT/$name TT_METAL_LOGGER_LEVEL=Warning timeout 3600 pytest -sv "$F::$case" -p no:cacheprovider > $OUT/$name/console.log 2>&1
+watcher test_lengths[dsa_moe-4000] exit=134
+============================== 1 passed in 31.30s ==============================
+watcher suspicious lines: 0
+=== done 2026-10-17T16:57:09+00:00

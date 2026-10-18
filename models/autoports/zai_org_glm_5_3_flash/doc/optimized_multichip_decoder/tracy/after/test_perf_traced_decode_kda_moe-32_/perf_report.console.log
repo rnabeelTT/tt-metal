@@ -7,18 +7,19 @@ Using operations until 'PERF_DECODE_END'.
 Detected data from 4 devices. Merging device data...
 Warning: SparseMatmulDeviceOperation rows without numeric nnz were found. Their DRAM/FLOP utilization is omitted; pass --active-experts K to model K active experts per input batch group.
 Writing CSV output to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_moe-32_/perf_report.csv
-Overall DRAM roofline (modeled ops): 2.3% (12 GB/s)
-Warning: Unclassified operation 'KdaRecurrentDecodeDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'MhcPreDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'MoeSortedDispatchDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Overall DRAM roofline (modeled ops): 2.4% (12 GB/s)
 Warning: Unclassified operation 'MhcMixDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'KdaDecodeConvDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'KdaRecurrentDecodeDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'MoeSortedDispatchDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'AllGatherAsyncDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'ReduceScatterMinimalAsyncDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'UntilizeCodegenDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'TopKDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcSplitSinkhornDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'UntilizeCodegenDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'MhcPreDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'TopKDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MhcPostDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
-Warning: Unclassified operation 'MoeGatherRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Warning: Unclassified operation 'MoeGatherAddRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
+Warning: Unclassified operation 'MoeGatherRowsDeviceOperation' found. Please add to OPERATION_CATEGORIES for proper classification.
 Writing CSV stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_moe-32_/perf_report_stacked.csv
 Plotting PNG stacked report to /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/tracy/after/test_perf_traced_decode_kda_moe-32_/perf_report_stacked.png

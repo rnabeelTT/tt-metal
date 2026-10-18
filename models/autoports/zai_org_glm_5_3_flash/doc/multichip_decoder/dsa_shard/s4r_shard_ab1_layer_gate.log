@@ -1,0 +1,183 @@
+=== start Sat Oct 17 03:31:20 PM UTC 2026 : timeout -k 60 5400 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py
+2026-10-17 15:31:22.286 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 2 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8] 2026-10-17 15:31:49.475 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-17 15:32:17.414 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+b8: slot 5 syn:77 prefill 9001
+b8: slot 2 real:4000 prefill 4000
+b8: slot 0 syn:78 prefill 2049
+b8: slot 7 syn:79 prefill 100
+b8 ('prefill', 5): PCC sharded vs replicated 0.998306 rms ratio 0.99952
+b8 ('prefill', 2): PCC sharded vs replicated 0.999920 rms ratio 0.99974
+b8 ('prefill', 0): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('prefill', 7): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('decode', 5, 0): PCC sharded vs replicated 0.999943 rms ratio 1.00061
+b8 ('decode', 2, 0): PCC sharded vs replicated 0.999980 rms ratio 0.99946
+b8 ('decode', 0, 0): PCC sharded vs replicated 0.999930 rms ratio 1.00164
+b8 ('decode', 7, 0): PCC sharded vs replicated 0.999950 rms ratio 0.99849
+b8 ('decode', 5, 1): PCC sharded vs replicated 0.999920 rms ratio 1.00067
+b8 ('decode', 2, 1): PCC sharded vs replicated 0.999975 rms ratio 0.99850
+b8 ('decode', 0, 1): PCC sharded vs replicated 0.992725 rms ratio 0.99459
+b8 ('decode', 7, 1): PCC sharded vs replicated 0.999946 rms ratio 0.99969
+b8 ('decode', 5, 2): PCC sharded vs replicated 0.999918 rms ratio 1.00053
+b8 ('decode', 2, 2): PCC sharded vs replicated 0.999977 rms ratio 1.00014
+b8 ('decode', 0, 2): PCC sharded vs replicated 0.999931 rms ratio 1.00152
+b8 ('decode', 7, 2): PCC sharded vs replicated 0.999958 rms ratio 1.00023
+b8 ('prefill', 5, 9001): replicated 2.82 sharded 9.346
+b8 ('prefill', 2, 4000): replicated 1.061 sharded 0.9828
+b8 ('prefill', 0, 2049): replicated 0.6405 sharded 4.569
+b8 ('prefill', 7, 100): replicated 0.04128 sharded 0.03377
+b8 decode_replay_us: replicated 3198 sharded 3605
+b8 latent_bytes_per_die: replicated 1.343e+08 sharded 3.593e+07
+b8: worst PCC 0.992725, worst |rms ratio - 1| 0.00541
+FAILED
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1] 2026-10-17 15:33:00.937 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-17 15:33:25.598 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+b1: slot 0 syn:80 prefill 6001
+b1 ('prefill', 0): PCC sharded vs replicated 0.998538 rms ratio 0.99957
+b1 ('decode', 0, 0): PCC sharded vs replicated 0.999926 rms ratio 0.99935
+b1 ('decode', 0, 1): PCC sharded vs replicated 0.983625 rms ratio 0.99570
+b1 ('decode', 0, 2): PCC sharded vs replicated 0.999939 rms ratio 1.00138
+b1 ('prefill', 0, 6001): replicated 1.489 sharded 1.764
+b1 decode_replay_us: replicated 1754 sharded 2163
+b1 latent_bytes_per_die: replicated 8.52e+06 sharded 2.507e+06
+b1: worst PCC 0.983625, worst |rms ratio - 1| 0.00430
+FAILED
+
+=================================== FAILURES ===================================
+______________________ test_shard_matches_replicated[b8] _______________________
+
+mesh = MeshDevice(1x4 grid, 4 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x73d5ba1b0950>
+case = 'b8'
+
+    @pytest.mark.parametrize("case", list(CASES))
+    def test_shard_matches_replicated(mesh, rd, case):
+        cfg = CASES[case]
+        users = []
+        for slot, src, L in cfg["users"]:
+            kind, arg = src.split(":")
+            x = _real(L, 1000 + L) if kind == "real" else None
+            if x is None:
+                x = _synthetic(int(arg) if kind == "syn" else 81, L + STEPS)
+                src = f"syn (real stream not cached)" if kind == "real" else src
+            users.append((slot, x, L))
+            print(f"{case}: slot {slot} {src} prefill {L}")
+        ref, t_ref = _run(mesh, rd, False, cfg["batch"], cfg["max_context"], users, perm_seed=11)
+        got, t_got = _run(mesh, rd, True, cfg["batch"], cfg["max_context"], users, perm_seed=11)
+        worst_p, worst_r = 1.0, 0.0
+        fails = []
+        for k in ref:
+            a, b = ref[k], got[k]
+            assert torch.isfinite(b).all(), k
+            p = pcc(b, a)
+            r = float(b.norm() / a.norm())
+            worst_p, worst_r = min(worst_p, p), max(worst_r, abs(r - 1))
+            print(f"{case} {k}: PCC sharded vs replicated {p:.6f} rms ratio {r:.5f}")
+            if p < PCC_BAR or abs(r - 1) > RMS_TOL:
+                fails.append((k, p, r))
+        for k in t_ref:
+            if k in t_got:
+                print(f"{case} {k}: replicated {t_ref[k]:.4g} sharded {t_got[k]:.4g}")
+        print(f"{case}: worst PCC {worst_p:.6f}, worst |rms ratio - 1| {worst_r:.5f}")
+>       assert not fails, fails
+E       AssertionError: [(('prefill', 5), 0.998305808431404, 0.9995236396789551), (('decode', 0, 1), 0.9927252448027284, 0.9945930242538452)]
+E       assert not [(('prefill', 5), 0.998305808431404, 0.9995236396789551), (('decode', 0, 1), 0.9927252448027284, 0.9945930242538452)]
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py:196: AssertionError
+______________________ test_shard_matches_replicated[b1] _______________________
+
+mesh = MeshDevice(1x4 grid, 4 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x73d5ba1b0950>
+case = 'b1'
+
+    @pytest.mark.parametrize("case", list(CASES))
+    def test_shard_matches_replicated(mesh, rd, case):
+        cfg = CASES[case]
+        users = []
+        for slot, src, L in cfg["users"]:
+            kind, arg = src.split(":")
+            x = _real(L, 1000 + L) if kind == "real" else None
+            if x is None:
+                x = _synthetic(int(arg) if kind == "syn" else 81, L + STEPS)
+                src = f"syn (real stream not cached)" if kind == "real" else src
+            users.append((slot, x, L))
+            print(f"{case}: slot {slot} {src} prefill {L}")
+        ref, t_ref = _run(mesh, rd, False, cfg["batch"], cfg["max_context"], users, perm_seed=11)
+        got, t_got = _run(mesh, rd, True, cfg["batch"], cfg["max_context"], users, perm_seed=11)
+        worst_p, worst_r = 1.0, 0.0
+        fails = []
+        for k in ref:
+            a, b = ref[k], got[k]
+            assert torch.isfinite(b).all(), k
+            p = pcc(b, a)
+            r = float(b.norm() / a.norm())
+            worst_p, worst_r = min(worst_p, p), max(worst_r, abs(r - 1))
+            print(f"{case} {k}: PCC sharded vs replicated {p:.6f} rms ratio {r:.5f}")
+            if p < PCC_BAR or abs(r - 1) > RMS_TOL:
+                fails.append((k, p, r))
+        for k in t_ref:
+            if k in t_got:
+                print(f"{case} {k}: replicated {t_ref[k]:.4g} sharded {t_got[k]:.4g}")
+        print(f"{case}: worst PCC {worst_p:.6f}, worst |rms ratio - 1| {worst_r:.5f}")
+>       assert not fails, fails
+E       AssertionError: [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.9836252551114146, 0.9956981539726257)]
+E       assert not [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.9836252551114146, 0.9956981539726257)]
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py:196: AssertionError
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+73.51s call     models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+54.34s call     models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+1.44s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8] - AssertionError: [(('prefill', 5), 0.998305808431404, 0.9995236396789551), (('decode', 0, 1), 0.9927252448027284, 0.9945930242538452)]
+assert not [(('prefill', 5), 0.998305808431404, 0.9995236396789551), (('decode', 0, 1), 0.9927252448027284, 0.9945930242538452)]
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1] - AssertionError: [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.9836252551114146, 0.9956981539726257)]
+assert not [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.9836252551114146, 0.9956981539726257)]
+======================== 2 failed in 129.54s (0:02:09) =========================
+nanobind: leaked 2 instances!
+ - leaked instance 0x73d586fa8868 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x73d5876ceef8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "ranges"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "devices"
+ - leaked function "to_json"
+ - leaked function "compute_program_hash"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "from_json"
+ - leaked function "__repr__"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Sat Oct 17 03:33:35 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

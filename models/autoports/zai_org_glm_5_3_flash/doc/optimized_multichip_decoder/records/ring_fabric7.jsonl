@@ -1,0 +1,8 @@
+{"kind": "kda_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1104.8237482706704, "step_us": 1192.8240458170574, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1407.5994491577148, "step_us": 1510.6995900472004, "traced_finite": true}
+{"kind": "kda_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 1, "variant": "fin1d", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1103.067398071289, "step_us": 1160.9554290771484, "traced_finite": true}
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin1d", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1406.995455423991, "step_us": 1504.0238698323567, "traced_finite": true}

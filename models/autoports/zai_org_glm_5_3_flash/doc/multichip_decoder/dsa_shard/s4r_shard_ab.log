@@ -1,0 +1,123 @@
+=== start Sat Oct 17 08:21:43 PM UTC 2026 : timeout -k 60 5400 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py
+2026-10-17 20:21:45.007 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 2 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8] 2026-10-17 20:22:13.253 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-17 20:22:42.339 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+b8: slot 5 syn:77 prefill 9001
+b8: slot 2 real:4000 prefill 4000
+b8: slot 0 syn:78 prefill 2049
+b8: slot 7 syn:79 prefill 100
+b8 ('attn prefill', 5): PCC sharded vs replicated 0.999942 rms ratio 1.00159
+b8 ('attn prefill', 2): PCC sharded vs replicated 0.999957 rms ratio 0.99973
+b8 ('attn prefill', 0): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('attn prefill', 7): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('attn decode', 5, 0): PCC sharded vs replicated 0.999930 rms ratio 1.00162
+b8 ('attn decode', 2, 0): PCC sharded vs replicated 0.999930 rms ratio 0.99777
+b8 ('attn decode', 0, 0): PCC sharded vs replicated 0.999935 rms ratio 1.00251
+b8 ('attn decode', 7, 0): PCC sharded vs replicated 0.999975 rms ratio 0.99901
+b8 ('attn decode', 5, 1): PCC sharded vs replicated 0.999928 rms ratio 1.00344
+b8 ('attn decode', 2, 1): PCC sharded vs replicated 0.999908 rms ratio 1.00019
+b8 ('attn decode', 0, 1): PCC sharded vs replicated 0.999939 rms ratio 1.00231
+b8 ('attn decode', 7, 1): PCC sharded vs replicated 0.999971 rms ratio 1.00019
+b8 ('attn decode', 5, 2): PCC sharded vs replicated 0.999919 rms ratio 1.00096
+b8 ('attn decode', 2, 2): PCC sharded vs replicated 0.999920 rms ratio 1.00033
+b8 ('attn decode', 0, 2): PCC sharded vs replicated 0.999923 rms ratio 1.00180
+b8 ('attn decode', 7, 2): PCC sharded vs replicated 0.999976 rms ratio 1.00002
+b8 ('prefill', 5): PCC sharded vs replicated 0.998306 rms ratio 0.99952
+b8 ('prefill', 2): PCC sharded vs replicated 0.999920 rms ratio 0.99974
+b8 ('prefill', 0): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('prefill', 7): PCC sharded vs replicated 1.000000 rms ratio 1.00000
+b8 ('decode', 5, 0): PCC sharded vs replicated 0.999943 rms ratio 1.00046
+b8 ('decode', 2, 0): PCC sharded vs replicated 0.999980 rms ratio 0.99941
+b8 ('decode', 0, 0): PCC sharded vs replicated 0.999930 rms ratio 1.00151
+b8 ('decode', 7, 0): PCC sharded vs replicated 0.999950 rms ratio 0.99865
+b8 ('decode', 5, 1): PCC sharded vs replicated 0.999919 rms ratio 1.00061
+b8 ('decode', 2, 1): PCC sharded vs replicated 0.999975 rms ratio 0.99855
+b8 ('decode', 0, 1): PCC sharded vs replicated 0.992665 rms ratio 0.99467
+b8 ('decode', 7, 1): PCC sharded vs replicated 0.999947 rms ratio 0.99971
+b8 ('decode', 5, 2): PCC sharded vs replicated 0.999914 rms ratio 1.00017
+b8 ('decode', 2, 2): PCC sharded vs replicated 0.999977 rms ratio 1.00008
+b8 ('decode', 0, 2): PCC sharded vs replicated 0.999930 rms ratio 1.00150
+b8 ('decode', 7, 2): PCC sharded vs replicated 0.999957 rms ratio 1.00018
+b8: attention output worst PCC 0.999908, worst |rms ratio - 1| 0.00344
+b8: layer updates outside the bars with a matching attention output (MoE near-tie): [(('prefill', 5), 0.998305808431404, 0.9995236396789551), (('decode', 0, 1), 0.9926650966330316, 0.9946737885475159)]
+b8 ('prefill', 5, 9001): replicated 3.251 sharded 2.926
+b8 ('prefill', 2, 4000): replicated 1.225 sharded 1.136
+b8 ('prefill', 0, 2049): replicated 0.7322 sharded 0.6428
+b8 ('prefill', 7, 100): replicated 0.04411 sharded 0.04058
+b8 decode_replay_us: replicated 3154 sharded 3563
+b8 latent_bytes_per_die: replicated 1.343e+08 sharded 3.593e+07
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1] 2026-10-17 20:23:11.962 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-17 20:23:36.229 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+b1: slot 0 syn:80 prefill 6001
+b1 ('attn prefill', 0): PCC sharded vs replicated 0.999951 rms ratio 1.00138
+b1 ('attn decode', 0, 0): PCC sharded vs replicated 0.999927 rms ratio 1.00195
+b1 ('attn decode', 0, 1): PCC sharded vs replicated 0.999927 rms ratio 1.00248
+b1 ('attn decode', 0, 2): PCC sharded vs replicated 0.999924 rms ratio 1.00136
+b1 ('prefill', 0): PCC sharded vs replicated 0.998538 rms ratio 0.99957
+b1 ('decode', 0, 0): PCC sharded vs replicated 0.999928 rms ratio 0.99943
+b1 ('decode', 0, 1): PCC sharded vs replicated 0.983629 rms ratio 0.99560
+b1 ('decode', 0, 2): PCC sharded vs replicated 0.999915 rms ratio 0.99891
+b1: attention output worst PCC 0.999924, worst |rms ratio - 1| 0.00248
+b1: layer updates outside the bars with a matching attention output (MoE near-tie): [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.983628578286602, 0.9956039786338806)]
+b1 ('prefill', 0, 6001): replicated 1.722 sharded 1.745
+b1 decode_replay_us: replicated 1730 sharded 2152
+b1 latent_bytes_per_die: replicated 8.52e+06 sharded 2.507e+06
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+61.77s call     models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+49.70s call     models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+1.35s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+0.17s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+======================== 2 passed in 113.17s (0:01:53) =========================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7c5ee08d6d78 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7c5ee01908a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "create_matmul_attributes"
+ - leaked function ""
+ - leaked function "to_numpy"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 08:23:41 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

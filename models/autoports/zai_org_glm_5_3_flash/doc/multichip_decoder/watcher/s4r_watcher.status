@@ -1,0 +1,12 @@
+watcher test_real_weights[kda_dense]: ============================== 1 passed in 8.03s =============================== suspicious=0
+nolog
+watcher test_real_weights[dsa_moe]: ============================== 1 passed in 32.82s ============================== suspicious=0
+nolog
+watcher test_real_weights[kda_moe]: ============================== 1 passed in 28.59s ============================== suspicious=0
+nolog
+watcher test_batch32_all_active[kda_moe]: ============================== 1 passed in 46.61s ============================== suspicious=0
+nolog
+watcher test_lengths[dsa_moe-2051]: ============================== 1 passed in 33.76s ============================== suspicious=0
+nolog
+watcher test_single_slot_kda_decode: ============================== 1 passed in 4.47s =============================== suspicious=0
+nolog

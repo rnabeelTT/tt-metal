@@ -1,0 +1,32 @@
+=== round7 start 2026-10-17T18:51:28+00:00
+=== kernel tests: ============================== 9 passed in 3.84s =============================== 2026-10-17T18:52:26+00:00
+=== suite: =================== 1 failed, 44 passed in 537.68s (0:08:57) =================== 2026-10-17T19:02:19+00:00
+=== fault suite: ============= 17 failed, 28 passed, 2 errors in 533.97s (0:08:53) ============== 2026-10-17T19:12:09+00:00
+=== kda_dense batch 1 2026-10-17T19:12:09+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_dense_1_191209.log
+build kda_dense batch 1: 1 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 895.2140808105469, "step_us": 925.9700775146484, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== kda_dense stress done 2026-10-17T19:12:15+00:00
+=== kda_moe batch 1 2026-10-17T19:12:15+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_1_191215.log
+build kda_moe batch 1: 30 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1104.8237482706704, "step_us": 1192.8240458170574, "traced_finite": true}
+=== dsa_moe batch 1 2026-10-17T19:13:46+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_1_191346.log
+build dsa_moe batch 1: 30 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1407.5994491577148, "step_us": 1510.6995900472004, "traced_finite": true}
+=== kda_moe batch 1 2026-10-17T19:14:26+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_1_191426.log
+build kda_moe batch 1: 29 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 1, "variant": "fin1d", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1103.067398071289, "step_us": 1160.9554290771484, "traced_finite": true}
+=== dsa_moe batch 1 2026-10-17T19:15:49+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_1_191549.log
+build dsa_moe batch 1: 28 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin1d", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1406.995455423991, "step_us": 1504.0238698323567, "traced_finite": true}
+=== fabric ring A/B done 2026-10-17T19:16:21+00:00
+=== decode tracy done 2026-10-17T19:24:59+00:00

@@ -5,237 +5,382 @@ Stage 5 of the tt-model-bringup flow. The pass optimizes `tt/multichip_decoder.p
 `tt/functional_decoder.py`. Decode is the priority (tokens/s/user, then 32-user throughput), then prefill.
 
 The stage-5 changes are options of one dataclass, `MCOpts` (`tt/multichip_decoder.py`). `DEFAULT_MC` holds the
-selected values. `GLM53_MC="key=value,..."` overrides fields at construction (A/B runs). `MCOpts()` (all options off, linear
-topology) is the stage-4 path; `GLM53_MC="topology=linear,ccl_l1=0,norm_sharded=0,dsa_pack=0,pack_a_1d=0,pack_b_1d=0,
-dsa_1d=0,router_1d=0,ds_shared=0,prefill_2d=0"` selects it.
+selected values; `MCOpts()` (all options off, linear topology) is the stage-4 path. `GLM53_MC="key=value,..."` overrides
+fields at construction for A/B runs and logs a warning. Two new device ops belong to the stage:
+
+- `ttnn.experimental.deepseek_prefill.kda_decode_conv` (new): the KDA decode conv step (4-tap causal conv in fp32, SiLU,
+  idle-slot select, in-place history shift) in one op instead of 12 (`kda_conv_op`).
+- `mhc_split_sinkhorn` gained a `perm_fidelity` attribute (`MHC_SINKHORN_PERM_FIDELITY`, 4 by default): the Sinkhorn
+  row / column-sum matmuls at HiFi3 are bit-identical to HiFi4 (`sinkhorn_perm_fidelity = 3`).
+
+Review #1 (`~/glm53-flash-bringup/artifacts/stage5_review_1.md`) asked for the deferred items; round 6 of this README
+answers them (sections marked "review #1").
 
 ## Result
 
-`DEFAULT_MC` (selected): ring topology when the fabric routes it (`topology="auto"`), 2 links, decode collective
-outputs in L1, width-sharded decode RMSNorms, the five replicated DSA projections packed into two matmuls
-(q_a | kv_a bfp8 and indexer wk | pool gate | head weights bf16, both interleaved on 1D decode configs), the DSA q_b /
-wq_b and the MoE router on 1D decode configs, the packed weights shared with prefill (`ds_shared`: the separate weights
-are freed, no second copy), and the DSA prefill matmuls on an explicit 2D config (`prefill_2d`).
+`DEFAULT_MC` (round 6): ring collectives when the fabric routes them (`topology="auto"`), 2 links, decode collective
+outputs in L1, persistent all-gather outputs, width-sharded decode RMSNorms, the five replicated DSA projections packed
+into two matmuls, 1D decode programs per role (q_a | kv_a pack, indexer pack, DSA q_b / wq_b / o_proj, KDA o_proj,
+shared expert, dense MLP, MoE router), the fused KDA decode conv, HiFi3 Sinkhorn sums, 16 mHC mix chunks at decode, the
+MoE grouped sparse matmuls at in0 blocks of 8, the packed weights shared with prefill, and explicit 2D prefill programs
+for the DSA projections, the packs, the dense MLP, the shared expert and the KDA output projection.
 
-Decode, device time of one traced replay (Tracy, device 0, µs; `tracy/before` = stage-4 options, `tracy/after` =
-`DEFAULT_MC`, same code and run day; the 1-user KDA "before" runs already carry the 1-slot fix, without which they
-fail):
+Decode, device time of one traced replay (Tracy, device 0, µs). `tracy/before` = stage-4 options (run 05:17, with the
+1-slot KDA fix of round 2 and without the padded-slot inputs of round 4, which removed ~27 µs of one-core pads from a
+1-user KDA layer); `tracy/after` = the final `DEFAULT_MC` with the persistent all-gather buffers in DRAM (run 19:17,
+round 7; the 16:03 run had them in L1, see the work log):
 
 | Layer kind | Users | Before | After | Change |
 |---|---|---|---|---|
-| kda_dense (L0) | 1 | 1134 | 979 | -13.7 % |
-| kda_moe (L4) | 1 | 1338 | 1157 | -13.5 % |
-| dsa_moe (L3) | 1 | 1745 | 1348 | -22.8 % |
-| kda_moe | 32 | 4599 | 4380 | -4.8 % |
-| dsa_moe | 32 | 4975 | 4536 | -8.8 % |
+| kda_dense (L0) | 1 | 1134 | 865 | -23.7 % |
+| kda_moe (L4) | 1 | 1338 | 1070 | -20.0 % |
+| dsa_moe (L3) | 1 | 1745 | 1332 | -23.7 % |
+| kda_moe | 32 | 4599 | 4323 | -6.0 % |
+| dsa_moe | 32 | 4975 | 4655 | -6.4 % |
 
-Decode, traced replay wall (`tools/mc_decode_ab.py`, 30 back-to-back replays, one build per row, µs; rounds 5 and 3):
+The 32-user rows move by up to 5 % between Tracy runs of the same build: the sparse expert matmuls and the row gather
+(DRAM-bound, 2.7 ms of the dsa_moe 32-user step) took 2499 µs in the 16:03 run and 2718 µs in the 19:17 run, with
+the same op list and the other groups within 2 µs. The replay table below (200 replays) is the stable figure.
 
-| Layer kind | Users | Stage-4 options (base / base2) | DEFAULT_MC | Change |
+Decode, traced replay wall on the shipped build (`tools/mc_decode_ab.py --base default`, the `DEFAULT_MC` construction
+incl. `ds_shared`; 30 back-to-back replays; `records/stress6.jsonl`) against the stage-4 options on a stage-4 build
+(`records/ab6.jsonl`, variant `s4`), µs:
+
+| Layer kind | Users | Stage-4 options (`s4`) | Shipped `DEFAULT_MC` | Change |
 |---|---|---|---|---|
-| kda_dense | 1 | 1167 / 1166 | 1035 | -11.3 % |
-| kda_moe | 1 | 1371 / 1371 | 1213 | -11.5 % |
-| dsa_moe | 1 | 1805 / 1804 | 1432 | -20.6 % |
-| kda_moe | 32 | 4610 / 4547 | 4361 | -4.8 % |
-| dsa_moe | 32 | 5122 / 5121 | 4753 | -7.2 % |
+| kda_dense | 1 | 1167 | 895 | -23.3 % |
+| kda_moe | 1 | 1371 | 1102 | -19.6 % |
+| dsa_moe | 1 | 1805 | 1407 | -22.0 % |
+| kda_moe | 32 | 4608 | 4431 | -3.8 % |
+| dsa_moe | 32 | 5119 | 4722 | -7.8 % |
+| dsa_moe, position 130,000 of a 131,072-token cache (review #1) | 1 | 2361 / 2361 (base / base2) | 1963 (run-time `DEFAULT_MC` options) | -16.9 % |
 
-For the 45-layer stack (3 kda_dense, 31 kda_moe, 11 dsa_moe layers) the layer replays sum to 65.9 ms per token
-before and 56.5 ms after at 1 user (decoder layers only, without embedding, head and sampling): 15.2 -> 17.7
-tokens/s/user from the layers (-14.3 %). At 32 users the MoE dominates (see Open items).
+The long-position row decodes in the sparse regime (indexer over ~32.5K pooled keys per slot; `records/longpos6.jsonl`).
+For the 45-layer stack (3 kda_dense, 31 kda_moe, 11 dsa_moe layers) the shipped layer replays sum to 52.3 ms per
+token at 1 user against 65.9 ms with the stage-4 options (decoder layers only, without embedding, head and sampling).
 
 Prefill, 2048 rows, device time of the signposted pass (Tracy, device 0, µs):
 
 | Layer kind | Before | After | Change | CCL before -> after |
 |---|---|---|---|---|
-| kda_dense | 12179 | 11670 | -4.2 % | 1889 -> 1365 |
-| kda_moe | 25601 | 24815 | -3.1 % | 2150 -> 1527 |
-| dsa_moe | 33523 | 31488 | -6.1 % | 1617 -> 1032 |
+| kda_dense | 12179 | 10084 | -17.2 % | 1889 -> 1467 |
+| kda_moe | 25601 | 24411 | -4.6 % | 2150 -> 1438 |
+| dsa_moe | 33523 | 30664 | -8.5 % | 1617 -> 1087 |
 
-Correctness on the final `DEFAULT_MC` (`tests/test_multichip_decoder.py`, `logs/s5_suite2.log`): **45 passed** in 9 min
-(the stage-4 functional suite on the (1, 4) mesh with the bfp4 bars on the MoE layers, the single-die baseline compare
-and the new 1-slot KDA test; the intermediate default of round 3 also passed 45 / 45, `logs/s5_suite.log`).
+## Correctness on the shipped default
 
-| Check | Stage 4 (`logs/s4_suite.log`) | Stage 5 |
-|---|---|---|
-| Update PCC vs the single-die TTNN decoder (`refs/baseline_opt.pt`, bar 0.999) | 0.99978 to 0.99999 | kda_dense 0.999993 to 0.999996, dsa_moe 0.999909 to 0.999954, kda_moe 0.999963 to 0.999993 |
-| Lowest update (delta) PCC vs HF over the suite (synthetic kda_moe prefill, bfp4 experts) | 0.972796 | 0.972638 |
-| 1-slot vs 2-slot KDA decode (3 eager steps + 1 traced replay) | failed (`TT_FATAL`) | bit-identical |
-| Full model on the round-3 `DEFAULT_MC` (DRAM-sharded q_a / kv_a pack; main agent's `tools/readiness prefill-check`, 45 layers, `logs/s6_prefill_check3.log`) | - | top-1 0.92, top-5 1.00 over 100 positions |
+- Suite `tests/test_multichip_decoder.py` (TP4, `DEFAULT_MC`, round 7, `records/s5_suite4.log`): 44 passed, 1 failed.
+  The failure is `test_matches_single_die_baseline`: the stored single-die baseline (`refs/baseline_opt.pt`) carries
+  policy 'opt', and the stage-3 rework changed the single-die `SELECTED` policy to 'opt_s5'. The test refuses a
+  baseline of another policy, as intended.
+- Baseline compare against a fresh single-die 'opt_s5' baseline (`tools/baseline_dump.py`, round 8,
+  `records/s5_baseline8.log`): 1 failed. 8 of 9 rows pass (PCC 0.99991 to
+  0.999996, rms ratio 0.99956 to 1.00098). kda_moe decode fails: PCC 0.998790 (bar 0.999), rms 0.99821. Cause: one
+  token. The host comparison of the two single-die baselines (`records/baseline8_rows.txt`) shows that single-die
+  'opt_s5' and single-die 'opt' differ in exactly this case, with the same PCC (0.998795), all in one row (decode
+  step 2, slot 0: rel L2 0.0845; the other 5 rows <= 0.0025). TP4 matched single-die 'opt' on this case
+  (PCC 0.999993, rms 1.00007, on the shipped options in `s5_mc_suite3.log`). So the single-die 'opt_s5' run moves one token across a router near-tie
+  (8.5 % of a token update = one of 8 experts swapped). This is not a TP4 sharding or collective error. The baseline
+  compare has no near-tie allowance (the suite's reference checks have one: `suite_swap_cap`). Open item for the
+  test owner (stage-4 rework): apply the near-tie allowance per row in the baseline compare, or compare the router
+  choice and accept a swapped-expert row.
+- Fault injection, routed-expert output x 0.9722 (`GLM53_FAULT_ROUTED_SCALE`), full suite (round 7,
+  `records/s5_suite_fault2.log`): 17 failed + 2 errors, 28 passed. Every test that runs a MoE layer fails on the
+  update-rms check (ratios 0.970 to 0.988, tolerance 1 +- 0.01); the kda_dense tests (no routed experts) and the
+  kernel / CCL unit tests pass. Baseline compare with the same fault (round 9, `records/s5_baseline_fault9.log`):
+  failed on the first MoE row, dsa_moe prefill_a:
+  PCC 0.999904 (passes the 0.999 bar), rms ratio 0.97828 (outside 1 +- 0.005). The rms assert catches the scale fault
+  that the PCC bar alone does not.
+- Kernel tests (`records/s5r_kernel_tests.log`): 9 passed (`tests/test_mhc_split_sinkhorn.py` 7 with HiFi3
+  permutation sums, `tests/test_kda_decode_conv.py` 2). The upstream sinkhorn tests passed 4/4 in round 6
+  (`records/s5_round6.log`).
+- Replay determinism: 200 replays bit-identical for kda_dense / kda_moe / dsa_moe at 1 user and kda_moe / dsa_moe at
+  32 users (`records/stress6.jsonl`); persistent all-gather 2 x 120 replays from a fresh state bit-identical
+  (`records/ab6_det.jsonl`).
+- Watcher (`records/s5_watcher3.log`, `watcher/`): 1-slot KDA, 32-user MoE and DSA sparse cases, 0 suspicious lines.
 
-Watcher (`TT_METAL_WATCHER=10`, `scripts/s5_watcher.sh`, worker L1 1,444,864 B so that the watcher-instrumented KDA
-prefill programs fit the kernel-config ring as in stage 1): `test_real_weights` of every layer kind (prefill, eager and
-traced decode) **passed** with no watcher assert (`watcher/<case>/`). Each process then aborts at mesh close with
-`Timed out while waiting for active ethernet core 29-25 to become active again`: the fabric-router teardown under the
-watcher on this board (seen on every watcher process of the 122B port too); a board reset clears it.
+## Performance accounting (review #1 P2-5)
+
+Roofline = bytes one decode step must read per die (weights at their stored dtypes, KDA state read + write, DSA
+latent rows for 2048 selected tokens) / 512 GB/s per die. Device = Tracy above. Replay = the shipped-build replay
+wall. 1 user (the 1-slot KDA layers carry 2 state slots):
+
+| Case | MB per die | Roofline µs | Device µs | Replay µs | Device / roofline |
+|---|---|---|---|---|---|
+| kda_dense | KDA in 36.3, out 8.9, decay 0.3, state 4.2, dense MLP 40.1 = 89.8 | 175 | 865 | 895 | 4.9x |
+| kda_moe | KDA 49.7, router 1.6, 8 experts 28.3, shared 6.7 = 86.3 | 169 | 1070 | 1102 | 6.3x |
+| dsa_moe | packs 11.3, q_b 6.7, W_UK / W_UV 4.5, wq_b 12.6, o 17.8, latent 2.1, MoE 36.6 = 91.6 | 179 | 1332 | 1407 | 7.4x |
+
+Named gap terms of the 1-user kda_moe layer (1070 µs device): Sinkhorn 172 (2 calls on one core, 40 sequential
+normalizations each), element-wise / data movement 323 (router 85, mHC glue 120, KDA gates 70, the rest below 10 µs
+each), the matmuls at 41 to 64 % of DRAM bandwidth (decode M = 32 on 6 to 87 cores), sparse matmuls 124, mHC kernels 96,
+KDA recurrence 60, CCL 60, MoE dispatch 35; and between device time and replay wall ~50 µs of dispatch over 121 ops
+(the traced replay issues one program per op).
 
 ## Method
 
-- A/B probe: `tools/mc_decode_ab.py` builds one real layer per (kind, batch), then for every variant sets the
-  options, runs one eager step, captures the decode trace and times 30 back-to-back replays (`replay`, the
-  device-bound step) and 30 replays with the host input copies (`step`, as `tests/test_perf_decoder.py`). One build
-  serves every variant. `base` runs first and `base2` last: their difference is the run noise (0 to 50 µs). Unit
-  checks (`--units`) compare each option with the stage-4 path on one input and with an fp64 product of the same
-  device weights.
-- Prefill probe: `tools/mc_prefill_ab.py` (warm 2048-row pass, best of 3, host wall with a sync; `--save` / `--ref`
-  compare outputs across builds).
-- Tracy: `~/glm53-flash-bringup/scripts/s5_tracy.sh before|after` (`tests/test_perf_decoder.py` windows,
-  `tt-perf-report`). Device times are device 0, one traced replay (decode) or the signposted pass (prefill), sum of
-  `DEVICE KERNEL DURATION` (`~/glm53-flash-bringup/scripts/s5_ops.py`). `tracy/before` = stage-4 options on the
-  same code, `tracy/after` = `DEFAULT_MC`.
-
-Correction to the stage-4 README: its column "CCL time in TP4" (117 to 864 µs) summed the merged 4-device report.
-Per device, one decode pass holds 6 collectives at 95 to 100 µs in total (2 % to 7 % of the layer). The stage-4
-"incomplete 1-user KDA pass" was a failure: see "1-slot KDA decode" below.
+- Decode A/B: `tools/mc_decode_ab.py` builds one real layer per (kind, batch); every variant sets the options at run
+  time (`MCOpts` fields, `env.NAME=value`, `moe.FIELD=value`, `fid.GROUP=HiFi2`), runs one eager step, captures the
+  decode trace and times 30 back-to-back replays (`replay`). `base` first and `base2` last give the run noise (0 to
+  60 µs at 32 users, under 3 µs at 1 user). `--units` compares options with the stage-4 path on one input and with an
+  fp64 product of the same device weights. `--determinism N`: 2 x N replays from a fresh state, every output compared.
+  `--base default`: the `DEFAULT_MC` construction (the shipped build).
+- Op-level sweep (review #1 P1-2): `tools/mc_matmul_sweep.py` (one die, per-die TP4 shapes, random data): ttnn default,
+  1D multicast (cores x in0 block 4 to 64), DRAM-sharded (activation cores 2 to 32 x in0 block x 1 / 2 / 3 readers per
+  bank), each family's best again at HiFi2; prefill rows on the auto config and the explicit 2D config (in0 block 2 / 4 /
+  8, HiFi4 / HiFi2). 100 traced replays per decode candidate (the replay wall includes a fixed per-trace overhead, so
+  only differences inside a role count). `records/mm6.jsonl`.
+- Prefill A/B: `tools/mc_prefill_ab.py` (warm 2048-row pass, best of 3, host wall; output, update PCC and update rms
+  ratio against the first variant).
+- Tracy: `~/glm53-flash-bringup/scripts/s5_tracy.sh before|after`; device 0, one traced replay (decode) or the
+  signposted pass (prefill), sum of `DEVICE KERNEL DURATION` (`~/glm53-flash-bringup/scripts/s5_ops.py`).
+- Provenance (review #1 P2-4): every number comes from the worktree of 2026-10-17, which carries the stage-3 rework's
+  uncommitted `tt/moe_opt.py` row split (`SORTED_ROWS_DEFAULT = 1024`: a 2048-row prefill runs two 1024-row sorted
+  dispatches) for both the before and the after prefill windows; it commits with the stage-3 rework. The decision
+  records and logs are in `records/` (`ab*.jsonl`, `pf*.jsonl`, `mm6.jsonl`, `stress6.jsonl`, the round logs, the
+  suites).
 
 ## Operation-topology audit (decode, per layer, per device)
 
-Stage-4 measurements (`doc/multichip_decoder/tracy`, dsa_moe 1 user = 1680 µs device, kda_moe 32 users = 4620 µs).
+Stage-4 path (`doc/multichip_decoder/tracy`) unless noted. Element-wise rows from the final Tracy (review #1 P1-3).
 
-| Op sequence | Material cost | Candidate | Constraint | Action |
+| Op sequence | Material cost | Candidate | Constraint | Action / result |
 |---|---|---|---|---|
-| mHC mix: `mhc_mix` split-K partials -> `ttnn.sum` dim 1 (transpose, reduce, transpose) -> all-gather fp32 [T, 64] -> sum -> 9 small ops (Gram diagonal, rsqrt, scale) | 42 µs + 13 µs CCL per sub-block | `fast_reduce_nc` for the two sums | fp32-exact sums (the mHC precision fix) | rejected: 4.3e-4 relative error (TF32 inputs of the FPU add) vs 7e-8 for `ttnn.sum` |
-| `mhc_split_sinkhorn` | 60 µs per call, 2 per layer, 1 core | multi-core over users | one tile holds all 32 users; 40 sequential normalizations of that tile | no gain possible by row split (see Sinkhorn) |
-| all-gather h [T, 1024] bf16 -> RMSNorm [T, 4096] | 17 µs + **65 µs** (ttnn splits an interleaved norm by tile rows: 1 core) | width-sharded L1 norm on 32 cores | fp32 accumulation kept | **taken** (`norm_sharded`) |
-| DSA: five projections of the same normed x (q_a 1536, kv_a 512 bfp8; indexer wk 128, pool gate 128, head weights 32 bf16) on 1 to 48 cores | **250 µs** | two packed matmuls on 1D configs (DRAM-sharded measured) | mixed dtypes: one bfp8 pack, one bf16 pack | **taken** (`dsa_pack`, `pack_a_1d`, `pack_b_1d`, `ds_shared`) |
-| DSA q_a / kv_a norms [T, 1536] / [T, 512] | 25 + 11 µs on 1 core | sharded norm (24 / 16 cores) | - | **taken** (`norm_sharded`) |
-| MoE router [T, 4096] x [4096, 192] bf16, fp32 out | 49 µs on 6 cores | DRAM-sharded or 1D config | fp32 routing precision (stage-1 route flips) | **taken**: 1D config, 6 cores, in0 blocks of 8 (`router_1d`) |
-| mixer / FFN output: row-parallel matmul -> reduce-scatter bf16 | 17 to 32 µs per RS | fused matmul + RS; bfp8 payload; ring | - | ring taken; fused / bfp8 rejected (CCL table) |
-| MoE 32 users: sorted dispatch -> `moe_gather_rows` [G x 32, 4096] -> sparse gate/up -> SwiGLU -> sparse down -> untilize -> gather-add | gather 620, untilize 261, SwiGLU element-wise 362, sparse matmuls 1866 µs | fewer padded rows per expert group | tile = 32 rows per expert group; ~1.8 real rows per group at 32 users | open item (below) |
-| inter-layer boundary | none: the residual stays stream-interleaved, hidden-sharded | - | - | contract below |
+| all-gather h -> RMSNorm [T, 4096] | 17 + **65** µs (1 core) | width-sharded L1 norm, 32 cores | fp32 accumulation | **taken**: 6 µs |
+| DSA: 5 projections of the same x on 1 to 48 cores | **250** µs | 2 packed matmuls | one bfp8 pack, one bf16 pack | **taken**: 1D configs, ~60 µs |
+| DSA q_a / kv_a norms | 25 + 11 µs (1 core) | sharded norm | - | **taken** |
+| MoE router [T, 4096] x [4096, 192] | 49 µs (6 cores) | DS / 1D | fp32 routing exactness | **taken**: 1D, 18 µs |
+| row-parallel matmul -> reduce-scatter | 17 to 32 µs per RS | ring, L1 out, fused / bfp8 | - | ring + L1 taken; fused / bfp8 rejected |
+| mHC mix: `mhc_mix` partials -> sum -> all-gather -> sum -> 9 small ops | 42 µs + 13 µs CCL per sub-block | `fast_reduce_nc`; fewer chunks | fp32-exact sums | fast_reduce_nc rejected (4.3e-4 error); 16 chunks taken (-6 to -10 µs per layer) |
+| `mhc_split_sinkhorn` | 2 x 89 µs, 1 core | split users over cores; HiFi3 permutation sums | one tile holds all users; fp32-exact | HiFi3 **taken** (bit-identical, 89 -> 86 µs) |
+| KDA decode conv: slice, multiply, 3 x (typecast + addcmul), SiLU, select, 3 shift selects on [B, 6144] | **~105** µs (12 ops) | one fused op | bit-exact history, fp32 conv, NaN-safe select | **taken**: `kda_decode_conv` 38 µs |
+| KDA gates: decay projection + sigmoid, exp, beta sigmoid, 2 selects, o-norm, gate multiply, typecasts | ~70 µs (B = 1) | `sigmoid_gated_rms_norm` (upstream fused o-norm + gate) | it takes head-first [B*H, T, V] / [B, T, W]; decode has [B*H, V] rows | rejected: the relayout costs what the fusion saves |
+| MoE router glue: sigmoid, add, **TopK (1 core, 34 µs)**, one-hot weights, normalize (FillPad 10 µs on [T, 8]) | 85 µs | padded top-k width (256 / 1024: multi-core top-k); fused gate op | fp32 selection (stage-1 route flips) | padded top-k slower (+39 µs, `ab6`); fused gate op computes bf16 scores: rejected |
+| FillPad (11 per layer, 61 µs) | from `ttnn.sum` / reduce on widths 8 / 64 / 192 that are not tile multiples | wider tensors / different reduce | mix sums must stay fp32-exact | the mix-sum FillPads shrink with 16 chunks; the router ones stay (exact reduce) |
+| MoE 32 users: sorted dispatch -> gather [G x 32, 4096] -> grouped sparse gate/up -> SwiGLU -> grouped down -> untilize -> gather-add | gather 620, untilize 260, SwiGLU 362, sparse 1866 µs | pairs path; masked (union) path; geometry | 32-row tiles per expert group | pairs +2.4 ms, union no gain; in0 blocks of 8 taken (-36 to -60 µs) |
+| inter-layer boundary | none | - | - | contract below |
 
 ## Candidates and decisions
 
-Replay wall of one traced decode step in µs (`tools/mc_decode_ab.py`); each row is measured against `base` of the
-same build. Records: `~/glm53-flash-bringup/artifacts/s5/ab{1,2,3,5}.jsonl`, `pf{2,5}.jsonl`, logs `logs/s5_ab1.log`,
-`logs/s5_ab2.log`, `logs/s5_round3.log`, `logs/s5_round5.log`, per-run `logs/s5_ab_<kind>_<batch>_<time>.log`.
+Replay wall in µs (`tools/mc_decode_ab.py`) against `fin` (the previous default) or `base` of the same build.
+Records: `records/ab{1,2,3,5,6}.jsonl`, `records/pf{2,5,6}.jsonl`.
 
-| Option (`MCOpts`) | Measurement | Precision (unit check, `--units`) | Decision |
+| Option (`MCOpts`) | Measurement | Precision | Decision |
 |---|---|---|---|
-| `norm_sharded` (decode RMSNorms width-sharded on 32 / 24 / 16 cores) | dsa_moe 1 user 1806 -> 1684; kda_moe 32 users 4587 -> 4417 | PCC 0.999999 vs the 1-core norm, max 1 bf16 ulp | taken |
-| `dsa_pack` (5 projections -> 2 packed matmuls) | dsa_moe 1 user 1806 -> 1686; with `norm_sharded` 1548 | q_a / kv_a / wk / gate / weights within the bf16 rounding of the separate matmuls (fp64 reference) | taken |
-| pack A (q_a, kv_a) DRAM-sharded vs 1D (`pack_a_1d`) | dsa_moe 1 user: DS 1487, 1D 1436; 32 users: DS 4800, 1D 4758 (Tracy: the DS kernel ran 62.6 µs on 80 cores, 142 GB/s) | DS with packer L1 accumulation: q_a 3.0e-3 vs 2.9e-3 separate | 1D taken (faster; interleaved weight, exact accumulation) |
-| pack B (wk, gate, weights) DRAM-sharded vs 1D (`pack_b_1d`) | dsa_moe 1 user: DS 1548, 1D 1519 | gate (fp32 out): DS 7.0e-4, 1D 3.1e-4 = separate | 1D taken (faster, exact, no bank padding) |
-| router DRAM-sharded (`router_ds`) vs 1D (`router_1d`) | kda_moe 1 user: DS 1222, 1D 1224 (base 1398 with norm/L1/ring 1255) | fp32 logits: interleaved 3.0e-4, DS 3.9e-3 (5.2e-4 to 7.1e-4 with L1 accumulation), 1D 3.0e-4 | 1D taken (same speed, routing-exact, no padding) |
-| `topology` ring vs linear | decode dsa_moe 1 user 1806 -> 1783; prefill kda_moe 26.9 / 25.9 -> 25.5 ms, dsa_moe 33.8 -> 33.3, kda_dense 12.8 -> 12.2 ms | all-gather bit-identical; reduce-scatter sums in another order (prefill dsa_moe PCC vs linear 0.9995, suite passes) | taken as `auto` (`ttnn.get_usable_topology`: Ring on this box; Linear on a line-cabled box) |
-| `num_links` 1 vs 2 | dsa_moe 1 user 1821 (1 link) vs 1806; prefill kda_moe 27.1 vs 26.9 ms | identical | 2 (all available) |
-| `ccl_l1` (decode collective outputs in L1) | dsa_moe 1 user 1806 -> 1797; kda_moe 32 users 4587 -> 4501 | identical | taken |
-| `ag_persistent` (preallocated all-gather outputs) | dsa_moe 1 user 1525 -> 1516; kda_moe 1 user 1255 -> 1249 | identical values | not taken (see Rejected) |
-| `mix_nc` (fast_reduce_nc for the mix sums) | dsa_moe 1 user 1806 -> 1778 | 4.3e-4 relative vs 7e-8 | rejected (mHC fp32 exactness) |
-| `ds_shared` (packed weights serve prefill, separate weights freed) | prefill dsa_moe 33.8 -> 32.8 ms | prefill output bit-identical (max abs 0) to the separate weights | taken |
-| `dsa_1d` (q_b, wq_b decode on 1D configs) | dsa_moe 1 user 1487 -> 1481 (with 1D pack A: 1436 -> 1432); 32 users 4758 -> 4753 | - | taken (same weights, no memory) |
-| `prefill_2d` (DSA prefill matmuls on an explicit 2D config) | prefill dsa_moe 2048 rows: 33.35 / 33.32 ms -> 31.39 ms (`logs/s5_round5.log`, `pf5.jsonl`) | - | taken (output PCC 1.0 vs the auto config) |
-| 1-slot KDA: per-slot inputs allocated with the padded slot count | kda_moe 1 user: stage-4 options 1398 -> 1371, DEFAULT_MC 1224 -> 1213; kda_dense 1044 -> 1035 (the in-tile pads of the [B, 1] inputs ran on 1 core at 10 to 11 µs each) | identical (same rows) | taken |
+| `norm_sharded` | dsa_moe 1 user 1806 -> 1684 | PCC 0.999999, max 1 bf16 ulp | taken |
+| `dsa_pack` | dsa_moe 1 user 1806 -> 1686 (+ norm 1548) | packs at the separate matmuls' error (fp64 reference) | taken |
+| pack A DS vs 1D (`pack_a_1d`) | DS 1487, 1D 1436 (1 user) | 1D = separate (2.90e-3); DS 3.03e-3 | 1D taken |
+| pack B DS vs 1D (`pack_b_1d`) | DS 1548, 1D 1519 | gate (fp32 out): DS 7.0e-4, 1D 3.1e-4 = separate | 1D taken |
+| router DS vs 1D | DS 1222, 1D 1224 (kda_moe 1 user) | DS 3.9e-3 (5.2e-4 with L1 acc.), 1D 3.0e-4 = interleaved | 1D taken |
+| `topology` ring | dsa_moe 1 user -23 µs; prefill -0.5 to -1 ms per layer | all-gather bit-identical; reduce-scatter order changes (prefill dsa_moe PCC 0.9995 vs linear on a random input; suite passes) | taken (`auto`) |
+| `num_links` | 1 link 1821 vs 2 links 1806 | identical | 2 |
+| `ccl_l1` | -9 µs (1 user), -86 µs (32 users) | identical | taken |
+| `ag_persistent` (review #1 P2-1) | kda_moe 1 user 1212 -> 1203, dsa_moe 1432 -> 1423, kda_moe 32 4433 -> 4362, dsa_moe 32 4783 -> 4759 | 2 x 120 replays from a fresh state bit-identical, every kind and batch (`records/ab6_det.jsonl`) | taken in this stage, then **reverted to off** (2026-10-18): on the 45-layer model the shared per-call-site buffers broke decode (1 slot: teacher forcing top-5 32 %, prefill-check unaffected; 8 slots: identical greedy runs differ). With `GLM53_MC=ag_persistent=0` the model is back to top-5 100 % (stage 7, `doc/optimized_full_model/`). A one-layer replay test cannot expose cross-layer reuse of one buffer. The decode gain was 9-71 µs per layer. |
+| `mix_nc` | -28 µs | 4.3e-4 vs 7e-8 | rejected |
+| `ds_shared` | prefill dsa_moe 33.8 -> 32.8 ms | prefill bit-identical | taken |
+| `dsa_1d` | 1436 -> 1432 | = default (3.01e-3) | taken |
+| `prefill_2d` (q_b, wq_b, o_proj) | dsa_moe prefill 33.35 -> 31.39 ms | PCC 1.0 | taken |
+| 1-slot KDA padded inputs | kda_moe 1 user 1398 -> 1371 | identical | taken |
+| `sinkhorn_perm_fidelity = 3` (review #1 P1-1) | 89.4 -> 85.8 µs per call (Tracy); replay -7 to -18 µs per layer | **bit-identical** to HiFi4 (`tests/test_mhc_split_sinkhorn.py` 7/7, upstream 4/4, `tools/sinkhorn_fidelity_probe.py`); HiFi2 0.8 % error: rejected | taken |
+| `kda_conv_op` (review #1 P1-3) | kda_moe 1 user 1214 -> 1129, kda_dense 1034 -> 953 (Tracy: 12 ops ~105 µs -> 38 µs) | qkv 1.2e-7 / 1.8e-7 relative (fp64); history bit-exact; an idle slot's NaN history comes back Inf (bf16 packer NaN encoding), still non-finite and kept out of qkv (`tests/test_kda_decode_conv.py`) | taken |
+| `kda_conv_mixed` (bf16 history into addcmul) | - | `TT_FATAL`: addcmul needs equal dtypes | blocked |
+| `mix_chunks_decode` 16 / 32 | kda_moe 1 user 1214 -> 1204 / 1204; dsa_moe 1432 -> 1431 | ttnn.sum (exact) over fewer partials | 16 taken |
+| `router_topk_pad` 256 / 1024 | +38 / +38 µs (kda_moe), +39 (dsa_moe) | identical selection | rejected |
+| role programs (review #1 P1-2): KDA o, DSA o / q_b / wq_b, pack A geometry, shared expert, dense MLP | kda_moe 1 user kout -5, shared -6; dsa_moe 1 user DSA roles -6, shared -4; kda_dense dense MLP -34 | outputs bf16 at the same rounding | taken |
+| KDA in-projection 1D (`kda_in=1d:c29:ib4`) | op sweep 162 -> 110 (replay-inflated), in layer 1214 -> 1216 | - | rejected (no gain in the layer: ttnn's 87-core program already reads at 350 GB/s) |
+| `moe_grouped_in0 = 8` (review #1 P1-2) | 32 users: kda_moe 4422 / 4364 -> 4361, dsa_moe 4751 -> 4715; prefill kda_moe 25.48 -> 25.09 ms; 1 user unchanged | PCC 1.0 | taken |
+| `prefill_2d_ffn` + `packs_prefill_2d` (review #1 P1-1) | prefill kda_dense 12.22 -> 10.49 ms, kda_moe 25.48 -> 25.26, dsa_moe 31.46 -> 31.11 | update PCC 0.999999+, rms 1.0 | taken |
+| HiFi2 (review #1 P1-1) | see "Fidelity" | systematic -0.27 % (dense MLP) / -0.04 % (shared) scale, -4 % (DSA module) | rejected |
+
+## Matmul geometry per role (review #1 P1-2)
+
+`tools/mc_matmul_sweep.py`, decode M = 32, µs per call (replay wall; compare within a row). In-model program =
+the stage-4 / stage-3 choice. Best DS = best DRAM-sharded geometry over activation cores x in0 block x readers.
+
+| Role [K x N], dtype | ttnn default | best 1D | best DS (geometry) | HiFi2 (best 1D) | Final |
+|---|---|---|---|---|---|
+| KDA in [4096 x 8336] bfp8 | 162.1 | 109.9 (29 cores, in0 4) | 140.1 (32 act. cores, in0 2, 3 readers) | 110.3 | default (no in-layer gain) |
+| KDA out [2048 x 4096] bfp8 | 48.2 | 33.7 (16, 4) | 45.4 (8, 4, 2 r.) | 33.3 | 1D 16 / 4 |
+| DSA o [4096 x 4096] bfp8 | 84.0 | 57.5 (16, 4) | 76.1 (16, 4, 2 r.) | 56.8 | 1D 16 / 4 |
+| DSA q_b [1536 x 4096] bfp8 | 39.4 | 27.9 (16, 4) | 38.2 (8, 3, 2 r.) | 27.5 | 1D 16 / 4 |
+| DSA wq_b [1536 x 4096] bf16 | 43.6 | 41.2 (16, 4) | 55.2 (8, 6, 1 r.) | 40.6 | 1D 16 / 4 |
+| pack A [4096 x 2048] bfp8 | 82.4 | 34.8 (32, 8) | 45.5 (4, 8, 2 r.) | 34.2 | 1D 32 / 8 |
+| shared gate/up [4096 x 1024] bfp8 | 66.8 | 23.8 (32, 16) | 29.5 (4, 8, 2 r.) | 23.3 | 1D 32 / 16 |
+| shared down [512 x 4096] bfp8 | 21.3 | 16.1 (16, 4) | 22.4 (4, 4, 2 r.) | 15.6 | 1D 16 / 4 |
+| dense gate/up [4096 x 6144] bfp8 | 104.4 | 84.0 (16, 4) | 105.8 (32, 2, 3 r.) | 83.0 | 1D 16 / 4 |
+| dense down [3072 x 4096] bfp8 | 66.1 | 45.6 (16, 4) | 61.1 (8, 6, 2 r.) | 45.2 | 1D 16 / 4 |
+
+DRAM-sharded never beat the best 1D program at these shapes, with any activation geometry or reader count; in0 blocks
+above 8 helped only the shared gate/up (16). Every DS candidate also carried 2.5x to 4x the output error of the 1D one
+(K-block partials re-read through the FPU source registers). Refused geometries (L1 / CB, e.g. 2 activation cores with
+in0 blocks of 32) are in `records/mm6.jsonl`.
+
+Prefill (2048 rows), µs per call: ttnn auto -> explicit 2D (best in0 block) at HiFi4 / HiFi2:
+
+| Role | Auto | 2D HiFi4 | 2D HiFi2 | Final |
+|---|---|---|---|---|
+| KDA out (fp32 in) | 1098 | 598 (in0 8) | 431 | 2D HiFi4 (`prefill_2d_ffn`) |
+| DSA o | 1982 | 990 (8) | 661 | 2D HiFi4 (`prefill_2d`) |
+| DSA q_b | 794 | 399 (8) | 275 | 2D HiFi4 (`prefill_2d`) |
+| pack A | 1057 | 515 (8) | 343 | 2D HiFi4 (`packs_prefill_2d`) |
+| shared gate/up | 536 | 269 (8) | 188 | 2D HiFi4 (`prefill_2d_ffn`) |
+| shared down | 306 | 161 (8) | 130 | 2D HiFi4 |
+| dense gate/up | 3075 | 1848 (4) | 1320 | 2D HiFi4 |
+| dense down | 1499 | 764 (8) | 508 | 2D HiFi4 |
+| KDA in | 3904 | (upstream tuned config in the KDA prefill module) | - | unchanged |
+
+## Sparse-matmul geometry at TP4 (review #1 P1-2)
+
+The grouped sparse matmuls (pairs path at 1 user, sorted path at 32 users and in prefill) came from single-die tuning
+(`in0_block_w = 4`, subblock 1 x 8 capped at 4 by fp32 accumulation). TP4 sweep (`moe.grouped_*`), replay µs / prefill
+ms:
+
+| Geometry | kda_moe 1 user | kda_moe 32 users | dsa_moe 32 users | prefill kda_moe 2048 |
+|---|---|---|---|---|
+| in0 4 (stage 3) | 1214 / 1213 | 4422 / 4364 | 4751 / 4752 | 25.48 / 25.42 |
+| in0 2 | 1213 | 4484 | - | 26.03 |
+| in0 8 | 1213 | 4361 | 4715 | 25.09 |
+| in0 16 | - | 4380 | - | 25.23 |
+| subblock w 4 | - | - | - | 25.31 |
+
+in0 8 is selected (`moe_grouped_in0 = 8`).
+
+## Fidelity (review #1 P1-1)
+
+Decode matmuls are DRAM-bound: HiFi2 saved 0.4 to 1.1 µs per call (table above) and adds the truncation bias the
+stage-3 review measured (activation low bit dropped). Prefill matmuls are compute-bound and HiFi2 is 25 to 35 % faster
+per call, but on real weights (`tools/mc_prefill_ab.py`, update rms vs HiFi4): dense MLP HiFi2 0.99735 (-0.27 %, a
+systematic scale loss) for -0.7 ms; shared expert HiFi2 0.99964 for -0.3 ms; the DSA module config at HiFi2 0.959 /
+PCC 0.9965. The explicit 2D config at HiFi4 gives the larger part of the gain without the bias (dense layer 12.2 ->
+10.5 ms). HiFi2 is rejected for every group; the datatype sweep (stage 8) can revisit it against model accuracy.
 
 ## Collectives (OPT-009 fields)
 
-Six collectives per layer, all `ttnn.experimental.*_async` through `models/tt_transformers/tt/ccl.py` (`MeshCCL` in
-`tt/multichip_decoder.py`), `chunks_per_sync` 10, `num_workers_per_link` 2, `num_buffers_per_channel` 2, 2 links,
-cluster axis none (1D mesh).
+Six per layer, `ttnn.experimental.*_async` (`MeshCCL`), `chunks_per_sync` 10, `num_workers_per_link` 2,
+`num_buffers_per_channel` 2, 2 links, ring.
 
-Decode (Tracy, device 0, µs per call, before -> after; 2 calls per kind per layer):
+| Collective | Payload per device | Dtype | Output | Persistent output | kda_moe 1 user µs (stage 4 -> final) |
+|---|---|---|---|---|---|
+| all-gather of the mix partials, dim 1 | [T, 64] -> [4, T, 64] | fp32 | DRAM (the persistent buffer) | yes (per site, shared over layers) | 12.0 -> 7.1 |
+| all-gather of h, dim 3 | [T, 1024] -> [T, 4096] | bf16 | DRAM (the persistent buffer) | yes | 17.8 -> 10.8 |
+| reduce-scatter, dim 3 | [T, 4096] -> [T, 1024] | bf16 (intermediate DRAM) | L1 | no (122B: no gain, `~/qwen35-122b-bringup/logs/05-r2-ccl-probe.log`) | 16.2 -> 15.0 |
 
-| Collective | Payload per device | Dtype | Output memory (after) | Persistent buffers | kda_moe 1 user | dsa_moe 1 user | kda_moe 32 users | Decision |
-|---|---|---|---|---|---|---|---|---|
-| all-gather of the mix partials, dim 1 | [T, 64] -> [4, T, 64] | fp32 | L1 | none (`ag_persistent` measured, not adopted) | 12.0 -> 9.9 | 12.7 -> 9.4 | 12.8 -> 10.2 | ring, L1 |
-| all-gather of h, dim 3 | [T, 1024] -> [T, 4096] | bf16 | L1 | none (same) | 17.8 -> 12.6 | 17.0 -> 11.6 | 18.6 -> 11.7 | ring, L1 |
-| reduce-scatter of the mixer / FFN partials, dim 3 | [T, 4096] -> [T, 1024] | bf16 (intermediate DRAM) | L1 | none (122B: no gain) | 16.2 -> 14.2 | 19.3 -> 15.4 | 18.6 -> 11.9 | ring, L1 |
+Final values = the mean of the 2 calls per layer in `tracy/after/test_perf_traced_decode_kda_moe-1_` (19:17). With the
+persistent buffers in L1 (16:03 run) the values were 7.1 / 8.8 / 13.9 µs; L1 placement is not usable (it clashes with
+the static CBs of later prefill programs), so the DRAM buffers cost about 2 µs per h all-gather.
 
-Per layer: 6 collectives, 92 to 100 µs before, 68 to 73 µs after. Prefill: 1.6 to 2.2 ms -> 1.0 to 1.5 ms per layer
-(ring).
+Ring on a FABRIC_1D fabric: `ttnn.get_usable_topology` returns Ring only when the fabric graph has the wraparound link
+(both p300 board-to-board links up; Linear otherwise). FABRIC_1D_RING adds dateline deadlock avoidance for traffic
+that crosses the wrap. These collectives are latency-bound single-round transfers (one chunk per direction per link);
+the 122B port has served Ring on FABRIC_1D on this board, and every replay here (thousands, incl. 2 x 120-replay
+determinism runs and 200-replay stress runs) completed bit-identical. `GLM53_FABRIC=FABRIC_1D_RING` (tests/harness.py) selects the ring fabric for an A/B. Result (`records/ring_fabric7.jsonl`, shipped `DEFAULT_MC`, 1 user, replay µs, FABRIC_1D_RING vs FABRIC_1D): kda_moe 1104.8 vs 1103.1, dsa_moe 1407.6 vs 1407.0. The difference is in the noise (< 0.2 %), so FABRIC_1D stays the default fabric.
+
+Rejected collective families (measured on this board by the 122B port, same ops and sizes): fused all-gather + matmul
+(`~/qwen35-122b-bringup/logs/05-agmm-probe*.log`: 0.14 to 0.60 ms vs 0.07 ms separate; here an RMSNorm also sits between
+the all-gather and every consumer matmul), fused matmul + reduce-scatter (`05-mmrs-probe*.log`: 2D configs only,
+<= 8 compute cores for one tile of rows), bfp8 payloads (`05-r2-ccl-probe.log`: -1.4 / -2.6 µs, plus a typecast),
+all-reduce instead of reduce-scatter (4x the bytes and the mHC work on every die).
 
 ## Inter-layer residual contract (for the full model)
 
 - Input and output of every layer: the 4-stream mHC state X [1, 1, T, 4 x 4096] fp32, stream-interleaved and
-  hidden-sharded. Device d holds columns [1024 d, 1024 (d + 1)) of every stream: [1, 1, T, 4096] per device, DRAM
-  interleaved, TILE.
-- No collective sits between layers. Inside a layer, each sub-block gathers the 64 fp32 mix partials and the 1024-wide
-  h of every device, and reduce-scatters the 4096-wide output back to the 1024-wide slice before `mhc_post`.
-- The embedding writes X in this layout (`tt/model.py`), and the head gathers only at the end (hc_head, final norm).
-- Decode rows: one tile of users (B <= 32). With B = 1 the KDA layers pad their batch to 2 internally.
+  hidden-sharded; device d holds columns [1024 d, 1024 (d + 1)) of every stream, DRAM interleaved, TILE.
+- No collective sits between layers.
+- Decode rows: one tile of users (B <= 32); with B = 1 the KDA layers pad to 2 slots internally. Contract of
+  `_decode_rows`: every prefill chunk is a multiple of 128 rows, so 32 padded rows only ever mean decode.
 
 ## 1-slot KDA decode
 
-`kda.recurrent_decode` needs batch x local heads % 32 == 0. TP4 leaves 16 KDA heads per die, so a decoder built for
-one slot (B = 1, a single-user serving profile) failed in every KDA layer (`TT_FATAL ... B * H must be a multiple of
-32`, `logs/s5_ab1.log`). `MultichipKDA` allocates the state for 2 slots, pads x and the per-slot inputs with one
-inactive row (state unchanged, the row is dropped), and leaves B >= 2 untouched.
-`tests/test_multichip_decoder.py::test_single_slot_kda_decode` checks slot 0 of a 1-slot decoder against slot 0 of a
-2-slot decoder (3 eager steps and one traced replay).
+`kda.recurrent_decode` needs batch x local heads % 32 == 0; TP4 leaves 16 heads, so a 1-slot decoder failed (stage 4).
+`MultichipKDA` allocates 2 state slots and per-slot inputs for 2 slots (the second inactive) and pads x in place.
+`test_single_slot_kda_decode`: 1-slot vs 2-slot bit-identical.
 
-## Sinkhorn
+## Sinkhorn (review #1 P1-1)
 
-`mhc_split_sinkhorn` already splits token tiles over cores (prefill: 64 cores at 2048 rows). Decode has one tile (all
-32 users), and the tile is the unit of FPU / SFPU work: a core with 8 valid rows takes as long as a core with 32. Its
-60 µs (stage 4; 90 µs with the fp32-exact kernel committed on 2026-10-17) are 40 sequential row / column normalizations of that tile (8 permutation matmuls, a reciprocal and a multiply
-each, hi / lo operand splits for fp32 exactness). Splitting users over cores gives no gain. A kernel-level speed-up
-(e.g. HiFi3 for the permutation matmuls, exact because the permutation operand is 0 / 1) needs a program-factory
-change and a rebuild; it is an open item.
+`mhc_split_sinkhorn` splits token tiles over cores (prefill: 64 cores at 2048 rows); decode is one tile on one core, 40
+sequential normalizations of 8 permutation matmuls + an fp32 reciprocal + 2 multiplies + 3 packs each. Splitting
+users over cores cannot help (the tile is the SFPU / FPU work unit). The permutation operand is 0 / 1, so the 4th
+fidelity phase (low srcA bits x low srcB bits) only adds zeros: HiFi3 is bit-identical (verified for T = 32 / 96 / 2048,
+sharded and interleaved) and HiFi2 is not (0.8 % error). Gain: 89.4 -> 85.8 µs per call. The rest of the cost is SFPU
+and pack work on full 32 x 32 tiles; processing only the 16 used columns (vector mode C) would leave stale DST values in
+columns 16 to 31 that the next permutation matmul multiplies by 0, and 0 x Inf = NaN, so it needs the padding faces
+zeroed first: not taken.
 
-## Memory and context contract
+## 32-user MoE (review #1 P2-6)
 
-`DEFAULT_MC` adds no persistent device memory: both DSA packs are interleaved concatenations of the separate weights
-(no padding), `ds_shared` frees the separate weights after packing (the build peaks at one extra packed copy of one
-layer, 11 MB, for a moment), and the router keeps its weight. Decode collective outputs in L1 and
-the sharded norms are activations of a step (L1, < 300 KB). The context contract (`doc/context_contract.json`,
-`optimized_multichip_decoder`) is unchanged. Rejected variants would have cost memory: a DRAM-sharded indexer pack
-+1.8 MB per DSA layer, a DRAM-sharded router +0.5 MB per MoE layer (bank padding), separate decode copies of the
-packed weights +12.9 MB per DSA layer.
+Lower-padding forms measured at 32 users (`records/ab6.jsonl`): the pairs path (one 32-row tile per (token, expert)
+pair, 256 groups) 6788 / 6883 µs vs 4364 / 4751 (it re-reads one expert block per pair); the masked union path 4383
+(no gain); grouped in0 blocks of 8: taken. The remaining glue (gather 620, untilize 260, SwiGLU 362 µs) is set by the
+32-row tile of an expert group with ~1.8 real rows: a smaller group needs a sub-tile (16- or 8-row) sparse-matmul and
+gather path, which the grouped factory does not have. The down projection cannot write row-major output at TP4 (its
+resident block, 1.7 MB, exceeds the factory's 1.3 MB L1 budget).
+
+## KDA prefill chunk terms (review #1 P2-7)
+
+Every TP4 KDA prefill of 2048 rows logs "KDA chunk terms need 595 KiB per core ... keeping them in DRAM". 1024-row
+chunks fit L1 (298 KiB): kda_dense 2 x 6.85 = 13.7 ms vs 12.2 ms for one 2048-row chunk, kda_moe 2 x 13.27 = 26.5 vs
+25.5 ms (`records/pf6_1024.jsonl`). The DRAM fallback at 2048 rows is faster overall: kept.
+
+## Memory and context contract (review #1 P2-3)
+
+`DEFAULT_MC` adds per die: the persistent all-gather outputs (< 0.6 MB of DRAM, once per TT_CCL), the 1-slot KDA padding
+slot when `max_batch = 1` (+1 MiB of recurrent state per KDA layer: 34 MiB, ~2.9K tokens of DSA cache at 11,968 B per
+token), nothing else (the packs replace the separate weights). The DSA latent cache cannot drop to bfp8 here:
+`sparse_sdpa` takes a ROW_MAJOR bf16 or FP8_E4M3 KV (`sparse_sdpa_device_operation.cpp:71,117`), and bfp8 is a tile
+format. FP8_E4M3 (3 mantissa bits, 16x the bf16 element error) needs `scatter_rows` sources cast to FP8 on both write
+paths and a model-accuracy check: a datatype-sweep (stage 8) item; the sequence-sharded latent that reaches the
+advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/context_contract.json` records this.
 
 ## Rejected and not adopted
 
 | Candidate | Evidence | Reason |
 |---|---|---|
-| Multi-core sinkhorn (split users over cores) | 60 µs per call at 1 and at 32 users (stage-4 Tracy), 90 µs after the fp32-exact kernel | one tile holds every user; see Sinkhorn |
-| `fast_reduce_nc` mix sums (`mix_nc`) | -28 µs per layer | 4.3e-4 relative error (TF32 inputs) vs 7e-8: breaks the fp32-exact mHC |
-| DRAM-sharded router / indexer pack | same speed as 1D or slower; 2x to 10x the error on fp32 outputs | 1D configs are exact, as fast, and need no bank padding |
-| Persistent all-gather outputs (`ag_persistent`) | -6 to -9 µs per layer (0.5 %) | the 122B port on this board saw traced replays lose bit-reproducibility with persistent all-gather outputs; the gain is at the noise level here; option kept |
-| Fused all-gather + matmul (`all_gather_minimal_matmul_async`) | not built here: an RMSNorm over the gathered row sits between the all-gather and every consumer matmul | 122B on this board (decode M = 32): 0.140 to 0.598 ms vs 0.067 to 0.070 ms for all-gather + 1D matmul (`qwen_qwen3_5_122b_a10b/doc/optimized_multichip_decoder/README.md`) |
-| Fused matmul + reduce-scatter (`matmul_reduce_scatter_async`) | output projections 28 µs (KDA), 52 µs (DSA) + RS 13 to 15 µs | 122B on this board: 2D configs only, at most 8 cores compute for one tile of rows: 0.063 to 0.087 ms vs 0.047 ms separate |
-| bfp8 collective payloads | RS / AG are 9 to 15 µs, latency bound | 122B on this board: -1.4 µs RS, -2.6 µs AG but an extra typecast; within noise |
-| `all_reduce_async` instead of reduce-scatter (replicated residual) | - | 4x the bytes and the mHC work on every die (stage 4); 122B: 38.4 vs 35.9 µs |
-| Fused MoE gate op (`generalized_moe_gate`, sigmoid + bias + top-k) | would replace ~15 router ops (~90 µs at 1 user) | bf16 scores in the op; the GLM router runs fp32 scores and fp32 top-k (stage-1 route-flip fix) |
-| tt-perf-report: "Output subblock 1x1 is small" (1D decode matmuls) | one output tile per core is the widest grid for N <= 64 tiles | a 1x2 subblock halves the cores of a bandwidth-bound matmul |
-| tt-perf-report: "HiFi2 may also work" (decode and prefill matmuls at HiFi4) | stage 3: HiFi2 left the shared expert 0.8 % low; HiFi4 norms / router / dense MLP / KDA projections are stage-1 accuracy fixes | precision policy belongs to the datatype sweep (stage 8) |
-| tt-perf-report: "place input 0 in L1" (decode activations in DRAM) | collective outputs moved to L1 (`ccl_l1`): -9 µs per layer; the other decode activations are 64 to 256 KB | further moves cost a reshard each; the activations are not bandwidth relevant |
-| tt-perf-report: "Try a DRAM-sharded program config" (indexer pack, router, shared expert) | measured for the indexer pack and the router (rows above) | slower or less exact; the shared expert (22 µs) would need a DRAM-sharded copy of 4.4 MB per MoE layer or a prefill path on the sharded weight |
+| Multi-core Sinkhorn | one tile holds every user | see Sinkhorn |
+| `fast_reduce_nc` mix sums | 4.3e-4 vs 7e-8 relative | fp32-exact mHC |
+| DRAM-sharded decode matmuls (all roles) | geometry sweep above | slower and less exact than 1D |
+| HiFi2 | Fidelity | systematic scale loss |
+| KDA in-projection 1D | in-layer 1214 -> 1216 | no gain |
+| padded router top-k | +38 µs | slower |
+| fused MoE gate op | - | bf16 scores |
+| `sigmoid_gated_rms_norm` for the decode o-norm + gate | head-first layout | relayout cost |
+| pairs / masked MoE at 32 users | +2.4 ms / +19 µs | slower |
+| 1024-row KDA prefill chunks | +1.0 to 1.5 ms per 2048 tokens | slower |
+| tt-perf-report "Output subblock 1x1" | one output tile per core is the widest 1D grid | - |
+| tt-perf-report "place input 0 in L1" | collective outputs moved (`ccl_l1`) | the rest are 64-256 KB activations |
 
 ## Open items
 
-- Sinkhorn kernel: 90 µs per call (fp32-exact kernel), 180 µs per layer = 15 % of a 1-user layer. The permutation
-  matmuls could run at HiFi3 (exact for a 0 / 1 operand); needs a program-factory change and a rebuild.
-- 32-user MoE (about 3.3 ms of a 4.5 ms kda_moe layer): `moe_gather_rows` 620 µs and `untilize` 261 µs move 195 expert
-  groups x 32 rows x 4096 per die (about 1.8 real rows per group), and the SwiGLU element-wise ops run on the same
-  6240 rows (362 µs). Smaller row groups (tiny tiles) or a fused gather + SwiGLU would cut this. The down projection
-  cannot write row-major output (its resident block, 1.7 MB, exceeds the grouped factory's L1 budget at TP4).
-- KDA input projection (100 µs per KDA layer, 36 MB bfp8 at 365 GB/s): a DRAM-sharded weight (8352 -> 8448 columns)
-  shared with the KDA prefill kernels.
-- Prefill matmuls still on `in0_block_w = 1` (tt-perf-report advice, `tracy/after/*/perf_report_advice.txt`): the
-  dense MLP (2048 x 4096 x 6144: 3.0 ms, 2048 x 3072 x 4096: 1.5 ms per dense layer), the shared expert (0.5 + 0.3 ms
-  per MoE layer), the KDA output projection (0.4 ms) and the DSA packed projections (1.0 + 0.2 ms). `prefill_2d`
-  (explicit 2D config) took the DSA q_b / wq_b / o_proj from 33.3 to 31.4 ms per dsa_moe layer with a bit-identical
-  output; the same config in `tt/mlp.py`, `tt/moe.py` and the KDA prefill is a stage-7 (prefill) item.
-- Single-user serving runs the decoder with `max_batch` slots (`tt/model.py` default 32): the 1-user numbers above
-  need `GLM53_MAX_BATCH=1` in the full model.
+- Sinkhorn (172 µs per layer) and the router / mHC glue (~200 µs) are the largest 1-user costs left; both are exact
+  fp32 paths that need new kernels (a decode Sinkhorn over the 16 used columns with zeroed padding faces; an fp32
+  router-gate op).
+- 32-user MoE glue: sub-tile expert groups (kernel work in the grouped sparse-matmul factory).
+- Full-model readiness on the final `DEFAULT_MC` (the round-3 default passed prefill-check at top-1 0.92 / top-5 1.00);
+  single-user serving needs `GLM53_MAX_BATCH = 1`.
+- Baseline compare vs the 'opt_s5' single-die baseline: one kda_moe decode token sits on a router near-tie that
+  the single-die 'opt_s5' run resolves differently (see Correctness). The compare needs a per-row near-tie
+  allowance (test owner: stage-4 rework); the stored default baseline `refs/baseline_opt.pt` must be regenerated for
+  'opt_s5' (`refs/baseline_opt_s5_stage5.pt` from round 8 can serve).
+- 32-user decode Tracy varies by up to 5 % between runs (the DRAM-bound sparse expert matmuls and row gather).
 
 ## Artifacts
 
-- Code: `tt/multichip_decoder.py` (`MCOpts`, `DEFAULT_MC`, `MeshCCL`, `DSMatmul`, `IL1DMatmul`,
-  `sharded_rms_norm`, `MultichipDSA`, `MultichipKDA`, router hook), `tt/moe.py` (collective links / output memory
-  hooks), `tests/test_multichip_decoder.py::test_single_slot_kda_decode`, `tools/mc_decode_ab.py`,
-  `tools/mc_prefill_ab.py`.
-- Tracy + tt-perf-report: `tracy/before/<case>/`, `tracy/after/<case>/` (`ops.csv.gz`, `perf_report.{txt,csv}`,
-  `perf_report_advice.txt` for the advice runs, `console.log`).
-- Watcher: `watcher/<case>/` (`console.log`, `generated/watcher/watcher.log`).
-- Logs (`~/glm53-flash-bringup/logs/`): `s5_ab1.log`, `s5_ab2.log`, `s5_round3.log`, `s5_round5.log`,
-  `s5_tracy.log`, `s5_suite.log` (round-3 default), `s5_suite2.log` (final), `s5_watcher.log` (first attempt: KDA
-  prefill programs over the kernel-config ring under the watcher), `s5_watcher2.log` (final); probe records
-  `artifacts/s5/*.jsonl`.
+- Code: `tt/multichip_decoder.py` (`MCOpts`, `DEFAULT_MC`, `MeshCCL`, `DSMatmul`, `IL1DMatmul`, `RoleMatmuls`,
+  `sharded_rms_norm`, `MultichipDSA`, `MultichipKDA`, `MultichipMLP`, shared-expert and router hooks),
+  `tt/fused_decoder.py` (`_in_proj`, `_conv_step` hooks), `tt/moe.py` (collective hooks, top-k padding hook),
+  `tests/harness.py` (`GLM53_FABRIC`), `tests/test_multichip_decoder.py::test_single_slot_kda_decode`,
+  `tests/test_kda_decode_conv.py`, `tools/mc_decode_ab.py`, `tools/mc_prefill_ab.py`, `tools/mc_matmul_sweep.py`,
+  `tools/sinkhorn_fidelity_probe.py`.
+- ttnn: `ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/kda_decode_conv/` (new op),
+  `deepseek_prefill/mhc_split_sinkhorn/` (`perm_fidelity`), `deepseek_prefill/CMakeLists.txt`,
+  `experimental/experimental_nanobind.cpp`.
+- Tracy + tt-perf-report (with advice): `tracy/before/<case>/`, `tracy/after/<case>/` (the raw op list as `ops.csv.xz`).
+- Watcher: `watcher/<case>/`.
+- Records: `records/` (A/B jsonl, sweep, stress, round logs, suites, watcher log).
 - Commands:
   ```
   GLM53_TP=4 pytest models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py
-  GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.mc_decode_ab --kind dsa_moe --batch 1 --units \
-      --variants "base:;fin:topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_a_1d=1,pack_b_1d=1,dsa_1d=1,router_1d=1" \
-      --out ab.jsonl
-  GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.mc_prefill_ab --kind dsa_moe --variants "base:;ring:topology=ring" --out pf.jsonl
-  ~/glm53-flash-bringup/scripts/s5_tracy.sh after        # GLM53_MC unset = DEFAULT_MC
+  pytest models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv.py
+  GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.mc_decode_ab --kind kda_moe --batch 1 --base default --determinism 200 --variants "fin:" --out stress.jsonl
+  python -m models.autoports.zai_org_glm_5_3_flash.tools.mc_matmul_sweep --out mm.jsonl
+  ~/glm53-flash-bringup/scripts/s5_tracy.sh after
   ```

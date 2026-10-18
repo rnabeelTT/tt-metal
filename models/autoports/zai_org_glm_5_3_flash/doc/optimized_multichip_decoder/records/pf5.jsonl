@@ -1,0 +1,3 @@
+{"kind": "dsa_moe", "rows": 2048, "variant": "fin", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "ms": 33.347129821777344, "ms_all": [33.574819564819336, 33.37383270263672, 33.347129821777344], "pcc_vs_first": 1.0}
+{"kind": "dsa_moe", "rows": 2048, "variant": "fin2d", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1,prefill_2d=1", "ms": 31.389951705932617, "ms_all": [31.769990921020508, 31.389951705932617, 31.431913375854492], "pcc_vs_first": 1.0}
+{"kind": "dsa_moe", "rows": 2048, "variant": "fin_b", "spec": "topology=auto,ccl_l1=1,norm_sharded=1,dsa_pack=1,pack_b_1d=1,router_1d=1", "ms": 33.31923484802246, "ms_all": [33.657073974609375, 33.31923484802246, 33.41817855834961], "pcc_vs_first": 1.0}

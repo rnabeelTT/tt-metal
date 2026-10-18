@@ -1,0 +1,111 @@
+=== start Sat Oct 17 09:05:59 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+2026-10-17 21:06:01.206 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline 2026-10-17 21:06:04.016 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-17 21:06:30.933 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+kda_dense prefill_a: PCC vs single die 0.999996 rms ratio 1.00011
+kda_dense prefill_b: PCC vs single die 0.999996 rms ratio 1.00005
+kda_dense decode: PCC vs single die 0.999994 rms ratio 1.00077
+dsa_moe prefill_a: PCC vs single die 0.999904 rms ratio 0.97828
+FAILED
+
+=================================== FAILURES ===================================
+_______________________ test_matches_single_die_baseline _______________________
+
+mesh = MeshDevice(1x4 grid, 4 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7efd8afd0a70>
+
+    def test_matches_single_die_baseline(mesh, rd):
+        """Same inputs and policy as tools/baseline_dump.py on one die: prefill rows and decode steps of every kind match
+        the single-die TTNN decoder (isolates sharding / collective errors from HF-vs-TT numerics)."""
+        import pytest
+        import torch
+
+        from models.autoports.zai_org_glm_5_3_flash.tools.baseline_dump import decoder_cls_from_env, run_case
+
+        if not os.path.exists(BASELINE):  # a missing baseline is a failed gate, not a skip (review #1 hard-check gap)
+            if os.environ.get("GLM53_BASELINE_OPTIONAL") == "1":
+                pytest.skip(f"no single-die baseline at {BASELINE} (tools/baseline_dump.py)")
+            pytest.fail(f"no single-die baseline at {BASELINE}: run tools/baseline_dump.py at GLM53_TP=1 first")
+        base = torch.load(BASELINE)
+        cls, name = decoder_cls_from_env(multichip=True)
+        assert base["policy"] == name, (base["policy"], name)
+        for kind, layer in _suite.KINDS.items():
+            got = run_case(mesh, rd, layer, cls)
+            for key in ("prefill_a", "prefill_b", "decode"):
+                ref = base["cases"][kind][key]
+                p = _suite.pcc(got[key], ref)
+                r = float(got[key].norm() / ref.norm())
+                print(f"{kind} {key}: PCC vs single die {p:.6f} rms ratio {r:.5f}")
+                assert p >= BASELINE_BAR, (kind, key, p)
+>               assert abs(r - 1) <= BASELINE_RMS_TOL, (kind, key, "rms ratio", r)
+E               AssertionError: ('dsa_moe', 'prefill_a', 'rms ratio', 0.9782799482345581)
+E               assert 0.021720051765441895 <= 0.005
+E                +  where 0.021720051765441895 = abs((0.9782799482345581 - 1))
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py:100: AssertionError
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+28.21s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+1.30s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline - AssertionError: ('dsa_moe', 'prefill_a', 'rms ratio', 0.9782799482345581)
+assert 0.021720051765441895 <= 0.005
+ +  where 0.021720051765441895 = abs((0.9782799482345581 - 1))
+============================== 1 failed in 29.61s ==============================
+nanobind: leaked 14 instances!
+ - leaked instance 0x7efd9a8e3108 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7efd8afe69e8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afb9158 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afb9188 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afe7198 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afd0648 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afe4a98 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd8afd31f8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efdede7d628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7efd8afd0228 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efd9a1a08a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7efd8afd2fb8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7efdede7d648 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7efd8afd07c8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+nanobind: leaked 24 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 270 functions!
+ - leaked function "__init__"
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "reshape"
+ - leaked function "__repr__"
+ - leaked function "to_torch_with_padded_shape"
+ - leaked function "num_program_cache_entries"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Sat Oct 17 09:06:34 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

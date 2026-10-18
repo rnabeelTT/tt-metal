@@ -1,0 +1,91 @@
+=== start Sat Oct 17 09:54:15 PM UTC 2026 : timeout -k 60 3600 python_env/bin/pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+2026-10-17 21:54:17.106 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline 2026-10-17 21:54:19.932 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-17 21:54:45.886 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-17 21:54:51.921 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-17 21:55:10.011 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+kda_dense prefill_a: PCC vs single die 0.999996 rms ratio 1.00011
+kda_dense prefill_b: PCC vs single die 0.999996 rms ratio 1.00005
+kda_dense decode: PCC vs single die 0.999994 rms ratio 1.00077
+dsa_moe prefill_a: PCC vs single die 0.999954 rms ratio 1.00058
+dsa_moe prefill_b: PCC vs single die 0.999937 rms ratio 1.00053
+dsa_moe decode: PCC vs single die 0.999911 rms ratio 1.00098
+kda_moe prefill_a: PCC vs single die 0.999963 rms ratio 1.00044
+kda_moe prefill_b: PCC vs single die 0.999976 rms ratio 1.00035
+kda_moe decode: PCC vs single die 0.998790 rms ratio 0.99821
+kda_moe decode: rows below 0.999: [(2, 0.99645, 0.000293731689453125)] (cap 1); other rows PCC 0.999998 rms ratio 1.00011
+single-die compare: router near-tie rows set aside: [('kda_moe', 'decode', 2, 0.9964521891424677, 0.000293731689453125)]
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+50.95s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+1.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_matches_single_die_baseline
+============================== 1 passed in 52.62s ==============================
+nanobind: leaked 20 instances!
+ - leaked instance 0x72d0b2f93798 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f75ea8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f90798 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f90e28 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d07c7a2da8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x72d0cfe85648 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x72d0b2fa4978 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f93858 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f900d8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b3187948 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d06d8f2808 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2fa4dc8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f92058 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f91968 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0cfe85628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x72d0b2f90eb8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f90cd8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b31f3d08 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d0b2f90888 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x72d07c07c8a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - ... skipped remainder
+nanobind: leaked 24 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 270 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "experimental_per_core_buffer_address"
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function "__repr__"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sat Oct 17 09:55:13 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

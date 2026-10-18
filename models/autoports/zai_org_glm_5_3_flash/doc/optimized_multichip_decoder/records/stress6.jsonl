@@ -1,0 +1,11 @@
+{"kind": "kda_dense", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1102.2726694742837, "step_us": 1144.9178059895833, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1406.6696166992188, "step_us": 1502.9350916544595, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "kda_moe", "batch": 32, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4430.7708740234375, "step_us": 4563.79254659017, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "dsa_moe", "batch": 32, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4722.015062967936, "step_us": 4890.4259999593105, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "kda_dense", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 895.2140808105469, "step_us": 925.9700775146484, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
