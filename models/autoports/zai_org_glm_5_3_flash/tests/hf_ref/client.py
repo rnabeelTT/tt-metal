@@ -41,6 +41,9 @@ REF_CODE = [SCRIPT, HERE.parents[1] / "tt" / "ckpt.py", HERE.parents[1] / "tt" /
 # Router near-tie counterfactuals (request key "flip", hf_flip_ref.py) have their own code digest, so adding them left
 # every base reference cached.
 FLIP_SCRIPT = HERE / "hf_flip_ref.py"
+# Quantization-aware references (request key "quant", hf_quant_ref.py: the HF layer with weights rounded as the port
+# stores them, bfp.py) have their own digest too.
+QUANT_SCRIPT = HERE / "hf_quant_ref.py"
 
 
 def _code_digest(paths=REF_CODE) -> str:
@@ -58,6 +61,7 @@ def _code_digest(paths=REF_CODE) -> str:
 
 _CODE_DIGEST = _code_digest()
 _FLIP_DIGEST = _code_digest([FLIP_SCRIPT] + REF_CODE)
+_QUANT_DIGEST = _code_digest([QUANT_SCRIPT, HERE / "bfp.py", FLIP_SCRIPT] + REF_CODE)
 
 
 def _digest(req: dict) -> str:
@@ -65,7 +69,7 @@ def _digest(req: dict) -> str:
     torch.save({k: req[k] for k in sorted(req)}, buf)
     h = hashlib.sha256(buf.getvalue())
     h.update(REF_VERSION.encode())
-    h.update((_FLIP_DIGEST if "flip" in req else _CODE_DIGEST).encode())
+    h.update((_QUANT_DIGEST if "quant" in req else _FLIP_DIGEST if "flip" in req else _CODE_DIGEST).encode())
     return h.hexdigest()[:24]
 
 
@@ -104,7 +108,9 @@ def hf_layer_reference(req: dict, timeout: int = 7200) -> dict:
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)  # the HF venv must not import tt-metal / ttnn packages
         cmd = [_hf_python(), "-I", str(SCRIPT), "--request", str(req_path), "--out", str(out)]
-        if "flip" in req:  # the base reference result is the input
+        if "quant" in req:
+            cmd[2] = str(QUANT_SCRIPT)
+        elif "flip" in req:  # the base reference result is the input
             cmd[2] = str(FLIP_SCRIPT)
             cmd += ["--base", str(_cache_dir() / f"{req['flip']}.pt")]
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
@@ -131,3 +137,30 @@ def flip_reference(req: dict, rows) -> dict | None:
     if isinstance(r, DryRunResult):
         return r
     return {int(i): r["y_swap"][j] for j, i in enumerate(r["rows"].tolist())}
+
+
+def quant_reference(req: dict, base: dict, quant: dict, rows=None, taps: bool = False) -> dict:
+    """Quantization-aware reference (hf_quant_ref.py) of the base request `req` whose computed result is `base`: the
+    same layer, segments and input stream, with the weights matching `quant` ({fnmatch pattern: "bfp4" | "bfp8"})
+    rounded as the port stores them. rows: also the router near-tie counterfactual of those rows (returns {row:
+    y_swap row} or None, as flip_reference)."""
+    x = base["x"] if "x" in base else req["x"]
+    q = {
+        "quant": dict(quant),
+        "layer": req["layer"],
+        "weights": req["weights"],
+        "segments": list(req["segments"]),
+        "x": x.to(torch.bfloat16),
+    }
+    if taps:
+        q["taps"] = True
+    if rows is not None:
+        rows = sorted(int(r) for r in rows)
+        if not rows:
+            return None
+        q["rows"] = rows
+        r = hf_layer_reference(q)
+        if isinstance(r, DryRunResult):
+            return r
+        return {int(i): r["y_swap"][j] for j, i in enumerate(r["rows"].tolist())}
+    return hf_layer_reference(q)

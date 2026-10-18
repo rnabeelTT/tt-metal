@@ -1,0 +1,61 @@
+{
+  "reference": "models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+  "format": "readiness_v1 (readiness_check.schema.save_reference)",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 (copied from zai-org/GLM-5.3-Flash at the revision above)",
+  "prompt_source": "aime24",
+  "aime24_prompts_file": "/home/raahem/tt-metal/models/demos/deepseek_v3/demo/aime_under_8k_prompts.json",
+  "aime24_prompt_index": 0,
+  "chat_template": true,
+  "add_generation_prompt": true,
+  "gen_len": 100,
+  "top_k": 100,
+  "num_entries": 1,
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --mode readiness --threads 12 --expert-cache-gb 48 --gen-len 100 --top-k 100 --output models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+  "generator": "tools/hf_full_ref.py: mirror of readiness_check.generate (aime24, --chat-template, greedy model.generate continuation, then batch-prefill teacher-forcing top-k); the stock script cannot load the model",
+  "note": "Routed experts are E192-masked (192 of 288 per MoE layer, mask autotrust/GLM5.3-Flash-E192-DGX-Spark, checkpoint renumbered 0..191, routers pruned to the kept rows) and FP8 e4m3 (block 128) weights are dequantized to bf16 (fp32 product, one rounding). Non-expert weights resident in bf16 (fp32: e_score_correction_bias, conv1d, dt_bias, A_log); experts dequantized lazily per forward step. HF Glm5NextTextModel, attn sdpa, experts eager, CPU.",
+  "stop_ids": [
+    154820
+  ],
+  "stop_ids_note": "as readiness_check.generate computes them (tokenizer eos + model.config.eos_token_id, which the composite Glm5NextConfig does not define); generation_config.json lists [154820, 154827, 154829]",
+  "prompt_tokens": 161,
+  "generated_tokens": 100,
+  "stopped_on_eos": false,
+  "completion_text": "Aya walks 9 kilometers. When walking at speed $s$ km/h, total time is 4 hours = 240 minutes, including $t$ minutes at coffee shop. So walking time is $240 - t$ minutes = $\\frac{240-t}{60}$ hours.\n\nWhen walking at $s+2$ km/h, total time is 2 hours 24 minutes = 144 minutes, including $t$ minutes. So walking time is $144 - t$ minutes =",
+  "full_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Every morning Aya goes for a $9$-kilometer-long walk and stops at a coffee shop afterwards. When she walks at a constant speed of $s$ kilometers per hour, the walk takes her 4 hours, including $t$ minutes spent in the coffee shop. When she walks $s+2$ kilometers per hour, the walk takes her 2 hours and 24 minutes, including $t$ minutes spent in the coffee shop. Suppose Aya walks at $s+\\frac{1}{2}$ kilometers per hour. Find the number of minutes the walk takes her, including the $t$ minutes spent in the coffee shop.\nPlease reason step by step, and put your final answer within\\boxed\nAnswer:<|assistant|><think>Aya walks 9 kilometers. When walking at speed $s$ km/h, total time is 4 hours = 240 minutes, including $t$ minutes at coffee shop. So walking time is $240 - t$ minutes = $\\frac{240-t}{60}$ hours.\n\nWhen walking at $s+2$ km/h, total time is 2 hours 24 minutes = 144 minutes, including $t$ minutes. So walking time is $144 - t$ minutes =",
+  "teacher_forcing_top1_equals_greedy": 0.96,
+  "teacher_forcing_top5_contains_greedy": 1.0,
+  "decode_vs_tf_top1_mismatch_positions": [
+    0,
+    23,
+    61,
+    89
+  ],
+  "timing": {
+    "build_s": 7.4,
+    "prefill_s": 424.5,
+    "decode_steps": 99,
+    "decode_s_per_token_mean": 12.42,
+    "decode_s_per_token_min": 6.63,
+    "decode_s_per_token_max": 37.35,
+    "generation_total_s": 1653.7,
+    "teacher_forcing_s": 437.8,
+    "threads": 12,
+    "expert_cache_gb": 48.0,
+    "expert_cache": {
+      "hits": 14734,
+      "misses": 32276,
+      "resident": 1024,
+      "resident_gb": 48.0,
+      "load_s": 1542.8
+    },
+    "peak_rss_gb": 151.4
+  },
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "created": "2026-10-16T18:13:31+0000"
+}

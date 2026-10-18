@@ -94,6 +94,11 @@ class SortedDispatch:
             raise RuntimeError(
                 f"SortedDispatch: constants for {T} rows were not prepared at setup ({sorted(self._const)})"
             )
+        if c is None and DISPATCH_MODE == "kernel":
+            # the dispatch kernel builds every map itself: none of the index-math constants below is read. They cost
+            # ~6.3 MB per MoE layer per 2048-row length (fp32 [32, Rp] / [Rp, 32] / [1, Rp]), ~265 MB per die over
+            # the 42 MoE layers of the full model (stage-6 memory budget)
+            c = self._const[T] = {}
         if c is None:
             k, E, dev, gs = self.k, self.E, self.device, self.group
             R = T * k

@@ -58,7 +58,7 @@ def main():
         inputs = dec.prefill_inputs(n, start=0, length=n, slot=0)
         ref = None
         for item in [v for v in args.variants.split(";") if v.strip()]:
-            name, spec = item.split(":", 1)
+            name, spec = item.split(":", 1) if ":" in item else (item, "")  # bash read strips a trailing ":"
             set_opts(dec, spec)
             rec = {"kind": args.kind, "rows": n, "variant": name, "spec": spec}
             try:
@@ -80,6 +80,9 @@ def main():
                     if args.save:
                         torch.save(y, args.save)
                 rec["pcc_vs_first"] = pcc(ref, y)
+                d, d0 = (y - x[0, 0]), (ref - x[0, 0])  # layer updates (output - input stream)
+                rec["update_pcc_vs_first"] = pcc(d0, d)
+                rec["update_rms_vs_first"] = float(d.norm() / d0.norm())
                 if ext is not None:
                     rec["pcc_vs_ref"] = pcc(ext, y)
                     rec["maxabs_vs_ref"] = float((ext - y).abs().max())

@@ -43,6 +43,7 @@ from models.tt_transformers.tt.ccl import TT_CCL, tt_all_gather, tt_all_reduce
 from .dsa import GlmDSA
 from .fused_decoder import FusedGlmKDA, FusedHyperConnection, mix_chunks
 from .mhc import DRAM, W
+from .mlp import DenseMLP
 from .optimized_decoder import OptimizedDecoder
 
 TOPOLOGY = ttnn.Topology.Linear  # stage-4 default; MCOpts.topology selects per decoder (stage 5)
@@ -52,9 +53,12 @@ L1 = ttnn.L1_MEMORY_CONFIG
 @dataclass
 class MCOpts:
     """Stage-5 multichip decode options (doc/optimized_multichip_decoder/README.md has the A/B measurements).
-    Every option only changes decode rows (one tile of users); prefill keeps the stage-4 path.
+    Most options change decode rows only (one tile of users). Prefill changes too with `topology` / `num_links` (every
+    collective), `ds_shared` (the packed weights serve prefill), `prefill_2d` / `packs_prefill_2d` / `prefill_2d_ffn`
+    (explicit 2D prefill configs) and the MoE geometry the A/B tools set.
 
-    GLM53_MC="key=value,..." overrides fields of DEFAULT_MC at construction (A/B runs; tools/mc_decode_ab.py)."""
+    GLM53_MC="key=value,..." overrides fields of DEFAULT_MC at construction (A/B runs; tools/mc_decode_ab.py); a
+    construction with it set logs a warning, since it changes the served decoder."""
 
     topology: str = "linear"  # CCL topology: linear | ring | auto (ring when the fabric has the wraparound link)
     num_links: int = 0  # CCL links per collective (0 = all available)
@@ -74,10 +78,47 @@ class MCOpts:
     pack_a_1d: bool = False  # q_a | kv_a pack interleaved on a 1D decode config instead of DRAM-sharded
     dsa_1d: bool = False  # DSA q_b and indexer wq_b decode matmuls (input q_a-normed, K = 1536) on 1D configs
     prefill_2d: bool = False  # DSA prefill matmuls (q_b, wq_b, o_proj) on the explicit 2D config (in0_block_w > 1)
+    packs_prefill_2d: bool = False  # ... and the two packed DSA projections (needs prefill_2d)
+    # dsa_shard: the DSA latent pool block-sharded over the dies instead of replicated (tt/dsa_shard.py; long-context
+    # capacity: 3,696 vs 11,968 B per token per die). Changes prefill and decode attention. Also GLM53_DSA_SHARD=1.
+    dsa_shard: bool = False
+    # per-role decode programs (stage-5 review #1 P1-2; tools/mc_matmul_sweep.py): "" = the built path, "1d[:ib<n>][:c<n>]"
+    # = 1D multicast (in0 block / cores), "ds[:a<n>][:ib<n>][:r<n>]" = DRAM-sharded (activation cores / in0 block / readers
+    # per bank; runtime A/B keeps a sharded copy, ds_shared moves the weight)
+    pack_a_spec: str = ""  # q_a | kv_a pack decode program when pack_a_1d ("" = 1D, in0 blocks of 8)
+    pack_b_spec: str = ""  # indexer pack decode program when pack_b_1d
+    kda_in: str = ""
+    kda_out: str = ""
+    dsa_o: str = ""
+    dsa_qb: str = ""
+    dsa_wqb: str = ""
+    shared_gu: str = ""
+    shared_dn: str = ""
+    mlp_gu: str = ""
+    mlp_dn: str = ""
+    # explicit 2D prefill configs for the dense MLP, the shared expert and the KDA output projection
+    prefill_2d_ffn: bool = False
+    # Sinkhorn permutation-sum fidelity (0 = the op default / environment; 3 = HiFi3, exact: the permutation is 0 / 1);
+    # applied as MHC_SINKHORN_PERM_FIDELITY at construction unless the environment sets it
+    sinkhorn_perm_fidelity: int = 0
+    mix_chunks_decode: int = 0  # mhc_mix K chunks at decode rows (0 = mix_chunks(): 64 at TP4; fewer = a smaller sum)
+    kda_conv_op: bool = (
+        False  # KDA decode conv step as one fused op (ttnn.experimental.deepseek_prefill.kda_decode_conv)
+    )
+    kda_conv_mixed: bool = False  # KDA decode conv: addcmul on the bf16 history rows directly (no fp32 typecasts)
+    moe_grouped_in0: int = 0  # MoE grouped sparse matmuls: in0 K block (gate/up and down; 0 = the stage-3 value 4)
+    router_topk_pad: int = 0  # MoE router top-k on a -1e30-padded width (256: power of two; 1024: multi-core top-k)
 
     @classmethod
     def from_env(cls, base: "MCOpts") -> "MCOpts":
+        shard = os.environ.get("GLM53_DSA_SHARD", "").strip()
+        if shard:
+            base = dataclasses.replace(base, dsa_shard=shard.lower() in ("1", "true", "on", "yes"))
         spec = os.environ.get("GLM53_MC", "").strip()
+        if spec:
+            from loguru import logger
+
+            logger.warning(f"GLM53_MC={spec!r} overrides the multichip decoder options (A/B runs only)")
         if not spec:
             return dataclasses.replace(base)
         kw = {}
@@ -103,11 +144,32 @@ DEFAULT_MC = MCOpts(
     router_1d=True,
     ds_shared=True,
     prefill_2d=True,
+    # stage-5 review #1 rework (README "Candidates and decisions", round 6)
+    packs_prefill_2d=True,
+    prefill_2d_ffn=True,
+    kda_conv_op=True,
+    sinkhorn_perm_fidelity=3,
+    mix_chunks_decode=16,
+    # off: on the 45-layer model the persistent decode all-gather outputs (shared per call site across layers) broke
+    # decode (1 slot: teacher forcing top-5 32 %; 8 slots: identical greedy runs differ), although 2 x 120 replays of
+    # one layer were bit-identical. Stage 7 measured readiness with it off (top-5 100 %); see the stage-7 README.
+    ag_persistent=False,
+    moe_grouped_in0=8,
+    kda_out="1d:c16:ib4",
+    dsa_o="1d:c16:ib4",
+    dsa_qb="1d:c16:ib4",
+    dsa_wqb="1d:c16:ib4",
+    pack_a_spec="1d:c32:ib8",
+    shared_gu="1d:c32:ib16",
+    shared_dn="1d:c16:ib4",
+    mlp_gu="1d:c16:ib4",
+    mlp_dn="1d:c16:ib4",
 )
 
 
 def _decode_rows(t) -> bool:
-    """One tile of rows (decode: users <= 32); prefill chunks are >= 128 rows."""
+    """Decode rows = one tile of rows (users <= 32). Contract: every prefill chunk is a multiple of 128 rows
+    (GlmDSA.prefill_inputs and the KDA prefill buckets assert it), so 32 padded rows only ever mean a decode step."""
     return int(t.padded_shape[-2]) == 32
 
 
@@ -131,25 +193,57 @@ def _width_shard(K: int, cores: int, grid) -> ttnn.MemoryConfig:
     )
 
 
+def prefill_pc(x, K: int, N: int, in0_block_w: int | None = None):
+    """Explicit 2D multicast config of a prefill matmul [m, K] x [K, N] (tt-perf-report flagged ttnn's auto config at
+    in0_block_w = 1 on these rows). in0_block_w: override of the qwen36 helper's choice (must divide K tiles)."""
+    m = int(x.padded_shape[-2]) * int(math.prod(list(x.padded_shape)[:-2]))
+    pc = tpc.create_prefill_matmul_program_config(m, K, N)
+    if in0_block_w:
+        assert (K // 32) % in0_block_w == 0, (K, in0_block_w)
+        pc.in0_block_w = in0_block_w
+    return pc
+
+
 class DSMatmul:
     """Decode matmul (one tile of rows) on a DRAM width-sharded weight [K, N] (N a multiple of 32 * 8 banks): every
     DRAM bank streams its own column block (the bandwidth-bound decode form; ttnn's default program puts an N <= 9 tile
     weight on N cores)."""
 
-    def __init__(self, w_il, max_cores: int = 32):
+    def __init__(
+        self,
+        w_il,
+        max_cores: int = 32,
+        act_cores: int | None = None,
+        in0_block_w: int | None = None,
+        readers: int = 1,
+        convert: bool = True,
+    ):
+        """act_cores: cores of the width-sharded activation (K tiles / act_cores = the in0 shard; in0_block_w must divide
+        it, so fewer activation cores allow larger in0 blocks); readers: workers per DRAM bank (Blackhole multi-reader,
+        legal when the bank's N tiles split evenly). The compute runs on the DRAM-bank reader cores (8 x readers)."""
         K, N = int(w_il.shape[-2]), int(w_il.shape[-1])
         assert N % (32 * tpc.DRAM_CORES) == 0, N
         self.l1_acc = True  # packer L1 accumulation of the K-block partials (acc_ckc); False = the caller's config
         self.K, self.N = K, N
-        self.w = ttnn.to_memory_config(w_il, tpc.create_dram_sharded_mem_config(K, N))
-        cores, grid = _ds_grid(K, N, max_cores)
+        self.w = ttnn.to_memory_config(w_il, tpc.create_dram_sharded_mem_config(K, N)) if convert else w_il
+        if act_cores is None:
+            cores, grid = _ds_grid(K, N, max_cores)
+        else:
+            cores = act_cores
+            rows = next(r for r in range(8, 0, -1) if cores % r == 0 and cores // r <= 8)
+            grid = ttnn.CoreGrid(x=cores // rows, y=rows)
+        shard = K // 32 // cores
         self.act = _width_shard(K, cores, grid)
         self.pc = ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
-            in0_block_w=tpc._find_largest_divisor(K // 32 // cores),
+            in0_block_w=in0_block_w or tpc._find_largest_divisor(shard),
             per_core_M=1,
-            per_core_N=N // 32 // cores,
+            per_core_N=max(1, N // 32 // cores),
             fused_activation=None,
         )
+        if readers > 1:
+            assert (N // 32 // tpc.DRAM_CORES) % readers == 0, (N, readers)
+            self.pc.num_workers_per_dram_bank = readers
+        self.geometry = {"act_cores": cores, "in0_block_w": self.pc.in0_block_w, "readers": readers}
 
     _acc_ckc = {}
 
@@ -173,8 +267,7 @@ class DSMatmul:
 
     def prefill(self, x, ckc, dtype=None):
         """Rows > 32 on the same DRAM-sharded weight: 2D multicast program config (models/demos/blackhole/qwen36)."""
-        m = int(x.padded_shape[-2]) * int(math.prod(list(x.padded_shape)[:-2]))
-        pc = tpc.create_prefill_matmul_program_config(m, self.K, self.N)
+        pc = prefill_pc(x, self.K, self.N)
         kw = {"dtype": dtype} if dtype is not None else {}
         return ttnn.linear(x, self.w, compute_kernel_config=ckc, program_config=pc, memory_config=DRAM, **kw)
 
@@ -202,16 +295,20 @@ class IL1DMatmul:
     config with one output tile per core and in0 blocks of 8 tiles (ttnn's default put the [4096, 128] indexer
     projections on 4 cores at 49 us); prefill rows on ttnn's default program."""
 
-    def __init__(self, w_il, grid_w: int, max_cores: int = 64):
+    def __init__(self, w_il, grid_w: int, max_cores: int = 64, in0_block_w: int | None = None, prefill_2d=False):
         K, N = int(w_il.shape[-2]), int(w_il.shape[-1])
         self.K, self.N, self.w = K, N, w_il
         nt = N // 32
         cores = max(c for c in range(1, min(nt, max_cores) + 1) if nt % c == 0)  # whole output tiles per core
-        ib = max(d for d in (8, 4, 2, 1) if (K // 32) % d == 0)
+        ib = in0_block_w or max(d for d in (8, 4, 2, 1) if (K // 32) % d == 0)
         self.pc = tpc.create_matmul_1d_decode_progcfg(32, K, N, cores, fp32_acc=True, grid_w=grid_w, in0_block_w=ib)
+        self.prefill_2d = prefill_2d
+        self.geometry = {"cores": cores, "in0_block_w": ib}
 
     def prefill(self, x, ckc, dtype=None):
         kw = {"dtype": dtype} if dtype is not None else {}
+        if self.prefill_2d:
+            kw["program_config"] = prefill_pc(x, self.K, self.N)
         return ttnn.linear(x, self.w, compute_kernel_config=ckc, memory_config=DRAM, **kw)
 
     def __call__(self, x, ckc, dtype=None, out_mc=DRAM):
@@ -223,6 +320,74 @@ class IL1DMatmul:
         if xi is not x:
             ttnn.deallocate(xi)
         return out
+
+
+def parse_role(spec: str) -> tuple[str, dict]:
+    """ "ds:a8:ib16:r3" -> ("ds", {"a": 8, "ib": 16, "r": 3}); "" -> ("", {})."""
+    if not spec:
+        return "", {}
+    parts = spec.split(":")
+    kv = {}
+    for p_ in parts[1:]:
+        k = p_.rstrip("0123456789")
+        kv[k] = int(p_[len(k) :])
+    return parts[0], kv
+
+
+def make_role_mm(spec: str, w, grid_w: int, sharded: bool = False):
+    """Decode matmul object for a role spec on weight w ([K, N] interleaved, or already DRAM-sharded when `sharded`)."""
+    kind, kv = parse_role(spec)
+    if kind == "1d":
+        return IL1DMatmul(w, grid_w, max_cores=kv.get("c", 64), in0_block_w=kv.get("ib"))
+    if kind == "ds":
+        if sharded:
+            return DSMatmul(w, act_cores=kv.get("a"), in0_block_w=kv.get("ib"), readers=kv.get("r", 1), convert=False)
+        N = int(w.shape[-1])
+        wp = _pad_cols(w, tpc._roundup(N, 32 * tpc.DRAM_CORES))
+        mm = DSMatmul(wp, act_cores=kv.get("a"), in0_block_w=kv.get("ib"), readers=kv.get("r", 1))
+        if wp is not w:
+            ttnn.deallocate(wp)
+        mm.n_logical = N
+        return mm
+    raise ValueError(spec)
+
+
+class RoleMatmuls:
+    """Per-module cache of decode matmul objects: (role, spec, weight id) -> object (runtime A/B builds each once)."""
+
+    def __init__(self, grid_w: int):
+        self.grid_w, self.cache = grid_w, {}
+
+    def get(self, role: str, spec: str, w):
+        key = (role, spec, id(w))
+        if key not in self.cache:
+            self.cache[key] = make_role_mm(spec, w, self.grid_w, sharded=w.is_sharded())
+        return self.cache[key]
+
+    def run(self, role, spec, x, w, ckc, out_mc=DRAM, dtype=None):
+        mm = self.get(role, spec, w)
+        out = mm(x, ckc, dtype=dtype, out_mc=out_mc)
+        n = int(w.shape[-1]) if not w.is_sharded() else getattr(mm, "n_logical", int(w.shape[-1]))
+        if int(out.shape[-1]) != n:  # DRAM-bank padding columns
+            o2 = ttnn.slice(out, (0, 0, 0, 0), (1, 1, int(out.shape[-2]), n), memory_config=out_mc)
+            ttnn.deallocate(out)
+            out = o2
+        return out
+
+
+class RoleDecodeMM:
+    """Wraps a module's decode_mm hook (moe_opt.DenseDecodeMatmul, role "o"): decode rows of `role` with a spec go
+    through RoleMatmuls; everything else to the wrapped hook."""
+
+    def __init__(self, inner, mc: "MCOpts", spec_attr: str, grid_w: int):
+        self.inner, self.mc, self.spec_attr = inner, mc, spec_attr
+        self.mms = RoleMatmuls(grid_w)
+
+    def __call__(self, x, w, role, ckc, mc):
+        spec = getattr(self.mc, self.spec_attr)
+        if role == "o" and spec and _decode_rows(x):
+            return self.mms.run("o", spec, x, w, ckc, out_mc=mc if mc is not None else DRAM)
+        return self.inner(x, w, role, ckc, mc) if self.inner is not None else None
 
 
 def _pad_cols(w, N: int):
@@ -277,7 +442,10 @@ class MeshCCL:
     def __init__(self, mesh, tt_ccl, mc: MCOpts):
         self.mesh, self.tt_ccl, self.mc = mesh, tt_ccl, mc
         self._topo = {}
-        self._bufs = {}  # ag_persistent output buffers
+        # ag_persistent output buffers, one per (call site, shape, dtype), shared by every layer on this TT_CCL: a
+        # buffer is rewritten only by the next all-gather of its site, whose barrier semaphore waits for every device
+        # to reach it (so the previous consumer of that buffer has run on every device)
+        self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
 
     def topology(self):
         t = self.mc.topology
@@ -317,13 +485,10 @@ class MeshCCL:
             key = (site, tuple(shape), dtype)
             buf = self._bufs.get(key)
             if buf is None:
-                buf = self._bufs[key] = ttnn.from_torch(
-                    torch.zeros(shape),
-                    dtype=dtype,
-                    layout=ttnn.TILE_LAYOUT,
-                    device=self.mesh,
-                    memory_config=L1 if self.mc.ccl_l1 else DRAM,
-                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+                # DRAM, allocated on device (no host transfer inside a pass): persistent L1 buffers sit at the top of
+                # L1 for the life of the model and clashed with the static CBs of later prefill programs (suite3)
+                buf = self._bufs[key] = ttnn.zeros(
+                    shape, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=DRAM
                 )
             xi = x if not x.is_sharded() else ttnn.to_memory_config(x, DRAM)
             ttnn.experimental.all_gather_async(  # writes buf; the caller gets buf itself (release() keeps it)
@@ -404,7 +569,10 @@ class MultichipHyperConnection(FusedHyperConnection):
     def _mixes_split_k(self, x):
         T, K = x.shape[-2], x.shape[-1]
         decode = _decode_rows(x)
-        part = ttnn.experimental.deepseek_prefill.mhc_mix(x, self.fn_T, mix_chunks(-(-T // 32) * 32, K // 32))
+        chunks = mix_chunks(-(-T // 32) * 32, K // 32)
+        if decode and self.ccl.mc.mix_chunks_decode and (K // 32) % self.ccl.mc.mix_chunks_decode == 0:
+            chunks = self.ccl.mc.mix_chunks_decode
+        part = ttnn.experimental.deepseek_prefill.mhc_mix(x, self.fn_T, chunks)
         local = self._sum1(part, decode)  # [1,1,T,64] this device's columns
         ttnn.deallocate(part)
         gathered = self.ccl.all_gather(local, dim=1, dtype=ttnn.float32, decode=decode, site=self.site)  # [1,tp,T,64]
@@ -467,13 +635,14 @@ class MultichipDSA(GlmDSA):
         a = ttnn.concat([self.w_q_a, self.w_kv_a], dim=-1)  # [4096, 2048] bfp8
         grid_w = self.mesh.compute_with_storage_grid_size().x
         if self.mc.pack_a_1d:
-            A = IL1DMatmul(a, grid_w)
+            A = make_role_mm(self.mc.pack_a_spec, a, grid_w) if self.mc.pack_a_spec else IL1DMatmul(a, grid_w)
         else:
             A = DSMatmul(a)
             ttnn.deallocate(a)
         b = ttnn.concat([self.w_ik, self.w_ig, self.w_iw], dim=-1)  # [4096, 288] bf16
         if self.mc.pack_b_1d:
-            B = IL1DMatmul(b, self.mesh.compute_with_storage_grid_size().x)
+            gw = self.mesh.compute_with_storage_grid_size().x
+            B = make_role_mm(self.mc.pack_b_spec, b, gw) if self.mc.pack_b_spec else IL1DMatmul(b, gw)
         else:
             bp = _pad_cols(b, tpc._roundup(int(b.shape[-1]), 32 * tpc.DRAM_CORES))
             B = DSMatmul(bp)
@@ -482,6 +651,7 @@ class MultichipDSA(GlmDSA):
         self._pack = (A, B)
         self._pack_b_1d = self.mc.pack_b_1d
         self._pack_a_1d = self.mc.pack_a_1d
+        self._pack_specs = (self.mc.pack_a_spec, self.mc.pack_b_spec)
         self._pack_ids = {
             id(self.w_q_a): ("A", 0),
             id(self.w_kv_a): ("A", 1),
@@ -510,7 +680,9 @@ class MultichipDSA(GlmDSA):
         decode = _decode_rows(x)
         if (self.mc.dsa_pack and decode) or shared:
             if self._pack is None or (
-                not shared and (self._pack_b_1d, self._pack_a_1d) != (self.mc.pack_b_1d, self.mc.pack_a_1d)
+                not shared
+                and (self._pack_b_1d, self._pack_a_1d, self._pack_specs)
+                != (self.mc.pack_b_1d, self.mc.pack_a_1d, (self.mc.pack_a_spec, self.mc.pack_b_spec))
             ):
                 self._build_pack()
             key = self._pack_ids.get(id(w))
@@ -524,6 +696,8 @@ class MultichipDSA(GlmDSA):
                                 ttnn.deallocate(t)
                     S = x.shape[-2]
                     A, B = self._pack
+                    for mm in (A, B):  # packs_prefill_2d: the packed prefill matmuls on the explicit 2D config too
+                        mm.prefill_2d = self.mc.prefill_2d and self.mc.packs_prefill_2d
                     if grp == "A":
                         out = A(x, self.ckc) if decode else A.prefill(x, self.ckc)  # [1,1,S,2048] bf16
                         q = int(self.w_q_a.shape[-1])
@@ -554,12 +728,14 @@ class MultichipDSA(GlmDSA):
                     ttnn.deallocate(t)
                     t = t2
                 return t
-        if decode and self.mc.dsa_1d and (w is self.w_q_b or w is self.w_iq):
-            cache = self.__dict__.setdefault("_mm1d", {})
-            mm = cache.get(id(w))
-            if mm is None:  # the interleaved weight itself, on a 1D decode config
-                mm = cache[id(w)] = IL1DMatmul(w, self.mesh.compute_with_storage_grid_size().x)
-            return mm(x, self.ckc, dtype=kw.get("dtype"))
+        if decode and (w is self.w_q_b or w is self.w_iq):
+            spec = self.mc.dsa_qb if w is self.w_q_b else self.mc.dsa_wqb
+            spec = spec or ("1d" if self.mc.dsa_1d else "")
+            if spec:
+                mms = self.__dict__.setdefault("_role_mms", RoleMatmuls(self.mesh.compute_with_storage_grid_size().x))
+                if x.is_sharded():
+                    x = ttnn.to_memory_config(x, DRAM)
+                return mms.run("qb" if w is self.w_q_b else "wqb", spec, x, w, self.ckc, dtype=kw.get("dtype"))
         if x.is_sharded():
             x = ttnn.to_memory_config(x, DRAM)
         if not decode and self.mc.prefill_2d and w.layout == ttnn.TILE_LAYOUT and not w.is_sharded():
@@ -579,7 +755,10 @@ def _pad_rows(t, rows: int):
     r = int(t.shape[-2])
     try:
         return ttnn.pad(t, [(0, 0), (0, 0), (0, rows - r), (0, 0)], 0.0)
-    except Exception:  # noqa: BLE001 - older pad: tile-layout padding must be tile aligned
+    except RuntimeError as e:  # a pad that refuses non-tile-aligned tile padding: row-major round trip
+        from loguru import logger
+
+        logger.warning(f"_pad_rows: in-tile pad refused ({str(e)[:100]}); row-major round trip")
         rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT)
         p = ttnn.pad(rm, [(0, 0), (0, 0), (0, rows - r), (0, 0)], 0.0)
         ttnn.deallocate(rm)
@@ -609,6 +788,45 @@ class MultichipKDA(FusedGlmKDA):
     def update_decode_inputs(self, bufs, positions):
         super().update_decode_inputs(bufs, list(positions) + [-1] * (self._pad_batch(len(positions)) - len(positions)))
 
+    def _conv_step(self, proj, dstate, inputs, B):
+        if not (hasattr(self, "mc") and self.mc.kda_conv_op) or not self.flags.kda_decode_fold:
+            return super()._conv_step(proj, dstate, inputs, B)
+        # one op: conv (fp32) + SiLU + idle-slot select, history shifted in place (tests/test_kda_decode_conv.py)
+        return ttnn.experimental.deepseek_prefill.kda_decode_conv(
+            proj, *dstate.conv, *self.taps32, inputs["active"], self.W
+        )
+
+    def _conv_fold(self, cur, dstate):
+        if not (hasattr(self, "mc") and self.mc.kda_conv_mixed):
+            return super()._conv_fold(cur, dstate)
+        acc = ttnn.multiply(cur, self.taps32[3], dtype=ttnn.float32, memory_config=DRAM)
+        for j in range(3):  # bf16 history x fp32 tap into the fp32 accumulator (exact widening inside the op)
+            nxt = ttnn.addcmul(acc, dstate.conv[j], self.taps32[j], memory_config=DRAM)
+            ttnn.deallocate(acc)
+            acc = nxt
+        return acc
+
+    def _in_proj(self, x, w, cc):
+        spec = self.mc.kda_in if hasattr(self, "mc") else ""
+        if spec or w.is_sharded():
+            mms = self.__dict__.setdefault("_role_mms", RoleMatmuls(self.mesh.compute_with_storage_grid_size().x))
+            return mms.run("in", spec or self._shared_in_spec, x, w, cc)
+        return super()._in_proj(x, w, cc)
+
+    def prefill_forward(self, x, state, bounds):
+        """prefill_2d_ffn: the output projection of the prefill layer on the explicit 2D config (ttnn's / the tuned
+        config otherwise)."""
+        n = x.shape[-2]
+        layer = self._prefill.get(n)
+        if layer is not None and hasattr(self, "mc"):
+            if "_out_pc0" not in layer.__dict__:
+                layer._out_pc0 = layer.output_projection_program_config
+            w = self.weights.output_projection
+            layer.output_projection_program_config = (
+                prefill_pc(x, int(w.shape[-2]), int(w.shape[-1])) if self.mc.prefill_2d_ffn else layer._out_pc0
+            )
+        return super().prefill_forward(x, state, bounds)
+
     def decode_forward(self, x, dstate, *, inputs):
         B = x.shape[-2]
         Bp = int(dstate.recurrent.shape[0])
@@ -623,6 +841,82 @@ class MultichipKDA(FusedGlmKDA):
         out = ttnn.slice(y, (0, 0, 0, 0), (1, 1, B, int(y.shape[-1])), memory_config=DRAM)
         ttnn.deallocate(y)
         return out
+
+
+class MultichipMLP(DenseMLP):
+    """DenseMLP (layers 0-2, packed gate | up) with the stage-5 role programs: decode rows on mlp_gu / mlp_dn specs,
+    prefill rows on the explicit 2D config (prefill_2d_ffn). MultichipDecoder swaps the class; weights unchanged."""
+
+    def forward(self, x):
+        mc = getattr(self, "mc", None)
+        decode = _decode_rows(x)
+        if (
+            self.wgu is None
+            or mc is None
+            or not ((decode and (mc.mlp_gu or mc.mlp_dn)) or (not decode and mc.prefill_2d_ffn))
+        ):
+            return super().forward(x)
+        mms = self.__dict__.setdefault("_role_mms", RoleMatmuls(x.device().compute_with_storage_grid_size().x))
+
+        def mm(role, spec, a, w):
+            if decode and spec:
+                return mms.run(role, spec, a, w, self.ckc)
+            pc = prefill_pc(a, int(w.shape[-2]), int(w.shape[-1])) if not decode else None
+            return ttnn.linear(a, w, compute_kernel_config=self.ckc, memory_config=DRAM, program_config=pc)
+
+        gu = mm("gu", mc.mlp_gu, x, self.wgu)
+        shp = list(gu.shape)
+        il = shp[-1] // 2
+        g = ttnn.slice(gu, [0] * len(shp), shp[:-1] + [il], memory_config=DRAM)
+        u = ttnn.slice(gu, [0] * (len(shp) - 1) + [il], shp, memory_config=DRAM)
+        ttnn.deallocate(gu)
+        h = ttnn.multiply(
+            u, g, input_tensor_a_activations=self.act_up, input_tensor_b_activations=self.act_gate, memory_config=DRAM
+        )
+        ttnn.deallocate(g)
+        ttnn.deallocate(u)
+        out = mm("dn", mc.mlp_dn, h, self.wd)
+        ttnn.deallocate(h)
+        return out
+
+
+def _install_shared(moe, mc: MCOpts):
+    """MoE shared expert (packed gate | up, down; ungated in GLM) with the stage-5 role programs: decode rows on
+    shared_gu / shared_dn specs (the others keep moe_opt's 1D decode config), prefill rows on the explicit 2D config
+    (prefill_2d_ffn)."""
+    orig = moe._shared
+
+    def _shared(self, x4):
+        decode = _decode_rows(x4)
+        use = (decode and (mc.shared_gu or mc.shared_dn)) or (not decode and mc.prefill_2d_ffn)
+        if not use or self.shared_gated or getattr(self, "shared_packed", None) is None:
+            return orig(x4)
+        mms = self.__dict__.setdefault("_role_mms", RoleMatmuls(self.device.compute_with_storage_grid_size().x))
+        pcs = getattr(self, "_shared_pc", None) or (None, None)
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        Sl = self.shared_inter // self.num_devices
+        T = x4.shape[2]
+
+        def mm(role, spec, a, w, pc_decode):
+            if decode and spec:
+                return mms.run(role, spec, a, w, self.shared_ckc)
+            pc = prefill_pc(a, int(w.shape[-2]), int(w.shape[-1])) if not decode else pc_decode
+            a_in = ttnn.to_memory_config(a, ttnn.L1_MEMORY_CONFIG) if a.is_sharded() else a
+            return ttnn.linear(a_in, w, compute_kernel_config=self.shared_ckc, program_config=pc, memory_config=dram)
+
+        fused = mm("sgu", mc.shared_gu, x4, self.shared_packed, pcs[0])
+        gate = ttnn.slice(fused, [0, 0, 0, 0], [1, 1, T, Sl], memory_config=dram)
+        up = ttnn.slice(fused, [0, 0, 0, Sl], [1, 1, T, 2 * Sl], memory_config=dram)
+        ttnn.deallocate(fused)
+        gate, up = self._clamp_gate_up(gate, up, dram)
+        hidden = ttnn.multiply(up, gate, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=dram)
+        ttnn.deallocate(gate)
+        ttnn.deallocate(up)
+        out = mm("sdn", mc.shared_dn, hidden, self.shared_w2, pcs[1])
+        ttnn.deallocate(hidden)
+        return out
+
+    moe._shared = types.MethodType(_shared, moe)
 
 
 def _install_router_ds(moe, mc: MCOpts):
@@ -691,10 +985,30 @@ class MultichipDecoder(OptimizedDecoder):
             dec.attn.mc_init(dec.mc)
             if dec.mc.ds_shared and dec.mc.dsa_pack:
                 dec.attn.free_separate()
+            if dec.mc.dsa_shard and tp > 1:
+                from .dsa_shard import install_dsa_shard
+
+                install_dsa_shard(dec.attn, dec.ccl)
         elif isinstance(dec.attn, FusedGlmKDA):
             dec.attn.__class__ = MultichipKDA
+            dec.attn.mc = dec.mc
+        grid_w = mesh_device.compute_with_storage_grid_size().x
+        dec.attn.decode_mm = RoleDecodeMM(
+            getattr(dec.attn, "decode_mm", None), dec.mc, "dsa_o" if dec.attn_kind == "dsa" else "kda_out", grid_w
+        )
         if dec.mlp_kind == "moe":
             _install_router_ds(dec.mlp, dec.mc)
+            _install_shared(dec.mlp, dec.mc)
+            if dec.mc.moe_grouped_in0:  # TP4 geometry sweep (README "Sparse matmul geometry")
+                dec.mlp.opt = dataclasses.replace(
+                    dec.mlp.opt, grouped_gate_up_in0=dec.mc.moe_grouped_in0, grouped_down_in0=dec.mc.moe_grouped_in0
+                )
+                dec.mlp._cfg_grouped = None
+        elif isinstance(dec.mlp, DenseMLP):
+            dec.mlp.__class__ = MultichipMLP
+            dec.mlp.mc = dec.mc
+        if dec.mc.sinkhorn_perm_fidelity and "MHC_SINKHORN_PERM_FIDELITY" not in os.environ:
+            os.environ["MHC_SINKHORN_PERM_FIDELITY"] = str(dec.mc.sinkhorn_perm_fidelity)
         if tp > 1:
             dec.attn_hc = MultichipHyperConnection(dec.attn_hc, state_dict["hc_attn_fn"], tp, dec.ccl)
             dec.ffn_hc = MultichipHyperConnection(dec.ffn_hc, state_dict["hc_ffn_fn"], tp, dec.ccl)
@@ -705,6 +1019,7 @@ class MultichipDecoder(OptimizedDecoder):
             else:  # the MoE reduce-scatters inside the module (tt/moe.py)
                 dec.mlp.args.ccl_topology = dec.ccl.topology
                 dec.mlp.args.ccl_num_links = dec.ccl.links
+                dec.mlp.args.router_topk_pad = lambda: dec.mc.router_topk_pad
                 dec.mlp.args.ccl_out_memory_config = lambda t: L1 if (dec.mc.ccl_l1 and _decode_rows(t)) else DRAM
         return dec
 
@@ -723,7 +1038,10 @@ class MultichipDecoder(OptimizedDecoder):
             # the DSA packed projections take the width-sharded norm output as is (same shard as their activation)
             keep = self.attn_kind == "dsa" and self.mc.dsa_pack and not self.mc.pack_a_1d and w is self.input_norm_w
             out = sharded_rms_norm(h, w, self.eps, self.norm_ckc, keep_sharded=keep)
-            self.ccl.release(h)
+            if self.ccl is not None:
+                self.ccl.release(h)
+            else:  # TP = 1 (one die; review #1 P1-5 measurement): h is the norm input of this step, as FusedDecoder._norm
+                ttnn.deallocate(h)
             return out
         if self.ccl is not None and self.ccl.is_persistent(h):  # FusedDecoder._norm would free the buffer
             return ttnn.rms_norm(h, epsilon=self.eps, weight=w, memory_config=DRAM, compute_kernel_config=self.norm_ckc)

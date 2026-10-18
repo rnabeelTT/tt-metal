@@ -473,6 +473,11 @@ class Qwen35MoE:
         choice = ttnn.add(sig, self.router_bias, memory_config=r_mc)
         # plain top-k: the large-k composite route (ROUTER_TOPK_ROUTE_K) takes bf16 only, an fp32 row with k = 80 would
         # run the stock single-core sort for 10x the k
+        pad_w = getattr(self.args, "router_topk_pad", lambda: 0)()  # stage-5 A/B (tt/multichip_decoder.MCOpts)
+        if pad_w and pad_w > choice.shape[-1]:  # padded columns at -1e30 never rank; the indices stay < E
+            padded = ttnn.pad(choice, [(0, 0), (0, 0), (0, 0), (0, pad_w - choice.shape[-1])], -1e30)
+            ttnn.deallocate(choice)
+            choice = padded
         values, ids = ttnn.topk(choice, k=self.top_k, dim=-1, largest=True, sorted=True, memory_config=r_mc)
         ttnn.deallocate(values)
         ttnn.deallocate(choice)

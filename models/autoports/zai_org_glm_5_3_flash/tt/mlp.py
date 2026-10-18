@@ -93,10 +93,27 @@ class DenseMLP(LightweightModule):
         ttnn.deallocate(u)
         return h
 
+    def _down_kw(self, h: ttnn.Tensor) -> dict:
+        """down_prefill_2d (optimized decoder, stage-3 review #1): prefill rows of the down projection on an explicit 2D
+        config over the full grid (tools/s3r_probe_dense.py at 2048 rows: 5792 -> 2778 us, bit-exact)."""
+        if not getattr(self, "down_prefill_2d", False) or int(h.padded_shape[-2]) <= 32:
+            return {}
+        import math
+
+        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+        g = self.wd.device().compute_with_storage_grid_size()
+        m = int(h.padded_shape[-2]) * int(math.prod(list(h.padded_shape)[:-2]))
+        return {
+            "program_config": tpc.create_prefill_matmul_program_config(
+                m, int(self.wd.shape[-2]), int(self.wd.shape[-1]), grid_size=(g.x, min(g.y, 10))
+            )
+        }
+
     def forward(self, x: ttnn.Tensor) -> ttnn.Tensor:
         if self.wgu is not None:
             h = self._packed_hidden(x)
-            out = ttnn.linear(h, self.wd, compute_kernel_config=self.ckc, memory_config=DRAM)
+            out = ttnn.linear(h, self.wd, compute_kernel_config=self.ckc, memory_config=DRAM, **self._down_kw(h))
             ttnn.deallocate(h)
             return out
         g = ttnn.linear(x, self.wg, compute_kernel_config=self.ckc, memory_config=DRAM)

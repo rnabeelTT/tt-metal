@@ -96,6 +96,26 @@ ALWI void mm_begin(uint32_t a, uint32_t b) {
     matmul_init(a, b);
 }
 
+// Row / column-sum matmuls m @ P_s. With PERM_FIDELITY (program factory, MHC_SINKHORN_PERM_FIDELITY=3) they run at
+// HiFi3: the fourth fidelity phase multiplies the low srcA bits by the low srcB bits, and srcA here is the 0 / 1
+// permutation tile (no low bits), so the phase only adds zeros. The projections keep the kernel fidelity (HiFi4).
+#ifdef PERM_FIDELITY
+constexpr ckernel::MathFidelity PERM_MF = static_cast<ckernel::MathFidelity>(PERM_FIDELITY);
+ALWI void perm_begin(uint32_t a, uint32_t b) {
+    mm_begin(a, b);
+    MATH((llk_math_matmul_init<PERM_MF, MM_THROTTLE>(a, b, 0)));
+}
+ALWI void perm_matmul(uint32_t a, uint32_t b, uint32_t ia, uint32_t ib, uint32_t idst) {
+    UNPACK((llk_unpack_AB_matmul(a, b, ia, ib)));
+    MATH((llk_math_matmul<PERM_MF, MM_THROTTLE>(idst)));
+}
+#else
+ALWI void perm_begin(uint32_t a, uint32_t b) { mm_begin(a, b); }
+ALWI void perm_matmul(uint32_t a, uint32_t b, uint32_t ia, uint32_t ib, uint32_t idst) {
+    matmul_tiles(a, b, ia, ib, idst);
+}
+#endif
+
 // DST[0] = mixes @ SEL[sel] + BASE[base] (fp32-exact up to ~1e-7). XH / XL must be available; pops nothing.
 ALWI void project(uint32_t sel, uint32_t base) {
     mm_begin(CB_XH, CB_CH);
@@ -138,11 +158,11 @@ FORCE_INLINE void normalize(bool rows, bool denom_eps, bool post_eps, uint32_t e
     ch.wait_front(1);
     cl.wait_front(1);
     tile_regs_acquire();
-    mm_begin(CB_MH, CB_PERM);
+    perm_begin(CB_MH, CB_PERM);
     for (uint32_t s = 0; s < n; ++s) {  // sum over the group = sum of n permuted copies
         const uint32_t perm = s == 0 ? 0 : (rows ? s : n - 1 + s);
-        matmul_tiles(CB_MH, CB_PERM, 0, perm, 0);
-        matmul_tiles(CB_ML, CB_PERM, 0, perm, 0);
+        perm_matmul(CB_MH, CB_PERM, 0, perm, 0);
+        perm_matmul(CB_ML, CB_PERM, 0, perm, 0);
     }
     if (denom_eps) {
         binop_with_scalar_tile_init();

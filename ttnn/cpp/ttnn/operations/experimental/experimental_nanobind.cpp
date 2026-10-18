@@ -98,6 +98,7 @@
 #include "ttnn/operations/experimental/deepseek_prefill/mhc_pre/mhc_pre_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/mhc_mix/mhc_mix_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/mhc_split_sinkhorn_nanobind.hpp"
+#include "ttnn/operations/experimental/deepseek_prefill/kda_decode_conv/kda_decode_conv_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/per_token_cast_to_fp8/per_token_cast_to_fp8_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/pack_scaled_fp8_kv_cache/pack_scaled_fp8_kv_cache_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/per_token_cast_back/per_token_cast_back_nanobind.hpp"
@@ -181,6 +182,7 @@ void py_module(nb::module_& mod) {
     deepseek_prefill::mhc_pre::detail::bind_experimental_mhc_pre_operation(mod);
     deepseek_prefill::mhc_mix::detail::bind_experimental_mhc_mix_operation(mod);
     deepseek_prefill::mhc_split_sinkhorn::detail::bind_experimental_mhc_split_sinkhorn_operation(mod);
+    deepseek_prefill::kda_decode_conv::detail::bind_experimental_kda_decode_conv_operation(mod);
     deepseek_prefill::detail::bind_post_combine_reduce(mod);
     deepseek_prefill::moe_grouped_topk::detail::bind_moe_grouped_topk(mod);
     deepseek_prefill::moe_hash_gate::detail::bind_moe_hash_gate(mod);

@@ -206,6 +206,10 @@ class FusedGlmKDA(GlmKDA):
             self.taps32 = [ttnn.typecast(_tap4(t), ttnn.float32) for t in self.weights.convolution_taps]
             self.sigmoid_act = [ttnn.UnaryWithParam(ttnn.UnaryOpType.SIGMOID)]
 
+    def _in_proj(self, x: ttnn.Tensor, w: ttnn.Tensor, cc) -> ttnn.Tensor:
+        """Decode input projection (hook: tt/multichip_decoder.MultichipKDA swaps in tuned decode programs)."""
+        return ttnn.linear(x, w, memory_config=DRAM, compute_kernel_config=cc)
+
     def _conv_fold(self, cur: ttnn.Tensor, dstate: KdaDecodeState) -> ttnn.Tensor:
         """acc = cur * tap3 + sum_j h_j * tap_j in fp32 (fp32 tap constants, one addcmul per history row)."""
         acc = ttnn.multiply(cur, self.taps32[3], dtype=ttnn.float32, memory_config=DRAM)
@@ -226,16 +230,11 @@ class FusedGlmKDA(GlmKDA):
         ttnn.where(active_bf, h2, h1, output_tensor=h1)
         ttnn.where(active_bf, cur, h2, output_tensor=h2)
 
-    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
-        if not self.flags.kda_recurrent_op:
-            return super().decode_forward(x, dstate, inputs=inputs)
-        B = x.shape[-2]
-        H, K, V, W = self.H, self.K, self.V, self.W
+    def _conv_step(self, proj: ttnn.Tensor, dstate: KdaDecodeState, inputs, B: int) -> ttnn.Tensor:
+        """Short causal conv over (h0, h1, h2, current) in fp32 + SiLU, idle slots zeroed; shifts the conv history in
+        place. Returns qkv [1,1,B,W] fp32 (hook: tt/multichip_decoder.MultichipKDA swaps in the fused op)."""
         w = self.weights
-        cc = self.ckc
-        proj = ttnn.linear(x, w.input_projection, memory_config=DRAM, compute_kernel_config=cc)  # [1,1,B,P]
-
-        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU
+        W = self.W
         cur = ttnn.slice(proj, (0, 0, 0, 0), (1, 1, B, W), memory_config=DRAM)
         fold = self.flags.kda_decode_fold
         if fold:
@@ -260,6 +259,20 @@ class FusedGlmKDA(GlmKDA):
         else:
             self.shift_conv_history(dstate, cur, inputs["active_bf"])
         ttnn.deallocate(cur)
+        return qkv
+
+    def decode_forward(self, x: ttnn.Tensor, dstate: KdaDecodeState, *, inputs) -> ttnn.Tensor:
+        if not self.flags.kda_recurrent_op:
+            return super().decode_forward(x, dstate, inputs=inputs)
+        B = x.shape[-2]
+        H, K, V, W = self.H, self.K, self.V, self.W
+        w = self.weights
+        cc = self.ckc
+        proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+
+        # ---- short causal conv over (h0, h1, h2, current), fp32 accumulation, SiLU; history shifted in place
+        qkv = self._conv_step(proj, dstate, inputs, B)
+        fold = self.flags.kda_decode_fold  # (also selects the gated-norm path below)
 
         # ---- gates
         rank_in = ttnn.slice(proj, (0, 0, 0, self.off_decay), (1, 1, B, self.off_decay + K), memory_config=DRAM)

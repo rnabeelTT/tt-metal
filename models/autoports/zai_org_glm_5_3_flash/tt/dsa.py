@@ -34,6 +34,7 @@ and open-pool state are not changed.
 
 from __future__ import annotations
 
+import math
 import os
 
 import torch
@@ -274,6 +275,22 @@ class GlmDSA(LightweightModule):
         return ttnn.rms_norm(x, epsilon=self.eps, weight=w, memory_config=DRAM, compute_kernel_config=self.ckc)
 
     def _mm(self, x, w, **kw):
+        if (
+            getattr(self, "prefill_o_2d", False)
+            and w is self.w_o
+            and "program_config" not in kw
+            and int(x.padded_shape[-2]) > 32
+            and not w.is_sharded()
+        ):
+            # optimized decoder (stage-3 review #1): o_proj prefill rows on an explicit 2D config over the full grid
+            # (tools/s3r_probe_dense.py at 2048 rows: 7707 -> 3708 us, bit-exact)
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            g = self.mesh.compute_with_storage_grid_size()
+            m = int(x.padded_shape[-2]) * int(math.prod(list(x.padded_shape)[:-2]))
+            kw["program_config"] = tpc.create_prefill_matmul_program_config(
+                m, int(w.shape[-2]), int(w.shape[-1]), grid_size=(g.x, min(g.y, 10))
+            )
         return ttnn.linear(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
 
     def _bmm(self, x, w, rows: int):
@@ -291,6 +308,23 @@ class GlmDSA(LightweightModule):
                 out_subblock_h=1,
                 out_subblock_w=max(d for d in (4, 2, 1) if Nt % d == 0),
                 per_core_M=Mt,
+                per_core_N=Nt,
+            )
+        elif self.bmm_reuse and getattr(self, "bmm_prefill_pm", 0) and w is self.w_uk:
+            # prefill rows of q_abs (stage-3 review #1 probe): the same reuse config with per_core_M <= bmm_prefill_pm
+            # (not Mt: the Mt = 64 variant hung at 2048 rows; tools/s3r_probe_dsa.py, M = 8: 1900 -> 765 us). Off in
+            # the optimized decoder: DSA continuation chunks read 11-22 % low with it on W_UK and non-finite on W_UV
+            # (logs/s3r_bisect_pf.log, s3r_final_suite.bmm_wuk.log); not diagnosed
+            grid = self.mesh.compute_with_storage_grid_size()
+            # M from the tensor (a continuation chunk passes its logical row count; Mt from it gave inf rows,
+            # logs/s3r_bisect_pf.log)
+            Kt, Nt, Mt = w.shape[-2] // 32, w.shape[-1] // 32, int(x.padded_shape[-2]) // 32
+            kw["program_config"] = ttnn.MatmulMultiCoreReuseProgramConfig(
+                compute_with_storage_grid_size=(grid.x, grid.y),
+                in0_block_w=min(Kt, 8),
+                out_subblock_h=1,
+                out_subblock_w=max(d for d in (4, 2, 1) if Nt % d == 0),
+                per_core_M=max(d for d in range(1, self.bmm_prefill_pm + 1) if Mt % d == 0),
                 per_core_N=Nt,
             )
         return ttnn.matmul(x, w, compute_kernel_config=self.ckc, memory_config=DRAM, **kw)
@@ -457,9 +491,17 @@ class GlmDSA(LightweightModule):
         ttnn.deallocate(masked)
         return ids
 
-    def _sparse_attend(self, q_abs, index_f32, cache_batch_idx=None):
+    def _write_latent(self, c, rows: int, row_idx):
+        """c [1,1,rows,512] bf16 TILE -> latent pool rows row_idx (uint32 [1, rows]; 0xFFFFFFFF = skip). The block-sharded
+        cache (tt/dsa_shard.py) overrides it."""
+        c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
+        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (rows, self.R)), row_idx)
+        ttnn.deallocate(c_rm)
+
+    def _sparse_attend(self, q_abs, index_f32, cache_batch_idx=None, latent_rows=None):
         """q_abs [1,H,rows,512] TILE; index_f32 [1,1,rows,IDX_WIDTH] fp32 logical positions (sentinel 2**32) ->
-        o_lat TILE [1,H,rows,512]. Page-table row: cache_batch_idx (prefill) or the query row (decode, one per slot)."""
+        o_lat TILE [1,H,rows,512]. Page-table row: cache_batch_idx (prefill) or the query row (decode, one per slot).
+        latent_rows: the query rows' own latent [1,1,rows,512] (used by the block-sharded cache, tt/dsa_shard.py)."""
         idx = ttnn.to_layout(ttnn.typecast(index_f32, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT)
         H = q_abs.shape[1]
         pad = -H % 32  # sparse_sdpa takes whole 32-head tiles: TP leaves 16 heads per die -> zero heads, sliced off
@@ -526,9 +568,21 @@ class GlmDSA(LightweightModule):
             )
             self._const(("ape_rows", n), lambda: self._dev(self.ape.repeat(npool, 1).reshape(1, 1, n, self.ID)))
 
-    def prefill_inputs(self, n: int, start: int, length: int, slot: int) -> dict:
-        """Device inputs of one prefill chunk (host -> device input construction, outside the pass)."""
+    def prefill_inputs(self, n: int, start: int, length: int, slot: int, host: bool = False) -> dict:
+        """Device inputs of one prefill chunk (host -> device input construction, outside the pass). host=True: the
+        same tensors on the host (stage-7 traced prefill copies them into the trace's persistent inputs)."""
         assert start % 128 == 0 and n % 128 == 0 and start + n <= self.T, (start, n, self.T)
+        if host:
+            return self._with_builder(
+                lambda t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT: ttnn.from_torch(
+                    t, dtype=dtype, layout=layout, mesh_mapper=self._rep
+                ),
+                self.prefill_inputs,
+                n,
+                start,
+                length,
+                slot,
+            )
         ar = torch.arange(n)
         phys = self._phys_rows(torch.full((n,), slot), start + ar, ar < length)
         rows = torch.where(ar < length, phys, torch.full((n,), 0xFFFFFFFF)).reshape(1, n)
@@ -566,32 +620,55 @@ class GlmDSA(LightweightModule):
             inp["is_dense"] = self._dev((pos <= DENSE_MAX_POSITION).float())
         return inp
 
+    def _with_builder(self, builder, fn, *a):
+        self._dev = builder  # instance attribute shadows the method for this call only
+        try:
+            return fn(*a)
+        finally:
+            del self._dev
+
+    def write_prefill_tail(self, length: int, slot: int):
+        """Deferred open-pool hand-off of a traced chunk (inputs["defer_tail"]): the chunk's pool state rows at
+        length // 4 -> decode slot `slot` (eager, after the trace replay; the tensors are the trace's outputs)."""
+        den, num, m = self._tail
+        if length % KPOOL:
+            p_last = length // KPOOL
+            for buf, src in ((self.acc_den, den), (self.acc_num, num), (self.acc_m, m)):
+                row = ttnn.slice(src, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
+                _write_row(buf, row, slot)
+                ttnn.deallocate(row)
+
     def prefill_forward(self, x, *, inputs):
         """One user's chunk x [1,1,n,hidden] at absolute positions [start, start+n) (start % 128 == 0; rows >= length
         are padding; inputs = prefill_inputs(...)); the user owns decode slot `slot`. Writes the latent rows, the
-        chunk's pool keys and (for a chunk ending inside a pool) the slot's open-pool state.
+        chunk's pool keys and (for a chunk ending inside a pool) the slot's open-pool state. inputs["defer_tail"]
+        (stage-7 traced prefill): the open-pool state rows stay in self._tail for write_prefill_tail (no python
+        length / slot in the captured ops).
         Returns (y [1,1,n,hidden], None)."""
         n = x.shape[-2]
         assert n == inputs["n"]
         length, slot = inputs["length"], inputs["slot"]
         q_abs, qr = self._q_abs(x, n)
         c = self._latent(x)  # [1,1,n,512] bf16 TILE
-        c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
-        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (n, self.R)), inputs["row_idx"])
-        ttnn.deallocate(c_rm)
+        self._write_latent(c, n, inputs["row_idx"])
         # pool keys of this chunk: pools start at the chunk start (start % 4 == 0)
         k, gl = self._index_k(x)
         poolK, den, num, m = self._pool_chunk(k, gl, n, inputs["vmask"])
         ttnn.experimental.paged_fill_cache(self.pooled, poolK, page_table=inputs["chunk_pt"], batch_idx=0)
-        if length % KPOOL:  # this chunk ends inside a pool: hand its partial state to the decode slot
+        if inputs.get("defer_tail"):
+            self._tail = (den, num, m)
+            for t in (poolK, k, gl):
+                ttnn.deallocate(t)
+        elif length % KPOOL:  # this chunk ends inside a pool: hand its partial state to the decode slot
             p_last = length // KPOOL
             d_row = ttnn.slice(den, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
             n_row = ttnn.slice(num, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
             m_row = ttnn.slice(m, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
             for buf, src in ((self.acc_den, d_row), (self.acc_num, n_row), (self.acc_m, m_row)):
                 _write_row(buf, src, slot)
-        for t in (poolK, den, num, m, k, gl):
-            ttnn.deallocate(t)
+        if not inputs.get("defer_tail"):
+            for t in (poolK, den, num, m, k, gl):
+                ttnn.deallocate(t)
 
         if inputs["path"] == "flash":
             o_lat = ttnn.transformer.flash_mla_prefill(
@@ -602,6 +679,7 @@ class GlmDSA(LightweightModule):
                 scale=self.scale,
                 compute_kernel_config=self.sdpa_ckc,
                 memory_config=DRAM,
+                program_config=getattr(self, "flash_prefill_pc", None),  # optimized decoder: q / k chunks 128
             )
         else:
             index = inputs["dense_idx"]
@@ -637,7 +715,7 @@ class GlmDSA(LightweightModule):
                 owned = True
                 for t in [qi_all, wi_all, sparse] + (parts if len(parts) > 1 else []):
                     ttnn.deallocate(t)
-            o_lat = self._sparse_attend(q_abs, index, cache_batch_idx=slot)
+            o_lat = self._sparse_attend(q_abs, index, cache_batch_idx=slot, latent_rows=c)
             if owned:
                 ttnn.deallocate(index)
         ttnn.deallocate(q_abs)
@@ -696,10 +774,7 @@ class GlmDSA(LightweightModule):
         assert S == self.S
         q_abs, qr = self._q_abs(x, S)  # [1,H,S,512]
         c = self._latent(x)
-        c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
-        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (S, self.R)), inputs["row_idx"])
-        ttnn.deallocate(c_rm)
-        ttnn.deallocate(c)
+        self._write_latent(c, S, inputs["row_idx"])
 
         # ---- open-pool online-softmax update, then write every slot's (partial) pool key
         k, gl = self._index_k(x)  # [1,1,S,128]
@@ -735,7 +810,8 @@ class GlmDSA(LightweightModule):
             ttnn.deallocate(t)
 
         if self.T <= TOPK_POOLS * KPOOL:  # every position of this cache is in the dense regime
-            o_lat = self._sparse_attend(q_abs, inputs["dense_idx"])
+            o_lat = self._sparse_attend(q_abs, inputs["dense_idx"], latent_rows=c)
+            ttnn.deallocate(c)
             ttnn.deallocate(q_abs)
             ttnn.deallocate(qr)
             y = self._out(o_lat, S)
@@ -752,7 +828,8 @@ class GlmDSA(LightweightModule):
         index = ttnn.where(inputs["dense"], inputs["dense_idx"], sparse)
         for t in (qi, wi, sc, ids, sparse):
             ttnn.deallocate(t)
-        o_lat = self._sparse_attend(q_abs, index)
+        o_lat = self._sparse_attend(q_abs, index, latent_rows=c)
+        ttnn.deallocate(c)
         ttnn.deallocate(index)
         ttnn.deallocate(q_abs)
         ttnn.deallocate(qr)

@@ -30,6 +30,16 @@ from .moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
 PAIRS_T1_TILE_REPEAT = os.environ.get("QWEN35_PAIRS_T1_TILE_REPEAT", "0") == "1"
 
 
+def sorted_rows_cap() -> int:
+    """GLM53_MOE_SORTED_ROWS = N: the expert-sorted prefill path runs the routed experts of a chunk wider than N rows in
+    N-row blocks (bit-identical; caps the worst-case dispatch buffers, Qwen35MoEOptimized._routed_sorted_split).
+    0 = whole chunk. Read per call so a probe can A/B it in one process."""
+    return int(os.environ.get("GLM53_MOE_SORTED_ROWS", str(SORTED_ROWS_DEFAULT)) or 0)
+
+
+SORTED_ROWS_DEFAULT = 1024
+
+
 @dataclass(frozen=True)
 class FusionFlags:
     # TTMoEGate (generalized_moe_gate kernel) instead of the softmax/topk chain; it only ever ran for the single-row
@@ -943,13 +953,48 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
         self._ensure_dispatch()
+        sub = sorted_rows_cap()
+        if sub and T > sub:
+            return self._routed_sorted_split(x4, scores, ids, T, sub)
         m = self._dispatch.build(ids, scores, T)
         return self._routed_sorted_built(x4, scores, ids, T, m)
+
+    def _routed_sorted_split(self, x4, scores, ids, T, sub):
+        """The routed experts of a T-row chunk in row blocks of `sub` rows (stage-6 memory): the dispatched buffers are
+        sized for the static worst case, Rd = roundup(T*k, 32) + 31*E + 32 rows of H bf16 (T=2048: 22368 rows, 183 MB
+        per die, live twice at the un-dispatch: tiled down output + its row-major copy), which OOMed the full model's
+        2048-row prefill. Every routed row is computed independently (per-row matmuls on fixed program configs, the
+        same k-order gather-add), so the split output is bit-identical (tools/memory_probe.py checks it)."""
+        H, k = self.hidden, self.top_k
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        ids32 = ttnn.typecast(ids, ttnn.uint32) if ids.dtype != ttnn.uint32 else ids  # exact; the kernel takes uint32
+        parts = []
+        for r0 in range(0, T, sub):
+            r1 = min(T, r0 + sub)
+            n = r1 - r0
+            xs = ttnn.slice(x4, (0, 0, r0, 0), (1, 1, r1, H), memory_config=dram)
+            ss = ttnn.slice(scores, (0, 0, r0, 0), (1, 1, r1, k), memory_config=dram)
+            si = ttnn.slice(ids32, (0, 0, r0, 0), (1, 1, r1, k), memory_config=dram)
+            m = self._dispatch.build(si, ss, n)
+            parts.append(self._routed_sorted_built(xs, ss, si, n, m))
+            for t in (xs, ss, si):
+                ttnn.deallocate(t)
+        if ids32 is not ids:
+            ttnn.deallocate(ids32)
+        y = ttnn.concat(parts, dim=2, memory_config=dram)
+        for t in parts:
+            ttnn.deallocate(t)
+        return y
 
     def prepare_dispatch(self, lengths):
         """Create the sorted-dispatch constants of every row count (prefill chunk lengths, decode batch) at setup."""
         self._ensure_dispatch()
-        self._dispatch.prepare(lengths)
+        sub = sorted_rows_cap()
+        rows = set(int(t) for t in lengths)
+        for t in list(rows):
+            if sub and t > sub:  # the row blocks of a split chunk (_routed_sorted_split)
+                rows |= {sub} | ({t % sub} if t % sub else set())
+        self._dispatch.prepare(sorted(rows))
 
     def _ensure_dispatch(self):
         E, Nl, H, k = self.num_experts, self.inter_local, self.hidden, self.top_k

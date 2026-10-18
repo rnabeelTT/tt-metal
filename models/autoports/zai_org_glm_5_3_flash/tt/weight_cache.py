@@ -106,6 +106,81 @@ def component_digest(kind: str) -> str:
     return _digest([inspect.getsource(o) for o in common + objs])[:8]
 
 
+# ------------------------------------------------------------------------------------------------- safe file load
+# ttnn.load_tensor mmaps the file (MAP_PRIVATE, PROT_READ) and to_device then pins that host buffer read-only through the
+# KMD (tt_metal PinnedMemoryCache::try_pin, the mmap(PROT_READ) case). On this host (kernel 7.0, ext4 page cache in
+# large folios) that long-term pin of file pages intermittently never returns: the main thread spins at 100 % CPU in
+# the kernel with ~2 M minor faults/s and flat RSS, holding the GIL, deaf to SIGTERM (2026-10-16/17: the embedding,
+# layer-0 KDA and layer-19 DSA files, each of which loads in < 0.1 s in other runs; a host-only read of all 113 GB
+# through the same mmaps never stalls). So the file is first copied (sendfile, the read path, no mmap) into an
+# anonymous memfd (shmem, small folios) and loaded from there: the pinned pages are never ext4 page-cache folios.
+_WATCHDOG = {"proc": None}
+STALL_EXIT_CODE = 75
+_WATCHDOG_SRC = r"""
+import os, select, signal, sys, time
+pid, timeout = int(sys.argv[1]), float(sys.argv[2])
+cur, t0, buf = None, None, b""
+while True:
+    r, _, _ = select.select([0], [], [], 1.0)
+    if r:
+        chunk = os.read(0, 65536)
+        if not chunk:
+            sys.exit(0)  # parent exited
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            cur, t0 = (line.decode()[2:], time.time()) if line.startswith(b"B ") else (None, None)
+    if cur is not None and time.time() - t0 > timeout:
+        sys.stderr.write(f"weight cache watchdog: load of {cur} stuck {time.time() - t0:.0f}s; quarantining it and "
+                         f"killing pid {pid} (a restart rebuilds that tensor from the checkpoint)\n")
+        sys.stderr.flush()
+        try:
+            os.replace(cur, cur + ".stalled")
+        except OSError:
+            pass
+        os.kill(pid, signal.SIGKILL)  # the stuck thread holds the GIL and ignores SIGTERM
+        sys.exit(1)
+"""
+
+
+def _watchdog_send(msg: str):
+    """Out-of-process watchdog (a Python thread cannot run while the stuck C++ call holds the GIL): a load that exceeds
+    GLM53_CACHE_LOAD_TIMEOUT seconds (default 120; the largest file loads in ~1 s) gets its file renamed to
+    <name>.stalled and the process SIGKILLed, so a stall fails fast instead of holding the device."""
+    import subprocess
+    import sys
+
+    p = _WATCHDOG["proc"]
+    if p is None or p.poll() is not None:
+        timeout = os.environ.get("GLM53_CACHE_LOAD_TIMEOUT", "120")
+        p = subprocess.Popen(
+            [sys.executable, "-I", "-c", _WATCHDOG_SRC, str(os.getpid()), timeout], stdin=subprocess.PIPE, bufsize=0
+        )
+        _WATCHDOG["proc"] = p
+    p.stdin.write((msg + "\n").encode())
+
+
+def load_file_tensor(path: Path, mesh) -> ttnn.Tensor:
+    """ttnn.load_tensor(path, device=mesh) without pinning file-backed pages (see above), under the watchdog."""
+    _watchdog_send(f"B {path}")
+    try:
+        fd = os.memfd_create("glm53_weight", os.MFD_CLOEXEC)
+        try:
+            with open(path, "rb") as src:
+                n, off = os.fstat(src.fileno()).st_size, 0
+                while off < n:
+                    sent = os.sendfile(fd, src.fileno(), off, n - off)
+                    if sent == 0:
+                        raise RuntimeError(f"{path}: short read at {off} of {n} bytes")
+                    off += sent
+            # maps the memfd and moves it to the mesh (C++ to_device with the stored memory config)
+            return ttnn._ttnn.tensor.load_tensor_flatbuffer(f"/proc/self/fd/{fd}", mesh)
+        finally:
+            os.close(fd)  # the host tensor's mapping (if still alive) keeps the memfd until it is freed
+    finally:
+        _watchdog_send("E")
+
+
 class WeightCache:
     """get(name, build): the cached device tensor `name`, else build() (a device tensor), dumped for the next run."""
 
@@ -138,12 +213,13 @@ class WeightCache:
         return all(self.file(n).is_file() for n in names)
 
     def load(self, name: str) -> ttnn.Tensor:
+        path = self.file(name)
         t0 = time.time()
-        t = ttnn.load_tensor(self.file(name), device=self.mesh)
+        t = load_file_tensor(path, self.mesh)
         dt = time.time() - t0
         self.stats["hits"] += 1
         if dt > 10:
-            logger.warning(f"weight cache: slow load {self.file(name)} ({dt:.1f}s)")
+            logger.warning(f"weight cache: slow load {path} ({dt:.1f}s)")
         return t
 
     def store(self, name: str, t: ttnn.Tensor) -> ttnn.Tensor:

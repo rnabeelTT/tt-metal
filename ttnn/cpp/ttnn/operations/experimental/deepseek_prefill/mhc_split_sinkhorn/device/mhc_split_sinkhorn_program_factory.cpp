@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <cstdlib>
+#include <string>
 
 #include "mhc_split_sinkhorn_program_factory.hpp"
 #include "mhc_split_sinkhorn_device_operation_types.hpp"
@@ -132,6 +133,9 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
         compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
         compute.core_ranges = cores;
         compute.compile_time_args = std::move(compute_ct);
+        if (operation_attributes.perm_fidelity != 4) {
+            compute.defines.emplace_back("PERM_FIDELITY", std::to_string(operation_attributes.perm_fidelity));
+        }
         compute.config = ComputeConfigDescriptor{
             .math_fidelity = MathFidelity::HiFi4,
             .fp32_dest_acc_en = true,
@@ -216,6 +220,9 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
     compute.source_type = KernelDescriptor::SourceType::FILE_PATH;
     compute.core_ranges = all_cores;
     compute.compile_time_args = std::move(compute_ct);
+    if (operation_attributes.perm_fidelity != 4) {
+        compute.defines.emplace_back("PERM_FIDELITY", std::to_string(operation_attributes.perm_fidelity));
+    }
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,
         .fp32_dest_acc_en = true,

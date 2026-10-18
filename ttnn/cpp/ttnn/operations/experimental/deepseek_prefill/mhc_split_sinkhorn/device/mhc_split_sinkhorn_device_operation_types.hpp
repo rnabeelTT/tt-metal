@@ -13,6 +13,10 @@ struct MhcSplitSinkhornParams {
     uint32_t sinkhorn_iters;
     float eps;
     uint32_t max_cores;  // 0 = full grid; 1 pins single-core (benchmark A/B). Hashed for cache correctness.
+    // Math fidelity of the Sinkhorn row / column-sum matmuls (m_hi / m_lo @ permutation tile). 4 = HiFi4; 3 = HiFi3,
+    // which skips only the srcA-low x srcB-low phase: the permutation operand (srcA) is 0 / 1, so that phase adds exact
+    // zeros.
+    uint32_t perm_fidelity;
 };
 
 // mixes: fused-projection output [T, (2+n)*n].  consts: [8, 32, 32] host-prepared tiles

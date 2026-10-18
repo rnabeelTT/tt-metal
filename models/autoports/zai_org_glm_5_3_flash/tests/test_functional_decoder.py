@@ -32,7 +32,12 @@ from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
     stream_in,
     stream_out,
 )
-from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import DryRunResult, flip_reference, hf_layer_reference
+from models.autoports.zai_org_glm_5_3_flash.tests.hf_ref.client import (
+    DryRunResult,
+    flip_reference,
+    hf_layer_reference,
+    quant_reference,
+)
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
 
 KINDS = {"kda_dense": 0, "dsa_moe": 3, "kda_moe": 4}
@@ -74,6 +79,15 @@ DECODE_RATIOS = []  # update rms ratio of every decode token of the running test
 # changes (tests/test_optimized_decoder.py): every PCC bar of the layer (update, synthetic-weights) moves down
 # by DELTA_BAR - delta, the scale bounds become seq / token. Empty here: the functional bars apply.
 BAR_OVERRIDES = {}
+# Quantization-aware reference {fnmatch pattern over checkpoint names: "bfp4" | "bfp8"}: when set, the reference of
+# an MoE layer (y, the near-tie y_swap, the synthetic FFN taps) is the HF layer with those weights rounded exactly as
+# the port stores them (tests/hf_ref/hf_quant_ref.py, bfp.py). A policy that stores weights below the checkpoint
+# precision (bfp4 routed experts, tests/test_optimized_decoder.py) is then held to the functional bars against its own
+# quantized model; each check also prints its numbers against the checkpoint reference (the quantization delta,
+# QDELTA). Empty here: the checkpoint reference.
+QUANT_REF = {}
+CKPT_Y = {}  # data_ptr of a quantized reference y -> (that y, the checkpoint reference y): the quantization delta
+QDELTA = []  # (tag, delta PCC, update rms ratio) of every check against the checkpoint reference (QUANT_REF set)
 SWAPS = []  # (tag, delta PCC vs y_swap, update rms ratio vs y_swap, HF margin) of every token that matched y_swap
 MOE_TOKENS = []  # one entry per MoE decode token (HF margin known) of the running test
 SUITE = {"swaps": 0, "moe_tokens": 0}
@@ -85,6 +99,13 @@ pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs 
 def suite_swap_cap():
     """Module-level y_swap cap, checked once at teardown (a running check fails early on a chance cluster)."""
     yield
+    if QDELTA:
+        d = min(q[1] for q in QDELTA)
+        r = [q[2] for q in QDELTA]
+        print(
+            f"quantization delta (port vs the checkpoint reference, {len(QDELTA)} checks): min delta PCC {d:.6f}, "
+            f"update rms ratio {min(r):.4f} .. {max(r):.4f}"
+        )
     if SUITE["moe_tokens"]:
         suite_cap = max(SWAP_SUITE_MIN, int(SWAP_SUITE_FRAC * SUITE["moe_tokens"]))
         print(f"module y_swap matches {SUITE['swaps']} of {SUITE['moe_tokens']} MoE decode tokens (cap {suite_cap})")
@@ -96,6 +117,7 @@ def decode_scale_mean():
     """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
     DECODE_RATIOS.clear()
     MOE_TOKENS.clear()
+    CKPT_Y.clear()
     n_swaps = len(SWAPS)
     yield
     swaps = len(SWAPS) - n_swaps
@@ -199,13 +221,33 @@ def make_ref(req, r, decode_rows):
     x = (r["x"] if "x" in r else req["x"]).float().reshape(n, H4)
     margin = r.get("route_margin")
     swap = None
+    rows = []
     if margin is not None and req["weights"] == "real":
         m = margin.reshape(-1).float()
         rows = sorted({int(i) for i in decode_rows if float(m[i]) < NEAR_TIE})
+    y = r["y"].float().reshape(n, H4)
+    if QUANT_REF and margin is not None:  # MoE layer: the quantization-aware reference (router margins unchanged)
+        rq = quant_reference(req, r, QUANT_REF)
+        swap = quant_reference(req, r, QUANT_REF, rows) if rows else None
+        if isinstance(rq, DryRunResult) or isinstance(swap, DryRunResult):
+            return _DryRef()
+        yq = rq["y"].float().reshape(n, H4)
+        CKPT_Y[yq.untyped_storage().data_ptr()] = (yq, y)
+        y = yq
+    elif rows:
         swap = flip_reference(req, rows)
         if isinstance(swap, DryRunResult):
             return _DryRef()
-    return Ref((x, r["y"].float().reshape(n, H4)), margin, swap)
+    return Ref((x, y), margin, swap)
+
+
+def _ckpt_view(y):
+    """The checkpoint reference rows of a (view of a) quantized reference y, or None."""
+    ent = CKPT_Y.get(y.untyped_storage().data_ptr())
+    if ent is None or not y.is_contiguous():
+        return None
+    off = y.storage_offset()
+    return ent[1].reshape(-1)[off : off + y.numel()].reshape(y.shape)
 
 
 class _DryRef(tuple):
@@ -258,6 +300,11 @@ def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y
     note = f" (HF router margin {margin:.1e})" if margin is not None else ""
     d, f, r, ok = stats(y)
     print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+    yc = _ckpt_view(y) if CKPT_Y else None
+    if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+        dc, _, rc, _ = stats(yc)
+        QDELTA.append((tag, dc, rc))
+        print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
     if token and margin is not None:
         MOE_TOKENS.append(tag)
     if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
@@ -334,15 +381,16 @@ def test_synthetic_weights(mesh, rd, kind):
         from models.autoports.zai_org_glm_5_3_flash.tests.harness import STATS
 
         n = 200
-        r = hf_layer_reference(
-            {
-                "layer": layer,
-                "weights": {"synthetic": 0, "stats": str(STATS)},
-                "x": synthetic_stream(layer, 2, n + 3),
-                "segments": [n, 1, 1, 1],
-                "taps": True,
-            }
-        )
+        req = {
+            "layer": layer,
+            "weights": {"synthetic": 0, "stats": str(STATS)},
+            "x": synthetic_stream(layer, 2, n + 3),
+            "segments": [n, 1, 1, 1],
+            "taps": True,
+        }
+        r = hf_layer_reference(req)
+        if QUANT_REF and not isinstance(r, DryRunResult):
+            r = quant_reference(req, r, QUANT_REF, taps=True)
         fin = r["taps"]["ffn_in"].reshape(n, -1)
         fout = r["taps"]["ffn_out"].float().reshape(n, -1)
         rows = 256

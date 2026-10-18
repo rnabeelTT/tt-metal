@@ -115,7 +115,16 @@ std::array<Tensor, 3> mhc_split_sinkhorn(
     if (const char* mc = std::getenv("MHC_MAX_CORES"); mc != nullptr) {
         max_cores = static_cast<uint32_t>(std::atoi(mc));
     }
-    auto operation_attributes = OperationType::operation_attributes_t{n, sinkhorn_iters, eps, max_cores};
+    // MHC_SINKHORN_PERM_FIDELITY (default 4 = HiFi4; 3 = HiFi3): fidelity of the permutation-sum matmuls. Hashed.
+    uint32_t perm_fidelity = 4;
+    if (const char* pf = std::getenv("MHC_SINKHORN_PERM_FIDELITY"); pf != nullptr) {
+        perm_fidelity = static_cast<uint32_t>(std::atoi(pf));
+    }
+    TT_FATAL(
+        perm_fidelity >= 2 && perm_fidelity <= 4,
+        "MHC_SINKHORN_PERM_FIDELITY must be 2, 3 or 4, got {}",
+        perm_fidelity);
+    auto operation_attributes = OperationType::operation_attributes_t{n, sinkhorn_iters, eps, max_cores, perm_fidelity};
     auto tensor_args = OperationType::tensor_args_t{mixes, consts};
     return ttnn::device_operation::launch<OperationType>(operation_attributes, tensor_args);
 }

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Diagnostic (stage-1 review #1, P2 "output-scale"): where does the routed-MoE output scale deficit come from?
 
-On one layer's real weights and MoE-input rows drawn from the real stream statistics (as tools/moe_route_probe.py
---stream), compare
+On one layer's real weights and MoE-input rows drawn per channel from the recorded statistics of the real input
+stream (synthetic draws, tests/test_functional_decoder.synthetic_stream; not recorded activations), compare
   ref      torch MoE with the checkpoint weights (fp32 math)
   ref_q8   the same with every expert / shared weight passed through the device block-float conversion
            (ttnn.from_torch(W^T, bfloat8_b, TILE) -> to_torch: the exact host packing the port uses)
@@ -11,7 +11,10 @@ On one layer's real weights and MoE-input rows drawn from the real stream statis
   tt       the port's MoE (Qwen35MoEOptimized, functional-decoder precision)
 and report RMS ratios and PCC: tt/ref vs ref_q8/ref separates conversion loss from device compute.
 
-usage: python tools/moe_scale_probe.py --layer 4 --rows 128 [--mode decode]"""
+usage: python tools/moe_scale_probe.py --layer 4 --rows 128 [--mode decode]
+       ... --policy opt --modes prefill,decode,decode1 --fidelities LoFi,HiFi3,HiFi4
+         (decode: 32-row tiles, the grouped path; decode1: one row per call, the B=1 gather path; each fidelity swaps
+          the routed compute kernel config of the one built layer)"""
 
 import argparse
 
@@ -56,6 +59,10 @@ def main():
     ap.add_argument("--skip-ref", action="store_true", help="TT only (reuse the printed reference numbers)")
     ap.add_argument("--policy", default=None, help="MoE policy of a tt/optimized_decoder.CANDIDATES entry")
     ap.add_argument("--mode", default="prefill", choices=("prefill", "decode"), help="MoE path (decode: 32-row tiles)")
+    ap.add_argument("--modes", default=None, help="comma list of prefill / decode / decode1 (overrides --mode)")
+    ap.add_argument(
+        "--fidelities", default=None, help="comma list of routed math fidelities (LoFi, HiFi2, HiFi3, HiFi4)"
+    )
     a = ap.parse_args()
     rd = CheckpointReader()
     sd = rd.layer_state(a.layer)
@@ -96,29 +103,55 @@ def main():
         )
         tx = ttnn.from_torch(x.reshape(1, 1, a.rows, 4096), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh)
         sh = ttnn.to_torch(moe._shared(tx)).reshape(a.rows, 4096).float()
-        if a.mode == "prefill":
-            y = ttnn.to_torch(moe.forward(tx, mode="prefill")).reshape(a.rows, 4096).float()
-        else:  # decode path: one 32-row tile of users per call (rows % 32 == 0)
+
+        def run(mode):
+            if mode == "prefill":
+                return ttnn.to_torch(moe.forward(tx, mode="prefill")).reshape(a.rows, 4096).float()
+            step = 32 if mode == "decode" else 1  # decode: one 32-row tile of users per call; decode1: one user
             ys = []
-            for r0 in range(0, a.rows, 32):
+            for r0 in range(0, a.rows, step):
                 xt = ttnn.from_torch(
-                    x[r0 : r0 + 32].reshape(1, 1, 32, 4096), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh
+                    x[r0 : r0 + step].reshape(1, 1, step, 4096),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh,
                 )
-                ys.append(ttnn.to_torch(moe.forward(xt, mode="decode")).reshape(32, 4096).float())
-            y = torch.cat(ys)
-        rt = y - sh
-        # per-row routed scale (decode checks are single rows)
-        rr = rt.norm(dim=-1) / ref_r.norm(dim=-1)
-        print(f"per-row routed rms ratio: mean {rr.mean():.4f} min {rr.min():.4f} max {rr.max():.4f}")
-        print(
-            f"tt vs ref:    routed rms {rat(rt, ref_r):.4f} PCC {pcc(rt, ref_r):.6f}; shared rms {rat(sh, ref_s):.4f} PCC {pcc(sh, ref_s):.6f}"
-        )
-        print(
-            f"tt vs ref_q8: routed rms {rat(rt, q8_r):.4f} PCC {pcc(rt, q8_r):.6f}; shared rms {rat(sh, q8_s):.4f} PCC {pcc(sh, q8_s):.6f}"
-        )
-        print(
-            f"tt vs ref_q4: routed rms {rat(rt, q4_r):.4f} PCC {pcc(rt, q4_r):.6f}; shared rms {rat(sh, q4_s):.4f} PCC {pcc(sh, q4_s):.6f}"
-        )
+                ys.append(ttnn.to_torch(moe.forward(xt, mode="decode")).reshape(step, 4096).float())
+            return torch.cat(ys)
+
+        modes = a.modes.split(",") if a.modes else [a.mode]
+        fids = a.fidelities.split(",") if a.fidelities else [None]
+        for fid in fids:
+            if fid is not None:
+                moe.routed_ckc = ttnn.init_device_compute_kernel_config(
+                    mesh.arch(),
+                    math_fidelity=getattr(ttnn.MathFidelity, fid),
+                    math_approx_mode=False,
+                    fp32_dest_acc_en=True,
+                    packer_l1_acc=False,
+                )
+            for mode in modes:
+                y = run(mode)
+                rt = y - sh
+                tag = f"[{mode} routed fidelity {fid or opt.routed_fidelity}]"
+                # per-row routed scale (decode checks are single rows)
+                rr = rt.norm(dim=-1) / ref_r.norm(dim=-1)
+                rq = rt.norm(dim=-1) / q4_r.norm(dim=-1)
+                print(
+                    f"{tag} per-row routed rms ratio vs ref: mean {rr.mean():.4f} min {rr.min():.4f} max {rr.max():.4f}"
+                )
+                print(
+                    f"{tag} per-row routed rms ratio vs ref_q4: mean {rq.mean():.4f} min {rq.min():.4f} max {rq.max():.4f}"
+                )
+                print(
+                    f"{tag} tt vs ref:    routed rms {rat(rt, ref_r):.4f} PCC {pcc(rt, ref_r):.6f}; shared rms {rat(sh, ref_s):.4f} PCC {pcc(sh, ref_s):.6f}"
+                )
+                print(
+                    f"{tag} tt vs ref_q8: routed rms {rat(rt, q8_r):.4f} PCC {pcc(rt, q8_r):.6f}; shared rms {rat(sh, q8_s):.4f} PCC {pcc(sh, q8_s):.6f}"
+                )
+                print(
+                    f"{tag} tt vs ref_q4: routed rms {rat(rt, q4_r):.4f} PCC {pcc(rt, q4_r):.6f}; shared rms {rat(sh, q8_s):.4f} PCC {pcc(sh, q8_s):.6f}"
+                )
     finally:
         ttnn.close_mesh_device(mesh)
 

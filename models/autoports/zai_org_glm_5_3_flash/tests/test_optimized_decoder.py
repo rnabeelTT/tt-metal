@@ -37,11 +37,18 @@ def _decoder_cls():
 
 
 _suite.DECODER_CLS = _decoder_cls()
-# bfp4 routed experts: the MoE layers are held to the bfp4 quantization floor, measured on the routed output itself
-# (tools/moe_scale_probe.py --policy opt, layer 4: the bfp4-rounded torch reference vs the checkpoint weights PCC 0.9826,
-# rms 1.0275; the port vs that reference PCC 0.99997, rms 0.995). Layer 0 (dense MLP) keeps the functional bars.
+# Reference: the quantization-aware HF layer (review #1 P1-2). The MoE layers' reference rounds the weights that the
+# policy stores below bf16 (routed experts bfp4, shared expert bfp8: OptConfig.quant_spec) exactly as the port's host
+# packing does (tests/hf_ref/hf_quant_ref.py, bfp.py; tools/bfp_check.py: bit-exact vs ttnn), and the functional bars
+# apply unchanged (no BAR_OVERRIDES). Each MoE check also prints its numbers against the checkpoint reference (the bfp4
+# quantization delta, summarized at module teardown).
+# GLM53_REF_QUANT=0: the checkpoint reference with the earlier bfp4 bar shift instead (every PCC bar of the MoE layers
+# down by 0.015, sequence scale 1 +- 0.03, token scale 1 +- 0.06; kept for comparison only).
 _opt = CANDIDATES[os.environ["GLM53_OPT"]] if os.environ.get("GLM53_OPT") else SELECTED
-if _opt.moe.routed_gate_up_dtype == ttnn.bfloat4_b:
+if os.environ.get("GLM53_REF_QUANT", "1") != "0":
+    _suite.QUANT_REF.update(_opt.quant_spec())
+    print(f"optimized suite: quantization-aware reference {_suite.QUANT_REF}")
+elif _opt.moe.routed_gate_up_dtype == ttnn.bfloat4_b:
     _suite.BAR_OVERRIDES.update(
         {layer: {"delta": 0.98, "seq": 0.03, "token": 0.06} for k, layer in _suite.KINDS.items() if k.endswith("moe")}
     )
@@ -56,3 +63,21 @@ globals().update({k: v for k, v in vars(_suite).items() if k.startswith("test_")
 
 def test_suite_runs_optimized_decoder():
     assert issubclass(_suite.DECODER_CLS, OptimizedDecoder)
+
+
+def test_policy_reached_weights(mesh, rd):
+    """Hard check of the policy (review #1, the OptConfig field-order bug): the built kda_moe / dsa_moe layers hold the
+    policy's weight dtypes and routed / shared compute fidelity (a policy silently running bfp8 experts fails here)."""
+    for kind in ("kda_moe", "dsa_moe"):
+        dec = _suite.get_layer(mesh, rd, _suite.KINDS[kind])
+        moe, m = dec.mlp, _opt.moe
+        assert moe.up_gate.dtype == m.routed_gate_up_dtype, (moe.up_gate.dtype, m.routed_gate_up_dtype)
+        assert moe.down.dtype == m.routed_down_dtype, (moe.down.dtype, m.routed_down_dtype)
+        assert moe.prec.routed_fidelity == m.routed_fidelity and moe.prec.shared_fidelity == m.shared_fidelity
+        assert moe.shared_w2.dtype == m.shared_dtype
+        if kind == "kda_moe":
+            w = dec.attn.weights
+            assert w.input_projection.dtype == _opt.kda_in_dtype and w.output_projection.dtype == _opt.kda_out_dtype
+        else:
+            assert dec.attn.w_uk.dtype == _opt.dsa_bmm_dtype and dec.attn.bmm_reuse == _opt.dsa_bmm_reuse
+        print(f"{kind}: policy {_opt.describe()} reached the weights")

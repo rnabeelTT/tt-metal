@@ -67,6 +67,50 @@
     "trace_region_bytes_needed": 47972352,
     "dram_budget_note": "E192 weights at bfp4 experts are ~28.5 GiB of the 31.9 GiB per die; the 11 DSA layers' latent cache (512 x 2 B per token per layer) and the 34 KDA states per slot share the remainder. Any reduction below the advertised context will be recorded here with the byte calculation and a capacity probe."
   },
+  "multichip_decoder": {
+    "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py; stage-4 path MCOpts(), code default DEFAULT_MC)",
+    "status": "measured (stage 4, review #1 rework 2026-10-17)",
+    "dsa_cache_layouts": {
+      "replicated (default)": "latent [NB x 128, 512] bf16 + pool keys replicated on every die: 11 x (1024 + 64) = 11,968 B per token per die",
+      "block-sharded (MCOpts.dsa_shard / GLM53_DSA_SHARD=1, tt/dsa_shard.py)": "global block b on die b % 4 (local block b // 4), rows 544 wide (latent + 32 control columns); pool keys, indexer and selection replicated: 11 x (544 x 2 / 4 + 64) = 3,696 B per token per die"
+    },
+    "per_die": {
+      "weights_and_model_level_after_load_1slot_bytes": 32127576576,
+      "kda_state_per_slot_bytes": 35651584,
+      "kda_state_note": "34 layers x 16 local heads x 128 x 128 fp32; max_batch 1 holds 2 slots (padding slot, MultichipKDA)",
+      "trace_region_bytes": 67108864,
+      "reserve_note": "workspace kept free besides the pool: 700 MiB (replicated probe), 900 MiB (sharded probe; 335 MB still free at its prefill peak)"
+    },
+    "supported_context_per_slot_profile": {
+      "replicated": {
+        "1": 104448,
+        "4": 94208,
+        "8": 81920,
+        "16": 57344,
+        "32": 8192,
+        "source": "doc/full_model/memory_budget.json recommended_profiles_anchored_to_capacity_probe"
+      },
+      "block_sharded": {
+        "1": 281344,
+        "note": "measured at 1 slot; other slot counts scale as (pool bytes - KDA state per extra slot) / 3,696 B, not probed"
+      }
+    },
+    "capacity_evidence_block_sharded": {
+      "probe": "GLM53_TP=4 GLM53_DSA_SHARD=1 tools/memory_probe.py capacity --trace-region 67108864 --workspace-mib 900 --max-context 284672 (~/glm53-flash-bringup/scripts/s4r_cap.sh)",
+      "result": "doc/multichip_decoder/dsa_shard/capacity/capacity_probe_1slot_shard.json (+ capacity_probe.log)",
+      "what_ran": "full 45-layer model, serving path (Glm53Generator(defer_caches=True), 1 slot): free after load 1,984,045,568 B per die -> 2199 blocks (473,088 B per block over the 11 DSA layers, measured pool 1,230,837,248 B) -> warm + traced decode capture -> one 281,283-token prompt (non-aligned) prefilled in 426.9 s -> 24 traced decode steps at 281,283..281,306",
+      "check": "1500-token natural-text passage repeated; greedy continuation copied it 24/24 (copy_accuracy 1.0)",
+      "dram_at_peak": "33,776,889,856 of 34,111,622,144 B allocatable per die (335 MB free at the prefill peak)"
+    },
+    "cost_block_sharded": "decode +409 .. 422 us per DSA layer per step (one-layer traced replay wall, 1 and 8 slots; ~4.6 ms per token over 11 DSA layers); prefill within noise at 6K-9K tokens (doc/multichip_decoder/README.md)",
+    "capability_reduction": {
+      "from": 1048576,
+      "to_replicated": 104448,
+      "to_block_sharded": 281344,
+      "reason": "device DRAM per die after weights (32.13 GB of 34.11 GB allocatable). Block-sharded is the largest measured layout; 1,048,576 tokens need 3.9 GB of DSA cache per die even sharded (3,696 B x 1M) vs ~1.25 GB available. Further steps (memory_budget.json path_to_1M): shard the pool keys too (2,992 B), a bfp8 / fp8 latent, host embedding lookup."
+    },
+    "doc": "doc/multichip_decoder/README.md (Memory, Block-sharded DSA cache)"
+  },
   "optimized_multichip_decoder": {
     "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py, MCOpts / DEFAULT_MC)",
     "per_die_state_bytes": {
@@ -80,7 +124,8 @@
     "supported_context": "full_model.supported_context (measured 1-slot limit 104,448 tokens with this decoder's state; per-slot profiles there)",
     "capability_reduction": null,
     "cache_dtype_candidates": "bfp8 latent impossible: sparse_sdpa takes ROW_MAJOR bf16 or FP8_E4M3 KV only (bfp8 is a tile format). FP8_E4M3 halves the latent (3 mantissa bits) but needs both scatter_rows write paths cast to FP8 and a model-accuracy check: stage-8 datatype-sweep item. The path to the advertised 1,048,576 is the sequence-sharded latent (stage-4 rework: MCOpts.dsa_shard).",
-    "doc": "doc/optimized_multichip_decoder/README.md (Memory and context contract)"
+    "doc": "doc/optimized_multichip_decoder/README.md (Memory and context contract)",
+    "status": "unchanged from the multichip decoder (see multichip_decoder; the block-sharded DSA cache is an MCOpts option of both)"
   },
   "supported_context": 104448,
   "limiting_reason": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin",
@@ -96,6 +141,6 @@
     "to": 104448,
     "reason": "hard physical limit: DRAM per die (byte budget doc/full_model/memory_budget.json; the advertised 1,048,576 tokens need 12.5 GB of DSA cache per die at the replicated layout)",
     "setting": "Glm53Generator / vLLM: max_num_seqs 1, max_model_len 104448 (block_size 128), GLM53_TRACE_REGION 67108864; other slot counts: doc/full_model/memory_budget.json recommended_profiles_anchored_to_capacity_probe",
-    "path_to_advertised": "sequence-sharded DSA latent pool over the 4 dies (~4x) + bfp8 latent + host embedding lookup: ~1M tokens at 1 slot (memory_budget.json path_to_1M); not implemented"
+    "path_to_advertised": "block-sharded DSA latent implemented as an option (MCOpts.dsa_shard): 281,344 tokens at 1 slot measured (multichip_decoder.capacity_evidence_block_sharded); further: pool-key sharding, bfp8/fp8 latent, host embedding lookup (memory_budget.json path_to_1M)"
   }
 }

@@ -44,7 +44,8 @@ def open_mesh(trace_region_size: int = 256 << 20):
         kw["worker_l1_size"] = int(os.environ["GLM53_WORKER_L1_SIZE"])
     tp = mesh_cols()
     if tp > 1:
-        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+        # GLM53_FABRIC=FABRIC_1D_RING: the ring fabric (dateline deadlock avoidance) for the stage-5 Ring CCL A/B
+        ttnn.set_fabric_config(getattr(ttnn.FabricConfig, os.environ.get("GLM53_FABRIC", "FABRIC_1D")))
     return ttnn.open_mesh_device(ttnn.MeshShape(1, tp), l1_small_size=24576, trace_region_size=trace_region_size, **kw)
 
 
