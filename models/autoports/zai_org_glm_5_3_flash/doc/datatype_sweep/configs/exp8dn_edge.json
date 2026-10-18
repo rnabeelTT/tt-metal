@@ -1,0 +1,14 @@
+{
+ "id": "exp8dn_edge",
+ "description": "routed expert down projections bfp8 (HiFi2) in the first and last MoE layers (3, 44); gate/up stay bfp4",
+ "moe_layer_exceptions": {
+  "3": {
+   "routed_down_dtype": "bfp8",
+   "routed_fidelity": "HiFi2"
+  },
+  "44": {
+   "routed_down_dtype": "bfp8",
+   "routed_fidelity": "HiFi2"
+  }
+ }
+}

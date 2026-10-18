@@ -6,8 +6,10 @@ The shipped policy is tt/optimized_decoder.SELECTED (per-layer weight dtypes and
 .DEFAULT_MC (decode programs, CCL) and the model-level constants of tt/model.py (LM head bfp8 at HiFi2, bf16 residual,
 bf16 DSA latent pool). doc/datatype_sweep/selected_precision_config.json records the complete selected policy.
 
-GLM53_PRECISION=<path to a JSON candidate> applies a candidate at construction (Glm53Model.__init__, so the generator,
-the readiness runners and the vLLM adapter all consume it); unset or empty = the shipped policy, no override. Fields:
+GLM53_PRECISION selects the policy at construction (Glm53Model.__init__ / MultichipDecoder.from_state_dict, so the
+generator, the readiness runners and the vLLM adapter all consume it): unset or empty = the stage-8 selected policy
+doc/datatype_sweep/selected_precision_config.json (the model default); "none" / "shipped" = the stage-7 policy (no
+override); <path> = another candidate JSON. Fields:
 
   id                       candidate id (logged and recorded)
   requant                  {group: {"dtype": "bfp4" | "bfp8", "layers": "all" | "inner" | [i, ...]}}: host round-to-
@@ -43,6 +45,8 @@ from loguru import logger
 import ttnn
 
 ENV = "GLM53_PRECISION"
+SELECTED_CONFIG = Path(__file__).resolve().parents[1] / "doc" / "datatype_sweep" / "selected_precision_config.json"
+_NONE = ("none", "shipped", "off", "0")
 _DT = {"bfp4": ttnn.bfloat4_b, "bfp8": ttnn.bfloat8_b, "bf16": ttnn.bfloat16}
 _FID = {
     "LoFi": ttnn.MathFidelity.LoFi,
@@ -87,6 +91,13 @@ def requant(t: ttnn.Tensor, dtype) -> ttnn.Tensor:
 _INSTANCES: dict = {}
 
 
+def _rq_version() -> str:
+    import hashlib
+    import inspect
+
+    return hashlib.sha256(inspect.getsource(requant).encode()).hexdigest()[:8]
+
+
 @dataclass
 class PrecisionOverrides:
     id: str = "shipped"
@@ -98,6 +109,7 @@ class PrecisionOverrides:
     kv_latent_dtype: str = "bf16"
     source: str | None = None
     applied: list = field(default_factory=list)  # (layer or "model", group, what) records of the runtime changes
+    _cache: object = field(default=None, repr=False)  # WeightCache scope of the re-quantized tensors (current layer)
 
     @classmethod
     def from_env(cls) -> "PrecisionOverrides":
@@ -110,10 +122,12 @@ class PrecisionOverrides:
 
     @classmethod
     def _load(cls, p: str) -> "PrecisionOverrides":
-        if not p:
+        if p.lower() in _NONE:
             return cls()
+        if not p:  # the model default: the stage-8 selected policy
+            p = str(SELECTED_CONFIG)
         d = json.loads(Path(p).read_text())
-        known = {f.name for f in dataclasses.fields(cls)} - {"source", "applied"}
+        known = {f.name for f in dataclasses.fields(cls)} - {"source", "applied", "_cache"}
         unknown = set(d) - known - {"description", "notes", "policy"}
         if unknown:
             raise ValueError(f"{p}: unknown precision override fields {sorted(unknown)}")
@@ -121,7 +135,10 @@ class PrecisionOverrides:
         for g in list(o.requant) + list(o.fidelity):
             if g not in GROUPS:
                 raise ValueError(f"{p}: unknown group {g!r} (groups {GROUPS})")
-        logger.warning(f"{ENV}={p}: precision candidate {o.id!r} overrides the shipped policy")
+        if p == str(SELECTED_CONFIG):
+            logger.info(f"precision policy: stage-8 selected {o.id!r} ({p}; {ENV}=none for the stage-7 policy)")
+        else:
+            logger.warning(f"{ENV}={p}: precision candidate {o.id!r} overrides the selected policy")
         return o
 
     @property
@@ -184,8 +201,30 @@ class PrecisionOverrides:
         return None if (cache is not None and self.layer_has_weight_exception(i)) else cache
 
     # ------------------------------------------------------------------------------------------- post-load
-    def apply_layer(self, dec, i: int, first: int, last: int):
-        """Re-quantize / re-fidelity the groups of one built decoder layer (before warm-up and trace capture)."""
+    def _rq(self, t, dtype, key: str):
+        """requant(t, dtype) through the weight cache: the re-quantized device tensor is stored under
+        <layer or top>/prec-<requant source digest>/<key>-<dtype>.tensorbin, so a warm load reads the final tensor (the
+        shipped tensor it replaces is still loaded first and freed). No cache: re-quantize on every load."""
+        c = self._cache
+        if c is None:
+            return requant(t, dtype)
+        name = f"{key}-{str(dtype).split('.')[-1].lower()}"
+        if c.has(name):
+            try:
+                out = c.load(name)
+                ttnn.deallocate(t)
+                return out
+            except RuntimeError as e:  # corrupt file: rebuild it
+                logger.warning(f"precision cache: {c.file(name)} unreadable ({e}); re-quantizing")
+        return c.store(name, requant(t, dtype))
+
+    def _scope(self, cache, scope: str):
+        self._cache = cache.sub(f"{scope}/prec-{_rq_version()}") if cache is not None else None
+
+    def apply_layer(self, dec, i: int, first: int, last: int, cache=None):
+        """Re-quantize / re-fidelity the groups of one built decoder layer (before warm-up and trace capture).
+        cache: the model's WeightCache (root scope) or None."""
+        self._scope(cache, f"layer_{i}")
         mesh = dec.mesh if hasattr(dec, "mesh") else dec.attn.mesh
         attn = dec.attn._inner if hasattr(dec.attn, "_inner") else dec.attn
         mlp = dec.mlp._inner if hasattr(dec.mlp, "_inner") else dec.mlp
@@ -196,8 +235,8 @@ class PrecisionOverrides:
         if dec.mlp_kind == "moe":
             dt = self.requant_dtype("shared_expert", i, first, last)
             if dt is not None:
-                mlp.shared_packed = requant(mlp.shared_packed, dt)
-                mlp.shared_w2 = requant(mlp.shared_w2, dt)
+                mlp.shared_packed = self._rq(mlp.shared_packed, dt, "shared_packed")
+                mlp.shared_w2 = self._rq(mlp.shared_w2, dt, "shared_w2")
                 self.applied.append((i, "shared_expert", f"requant {dt}"))
             self.applied.append((i, "moe", f"routed {mlp.prec.routed_fidelity} shared {mlp.prec.shared_fidelity}"))
         else:
@@ -215,7 +254,7 @@ class PrecisionOverrides:
         for g, name in (("kda_in", "input_projection"), ("kda_out", "output_projection")):
             dt = self.requant_dtype(g, i, first, last)
             if dt is not None:
-                new[name] = requant(getattr(w, name), dt)
+                new[name] = self._rq(getattr(w, name), dt, f"kda_{name}")
                 self.applied.append((i, g, f"requant {dt}"))
         if new:
             nw = dataclasses.replace(w, **new)
@@ -233,7 +272,13 @@ class PrecisionOverrides:
             self.applied.append((i, "kda_out", f"decode fidelity {f_out}"))
 
     def _apply_dsa(self, attn, mesh, i, first, last):
-        if self.kv_latent_dtype != "bf16":
+        if self.kv_latent_dtype != "bf16" and getattr(attn, "dsa_shard", False):
+            # tt/dsa_shard.py has no fp8 pool: the block-sharded cache keeps its bf16 latent
+            logger.warning(
+                f"layer {i}: kv_latent_dtype {self.kv_latent_dtype} ignored with the block-sharded DSA cache"
+            )
+            self.applied.append((i, "kv_latent", "bf16 (dsa_shard)"))
+        elif self.kv_latent_dtype != "bf16":
             assert self.kv_latent_dtype == "fp8_e4m3", self.kv_latent_dtype
             assert attn.latent is None, "the latent pool dtype must be set before allocate_decode_state"
             attn.latent_dtype = ttnn.fp8_e4m3  # tt/dsa.py: ROW_MAJOR fp8 pool, sparse_sdpa kv_format FP8_E4M3
@@ -241,9 +286,9 @@ class PrecisionOverrides:
         dt = self.requant_dtype("dsa_proj", i, first, last)
         if dt is not None:
             A, B = attn._pack  # q_a | kv_a pack (serves prefill and decode: ds_shared), indexer pack (bf16, kept)
-            A.w = requant(A.w, dt)
-            attn.w_q_b = requant(attn.w_q_b, dt)
-            attn.w_o = requant(attn.w_o, dt)
+            A.w = self._rq(A.w, dt, "dsa_pack_a")
+            attn.w_q_b = self._rq(attn.w_q_b, dt, "dsa_w_q_b")
+            attn.w_o = self._rq(attn.w_o, dt, "dsa_w_o")
             self.applied.append((i, "dsa_proj", f"requant {dt} (q_a|kv_a pack, q_b, o_proj)"))
         f = self.fid("dsa_proj", i, first, last)
         if f is not None:
@@ -269,9 +314,10 @@ class PrecisionOverrides:
             self.applied.append((i, "dsa_proj", f"decode fidelity {f} (q_a|kv_a, q_b, o_proj)"))
 
     def apply_model(self, model, first: int, last: int):
+        self._scope(getattr(model, "weight_cache", None), "top")
         dt = self.requant_dtype("lm_head", -1, first, last)
         if dt is not None:
-            model.lm_head = requant(model.lm_head, dt)
+            model.lm_head = self._rq(model.lm_head, dt, "lm_head")
             self.applied.append(("model", "lm_head", f"requant {dt}"))
         f = self.fid("lm_head", -1, first, last)
         if f is not None:
@@ -279,7 +325,7 @@ class PrecisionOverrides:
             self.applied.append(("model", "lm_head", f"fidelity {f}"))
 
     def record(self) -> dict:
-        d = dataclasses.asdict(self)
+        d = {f.name: getattr(self, f.name) for f in dataclasses.fields(self) if f.name != "_cache"}
         d["applied"] = [list(map(str, a)) for a in self.applied]
         return d
 

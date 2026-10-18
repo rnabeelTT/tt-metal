@@ -1,0 +1,58 @@
+{
+  "reference": "/home/raahem/glm53-flash-bringup/refs/s8/readiness_aime24_chat_p1.refpt",
+  "format": "readiness_v1 (readiness_check.schema.save_reference)",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 (copied from zai-org/GLM-5.3-Flash at the revision above)",
+  "prompt_source": "aime24",
+  "aime24_prompts_file": "/home/raahem/tt-metal/models/demos/deepseek_v3/demo/aime_under_8k_prompts.json",
+  "aime24_prompt_index": 1,
+  "chat_template": true,
+  "add_generation_prompt": true,
+  "gen_len": 100,
+  "top_k": 100,
+  "num_entries": 1,
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --mode readiness --threads 8 --expert-cache-gb 32 --gen-len 100 --top-k 100 --aime24-prompt-index 1 --output /home/raahem/glm53-flash-bringup/refs/s8/readiness_aime24_chat_p1.refpt",
+  "generator": "tools/hf_full_ref.py: mirror of readiness_check.generate (aime24, --chat-template, greedy model.generate continuation, then batch-prefill teacher-forcing top-k); the stock script cannot load the model",
+  "note": "Routed experts are E192-masked (192 of 288 per MoE layer, mask autotrust/GLM5.3-Flash-E192-DGX-Spark, checkpoint renumbered 0..191, routers pruned to the kept rows) and FP8 e4m3 (block 128) weights are dequantized to bf16 (fp32 product, one rounding). Non-expert weights resident in bf16 (fp32: e_score_correction_bias, conv1d, dt_bias, A_log); experts dequantized lazily per forward step. HF Glm5NextTextModel, attn sdpa, experts eager, CPU.",
+  "stop_ids": [
+    154820
+  ],
+  "stop_ids_note": "as readiness_check.generate computes them (tokenizer eos + model.config.eos_token_id, which the composite Glm5NextConfig does not define); generation_config.json lists [154820, 154827, 154829]",
+  "prompt_tokens": 153,
+  "generated_tokens": 100,
+  "stopped_on_eos": false,
+  "completion_text": "Jen picks 4 distinct numbers from S = {1,2,...,10}. Then 4 numbers are randomly chosen from S.\n\nShe wins a prize if at least two of her numbers were among the randomly chosen numbers (i.e., at least 2 matches).\n\nShe wins the grand prize if all four of her numbers were the randomly chosen numbers (i.e., 4 matches).\n\nWe need P(grand prize | won a prize) = P(4 matches) / P(at least",
+  "full_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Jen enters a lottery by picking $4$ distinct numbers from $S=\\{1,2,3,\\cdots,9,10\\}.$ $4$ numbers are randomly chosen from $S.$ She wins a prize if at least two of her numbers were $2$ of the randomly chosen numbers, and wins the grand prize if all four of her numbers were the randomly chosen numbers. The probability of her winning the grand prize given that she won a prize is $\\tfrac{m}{n}$ where $m$ and $n$ are relatively prime positive integers. Find $m+n$.\nPlease reason step by step, and put your final answer within\\boxed\nAnswer:<|assistant|><think>Jen picks 4 distinct numbers from S = {1,2,...,10}. Then 4 numbers are randomly chosen from S.\n\nShe wins a prize if at least two of her numbers were among the randomly chosen numbers (i.e., at least 2 matches).\n\nShe wins the grand prize if all four of her numbers were the randomly chosen numbers (i.e., 4 matches).\n\nWe need P(grand prize | won a prize) = P(4 matches) / P(at least",
+  "teacher_forcing_top1_equals_greedy": 0.99,
+  "teacher_forcing_top5_contains_greedy": 1.0,
+  "decode_vs_tf_top1_mismatch_positions": [
+    13
+  ],
+  "timing": {
+    "build_s": 4.6,
+    "prefill_s": 291.6,
+    "decode_steps": 99,
+    "decode_s_per_token_mean": 10.6,
+    "decode_s_per_token_min": 6.56,
+    "decode_s_per_token_max": 19.27,
+    "generation_total_s": 1341.0,
+    "teacher_forcing_s": 340.1,
+    "threads": 8,
+    "expert_cache_gb": 32.0,
+    "expert_cache": {
+      "hits": 11732,
+      "misses": 35370,
+      "resident": 682,
+      "resident_gb": 31.97,
+      "load_s": 1385.3
+    },
+    "peak_rss_gb": 131.8
+  },
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "created": "2026-10-18T09:06:43+0000"
+}

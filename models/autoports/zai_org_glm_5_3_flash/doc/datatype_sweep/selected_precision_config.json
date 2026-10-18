@@ -1,0 +1,119 @@
+{
+ "id": "combo_a_kv",
+ "description": "Stage-8 selected precision policy of GLM-5.3-Flash (E192) on p300x2 TP4: the shipped stage-7 policy (optimized_decoder.SELECTED = opt_s5_pf, multichip_decoder.DEFAULT_MC) plus the overrides below. Consumed by tt/precision.PrecisionOverrides (GLM53_PRECISION unset = this file; GLM53_PRECISION=none = the stage-7 policy).",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ },
+ "kv_latent_dtype": "fp8_e4m3",
+ "policy": {
+  "base": {
+   "optimized_decoder.SELECTED": "opt_s5_pf",
+   "multichip_decoder.DEFAULT_MC": "stage-5 default (ag_persistent=False)",
+   "mesh": "(1, 4), TP4, FABRIC_1D"
+  },
+  "layer_range_note": "'inner' = layers 1-43: the first layer 0 (KDA + dense MLP) and the last layer 44 (KDA + MoE) keep bfp8; combo_a_all (bfp4 also on 0 / 44) failed teacher forcing",
+  "weights": {
+   "routed_experts_gate_up_down": {
+    "dtype": "bfp4",
+    "fidelity": "LoFi",
+    "layers": "3-44 (all MoE layers)",
+    "source": "SELECTED (host RTN at load)"
+   },
+   "shared_expert_gate_up_down": {
+    "dtype": "bfp4 (layers 3-43) / bfp8 (layer 44)",
+    "fidelity": "LoFi",
+    "layers": "3-44",
+    "source": "requant shared_expert + fidelity shared_expert"
+   },
+   "router": {
+    "dtype": "bf16",
+    "fidelity": "HiFi4",
+    "note": "never reduced: routing numerics"
+   },
+   "kda_input_projection": {
+    "dtype": "bfp4 (layers 1-43) / bfp8 (layers 0, 44)",
+    "decode_fidelity": "LoFi",
+    "prefill_fidelity": "KDA prefill kernels' own (HiFi4 recurrence)",
+    "layers": "34 KDA layers"
+   },
+   "kda_output_projection": {
+    "dtype": "bfp4 (layers 1-43) / bfp8 (layers 0, 44)",
+    "decode_fidelity": "LoFi",
+    "layers": "34 KDA layers"
+   },
+   "dsa_q_a_kv_a_pack_q_b_o_proj": {
+    "dtype": "bfp4 (all 11 DSA layers: 3, 7, ..., 43; none is the first / last layer)",
+    "decode_fidelity": "LoFi",
+    "prefill_fidelity": "HiFi4",
+    "layers": "11 DSA layers"
+   },
+   "dsa_w_uk_w_uv": {
+    "dtype": "bfp8",
+    "fidelity": "HiFi4"
+   },
+   "dsa_indexer_wq_b_wk_gate_weights": {
+    "dtype": "bf16",
+    "fidelity": "HiFi4",
+    "note": "index scores (fp32 output)"
+   },
+   "dense_mlp_layers_0_2": {
+    "dtype": "bfp8",
+    "decode_fidelity": "LoFi",
+    "prefill_fidelity": "HiFi4"
+   },
+   "lm_head": {
+    "dtype": "bfp4",
+    "fidelity": "LoFi"
+   },
+   "embedding": {
+    "dtype": "bf16"
+   },
+   "norms_mhc": {
+    "dtype": "bf16 / fp32 (mHC mixes, Sinkhorn)",
+    "fidelity": "HiFi4 (Sinkhorn permutation HiFi3, DEFAULT_MC)"
+   }
+  },
+  "activations_residual": "bf16 residual streams (4 mHC streams, hidden-sharded over TP4); fp32 mHC mix partials",
+  "ccl": "bf16 all-gathers / reduce-scatters of the residual (bfp8 CCL rejected: +0.47 ms); fp32 all-gather of mHC mix partials",
+  "kv_cache": {
+   "dsa_latent_pool": "fp8_e4m3 ROW_MAJOR rows (sparse_sdpa kv_format FP8_E4M3), 512 B per token per DSA layer",
+   "dsa_indexer_pool_keys": "bf16 TILE, 64 B per token per DSA layer",
+   "bytes_per_token_per_die": 6336,
+   "shipped_bytes_per_token_per_die": 11968,
+   "kda_recurrent_state": "fp32 per slot (unchanged)",
+   "block_sharded_cache": "GLM53_DSA_SHARD=1 keeps a bf16 latent (fp8 not implemented for tt/dsa_shard.py); warning logged"
+  },
+  "logits_sampling": "LM head bfp4 x bf16 activations, LoFi, fp32 accumulate; bf16 logits; on-device split greedy / top-k sampler unchanged",
+  "moe_routing": "sigmoid router bf16 weights HiFi4, bias + top-8 on device, routed_scaling 2.5 (unchanged)",
+  "runtime_flags": {
+   "GLM53_PRECISION": "unset = this file; 'none' = stage-7 policy; <path> = another candidate",
+   "GLM53_CACHE_DIR": "re-quantized tensors cached under <cache>/<layer>/prec-<digest>/"
+  }
+ }
+}

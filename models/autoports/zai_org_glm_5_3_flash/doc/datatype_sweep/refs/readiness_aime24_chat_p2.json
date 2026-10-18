@@ -1,0 +1,59 @@
+{
+  "reference": "/home/raahem/glm53-flash-bringup/refs/s8/readiness_aime24_chat_p2.refpt",
+  "format": "readiness_v1 (readiness_check.schema.save_reference)",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 (copied from zai-org/GLM-5.3-Flash at the revision above)",
+  "prompt_source": "aime24",
+  "aime24_prompts_file": "/home/raahem/tt-metal/models/demos/deepseek_v3/demo/aime_under_8k_prompts.json",
+  "aime24_prompt_index": 2,
+  "chat_template": true,
+  "add_generation_prompt": true,
+  "gen_len": 100,
+  "top_k": 100,
+  "num_entries": 1,
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --mode readiness --threads 8 --expert-cache-gb 32 --gen-len 100 --top-k 100 --aime24-prompt-index 2 --output /home/raahem/glm53-flash-bringup/refs/s8/readiness_aime24_chat_p2.refpt",
+  "generator": "tools/hf_full_ref.py: mirror of readiness_check.generate (aime24, --chat-template, greedy model.generate continuation, then batch-prefill teacher-forcing top-k); the stock script cannot load the model",
+  "note": "Routed experts are E192-masked (192 of 288 per MoE layer, mask autotrust/GLM5.3-Flash-E192-DGX-Spark, checkpoint renumbered 0..191, routers pruned to the kept rows) and FP8 e4m3 (block 128) weights are dequantized to bf16 (fp32 product, one rounding). Non-expert weights resident in bf16 (fp32: e_score_correction_bias, conv1d, dt_bias, A_log); experts dequantized lazily per forward step. HF Glm5NextTextModel, attn sdpa, experts eager, CPU.",
+  "stop_ids": [
+    154820
+  ],
+  "stop_ids_note": "as readiness_check.generate computes them (tokenizer eos + model.config.eos_token_id, which the composite Glm5NextConfig does not define); generation_config.json lists [154820, 154827, 154829]",
+  "prompt_tokens": 131,
+  "generated_tokens": 100,
+  "stopped_on_eos": false,
+  "completion_text": "This is a classic AIME problem. Let me solve it.\n\nLet $a$ = number owning exactly one thing, $b$ = number owning exactly two, $c$ = number owning exactly three, $d$ = number owning all four.\n\nWe know:\n- $a + b + c + d = 900$\n- $b = 437$, $c = 234$\n- Total count of items: $a + 2b + 3c + ",
+  "full_text": "[gMASK]<sop><|system|>Reasoning Effort: Max<|user|>Among the 900 residents of Aimeville, there are 195 who own a diamond ring, 367 who own a set of golf clubs, and 562 who own a garden spade. In addition, each of the 900 residents owns a bag of candy hearts. There are 437 residents who own exactly two of these things, and 234 residents who own exactly three of these things. Find the number of residents of Aimeville who own all four of these things.\nPlease reason step by step, and put your final answer within\\boxed\nAnswer:<|assistant|><think>This is a classic AIME problem. Let me solve it.\n\nLet $a$ = number owning exactly one thing, $b$ = number owning exactly two, $c$ = number owning exactly three, $d$ = number owning all four.\n\nWe know:\n- $a + b + c + d = 900$\n- $b = 437$, $c = 234$\n- Total count of items: $a + 2b + 3c + ",
+  "teacher_forcing_top1_equals_greedy": 0.99,
+  "teacher_forcing_top5_contains_greedy": 1.0,
+  "decode_vs_tf_top1_mismatch_positions": [
+    0,
+    83
+  ],
+  "timing": {
+    "build_s": 5.9,
+    "prefill_s": 270.1,
+    "decode_steps": 99,
+    "decode_s_per_token_mean": 10.68,
+    "decode_s_per_token_min": 5.96,
+    "decode_s_per_token_max": 24.94,
+    "generation_total_s": 1327.3,
+    "teacher_forcing_s": 357.0,
+    "threads": 8,
+    "expert_cache_gb": 32.0,
+    "expert_cache": {
+      "hits": 11831,
+      "misses": 34576,
+      "resident": 682,
+      "resident_gb": 31.97,
+      "load_s": 1392.0
+    },
+    "peak_rss_gb": 131.3
+  },
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "created": "2026-10-18T09:35:03+0000"
+}

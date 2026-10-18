@@ -1,0 +1,11 @@
+{
+ "id": "proj8_hifi2",
+ "description": "non-expert bfp8 projections at HiFi2 on decode rows (KDA in/out, DSA q_a|kv_a/q_b/o, dense MLP) and shared expert HiFi2",
+ "fidelity": {
+  "kda_in": "HiFi2",
+  "kda_out": "HiFi2",
+  "dsa_proj": "HiFi2",
+  "dense_mlp": "HiFi2",
+  "shared_expert": "HiFi2"
+ }
+}

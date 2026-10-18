@@ -1,0 +1,12 @@
+{
+ "id": "lm4_lofi",
+ "description": "LM head bfp4 (host RTN), LoFi",
+ "requant": {
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "lm_head": "LoFi"
+ }
+}

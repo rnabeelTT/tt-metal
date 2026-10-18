@@ -1,0 +1,33 @@
+{
+ "id": "combo_a_all",
+ "description": "combo_a extended to the first and last layers (0, 44)",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "all"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "all"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "all"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "all"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ }
+}

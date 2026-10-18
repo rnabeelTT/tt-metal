@@ -1,0 +1,656 @@
+{
+  "id": "shipped",
+  "args": {
+    "id": "shipped",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,extra,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r3",
+    "extra_refs": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r3/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r3/record.json"
+  },
+  "precision_env": "",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T10:14:50Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 90.86300563812256,
+  "precision": {
+    "id": "shipped",
+    "requant": {},
+    "fidelity": {},
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "bf16",
+    "source": null,
+    "applied": [
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4053108224,
+  "dram_free_per_bank": 210844544,
+  "dram_largest_free_block_per_bank": 209966976,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.92,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 92,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.784345698077232,
+      "e2e_t/s/u": 17.288040034197973,
+      "ttft_ms": 424.50418905355036,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.359808625886217,
+      "decode_t/s/u": 18.470808737808408
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "extra_refs": {
+    "readiness_aime24_chat_p1": {
+      "teacher_forcing": [
+        {
+          "top1": 0.98,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 98,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.77151680807583,
+          "e2e_t/s/u": 17.326467777079742,
+          "ttft_ms": 420.7403950858861,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.350753177888691,
+          "decode_t/s/u": 18.502068159134108
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.97,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 97,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    },
+    "readiness_aime24_chat_p2": {
+      "teacher_forcing": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.763771926984191,
+          "e2e_t/s/u": 17.34974965470633,
+          "ttft_ms": 412.9207779187709,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.350823326036334,
+          "decode_t/s/u": 18.50182560098374
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    }
+  },
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        46653,
+        46653
+      ],
+      "tokens_traced": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_eager": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_traced2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        13189,
+        13189
+      ],
+      "tokens_traced": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_eager": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_traced2": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        271,
+        271
+      ],
+      "tokens_traced": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_eager": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_traced2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1701346304,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 210.69843880832195,
+          "total_ms": 231.2082159332931
+        },
+        "warm": {
+          "dispatch_ms": 209.33349803090096,
+          "total_ms": 229.72396714612842
+        },
+        "host_logits_ms": 242.16363998129964,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 345.0283941347152,
+          "total_ms": 375.69996109232306
+        },
+        "warm": {
+          "dispatch_ms": 344.92172207683325,
+          "total_ms": 375.71845785714686
+        },
+        "host_logits_ms": 392.7942980080843,
+        "first_token": 19949
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 957.562900846824,
+          "total_ms": 1035.067874006927
+        },
+        "warm": {
+          "dispatch_ms": 957.9285718500614,
+          "total_ms": 1035.4395059403032
+        },
+        "host_logits_ms": 1049.8569628689438,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 53.69370114058256,
+      "model_enqueue_ms": 0.0018355048572023709,
+      "sampler_ms": 0.38277033405999344,
+      "tokenout_ms": 54.074890670987465,
+      "generate_ms": 54.15810556927075,
+      "generate_tsu": 18.464456787930907
+    }
+  }
+}

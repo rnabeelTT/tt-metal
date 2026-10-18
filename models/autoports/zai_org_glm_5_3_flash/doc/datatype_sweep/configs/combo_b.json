@@ -1,0 +1,29 @@
+{
+ "id": "combo_b",
+ "description": "combo_a without the KDA input projection bfp4 (the lowest-accuracy single group); KDA in stays bfp8 at LoFi",
+ "requant": {
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ }
+}

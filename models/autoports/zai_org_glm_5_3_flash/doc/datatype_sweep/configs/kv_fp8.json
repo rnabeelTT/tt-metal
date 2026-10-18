@@ -1,0 +1,1 @@
+{"id": "kv_fp8", "description": "DSA latent pool (KV cache) in fp8 e4m3 rows (sparse_sdpa kv_format FP8_E4M3); indexer pool keys bf16", "kv_latent_dtype": "fp8_e4m3"}

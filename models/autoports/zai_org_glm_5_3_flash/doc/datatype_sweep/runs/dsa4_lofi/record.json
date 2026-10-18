@@ -1,0 +1,708 @@
+{
+  "id": "dsa4_lofi",
+  "args": {
+    "id": "dsa4_lofi",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/dsa4_lofi",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/dsa4_lofi/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/dsa4_lofi/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/dsa4_lofi.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T07:04:39Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 99.7143304347992,
+  "precision": {
+    "id": "dsa4_lofi",
+    "requant": {
+      "dsa_proj": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      }
+    },
+    "fidelity": {
+      "dsa_proj": "LoFi"
+    },
+    "fidelity_layers": {
+      "dsa_proj": "inner"
+    },
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "bf16",
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/dsa4_lofi.json",
+    "applied": [
+      [
+        "3",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4031481344,
+  "dram_free_per_bank": 232471424,
+  "dram_largest_free_block_per_bank": 231595776,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT4_B",
+        "dsa_q_b": "DataType.BFLOAT4_B",
+        "dsa_o": "DataType.BFLOAT4_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.94,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 94,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.7478489191271365,
+      "e2e_t/s/u": 17.397812887396825,
+      "ttft_ms": 419.69971521757543,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.328121831873432,
+      "decode_t/s/u": 18.58065620943026
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.95,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 95,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        149076,
+        149076
+      ],
+      "tokens_traced": [
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076
+      ],
+      "tokens_eager": [
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076
+      ],
+      "tokens_traced2": [
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076,
+        149076
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        74617,
+        74617
+      ],
+      "tokens_traced": [
+        74617,
+        23199,
+        34889,
+        53559,
+        49285,
+        67611,
+        40636,
+        20221
+      ],
+      "tokens_eager": [
+        74617,
+        23199,
+        34889,
+        53559,
+        49285,
+        67611,
+        40636,
+        20221
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        74617,
+        23199,
+        34889,
+        53559,
+        49285,
+        67611,
+        40636,
+        20221
+      ],
+      "tokens_traced2": [
+        74617,
+        23199,
+        34889,
+        53559,
+        49285,
+        67611,
+        40636,
+        20221
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        197,
+        197
+      ],
+      "tokens_traced": [
+        197,
+        197,
+        3,
+        12,
+        3528,
+        197,
+        3,
+        12
+      ],
+      "tokens_eager": [
+        197,
+        197,
+        3,
+        12,
+        3528,
+        197,
+        3,
+        12
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        197,
+        197,
+        3,
+        12,
+        3528,
+        197,
+        3,
+        12
+      ],
+      "tokens_traced2": [
+        197,
+        197,
+        3,
+        12,
+        3528,
+        197,
+        3,
+        12
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1874376704,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 208.51132296957076,
+          "total_ms": 229.12832908332348
+        },
+        "warm": {
+          "dispatch_ms": 206.73746895045042,
+          "total_ms": 227.2145680617541
+        },
+        "host_logits_ms": 240.54969986900687,
+        "first_token": 13361
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 344.82989902608097,
+          "total_ms": 375.4152830224484
+        },
+        "warm": {
+          "dispatch_ms": 345.2169569209218,
+          "total_ms": 375.7204650901258
+        },
+        "host_logits_ms": 388.2512531708926,
+        "first_token": 291
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 956.998358014971,
+          "total_ms": 1034.513951977715
+        },
+        "warm": {
+          "dispatch_ms": 956.7819749936461,
+          "total_ms": 1034.3719101510942
+        },
+        "host_logits_ms": 1046.8106027692556,
+        "first_token": 64
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 53.41019046803316,
+      "model_enqueue_ms": 0.001489534042775631,
+      "sampler_ms": 0.38218953801939887,
+      "tokenout_ms": 53.79170433152467,
+      "generate_ms": 53.92932523197184,
+      "generate_tsu": 18.542787170034032
+    }
+  }
+}

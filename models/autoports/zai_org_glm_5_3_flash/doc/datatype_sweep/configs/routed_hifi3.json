@@ -1,0 +1,7 @@
+{
+ "id": "routed_hifi3",
+ "description": "routed experts bfp4 at HiFi3 (higher precision: keeps the activation mantissa bits LoFi drops)",
+ "fidelity": {
+  "routed": "HiFi3"
+ }
+}

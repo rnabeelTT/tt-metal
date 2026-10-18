@@ -1,0 +1,4 @@
+{
+ "id": "shipped",
+ "description": "shipped policy (optimized_decoder.SELECTED = opt_s5_pf, DEFAULT_MC, model constants); no override"
+}

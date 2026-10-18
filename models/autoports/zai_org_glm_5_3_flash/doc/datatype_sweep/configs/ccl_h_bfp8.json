@@ -1,0 +1,5 @@
+{
+ "id": "ccl_h_bfp8",
+ "description": "decode all-gathers of the residual (h before the attention / FFN norms) in bfp8",
+ "ccl_h_dtype": "bfp8"
+}

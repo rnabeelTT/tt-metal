@@ -1,0 +1,7 @@
+{
+ "id": "lm8_lofi",
+ "description": "LM head bfp8 at LoFi (shipped HiFi2)",
+ "fidelity": {
+  "lm_head": "LoFi"
+ }
+}

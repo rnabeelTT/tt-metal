@@ -1,0 +1,16 @@
+{
+ "id": "shared4_lofi",
+ "description": "shared expert gate|up and down bfp4 (host RTN), LoFi, inner layers",
+ "requant": {
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  }
+ },
+ "fidelity": {
+  "shared_expert": "LoFi"
+ },
+ "fidelity_layers": {
+  "shared_expert": "inner"
+ }
+}

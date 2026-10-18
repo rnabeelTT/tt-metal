@@ -1,0 +1,11 @@
+{
+ "id": "proj8_lofi",
+ "description": "same groups as proj8_hifi2 at LoFi",
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi"
+ }
+}

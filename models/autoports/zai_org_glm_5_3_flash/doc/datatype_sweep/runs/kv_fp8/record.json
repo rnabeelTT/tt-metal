@@ -1,0 +1,644 @@
+{
+  "id": "kv_fp8",
+  "args": {
+    "id": "kv_fp8",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kv_fp8",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kv_fp8/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kv_fp8/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/kv_fp8.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T03:38:01Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "7d850a125ae8",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 106.52275586128235,
+  "precision": {
+    "id": "kv_fp8",
+    "requant": {},
+    "fidelity": {},
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "fp8_e4m3",
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/kv_fp8.json",
+    "applied": [
+      [
+        "3",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4041491968,
+  "dram_free_per_bank": 222460800,
+  "dram_largest_free_block_per_bank": 221590144,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.FP8_E4M3 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.92,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 92,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.793981435941532,
+      "e2e_t/s/u": 17.25928898903174,
+      "ttft_ms": 438.3592309895903,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.355596605921164,
+      "decode_t/s/u": 18.485335488215316
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        46653,
+        46653
+      ],
+      "tokens_traced": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        96789,
+        2328,
+        99835
+      ],
+      "tokens_eager": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        96789,
+        2328,
+        99835
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        96789,
+        2328,
+        99835
+      ],
+      "tokens_traced2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        96789,
+        2328,
+        99835
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        13189,
+        13189
+      ],
+      "tokens_traced": [
+        13189,
+        18972,
+        7,
+        22634,
+        27868,
+        68613,
+        9665,
+        13189
+      ],
+      "tokens_eager": [
+        13189,
+        18972,
+        7,
+        22634,
+        27868,
+        68613,
+        9665,
+        13189
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        13189,
+        18972,
+        7,
+        22634,
+        27868,
+        68613,
+        9665,
+        13189
+      ],
+      "tokens_traced2": [
+        13189,
+        18972,
+        7,
+        22634,
+        27868,
+        68613,
+        9665,
+        13189
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        271,
+        271
+      ],
+      "tokens_traced": [
+        271,
+        1259,
+        6,
+        5661,
+        6,
+        5661,
+        6,
+        5661
+      ],
+      "tokens_eager": [
+        271,
+        1259,
+        6,
+        5661,
+        6,
+        5661,
+        6,
+        5661
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        271,
+        1259,
+        6,
+        5661,
+        6,
+        5661,
+        6,
+        5661
+      ],
+      "tokens_traced2": [
+        271,
+        1259,
+        6,
+        5661,
+        6,
+        5661,
+        6,
+        5661
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1794397184,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 211.18173701688647,
+          "total_ms": 231.65540909394622
+        },
+        "warm": {
+          "dispatch_ms": 208.59694411046803,
+          "total_ms": 228.93534903414547
+        },
+        "host_logits_ms": 241.12899391911924,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 343.57971604913473,
+          "total_ms": 374.329986050725
+        },
+        "warm": {
+          "dispatch_ms": 343.3640939183533,
+          "total_ms": 374.0824838168919
+        },
+        "host_logits_ms": 387.49953312799335,
+        "first_token": 19949
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 955.9478990267962,
+          "total_ms": 1033.4514430724084
+        },
+        "warm": {
+          "dispatch_ms": 956.6832820419222,
+          "total_ms": 1034.1161109972745
+        },
+        "host_logits_ms": 1045.4199390951544,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 53.71335856616497,
+      "model_enqueue_ms": 0.0015356034661332767,
+      "sampler_ms": 0.3827916691079736,
+      "tokenout_ms": 54.09067783039063,
+      "generate_ms": 54.35349626932293,
+      "generate_tsu": 18.39808050332172
+    }
+  }
+}

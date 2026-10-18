@@ -1275,7 +1275,8 @@ class MultichipDecoder(OptimizedDecoder):
 
         prec, last = PrecisionOverrides.from_env(), hf_config["num_hidden_layers"] - 1
         kw["opt"] = prec.layer_opt(kw.get("opt"), layer_idx, 0, last)
-        kw["weight_cache"] = prec.layer_cache(kw.get("weight_cache"), layer_idx)
+        root_cache = kw.get("weight_cache")
+        kw["weight_cache"] = prec.layer_cache(root_cache, layer_idx)
         dec = super().from_state_dict(
             state_dict, hf_config=hf_config, layer_idx=layer_idx, mesh_device=mesh_device, **kw
         )
@@ -1330,7 +1331,7 @@ class MultichipDecoder(OptimizedDecoder):
                 dec.mlp.args.ccl_num_links = dec.ccl.links
                 dec.mlp.args.router_topk_pad = lambda: dec.mc.router_topk_pad
                 dec.mlp.args.ccl_out_memory_config = lambda t: L1 if (dec.mc.ccl_l1 and _decode_rows(t)) else DRAM
-        prec.apply_layer(dec, layer_idx, 0, last)
+        prec.apply_layer(dec, layer_idx, 0, last, cache=root_cache)
         return dec
 
     def _reduce(self, y):

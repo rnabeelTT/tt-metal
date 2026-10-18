@@ -1,0 +1,814 @@
+{
+  "id": "ccl_h_bfp8",
+  "args": {
+    "id": "ccl_h_bfp8",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/ccl_h_bfp8",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/ccl_h_bfp8/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/ccl_h_bfp8/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/ccl_h_bfp8.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T07:18:15Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 76.16682577133179,
+  "precision": {
+    "id": "ccl_h_bfp8",
+    "requant": {},
+    "fidelity": {},
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bfp8",
+    "kv_latent_dtype": "bf16",
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/ccl_h_bfp8.json",
+    "applied": [
+      [
+        "0",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "1",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "2",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "3",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "ccl_h",
+        "bfp8"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "ccl_h",
+        "bfp8"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4053112320,
+  "dram_free_per_bank": 210840448,
+  "dram_largest_free_block_per_bank": 209962880,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.92,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 92,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.819707715883851,
+      "e2e_t/s/u": 17.182993525098844,
+      "ttft_ms": 420.207176823169,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.399473217083141,
+      "decode_t/s/u": 18.335121968339156
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        46653,
+        46653
+      ],
+      "tokens_traced": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_eager": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_traced2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        13189,
+        13189
+      ],
+      "tokens_traced": [
+        13189,
+        81280,
+        68613,
+        13189,
+        81280,
+        68613,
+        13189,
+        81280
+      ],
+      "tokens_eager": [
+        13189,
+        81280,
+        68613,
+        13189,
+        81280,
+        68613,
+        13189,
+        81280
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        13189,
+        81280,
+        68613,
+        13189,
+        81280,
+        68613,
+        13189,
+        81280
+      ],
+      "tokens_traced2": [
+        13189,
+        81280,
+        68613,
+        13189,
+        81280,
+        68613,
+        13189,
+        81280
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        271,
+        271
+      ],
+      "tokens_traced": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_eager": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_traced2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1701346304,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 210.38003591820598,
+          "total_ms": 230.86383705958724
+        },
+        "warm": {
+          "dispatch_ms": 209.37861502170563,
+          "total_ms": 229.88361702300608
+        },
+        "host_logits_ms": 242.51013807952404,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 344.5471751037985,
+          "total_ms": 375.4445039667189
+        },
+        "warm": {
+          "dispatch_ms": 344.61369179189205,
+          "total_ms": 375.4050889983773
+        },
+        "host_logits_ms": 388.0969739984721,
+        "first_token": 19949
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 957.2533830069005,
+          "total_ms": 1034.796518040821
+        },
+        "warm": {
+          "dispatch_ms": 957.2867869865149,
+          "total_ms": 1034.8514430224895
+        },
+        "host_logits_ms": 1047.5254331249744,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 54.1759772070994,
+      "model_enqueue_ms": 0.0016284330437580745,
+      "sampler_ms": 0.38255653344094753,
+      "tokenout_ms": 54.55474349825332,
+      "generate_ms": 54.6889872988686,
+      "generate_tsu": 18.285216995061965
+    }
+  }
+}

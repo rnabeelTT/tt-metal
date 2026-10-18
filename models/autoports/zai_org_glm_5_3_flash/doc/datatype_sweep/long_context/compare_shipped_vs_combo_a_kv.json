@@ -1,0 +1,41 @@
+{
+ "2048": {
+  "positions": 200,
+  "prefill_tokens": 1848,
+  "top1_agreement": 0.93,
+  "top5_overlap": 0.843,
+  "a_true_top1": 0.8399999737739563,
+  "a_true_top5": 0.9350000023841858,
+  "b_true_top1": 0.8299999833106995,
+  "b_true_top5": 0.9399999976158142,
+  "a_prefill_s": 1.2,
+  "b_prefill_s": 1.0,
+  "finite": true
+ },
+ "32768": {
+  "positions": 200,
+  "prefill_tokens": 32568,
+  "top1_agreement": 0.855,
+  "top5_overlap": 0.854,
+  "a_true_top1": 0.5550000071525574,
+  "a_true_top5": 0.824999988079071,
+  "b_true_top1": 0.5400000214576721,
+  "b_true_top5": 0.8149999976158142,
+  "a_prefill_s": 23.8,
+  "b_prefill_s": 21.1,
+  "finite": true
+ },
+ "100000": {
+  "positions": 200,
+  "prefill_tokens": 99800,
+  "top1_agreement": 0.875,
+  "top5_overlap": 0.825,
+  "a_true_top1": 0.699999988079071,
+  "a_true_top5": 0.8949999809265137,
+  "b_true_top1": 0.6949999928474426,
+  "b_true_top5": 0.875,
+  "a_prefill_s": 73.7,
+  "b_prefill_s": 65.4,
+  "finite": true
+ }
+}

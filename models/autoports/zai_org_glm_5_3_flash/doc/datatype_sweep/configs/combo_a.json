@@ -1,0 +1,33 @@
+{
+ "id": "combo_a",
+ "description": "every passing bfp4 group (KDA in / out, DSA q_a|kv_a / q_b / o, shared expert; inner layers) + LM head bfp4, all their decode matmuls and the dense MLP at LoFi",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ }
+}

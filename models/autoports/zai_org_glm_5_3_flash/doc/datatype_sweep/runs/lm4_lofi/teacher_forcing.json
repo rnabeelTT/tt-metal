@@ -1,0 +1,18 @@
+[
+  {
+    "top1": 0.93,
+    "top5": 1.0,
+    "top100": 1.0,
+    "matches_top1": 93,
+    "matches_top5": 100,
+    "matches_top100": 100,
+    "total": 100,
+    "k": 100,
+    "elapsed_s": 5.758016515057534,
+    "e2e_t/s/u": 17.36709155635355,
+    "ttft_ms": 418.9925219397992,
+    "decode_tokens": 99.0,
+    "decode_elapsed_s": 5.338997723069042,
+    "decode_t/s/u": 18.542806184807915
+  }
+]

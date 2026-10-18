@@ -1,0 +1,1005 @@
+{
+  "id": "proj8_hifi2",
+  "args": {
+    "id": "proj8_hifi2",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/proj8_hifi2",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/proj8_hifi2/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/proj8_hifi2/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/proj8_hifi2.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T06:56:02Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 83.35227727890015,
+  "precision": {
+    "id": "proj8_hifi2",
+    "requant": {},
+    "fidelity": {
+      "kda_in": "HiFi2",
+      "kda_out": "HiFi2",
+      "dsa_proj": "HiFi2",
+      "dense_mlp": "HiFi2",
+      "shared_expert": "HiFi2"
+    },
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "bf16",
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/proj8_hifi2.json",
+    "applied": [
+      [
+        "0",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "0",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "0",
+        "dense_mlp",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "1",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "1",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "1",
+        "dense_mlp",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "2",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "2",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "2",
+        "dense_mlp",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "4",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "4",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "5",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "5",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "6",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "6",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "8",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "8",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "9",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "9",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "10",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "10",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "12",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "12",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "13",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "13",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "14",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "14",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "16",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "16",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "17",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "17",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "18",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "18",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "20",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "20",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "21",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "21",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "22",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "22",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "24",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "24",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "25",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "25",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "26",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "26",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "28",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "28",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "29",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "29",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "30",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "30",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "32",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "32",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "33",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "33",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "34",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "34",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "36",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "36",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "37",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "37",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "38",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "38",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "40",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "40",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "41",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "41",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "42",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "42",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "decode fidelity MathFidelity.HiFi2 (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ],
+      [
+        "44",
+        "kda_in",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "44",
+        "kda_out",
+        "decode fidelity MathFidelity.HiFi2"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi2"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4053108224,
+  "dram_free_per_bank": 210844544,
+  "dram_largest_free_block_per_bank": 209966976,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi2",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi2",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.93,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 93,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.771096091950312,
+      "e2e_t/s/u": 17.32773088624929,
+      "ttft_ms": 420.94725696370006,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.350119177950546,
+      "decode_t/s/u": 18.504260691613908
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.94,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 94,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        59251,
+        59251
+      ],
+      "tokens_traced": [
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897
+      ],
+      "tokens_eager": [
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897
+      ],
+      "tokens_traced2": [
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897,
+        59251,
+        90897
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        18198,
+        18198
+      ],
+      "tokens_traced": [
+        18198,
+        22634,
+        27868,
+        33727,
+        29441,
+        43845,
+        9665,
+        13189
+      ],
+      "tokens_eager": [
+        18198,
+        22634,
+        27868,
+        33727,
+        29441,
+        43845,
+        9665,
+        13189
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        18198,
+        22634,
+        27868,
+        33727,
+        29441,
+        43845,
+        9665,
+        13189
+      ],
+      "tokens_traced2": [
+        18198,
+        22634,
+        27868,
+        33727,
+        29441,
+        43845,
+        9665,
+        13189
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        197,
+        197
+      ],
+      "tokens_traced": [
+        197,
+        197,
+        3,
+        12,
+        16,
+        13,
+        20,
+        13
+      ],
+      "tokens_eager": [
+        197,
+        197,
+        3,
+        12,
+        16,
+        13,
+        20,
+        13
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        197,
+        197,
+        3,
+        12,
+        16,
+        13,
+        20,
+        13
+      ],
+      "tokens_traced2": [
+        197,
+        197,
+        3,
+        12,
+        16,
+        13,
+        20,
+        13
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1701346304,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 208.82748300209641,
+          "total_ms": 229.43375795148313
+        },
+        "warm": {
+          "dispatch_ms": 206.97485795244575,
+          "total_ms": 227.59881685487926
+        },
+        "host_logits_ms": 240.9823019988835,
+        "first_token": 13361
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 343.90348102897406,
+          "total_ms": 374.56935993395746
+        },
+        "warm": {
+          "dispatch_ms": 343.63056998699903,
+          "total_ms": 374.32944192551076
+        },
+        "host_logits_ms": 386.98607101105154,
+        "first_token": 291
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 951.2509808409959,
+          "total_ms": 1028.3060378860682
+        },
+        "warm": {
+          "dispatch_ms": 951.6987539827824,
+          "total_ms": 1028.90887693502
+        },
+        "host_logits_ms": 1041.4965329691768,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 53.65768247283995,
+      "model_enqueue_ms": 0.0015850023676951726,
+      "sampler_ms": 0.38285379608472186,
+      "tokenout_ms": 54.04048616377016,
+      "generate_ms": 54.18290689898034,
+      "generate_tsu": 18.45600498814911
+    }
+  }
+}

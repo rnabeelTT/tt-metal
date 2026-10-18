@@ -1,0 +1,945 @@
+{
+  "id": "kda_out4_lofi",
+  "args": {
+    "id": "kda_out4_lofi",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,ptcheck,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kda_out4_lofi",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kda_out4_lofi/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/kda_out4_lofi/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/kda_out4_lofi.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T07:01:43Z",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "7b5daa3ad41a",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "a48174376bbb",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "58a10aacda66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    }
+  },
+  "build_s": 96.75923013687134,
+  "precision": {
+    "id": "kda_out4_lofi",
+    "requant": {
+      "kda_out": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      }
+    },
+    "fidelity": {
+      "kda_out": "LoFi"
+    },
+    "fidelity_layers": {
+      "kda_out": "inner"
+    },
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "bf16",
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/kda_out4_lofi.json",
+    "applied": [
+      [
+        "1",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4036347392,
+  "dram_free_per_bank": 227605376,
+  "dram_largest_free_block_per_bank": 226726784,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 1,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 44,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.94,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 94,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.755679477006197,
+      "e2e_t/s/u": 17.374143296112585,
+      "ttft_ms": 421.45502590574324,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.334198812022805,
+      "decode_t/s/u": 18.559488217211342
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.94,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 94,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        26109,
+        26109
+      ],
+      "tokens_traced": [
+        26109,
+        22673,
+        46653,
+        31910,
+        32679,
+        4408,
+        55000,
+        26109
+      ],
+      "tokens_eager": [
+        26109,
+        22673,
+        46653,
+        31910,
+        32679,
+        4408,
+        55000,
+        26109
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        26109,
+        22673,
+        46653,
+        31910,
+        32679,
+        4408,
+        55000,
+        26109
+      ],
+      "tokens_traced2": [
+        26109,
+        22673,
+        46653,
+        31910,
+        32679,
+        4408,
+        55000,
+        26109
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        13189,
+        13189
+      ],
+      "tokens_traced": [
+        13189,
+        18972,
+        85159,
+        22634,
+        13189,
+        18972,
+        85159,
+        22634
+      ],
+      "tokens_eager": [
+        13189,
+        18972,
+        85159,
+        22634,
+        13189,
+        18972,
+        85159,
+        22634
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        13189,
+        18972,
+        85159,
+        22634,
+        13189,
+        18972,
+        85159,
+        22634
+      ],
+      "tokens_traced2": [
+        13189,
+        18972,
+        85159,
+        22634,
+        13189,
+        18972,
+        85159,
+        22634
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        197,
+        197
+      ],
+      "tokens_traced": [
+        197,
+        2,
+        197,
+        2,
+        197,
+        2,
+        197,
+        2
+      ],
+      "tokens_eager": [
+        197,
+        2,
+        197,
+        2,
+        197,
+        2,
+        197,
+        2
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        197,
+        2,
+        197,
+        2,
+        197,
+        2,
+        197,
+        2
+      ],
+      "tokens_traced2": [
+        197,
+        2,
+        197,
+        2,
+        197,
+        2,
+        197,
+        2
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1835555840,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 208.4014150314033,
+          "total_ms": 228.700194042176
+        },
+        "warm": {
+          "dispatch_ms": 207.11024198681116,
+          "total_ms": 227.21065185032785
+        },
+        "host_logits_ms": 241.06096802279353,
+        "first_token": 13361
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 344.694382045418,
+          "total_ms": 375.4569648299366
+        },
+        "warm": {
+          "dispatch_ms": 344.22249207273126,
+          "total_ms": 374.83643111772835
+        },
+        "host_logits_ms": 387.76378496550024,
+        "first_token": 19949
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 956.3269228674471,
+          "total_ms": 1033.8783760089427
+        },
+        "warm": {
+          "dispatch_ms": 956.6211740020663,
+          "total_ms": 1033.673906000331
+        },
+        "host_logits_ms": 1049.0716029889882,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 53.50001056989034,
+      "model_enqueue_ms": 0.0016034037495652835,
+      "sampler_ms": 0.38285110301027697,
+      "tokenout_ms": 53.8781572987015,
+      "generate_ms": 54.00921033384899,
+      "generate_tsu": 18.515360506451874
+    }
+  }
+}

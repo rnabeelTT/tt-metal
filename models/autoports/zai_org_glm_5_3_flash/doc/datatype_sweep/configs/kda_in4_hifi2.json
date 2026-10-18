@@ -1,0 +1,16 @@
+{
+ "id": "kda_in4_hifi2",
+ "description": "KDA input projection bfp4 (host RTN) at HiFi2 decode, inner layers (fidelity comparison for kda_in4_lofi)",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  }
+ },
+ "fidelity": {
+  "kda_in": "HiFi2"
+ },
+ "fidelity_layers": {
+  "kda_in": "inner"
+ }
+}

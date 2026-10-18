@@ -1,0 +1,16 @@
+{
+ "id": "kda_out4_lofi",
+ "description": "KDA output projection bfp4 (host RTN), LoFi decode, inner layers",
+ "requant": {
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  }
+ },
+ "fidelity": {
+  "kda_out": "LoFi"
+ },
+ "fidelity_layers": {
+  "kda_out": "inner"
+ }
+}

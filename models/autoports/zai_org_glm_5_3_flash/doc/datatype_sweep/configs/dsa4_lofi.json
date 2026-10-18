@@ -1,0 +1,16 @@
+{
+ "id": "dsa4_lofi",
+ "description": "DSA q_a|kv_a pack, q_b, o_proj bfp4 (host RTN), LoFi decode, inner layers",
+ "requant": {
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  }
+ },
+ "fidelity": {
+  "dsa_proj": "LoFi"
+ },
+ "fidelity_layers": {
+  "dsa_proj": "inner"
+ }
+}
