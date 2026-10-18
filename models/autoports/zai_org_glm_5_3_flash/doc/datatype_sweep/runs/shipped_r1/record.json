@@ -1,0 +1,697 @@
+{
+  "id": "shipped",
+  "args": {
+    "id": "shipped",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,extra,ptcheck,ttft,decode,fidcount",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1",
+    "extra_refs": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/record.json"
+  },
+  "precision_env": "none",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T16:08:43Z",
+  "argv": [
+    "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py",
+    "--id",
+    "shipped",
+    "--seq-len",
+    "16384",
+    "--do",
+    "policy,ready,extra,ptcheck,ttft,decode,fidcount",
+    "--prompts",
+    "128,161,2048",
+    "--ptcheck",
+    "100,161,300",
+    "--steps",
+    "30",
+    "--extra-refs",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "--report-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1",
+    "--checks-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/checks",
+    "--out",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/record.json"
+  ],
+  "env": {
+    "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+    "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+    "GLM53_PRECISION": "none",
+    "GLM53_TP": "4",
+    "MESH_DEVICE": "P300x2",
+    "S8_BASE_COMMIT": "b8198430147",
+    "S8_REQUIRE_PKG": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models",
+    "S8_SCRIPT": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh"
+  },
+  "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh",
+  "cwd": "/home/raahem/glm53-flash-bringup/s8r1_snapshot",
+  "base_commit": "b8198430147",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "9950ff43360f",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "8131881b2a0a",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "8c6e445858ac",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "80ada0e677d3",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    },
+    "md5_map_digest": "d67f2dbeed76"
+  },
+  "build_s": 101.29956817626953,
+  "precision": {
+    "id": "shipped",
+    "requant": {},
+    "fidelity": {},
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "bf16",
+    "source": null,
+    "applied": [
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.HiFi4"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 734,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 4053476352,
+  "dram_free_per_bank": 210476416,
+  "dram_largest_free_block_per_bank": 209962880,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT8_B",
+      "fidelity": "MathFidelity.HiFi2"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": false
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT8_B",
+        "dsa_q_b": "DataType.BFLOAT8_B",
+        "dsa_o": "DataType.BFLOAT8_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.BFLOAT16 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": false,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.92,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 92,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.587716702837497,
+      "e2e_t/s/u": 17.89639763755722,
+      "ttft_ms": 419.95861381292343,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.167735095135868,
+      "decode_t/s/u": 19.157328728630805
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "readiness_trace_replays_expected": 198,
+  "trace_verified": true,
+  "extra_refs": {
+    "readiness_aime24_chat_p1": {
+      "teacher_forcing": [
+        {
+          "top1": 0.98,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 98,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.586124708876014,
+          "e2e_t/s/u": 17.901497945634127,
+          "ttft_ms": 421.43626092001796,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.164661786984652,
+          "decode_t/s/u": 19.168728579572754
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.97,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 97,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    },
+    "readiness_aime24_chat_p2": {
+      "teacher_forcing": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.584139306098223,
+          "e2e_t/s/u": 17.907862701561523,
+          "ttft_ms": 417.8601400926709,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.166253947885707,
+          "decode_t/s/u": 19.162821068932512
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    }
+  },
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        46653,
+        46653
+      ],
+      "tokens_traced": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_eager": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "tokens_traced2": [
+        46653,
+        31910,
+        52614,
+        13436,
+        79476,
+        9217,
+        96789,
+        81699
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        13189,
+        13189
+      ],
+      "tokens_traced": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_eager": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "tokens_traced2": [
+        13189,
+        22634,
+        27868,
+        68613,
+        13189,
+        22634,
+        27868,
+        68613
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        271,
+        271
+      ],
+      "tokens_traced": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_eager": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "tokens_traced2": [
+        271,
+        1259,
+        364,
+        345,
+        364,
+        345,
+        364,
+        345
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 1701346304,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 210.27045813389122,
+          "total_ms": 230.7043771725148
+        },
+        "warm": {
+          "dispatch_ms": 208.16466002725065,
+          "total_ms": 228.6720999982208
+        },
+        "host_logits_ms": 239.56397688016295,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 351.111704017967,
+          "total_ms": 381.8510719574988
+        },
+        "warm": {
+          "dispatch_ms": 351.19351907633245,
+          "total_ms": 381.98495586402714
+        },
+        "host_logits_ms": 394.03861900791526,
+        "first_token": 19949
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 957.7711140736938,
+          "total_ms": 1035.2092641405761
+        },
+        "warm": {
+          "dispatch_ms": 957.3330888524652,
+          "total_ms": 1034.6905349288136
+        },
+        "host_logits_ms": 1048.6067309975624,
+        "first_token": 197
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 51.817809604108334,
+      "model_enqueue_ms": 0.0015813314045468967,
+      "sampler_ms": 0.3828733693808317,
+      "tokenout_ms": 52.20190129863719,
+      "generate_ms": 52.32545599962274,
+      "generate_tsu": 19.111156910074705
+    }
+  },
+  "fidelity_seen_build": {},
+  "fidelity_seen_one_eager_step": {}
+}

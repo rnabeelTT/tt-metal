@@ -14,7 +14,8 @@ override); <path> = another candidate JSON. Fields:
   id                       candidate id (logged and recorded)
   requant                  {group: {"dtype": "bfp4" | "bfp8", "layers": "all" | "inner" | [i, ...]}}: host round-to-
                            nearest re-quantization of the loaded weights of a group (groups: kda_in, kda_out, dsa_proj
-                           = q_a | kv_a pack + q_b + o_proj, shared_expert, lm_head). The loaded weights come from the
+                           = q_a | kv_a pack + q_b + o_proj, dense_mlp = gate|up + down, shared_expert, lm_head). The
+                           loaded weights come from the
                            shipped-policy weight cache (bfp8); bfp8 -> bfp4 RTN equals bf16 -> bfp4 RTN except at
                            rounding ties of the bfp8 grid (2^-7 of the block maximum).
   fidelity                 {group: "LoFi" | "HiFi2" | "HiFi3" | "HiFi4"}: compute fidelity of the decode-row matmuls of
@@ -55,6 +56,16 @@ _FID = {
     "HiFi4": ttnn.MathFidelity.HiFi4,
 }
 _MOE_DTYPE_FIELDS = ("routed_gate_up_dtype", "routed_down_dtype", "shared_dtype", "router_dtype")
+# decode-row matmuls run through the fidelity wrappers, per (group, fidelity): the per-step propagation check
+# (tools/dtype_sweep.py --do fidcount resets it and runs one eager decode step)
+FIDELITY_SEEN: dict = {}
+
+
+def _seen(group: str, ck):
+    k = f"{group}:{str(ck.math_fidelity).split('.')[-1]}"
+    FIDELITY_SEEN[k] = FIDELITY_SEEN.get(k, 0) + 1
+
+
 GROUPS = ("kda_in", "kda_out", "dsa_proj", "dense_mlp", "shared_expert", "routed", "lm_head")
 
 
@@ -96,6 +107,34 @@ def _rq_version() -> str:
     import inspect
 
     return hashlib.sha256(inspect.getsource(requant).encode()).hexdigest()[:8]
+
+
+def _short(obj) -> str:
+    import hashlib
+
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+def rq_name(key: str, src, dtype, component: str) -> str:
+    """File name of a re-quantized tensor in the weight cache: the group key, the target dtype, and a digest of what
+    determines its bytes: the owning component's build-source digest (tt/weight_cache.component_digest), the requant
+    source digest (scope), and the SOURCE tensor's memory config, padded shape and dtype."""
+    sig = {
+        "component": component,
+        "memory_config": str(src.memory_config()),
+        "padded_shape": [int(x) for x in src.padded_shape],
+        "src_dtype": str(src.dtype),
+    }
+    return f"{key}-{str(dtype).split('.')[-1].lower()}-{_short(sig)}"
+
+
+def _component(kind: str) -> str:
+    try:
+        from .weight_cache import component_digest
+
+        return f"{kind}-{component_digest(kind)}"
+    except Exception as e:  # noqa: BLE001  (host tests without the full package)
+        return f"{kind}-nodigest-{type(e).__name__}"
 
 
 @dataclass
@@ -201,19 +240,28 @@ class PrecisionOverrides:
         return None if (cache is not None and self.layer_has_weight_exception(i)) else cache
 
     # ------------------------------------------------------------------------------------------- post-load
-    def _rq(self, t, dtype, key: str):
+    def _rq(self, t, dtype, key: str, kind: str):
         """requant(t, dtype) through the weight cache: the re-quantized device tensor is stored under
-        <layer or top>/prec-<requant source digest>/<key>-<dtype>.tensorbin, so a warm load reads the final tensor (the
-        shipped tensor it replaces is still loaded first and freed). No cache: re-quantize on every load."""
+        <layer or top>/prec-<requant source digest>/<rq_name>.tensorbin (rq_name: group, dtype and a digest of the
+        owning component's source digest + the source tensor's memory config / padded shape / dtype), so a warm load
+        reads the final tensor (the shipped tensor it replaces is still loaded first and freed). A loaded file whose
+        memory config, padded shape or dtype does not match is rebuilt. No cache: re-quantize on every load."""
         c = self._cache
         if c is None:
             return requant(t, dtype)
-        name = f"{key}-{str(dtype).split('.')[-1].lower()}"
+        name = rq_name(key, t, dtype, _component(kind))
         if c.has(name):
             try:
                 out = c.load(name)
-                ttnn.deallocate(t)
-                return out
+                if (
+                    str(out.memory_config()) == str(t.memory_config())
+                    and [int(x) for x in out.padded_shape] == [int(x) for x in t.padded_shape]
+                    and out.dtype == dtype
+                ):
+                    ttnn.deallocate(t)
+                    return out
+                logger.warning(f"precision cache: {c.file(name)} does not match its source tensor; re-quantizing")
+                ttnn.deallocate(out)
             except RuntimeError as e:  # corrupt file: rebuild it
                 logger.warning(f"precision cache: {c.file(name)} unreadable ({e}); re-quantizing")
         return c.store(name, requant(t, dtype))
@@ -223,8 +271,9 @@ class PrecisionOverrides:
 
     def apply_layer(self, dec, i: int, first: int, last: int, cache=None):
         """Re-quantize / re-fidelity the groups of one built decoder layer (before warm-up and trace capture).
-        cache: the model's WeightCache (root scope) or None."""
-        self._scope(cache, f"layer_{i}")
+        cache: the model's WeightCache (root scope) or None. A layer with a weight-dtype exception is built from the
+        checkpoint (layer_cache), so its re-quantized tensors are not cached either (their source differs)."""
+        self._scope(None if self.layer_has_weight_exception(i) else cache, f"layer_{i}")
         mesh = dec.mesh if hasattr(dec, "mesh") else dec.attn.mesh
         attn = dec.attn._inner if hasattr(dec.attn, "_inner") else dec.attn
         mlp = dec.mlp._inner if hasattr(dec.mlp, "_inner") else dec.mlp
@@ -235,14 +284,21 @@ class PrecisionOverrides:
         if dec.mlp_kind == "moe":
             dt = self.requant_dtype("shared_expert", i, first, last)
             if dt is not None:
-                mlp.shared_packed = self._rq(mlp.shared_packed, dt, "shared_packed")
-                mlp.shared_w2 = self._rq(mlp.shared_w2, dt, "shared_w2")
+                mlp.shared_packed = self._rq(mlp.shared_packed, dt, "shared_packed", "moe")
+                mlp.shared_w2 = self._rq(mlp.shared_w2, dt, "shared_w2", "moe")
                 self.applied.append((i, "shared_expert", f"requant {dt}"))
             self.applied.append((i, "moe", f"routed {mlp.prec.routed_fidelity} shared {mlp.prec.shared_fidelity}"))
         else:
+            dt = self.requant_dtype("dense_mlp", i, first, last)
+            if dt is not None:
+                for name in ("wgu", "wg", "wu", "wd"):
+                    t = getattr(mlp, name, None)
+                    if t is not None:
+                        setattr(mlp, name, self._rq(t, dt, f"mlp_{name}", "mlp"))
+                self.applied.append((i, "dense_mlp", f"requant {dt}"))
             f = self.fid("dense_mlp", i, first, last)
             if f is not None:
-                _swap_ckc_on_decode(mlp, "forward", _ckc(mesh, f))
+                _swap_ckc_on_decode(mlp, "forward", _ckc(mesh, f), "dense_mlp")
                 self.applied.append((i, "dense_mlp", f"decode fidelity {f}"))
         if self.ccl_h_dtype != "bf16" and getattr(dec, "ccl", None) is not None:
             _install_ccl_h(dec.ccl, _DT[self.ccl_h_dtype])
@@ -254,7 +310,7 @@ class PrecisionOverrides:
         for g, name in (("kda_in", "input_projection"), ("kda_out", "output_projection")):
             dt = self.requant_dtype(g, i, first, last)
             if dt is not None:
-                new[name] = self._rq(getattr(w, name), dt, f"kda_{name}")
+                new[name] = self._rq(getattr(w, name), dt, f"kda_{name}", "kda")
                 self.applied.append((i, g, f"requant {dt}"))
         if new:
             nw = dataclasses.replace(w, **new)
@@ -265,10 +321,17 @@ class PrecisionOverrides:
         if f_in is not None:
             ck = _ckc(mesh, f_in)
             orig = attn._in_proj
-            attn._in_proj = lambda x, w_, cc, _o=orig, _c=ck: _o(x, w_, _c if _decode_rows(x) else cc)
+
+            def _in_proj(x, w_, cc, _o=orig, _c=ck):
+                if _decode_rows(x):
+                    _seen("kda_in", _c)
+                    return _o(x, w_, _c)
+                return _o(x, w_, cc)
+
+            attn._in_proj = _in_proj
             self.applied.append((i, "kda_in", f"decode fidelity {f_in}"))
         if f_out is not None:
-            _wrap_decode_mm(attn, _ckc(mesh, f_out))
+            _wrap_decode_mm(attn, _ckc(mesh, f_out), "kda_out")
             self.applied.append((i, "kda_out", f"decode fidelity {f_out}"))
 
     def _apply_dsa(self, attn, mesh, i, first, last):
@@ -286,9 +349,9 @@ class PrecisionOverrides:
         dt = self.requant_dtype("dsa_proj", i, first, last)
         if dt is not None:
             A, B = attn._pack  # q_a | kv_a pack (serves prefill and decode: ds_shared), indexer pack (bf16, kept)
-            A.w = self._rq(A.w, dt, "dsa_pack_a")
-            attn.w_q_b = self._rq(attn.w_q_b, dt, "dsa_w_q_b")
-            attn.w_o = self._rq(attn.w_o, dt, "dsa_w_o")
+            A.w = self._rq(A.w, dt, "dsa_pack_a", "dsa")
+            attn.w_q_b = self._rq(attn.w_q_b, dt, "dsa_w_q_b", "dsa")
+            attn.w_o = self._rq(attn.w_o, dt, "dsa_w_o", "dsa")
             self.applied.append((i, "dsa_proj", f"requant {dt} (q_a|kv_a pack, q_b, o_proj)"))
         f = self.fid("dsa_proj", i, first, last)
         if f is not None:
@@ -299,6 +362,7 @@ class PrecisionOverrides:
 
             def _mm(x, w, _o=orig, _ids=ids, _c=ck, _a=attn, **kw):
                 if (id(w) in _ids or w is _a.w_q_b) and _decode_rows(x) and id(w) not in _a.__dict__.get("_ix", ()):
+                    _seen("dsa_proj", _c)
                     saved = _a.ckc
                     _a.ckc = _c
                     try:
@@ -310,14 +374,14 @@ class PrecisionOverrides:
             # the indexer pack (wk | gate | weights, bf16, fp32 output) keeps HiFi4: index scores, not a projection
             attn._ix = {id(attn.w_ik), id(attn.w_ig), id(attn.w_iw)}
             attn._mm = _mm
-            _wrap_decode_mm(attn, ck)
+            _wrap_decode_mm(attn, ck, "dsa_proj")
             self.applied.append((i, "dsa_proj", f"decode fidelity {f} (q_a|kv_a, q_b, o_proj)"))
 
     def apply_model(self, model, first: int, last: int):
         self._scope(getattr(model, "weight_cache", None), "top")
         dt = self.requant_dtype("lm_head", -1, first, last)
         if dt is not None:
-            model.lm_head = self._rq(model.lm_head, dt, "lm_head")
+            model.lm_head = self._rq(model.lm_head, dt, "lm_head", "top")
             self.applied.append(("model", "lm_head", f"requant {dt}"))
         f = self.fid("lm_head", -1, first, last)
         if f is not None:
@@ -330,13 +394,14 @@ class PrecisionOverrides:
         return d
 
 
-def _swap_ckc_on_decode(obj, method: str, ck):
+def _swap_ckc_on_decode(obj, method: str, ck, group: str):
     """obj.<method>(x, ...) runs with obj.ckc = ck on decode rows (the method reads self.ckc per call)."""
     orig = getattr(obj, method)
 
     def wrapped(x, *a, _o=orig, **kw):
         if not _decode_rows(x):
             return _o(x, *a, **kw)
+        _seen(group, ck)
         saved = obj.ckc
         obj.ckc = ck
         try:
@@ -347,10 +412,18 @@ def _swap_ckc_on_decode(obj, method: str, ck):
     setattr(obj, method, wrapped)
 
 
-def _wrap_decode_mm(attn, ck):
+def _wrap_decode_mm(attn, ck, group: str):
     """The module's decode output-projection hook (RoleDecodeMM, role "o") with compute config ck."""
     inner = attn.decode_mm
-    attn.decode_mm = lambda x, w, role, ckc, mc, _i=inner, _c=ck: _i(x, w, role, _c if role == "o" else ckc, mc)
+
+    def decode_mm(x, w, role, ckc, mc, _i=inner, _c=ck):
+        if role == "o":
+            if _decode_rows(x):  # the hook declines prefill rows (RoleDecodeMM: decode rows only); count decode only
+                _seen(f"{group}_o", _c)
+            return _i(x, w, role, _c, mc)
+        return _i(x, w, role, ckc, mc)
+
+    attn.decode_mm = decode_mm
 
 
 def _install_ccl_h(ccl, dtype):

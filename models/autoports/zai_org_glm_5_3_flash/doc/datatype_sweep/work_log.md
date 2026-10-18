@@ -168,3 +168,42 @@ copy of `tt/dsa.py`; reported to the coordinator. The classification run waits f
   0.700 / 0.695 (100K); TT-vs-TT top-5 overlap 0.84 / 0.85 / 0.83. Pass (no degradation beyond 2 points).
 - README, selected_precision_config.json, sweep_results.{json,csv}, Pareto charts written. The default flip is staged
   in `~/glm53-flash-bringup/s8_snapshot_flip` for the coordinator's stage-8 commit (not applied to the live tree).
+
+## Review #1 rework (commit b8198430147 reviewed: MORE-WORK-NEEDED)
+
+- P1: the commit took HEAD's `tt/multichip_decoder.py` (stage-5 defaults: sinkhorn_faces, dsa_q_mm, dsa_tail_shared,
+  kda_conv_max_batch=16) plus the `root_cache` hook; that combination was not measured before. New snapshot
+  `~/glm53-flash-bringup/s8r1_snapshot` = `git archive b8198430147 models/` + the review-#1 `tt/precision.py`,
+  `tools/dtype_sweep.py`, `tools/long_ctx_check.py`, `tests/test_precision_host.py`, `configs/combo_a_kv_dense4.json`
+  (+ `tools/memory_probe.py` loading the weight cache). Only `tt/precision.py` differs from the commit (md5 check in
+  the records). One device ticket (`scripts/s8r1_inner.sh`, 15:57 - 16:29 UTC):
+  - `selected_default_r1` (GLM53_PRECISION unset, cold precision cache: 180 tensors stored): TF top-1 p0 / p1 / p2
+    91 / 96 / 91, PC 91 / 95 / 91, top-5 / top-100 100 %, 198 trace replays, non-aligned check equal, TTFT
+    226 / 377 / 1026 ms, token-out 51.14 ms, qualitative 5 / 6 EOS (q3 budget), autoregressive degenerate check exit 0,
+    one eager step's fidelity counts kda_in / kda_out LoFi x 34, DSA q_a|kv_a / q_b x 33, DSA o x 11, dense MLP x 3.
+  - `selected_default_r1_warm`: load 92.1 s (cold 147.8 s), token-out 51.13 ms.
+  - `shipped_r1` (GLM53_PRECISION=none, same code): 92 / 98 / 91, PC 91 / 97 / 91, token-out 52.20 ms. Selected:
+    -1.06 ms (-2.0 %).
+  - `combo_a_kv_dense4_r1` (P2-5, dense MLP bfp4 LoFi on layers 1-2): 92 / 95 / 92, PC 92 / 95 / 91, min 91,
+    token-out 51.13 ms, 37 MB per die freed (~+5.8K tokens, estimate). Coordinator: keep combo_a_kv (rule 3: an
+    estimated context gain below ~5 % does not override a config with fewer bfp4 groups at equal speed).
+  - Capacity probe at `--max-context 337920 --workspace-mib 1024`: free DRAM again sized the pool to 2,433 blocks;
+    311,235-token copy prompt, copy accuracy 1.0, 836 MB per die free after the prefill. 311,296 stays the measured
+    value ("next step not reached").
+- P2-1: combo_a_all reworded to "decode collapse, cause unclassified" (README, selected_precision_config.json):
+  `</think>` (154842) loops, deterministic; prefill check 90 / 100 / 100 %; the TF 14 / 32 matches non-precision
+  decode-collapse signatures (stage-7 ag_persistent, the open prefill->decode race). Classification runs wait for the
+  race fix.
+- P2-2: the re-quantized tensor cache name now has a digest of the owning component's source digest and the source
+  tensor's memory config / padded shape / dtype; a loaded file is checked against them and rebuilt on mismatch;
+  exception layers cache nothing. Host tests: 10 passed.
+- P2-3: `doc/context_contract.json` top level = 311,296 (stage-7 values under `stage7_policy_GLM53_PRECISION_none`).
+- P2-4: `GLM53_PRECISION` defaults to `none` (one line each, coordinator-approved) in tests/test_multichip_decoder.py,
+  test_dsa_shard.py, test_perf_decoder.py and tools/mc_decode_ab.py, dsa_shard_probe.py, s5_sparse_probe.py,
+  baseline_dump.py.
+- P2-6: records now hold argv, GLM53_* / MESH environment, calling script, base commit and the md5-map digest;
+  `sweep_results.*` gained code / requant / fidelity / kv / ccl / precision_env / script columns; older commands are
+  marked `[reconstructed]`.
+- P3: stale comments fixed (tt/model.py, tt/multichip_decoder.py, tools/dtype_sweep.py, tools/long_ctx_check.py);
+  `evidence/` (kv_fp8 probe json, OOM and crash excerpts); `min_top1_perf.png` with the 91 % line; report gate checks
+  prefill-check top-1 too; trace replays must equal 2 x decode steps.

@@ -14,6 +14,7 @@ projections, DRAM-sharded router, fast_reduce_nc mix sums, ring vs linear all-ga
 
 from __future__ import annotations
 
+__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import argparse
 import dataclasses
 import json

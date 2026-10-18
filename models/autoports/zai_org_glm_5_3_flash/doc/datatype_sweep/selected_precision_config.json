@@ -34,10 +34,11 @@
  "policy": {
   "base": {
    "optimized_decoder.SELECTED": "opt_s5_pf",
-   "multichip_decoder.DEFAULT_MC": "stage-5 default (ag_persistent=False)",
-   "mesh": "(1, 4), TP4, FABRIC_1D"
+   "multichip_decoder.DEFAULT_MC": "stage-5 default of commit b8198430147 (incl. sinkhorn_faces, dsa_q_mm, dsa_tail_shared, kda_conv_max_batch=16; ag_persistent=False)",
+   "mesh": "(1, 4), TP4, FABRIC_1D",
+   "measured_on": "selection evidence (18 candidates, 3 references): s8_snapshot (ac03689d2bb + stage-8 files); post-selection gate: commit b8198430147 + the review-#1 tt/precision.py (doc/datatype_sweep/runs/selected_default_r1)"
   },
-  "layer_range_note": "'inner' = layers 1-43: the first layer 0 (KDA + dense MLP) and the last layer 44 (KDA + MoE) keep bfp8; combo_a_all (bfp4 also on 0 / 44) failed teacher forcing",
+  "layer_range_note": "'inner' = layers 1-43: the first layer 0 (KDA + dense MLP) and the last layer 44 (KDA + MoE) keep bfp8. combo_a_all (bfp4 also on layers 0 / 44) showed a decode collapse (TF 14 / 32 / 95 %, prefill check 90 / 100 / 100 %), cause unclassified (README)",
   "weights": {
    "routed_experts_gate_up_down": {
     "dtype": "bfp4",
@@ -85,7 +86,8 @@
    "dense_mlp_layers_0_2": {
     "dtype": "bfp8",
     "decode_fidelity": "LoFi",
-    "prefill_fidelity": "HiFi4"
+    "prefill_fidelity": "HiFi4",
+    "note": "bfp4 LoFi on layers 1-2 (combo_a_kv_dense4) passes min top-1 91 at equal speed (+37 MB per die, ~+5.8K tokens estimated); not selected: context gain below the ~5 % bar"
    },
    "lm_head": {
     "dtype": "bfp4",

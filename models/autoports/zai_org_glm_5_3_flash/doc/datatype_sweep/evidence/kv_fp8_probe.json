@@ -1,0 +1,29 @@
+{
+ "cast_tile": {
+  "ok": false,
+  "error": "TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/tensor/spec/tensor_spec.cpp:132: layout == Layout::ROW_MAJOR"
+ },
+ "cast_row_major": {
+  "ok": true,
+  "out_layout": "Layout.ROW_MAJOR",
+  "max_abs_vs_torch_fp8": 0.25,
+  "pcc_vs_bf16": 0.9996140997264388
+ },
+ "scatter_rows_fp8": {
+  "ok": true
+ },
+ "sdpa_S32": {
+  "pcc_bf16_vs_torch": 0.9998095687480044,
+  "rms_bf16_over_ref": 0.9968002438545227,
+  "pcc_fp8_vs_torch": 0.9995615010992034,
+  "rms_fp8_over_ref": 0.9938279986381531,
+  "pcc_fp8_vs_bf16": 0.9995829081318827
+ },
+ "sdpa_S128": {
+  "pcc_bf16_vs_torch": 0.9998086922085295,
+  "rms_bf16_over_ref": 0.9969365000724792,
+  "pcc_fp8_vs_torch": 0.9995625230250432,
+  "rms_fp8_over_ref": 0.9935616850852966,
+  "pcc_fp8_vs_bf16": 0.9995842831924417
+ }
+}

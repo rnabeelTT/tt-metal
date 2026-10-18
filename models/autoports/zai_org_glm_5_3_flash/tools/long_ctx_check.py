@@ -8,7 +8,8 @@ L - N tokens, then N traced decode steps teacher-forced with the document's own 
 sampling). Per position the top-5 token ids and logits are saved, plus the rank of the document's true next token.
 tools/long_ctx_compare.py compares two candidates' files (top-1 agreement, top-5 overlap, true-token top-1 / top-5).
 
-usage (one build): GLM53_PRECISION=<json or empty> python -m models.autoports.zai_org_glm_5_3_flash.tools.long_ctx_check \
+usage (one build; GLM53_PRECISION: unset = selected default, none = stage 7, <json> = candidate):
+  GLM53_PRECISION=... python -m models.autoports.zai_org_glm_5_3_flash.tools.long_ctx_check \
     --lengths 32768,100000 --steps 200 --seq-len 102400 --out <file.json>
 """
 
@@ -62,7 +63,23 @@ def main():
     from models.autoports.zai_org_glm_5_3_flash.tt.precision import PrecisionOverrides
 
     lengths = [int(x) for x in a.lengths.split(",")]
-    rec = {"precision_env": os.environ.get("GLM53_PRECISION", ""), "lengths": lengths, "steps": a.steps, "runs": {}}
+    import hashlib
+    import sys
+
+    import models.autoports.zai_org_glm_5_3_flash.tt as _tt
+
+    tt_dir = Path(_tt.__file__).parent
+    md5 = {f.name: hashlib.md5(f.read_bytes()).hexdigest()[:12] for f in sorted(tt_dir.glob("*.py"))}
+    rec = {
+        "precision_env": os.environ.get("GLM53_PRECISION", ""),
+        "lengths": lengths,
+        "steps": a.steps,
+        "argv": sys.argv,
+        "env": {k: v for k, v in sorted(os.environ.items()) if k.startswith(("GLM53_", "MESH_", "S8_"))},
+        "code": {"package": str(tt_dir), "md5": md5},
+        "base_commit": Path("BASE_COMMIT").read_text().strip() if Path("BASE_COMMIT").exists() else None,
+        "runs": {},
+    }
     mesh = _open_mesh(a.trace_region)
     try:
         t0 = time.time()

@@ -17,6 +17,7 @@ Also printed: wall time of the prefill per user and of a traced decode replay (o
 
 from __future__ import annotations
 
+__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import dataclasses
 import os
 import time

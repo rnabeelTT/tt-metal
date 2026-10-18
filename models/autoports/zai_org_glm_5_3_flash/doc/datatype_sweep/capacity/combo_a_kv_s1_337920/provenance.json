@@ -1,0 +1,30 @@
+{
+ "base_commit": "b8198430147",
+ "snapshot": "/home/raahem/glm53-flash-bringup/s8r1_snapshot",
+ "precision": "GLM53_PRECISION unset = selected_precision_config.json (combo_a_kv)",
+ "command": "tools/memory_probe.py capacity --trace-region 67108864 --workspace-mib 1024 --max-context 337920 --slots 1",
+ "snapshot_patch": "tools/memory_probe.py: weight_cache=\"env\" instead of None in the capacity build (warm load from the shipped cache)",
+ "tt_md5": {
+  "__init__.py": "53fbca0cafb2",
+  "ckpt.py": "daa701ea8bbd",
+  "decode_inputs.py": "eba59efeff02",
+  "dsa.py": "e16ae30c4dc9",
+  "dsa_shard.py": "60b55f51d867",
+  "functional_decoder.py": "252ff34a8daf",
+  "fused_decoder.py": "9950ff43360f",
+  "generator.py": "746a1c153739",
+  "kda.py": "2e7dde09ee2a",
+  "mhc.py": "6acd0fb3c3ad",
+  "mlp.py": "952a9a2ad222",
+  "model.py": "8131881b2a0a",
+  "moe.py": "6f6667949b4d",
+  "moe_dispatch.py": "f1bc95c39a49",
+  "moe_opt.py": "56a26881d001",
+  "multichip_decoder.py": "8c6e445858ac",
+  "optimized_decoder.py": "3413548afa4b",
+  "precision.py": "80ada0e677d3",
+  "serving_state.py": "446ac30d4ad5",
+  "synthetic.py": "5c661837e535",
+  "weight_cache.py": "1e22c3469e02"
+ }
+}

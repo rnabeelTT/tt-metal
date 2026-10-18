@@ -12,8 +12,13 @@
              generate (one token readback per step) ms per step (tools/s7_probe.run_decode)
   ptcheck    non-aligned prompts: traced vs eager prefill logits and greedy continuations (tools/s7_probe.run_ptcheck)
   checks     qualitative suite + autoregressive check (tools/full_model_checks) into --checks-dir
+  fidcount   LAST: one eager (untraced) decode step with the precision wrappers' fidelity counters reset
+             (tt/precision.FIDELITY_SEEN): which compute fidelity each wrapped decode matmul group used in one step
 
-The candidate is GLM53_PRECISION=<json> (tt/precision.py); unset = the shipped policy.
+The policy is GLM53_PRECISION (tt/precision.py): unset = the selected default (doc/datatype_sweep/
+selected_precision_config.json), "none" = the stage-7 policy, <json> = a candidate. The record holds the argv, the
+GLM53_* / MESH environment, the calling script (S8_SCRIPT), the base commit (S8_BASE_COMMIT or <cwd>/BASE_COMMIT)
+and the md5 of every tt/*.py with a digest of that map.
 
 usage:
   GLM53_TP=4 GLM53_CACHE_DIR=~/.cache/glm53_flash GLM53_PRECISION=doc/datatype_sweep/configs/<id>.json \\
@@ -27,6 +32,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -81,6 +87,14 @@ def main():
         ).stdout.strip(),
         "mesh": os.environ.get("MESH_DEVICE", ""),
         "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "argv": sys.argv,
+        "env": {
+            k: v for k, v in sorted(os.environ.items()) if k.startswith(("GLM53_", "MESH_", "S8_", "TT_METAL_TRACE"))
+        },
+        "script": os.environ.get("S8_SCRIPT", ""),
+        "cwd": os.getcwd(),
+        "base_commit": os.environ.get("S8_BASE_COMMIT")
+        or (Path("BASE_COMMIT").read_text().strip() if Path("BASE_COMMIT").exists() else None),
     }
     import hashlib
 
@@ -91,7 +105,10 @@ def main():
         "package": str(tt_dir),
         "md5": {f.name: hashlib.md5(f.read_bytes()).hexdigest()[:12] for f in sorted(tt_dir.glob("*.py"))},
     }
-    print(f"S8 CODE {tt_dir} " + json.dumps(rec["code"]["md5"]), flush=True)
+    rec["code"]["md5_map_digest"] = hashlib.sha256(json.dumps(rec["code"]["md5"], sort_keys=True).encode()).hexdigest()[
+        :12
+    ]
+    print(f"S8 CODE {tt_dir} " + json.dumps(rec["code"]), flush=True)
     if os.environ.get("S8_REQUIRE_PKG") and not str(tt_dir).startswith(os.environ["S8_REQUIRE_PKG"]):
         raise SystemExit(f"S8: package {tt_dir} is not under S8_REQUIRE_PKG={os.environ['S8_REQUIRE_PKG']}")
     mesh = s7._open_mesh(a.trace_region)
@@ -124,6 +141,10 @@ def main():
             finally:
                 undo()
             rec["readiness_trace_replays"] = n["calls"]
+            # teacher forcing: prefill logits give position 0, then 99 decode steps, each = model + sampler trace
+            steps = int(rec["teacher_forcing"][0].get("decode_tokens", 99))
+            rec["readiness_trace_replays_expected"] = 2 * steps
+            rec["trace_verified"] = n["calls"] == 2 * steps
             print(f"S8 readiness trace replays: {n['calls']}", flush=True)
         if "extra" in todo:
             rec["extra_refs"] = {}
@@ -153,6 +174,18 @@ def main():
             s7.run_ttft(g, [int(x) for x in a.prompts.split(",")], rec)
         if "decode" in todo:
             s7.run_decode(g, [1], a.steps, rec)
+        if "fidcount" in todo:  # last: an eager step after capture allocates outside the trace's view
+            import torch
+
+            from models.autoports.zai_org_glm_5_3_flash.tt import precision as prec_mod
+
+            rec["fidelity_seen_build"] = dict(prec_mod.FIDELITY_SEEN)  # warm-up eager step + trace capture
+            prec_mod.FIDELITY_SEEN.clear()
+            g.reset()
+            g.decode_forward(torch.tensor([[1000]]), torch.tensor([300]), enable_trace=False, on_device_sampling=False)
+            rec["fidelity_seen_one_eager_step"] = dict(prec_mod.FIDELITY_SEEN)
+            print("S8 FIDELITY one step " + json.dumps(rec["fidelity_seen_one_eager_step"]), flush=True)
+            g.reset()
         g.teardown()
     finally:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)

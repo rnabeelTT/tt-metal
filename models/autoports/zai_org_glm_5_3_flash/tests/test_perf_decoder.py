@@ -9,6 +9,7 @@ measured windows for tt-perf-report.
 
 from __future__ import annotations
 
+__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import os
 import time
 

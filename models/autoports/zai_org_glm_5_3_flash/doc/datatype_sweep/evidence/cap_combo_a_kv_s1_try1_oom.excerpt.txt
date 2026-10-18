@@ -1,0 +1,21 @@
+# excerpt of ~/glm53-flash-bringup/logs/s8/cap_combo_a_kv_s1_try1_oom.log
+=== start Sun Oct 18 11:49:00 AM UTC 2026 : timeout -k 60 7200 /home/raahem/glm53-flash-bringup/scripts/s8_cap_inner.sh combo_a_kv 364544 1
+2026-10-18 11:51:28.728 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:576 - MoE prefill row split: {'mode': 'auto', 'rows': '1024', 'largest_free_bytes_per_die': 265470976, 'need_bytes': 1073741824}
+2026-10-18 11:51:57.432 | critical |          Always | TT_FATAL: Out of Memory: Not enough space to allocate 82575360 B DRAM buffer across 8 banks, where each bank needs to store 10321920 B, but bank size is 4263952768 B (allocated: 4248445952 B, free: 15506816 B, largest free block: 9384064 B) (assert.hpp:104)
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 668, in <module>
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 664, in main
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 542, in run_capacity
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 208, in warm_programs
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/model.py", line 532, in prefill
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 1064, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 306, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 252, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 222, in _ffn
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/moe.py", line 412, in forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py", line 949, in _routed_masked
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py", line 960, in _routed_sorted
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py", line 1089, in _routed_sorted_built
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py", line 554, in undispatch_rows
+  File "/home/raahem/tt-metal/ttnn/ttnn/operation_tracer.py", line 484, in wrapped_function
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/allocator/bank_manager.cpp:462: false
+=== exit code: 1 Sun Oct 18 11:51:59 AM UTC 2026

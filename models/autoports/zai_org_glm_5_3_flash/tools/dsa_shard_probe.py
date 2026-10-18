@@ -8,6 +8,7 @@ layouts), and in the sharded layout the per-die sink weight w / real mass u per 
 usage: GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.dsa_shard_probe --out FILE [--traced 1]
 """
 
+__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import argparse
 import dataclasses
 

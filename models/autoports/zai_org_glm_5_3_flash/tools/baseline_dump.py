@@ -11,6 +11,7 @@ X' - X (the residual itself would dominate a PCC).
 usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.baseline_dump --out ~/glm53-flash-bringup/refs/baseline_opt.pt
 """
 
+__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import argparse
 import os
 from pathlib import Path

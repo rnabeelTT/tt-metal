@@ -4,7 +4,8 @@
 
   tokens -> embedding (hidden-sharded table: die d looks up columns [d*C/tp, (d+1)*C/tp)) -> 4 identical mHC streams
   in the stream-interleaved layout of tt/multichip_decoder.py -> 45 MultichipDecoder layers -> hc_head (mean of the
-  streams, local columns) -> all-gather -> final RMSNorm -> LM head (vocab-sharded, bfp8) -> logits [.., V/tp] per die
+  streams, local columns) -> all-gather -> final RMSNorm -> LM head (vocab-sharded; stage-8 default bfp4 LoFi,
+  GLM53_PRECISION=none: bfp8) -> logits [.., V/tp] per die
   -> on-device sampling (models.common.sampling.SamplingGenerator) or host logits.
 
 Prefill runs one user's prompt in chunks of the constructed prefill lengths (the last chunk on the smallest length
@@ -177,7 +178,7 @@ class Glm53Model:
             packer_l1_acc=False,
         )
 
-        # stage-8 datatype-sweep candidate (GLM53_PRECISION, tt/precision.py; unset = shipped policy): LM head group
+        # stage-8 precision (GLM53_PRECISION, tt/precision.py; unset = selected default, none = stage 7): LM head
         PrecisionOverrides.from_env().apply_model(self, 0, tc["num_hidden_layers"] - 1)
         self.layers = []
         for i in self.layer_indices:

@@ -1,0 +1,16 @@
+# excerpt of ~/glm53-flash-bringup/logs/s8/longctx_shipped_try1_oom.log
+=== start Sun Oct 18 12:04:33 PM UTC 2026 shipped
+2026-10-18 12:06:00.584 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:576 - MoE prefill row split: {'mode': 'auto', 'rows': '1024', 'largest_free_bytes_per_die': 641217536, 'need_bytes': 1073741824}
+2026-10-18 12:06:45.298 | critical |          Always | TT_FATAL: Out of Memory: Not enough space to allocate 52494336 B DRAM buffer across 8 banks, where each bank needs to store 6561792 B, but bank size is 4263952768 B (allocated: 4233812544 B, free: 30140224 B, largest free block: 6391424 B) (assert.hpp:104)
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/long_ctx_check.py", line 130, in <module>
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/long_ctx_check.py", line 87, in main
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 413, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/model.py", line 532, in prefill
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 1064, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 306, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 247, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 612, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/dsa.py", line 721, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/dsa.py", line 497, in _select_pools
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/allocator/bank_manager.cpp:462: false
+=== exit code: 1 Sun Oct 18 12:06:46 PM UTC 2026

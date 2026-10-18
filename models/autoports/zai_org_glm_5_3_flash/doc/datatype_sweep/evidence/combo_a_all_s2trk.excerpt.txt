@@ -1,0 +1,18 @@
+# excerpt of ~/glm53-flash-bringup/logs/s8/combo_a_all_s2trk.log
+=== start Sun Oct 18 09:28:02 AM UTC 2026 : combo_a_all
+S8 CODE /home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt {"__init__.py": "53fbca0cafb2", "ckpt.py": "daa701ea8bbd", "decode_inputs.py": "d9786f26f27b", "dsa.py": "1ccd9561252e", "dsa_shard.py": "a24a4337c9c1", "functional_decoder.py": "e6b204abc327", "fused_decoder.py": "7b5daa3ad41a", "generator.py": "9a4a6e70b1c2", "generator_vllm.py": "48c406fb59e1", "kda.
+2026-10-18 09:32:47.604 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:622 - MoE prefill row split: {'mode': 'auto', 'rows': '0', 'largest_free_bytes_per_die': 2802004992, 'need_bytes': 1073741824}
+2026-10-18 09:32:55.009 | critical |          Always | TT_FATAL: Input Tensor is not allocated (assert.hpp:104)
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py", line 165, in <module>
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py", line 99, in main
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 215, in __init__
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 266, in _warm
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/model.py", line 577, in prefill
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 1065, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 306, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 257, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 612, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/dsa.py", line 717, in prefill_forward
+  File "/home/raahem/glm53-flash-bringup/s8_snapshot2/models/autoports/zai_org_glm_5_3_flash/tt/dsa.py", line 677, in _set_open_pool
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/ttnn/api/ttnn/device_operation.hpp:514: input_tensor.is_allocated()
+=== exit code: 1 Sun Oct 18 09:32:58 AM UTC 2026
