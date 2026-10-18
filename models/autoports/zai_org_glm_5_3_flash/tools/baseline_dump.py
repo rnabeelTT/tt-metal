@@ -51,6 +51,19 @@ def run_case(mesh, rd, layer, decoder_cls):
     return out
 
 
+def frozen_baseline_policy(opt):
+    """The one-die policy of the frozen baseline (refs/baseline_opt.pt, dumped 2026-10-18 00:21 under opt_s5_pf): the
+    single-die-only knobs that TP4 does not run are off (stage-3 review #2: the kda_decode_conv swap, the 1D mlp_dn /
+    dsa_o specs, the HiFi2 DRAM-sharded KDA in-projection, the sinkhorn HiFi3 setting; those all come with
+    single_die_r2 / kda_in_split_ds), and the DSA per-head reuse config on prefill rows of W_UK is on, as it was in the
+    code at 00:21 (GLM53_PF_OFF=bmm_on; the baseline prefills are first chunks, where that config is correct).
+    GLM53_BASELINE_FROZEN=0: the current SELECTED instead."""
+    import dataclasses
+
+    os.environ.setdefault("GLM53_PF_OFF", "bmm_on")
+    return dataclasses.replace(opt, single_die_r2=False, kda_in_split_ds="", out_proj_ds="", prefill_fidelity=None)
+
+
 def decoder_cls_from_env(multichip: bool):
     from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES, SELECTED, OptimizedDecoder
 
@@ -58,6 +71,8 @@ def decoder_cls_from_env(multichip: bool):
     if multichip:
         from models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder import MultichipDecoder as base
     opt = CANDIDATES[os.environ["GLM53_OPT"]] if os.environ.get("GLM53_OPT") else SELECTED
+    if not multichip and os.environ.get("GLM53_BASELINE_FROZEN", "1") == "1":
+        opt = frozen_baseline_policy(opt)
 
     class _Cls(base):
         @classmethod

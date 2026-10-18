@@ -1,0 +1,460 @@
+=== GLM53_R2_OFF=none Sun Oct 18 03:09:14 PM UTC 2026
+2026-10-18 15:09:17.090 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:09:20.239 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 15:09:28.533 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x7619d77a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x761a1b2f5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x761a1e29cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x761a1e329ecc]
+
+Fatal Python error: Aborted
+
+Thread 0x0000761a1e564740 (most recent call first):
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/ttnn/ttnn/operations/core.py", line 445 in to_torch
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 103 in stream_out
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 197 in eager_step
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 557 in test_decode_only
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/raahem/tt-metal/python_env/bin/pytest", line 12 in <module>
+
+Extension modules: markupsafe._speedups, zmq.backend.cython._zmq, tornado.speedups, msgpack._cmsgpack, psutil._psutil_linux, _brotli, backports.zstd._zstd, charset_normalizer.md, charset_normalizer.cd, simplejson._speedups, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, yaml._yaml, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, PIL._imaging, kiwisolver._cext, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.cluster._vq, scipy.cluster._hierarchy, scipy.cluster._optimal_leaf_ordering, PIL._imagingft (total: 169)
+timeout: the monitored command dumped core
+=== GLM53_R2_OFF=conv Sun Oct 18 03:10:19 PM UTC 2026
+2026-10-18 15:10:21.255 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:10:24.311 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 15:10:32.635 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x7508ae7a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x7508f1ef5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x7508f4e9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x7508f4f29ecc]
+
+Fatal Python error: Aborted
+
+Thread 0x00007508f51bc740 (most recent call first):
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/ttnn/ttnn/operations/core.py", line 445 in to_torch
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 103 in stream_out
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 197 in eager_step
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 557 in test_decode_only
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/raahem/tt-metal/python_env/bin/pytest", line 12 in <module>
+
+Extension modules: markupsafe._speedups, zmq.backend.cython._zmq, tornado.speedups, msgpack._cmsgpack, psutil._psutil_linux, _brotli, backports.zstd._zstd, charset_normalizer.md, charset_normalizer.cd, simplejson._speedups, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, yaml._yaml, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, PIL._imaging, kiwisolver._cext, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.cluster._vq, scipy.cluster._hierarchy, scipy.cluster._optimal_leaf_ordering, PIL._imagingft (total: 169)
+timeout: the monitored command dumped core
+=== GLM53_R2_OFF=kdain Sun Oct 18 03:11:23 PM UTC 2026
+2026-10-18 15:11:25.343 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:11:28.281 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 6 decode-only pos 0: delta PCC 0.999973 full PCC 0.999970 update rms ratio 0.9996
+L0 slot 6 decode-only pos 1: delta PCC 0.999978 full PCC 0.999973 update rms ratio 1.0002
+L0 slot 6 decode-only pos 2: delta PCC 0.999977 full PCC 0.999967 update rms ratio 0.9988
+L0 slot 6 decode-only pos 3: delta PCC 0.999980 full PCC 0.999968 update rms ratio 1.0000
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.40s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+1.34s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+======================= 1 passed, 43 deselected in 2.83s =======================
+nanobind: leaked 73 instances!
+ - leaked instance 0x77293f768eb8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77290c8c48a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x77293f768d68 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x77293f769938 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7728fe062f88 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastProgramConfig"
+ - leaked instance 0x77293f769368 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x77293f54ac58 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x77293f769278 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f5ff3a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f769998 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f7694e8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f5ff348 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f769458 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x77293f769218 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x772960585628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x77293f5fcf48 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x77293f768bb8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7728fd7ae4d8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x770786e17948 of type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked instance 0x77293f7692a8 of type "ttnn._ttnn.tensor.Tensor"
+ - ... skipped remainder
+nanobind: leaked 25 keep_alive records!
+nanobind: leaked 26 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - ... skipped remainder
+nanobind: leaked 277 functions!
+ - leaked function "is_allocated"
+ - leaked function ""
+ - leaked function "__repr__"
+ - leaked function "get_layout"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== GLM53_R2_OFF=mlpdn Sun Oct 18 03:12:20 PM UTC 2026
+2026-10-18 15:12:22.653 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:12:25.702 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 15:12:34.024 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x7d85d09a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x7d86146f5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x7d861769cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x7d8617729ecc]
+
+Fatal Python error: Aborted
+
+Thread 0x00007d861792b740 (most recent call first):
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/ttnn/ttnn/operations/core.py", line 445 in to_torch
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 103 in stream_out
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 197 in eager_step
+  File "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 557 in test_decode_only
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/raahem/tt-metal/python_env/bin/pytest", line 12 in <module>
+
+Extension modules: markupsafe._speedups, zmq.backend.cython._zmq, tornado.speedups, msgpack._cmsgpack, psutil._psutil_linux, _brotli, backports.zstd._zstd, charset_normalizer.md, charset_normalizer.cd, simplejson._speedups, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, yaml._yaml, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, PIL._imaging, kiwisolver._cext, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.cluster._vq, scipy.cluster._hierarchy, scipy.cluster._optimal_leaf_ordering, PIL._imagingft (total: 169)
+timeout: the monitored command dumped core
+=== GLM53_R2_OFF=sink Sun Oct 18 03:13:24 PM UTC 2026
+2026-10-18 15:13:26.726 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:13:30.137 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 6 decode-only pos 0: delta PCC 0.999973 full PCC 0.999970 update rms ratio 0.9996
+L0 slot 6 decode-only pos 1: delta PCC 0.999978 full PCC 0.999973 update rms ratio 1.0002
+L0 slot 6 decode-only pos 2: delta PCC 0.999977 full PCC 0.999967 update rms ratio 0.9988
+L0 slot 6 decode-only pos 3: delta PCC 0.999980 full PCC 0.999968 update rms ratio 1.0000
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+3.09s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+1.40s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+======================= 1 passed, 43 deselected in 4.58s =======================
+nanobind: leaked 73 instances!
+ - leaked instance 0x7e8782db5248 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782db5188 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e8782db58a8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e873c8d7588 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e873c8d7648 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e874ba748a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7e873c8d7768 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782c83fa8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e8782db5278 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782c0b648 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e8782dc7088 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7e8782db50c8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782db52a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e879f689628 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7e8782db4a98 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782db5098 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e873c8d51e8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e8782db5368 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e8782db5818 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x42df0120 of type "ttnn._ttnn.multi_device.MeshDevice"
+ - ... skipped remainder
+nanobind: leaked 25 keep_alive records!
+nanobind: leaked 26 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - ... skipped remainder
+nanobind: leaked 277 functions!
+ - leaked function ""
+ - leaked function "__ne__"
+ - leaked function "tensor_topology"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "contains"
+ - leaked function ""
+ - leaked function "matmul_select_program_factory"
+ - leaked function "quiesce_devices"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== GLM53_R2_OFF=conv,kdain,mlpdn,sink Sun Oct 18 03:14:23 PM UTC 2026
+2026-10-18 15:14:25.683 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 15:14:28.601 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+L0 slot 6 decode-only pos 0: delta PCC 0.999973 full PCC 0.999970 update rms ratio 0.9996
+L0 slot 6 decode-only pos 1: delta PCC 0.999978 full PCC 0.999973 update rms ratio 1.0002
+L0 slot 6 decode-only pos 2: delta PCC 0.999977 full PCC 0.999967 update rms ratio 0.9988
+L0 slot 6 decode-only pos 3: delta PCC 0.999980 full PCC 0.999968 update rms ratio 1.0000
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.40s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+1.40s call     models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+======================= 1 passed, 43 deselected in 2.89s =======================
+nanobind: leaked 71 instances!
+ - leaked instance 0x7ce369709ba8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce36959f348 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce369708be8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce36959c468 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce369717508 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7ce369709458 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7ce369708b88 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7ce321702f88 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastProgramConfig"
+ - leaked instance 0x7ce369708ac8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7ce369708bb8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7ce369709878 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce36959f438 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce36959f318 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce369717648 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7ce369709068 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7ce369716e48 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7ce3697092a8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7cc1a63a3a28 of type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked instance 0x7ce369709998 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7ce3697090c8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - ... skipped remainder
+nanobind: leaked 25 keep_alive records!
+nanobind: leaked 26 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - ... skipped remainder
+nanobind: leaked 277 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__eq__"
+ - leaked function "clear_program_cache"
+ - leaked function "__init__"
+ - leaked function "from_json"
+ - leaked function "extract_shard"
+ - leaked function "memory_config"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html

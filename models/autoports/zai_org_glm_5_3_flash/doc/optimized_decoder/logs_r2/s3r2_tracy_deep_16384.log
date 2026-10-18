@@ -1,0 +1,7 @@
+=== tracy test_perf_traced_decode[dsa_moe-1] 2026-10-18T03:32:44+00:00 decoder=optimized opt=SELECTED tp=1
+tracy test_perf_traced_decode[dsa_moe-1] exit=0
+PERF dsa_moe traced decode batch 1: 3.386 ms/step host wall (3 replays, incl. input copies)
+=== tracy test_perf_traced_decode[dsa_moe-32] 2026-10-18T03:34:10+00:00 decoder=optimized opt=SELECTED tp=1
+tracy test_perf_traced_decode[dsa_moe-32] exit=0
+PERF dsa_moe traced decode batch 32: 12.441 ms/step host wall (3 replays, incl. input copies)
+=== done 2026-10-18T03:35:34+00:00

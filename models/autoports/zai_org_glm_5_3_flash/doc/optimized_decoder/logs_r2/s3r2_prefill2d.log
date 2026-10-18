@@ -1,0 +1,185 @@
+=== start Sun Oct 18 06:34:38 AM UTC 2026 : timeout -k 60 4200 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_prefill2d
+2026-10-18 06:34:39.581 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+mlp_gu HiFi4 default:    7059.4 us
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 1x70 sub 1x2:    6102.4 us  PCC vs default 1.000000
+2026-10-18 06:34:42.245 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 7x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3846144 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 1x35 sub 1x1:    6976.2 us  PCC vs default 1.000000
+2026-10-18 06:34:43.553 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2036224 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 7x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2036224 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 1x14 sub 1x2:    6174.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 7x14 sub 1x2:    6020.2 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 1x10 sub 1x2:    6237.8 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2:    6019.5 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 1x70 sub 1x2:    8539.9 us  PCC vs default 1.000000
+2026-10-18 06:34:48.254 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3484160 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 7x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3484160 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 1x35 sub 1x1:   10130.7 us  PCC vs default 1.000000
+2026-10-18 06:34:49.608 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 1826560 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 7x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 1826560 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 1x14 sub 1x2:    8596.7 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 7x14 sub 1x2:    8478.9 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 1x10 sub 1x2:    8578.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 2 out_block 7x10 sub 1x2:    8445.6 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 1x70 sub 1x2:   12865.6 us  PCC vs default 1.000000
+2026-10-18 06:34:54.296 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3303168 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 7x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 3303168 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 1x35 sub 1x1:   15982.6 us  PCC vs default 1.000000
+2026-10-18 06:34:55.733 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 1721728 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 7x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 1721728 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 1x14 sub 1x2:   13048.8 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 7x14 sub 1x2:   12993.1 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 1x10 sub 1x2:   13330.3 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x10 pm 7 pn 70 in0 1 out_block 7x10 sub 1x2:   13159.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 1x96 sub 1x4:    7501.5 us  PCC vs default 1.000000
+2026-10-18 06:35:00.565 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 5190656 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 7x96 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 5190656 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 1x48 sub 1x4:    7529.5 us  PCC vs default 1.000000
+2026-10-18 06:35:01.839 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2708480 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 7x48 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2708480 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 1x32 sub 1x4:    7519.1 us  PCC vs default 1.000000
+2026-10-18 06:35:03.244 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1881088 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 7x32 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1881088 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 1x24 sub 1x4:    7599.9 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 4 out_block 7x24 sub 1x4:    7324.9 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 1x96 sub 1x4:   10093.0 us  PCC vs default 1.000000
+2026-10-18 06:35:06.239 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4715520 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 7x96 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4715520 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 1x48 sub 1x4:   10108.6 us  PCC vs default 1.000000
+2026-10-18 06:35:07.527 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2442240 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 7x48 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2442240 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 1x32 sub 1x4:   10137.5 us  PCC vs default 1.000000
+2026-10-18 06:35:08.898 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1684480 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 7x32 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1684480 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 1x24 sub 1x4:   10144.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 2 out_block 7x24 sub 1x4:    9941.3 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 1x96 sub 1x4:   15026.3 us  PCC vs default 1.000000
+2026-10-18 06:35:11.889 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4477952 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 7x96 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 4477952 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 1x48 sub 1x4:   14993.3 us  PCC vs default 1.000000
+2026-10-18 06:35:13.226 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2309120 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 7x48 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2309120 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 1x32 sub 1x4:   15084.3 us  PCC vs default 1.000000
+2026-10-18 06:35:14.582 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1586176 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 7x32 sub 1x4: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1586176 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 1x24 sub 1x4:   15213.7 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 8x10 pm 7 pn 96 in0 1 out_block 7x24 sub 1x4:   15052.1 us  PCC vs default 1.000000
+2026-10-18 06:35:16.862 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2506752 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 4x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2506752 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:17.317 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 4292608 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 8x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 4292608 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 4x35 sub 1x1:    7670.2 us  PCC vs default 1.000000
+2026-10-18 06:35:18.643 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2267648 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 8x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2267648 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 4x14 sub 1x2:    6717.3 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 8x14 sub 1x2:    6693.3 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 4x10 sub 1x2:    6754.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 4 out_block 8x10 sub 1x2:    6700.5 us  PCC vs default 1.000000
+2026-10-18 06:35:22.549 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2169344 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 4x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2169344 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:23.000 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3922432 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 8x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3922432 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 4x35 sub 1x1:   11292.3 us  PCC vs default 1.000000
+2026-10-18 06:35:24.340 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2049792 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 8x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2049792 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 4x14 sub 1x2:    9473.8 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 8x14 sub 1x2:    9435.7 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 4x10 sub 1x2:    9409.5 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 2 out_block 8x10 sub 1x2:    9401.5 us  PCC vs default 1.000000
+2026-10-18 06:35:28.372 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2000640 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 4x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2000640 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:28.832 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3737344 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 8x70 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3737344 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 4x35 sub 1x1:   18253.7 us  PCC vs default 1.000000
+2026-10-18 06:35:30.268 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 1940864 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 8x35 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 1940864 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 4x14 sub 1x2:   14666.3 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 8x14 sub 1x2:   14742.7 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 4x10 sub 1x2:   14994.7 us  PCC vs default 1.000000
+mlp_gu HiFi4 2D 11x8 pm 8 pn 70 in0 1 out_block 8x10 sub 1x2:   14934.0 us  PCC vs default 1.000000
+mlp_gu HiFi4 BEST: [(6019.535195082426, '2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2', (11, 10, 4, 2, 7, 10, 7, 70))]
+mlp_gu HiFi4 l1acc default:    3861.0 us
+mlp_gu HiFi4 l1acc 2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2:    3877.0 us  PCC vs default 1.000000
+mlp_gu HiFi4 l1acc 2D 11x10 pm 7 pn 70 in0 4 out_block 7x14 sub 1x2:    3881.6 us  PCC vs default 1.000000
+mlp_gu HiFi4 l1acc 2D 11x10 pm 7 pn 70 in0 4 out_block 1x70 sub 1x2:    3973.4 us  PCC vs default 1.000000
+mlp_gu HiFi4 l1acc BEST: [(6019.535195082426, '2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2', (11, 10, 4, 2, 7, 10, 7, 70))]
+mlp_gu HiFi2 default:    5601.8 us
+mlp_gu HiFi2 2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2:    4399.0 us  PCC vs default 1.000000
+mlp_gu HiFi2 2D 11x10 pm 7 pn 70 in0 4 out_block 7x14 sub 1x2:    4382.0 us  PCC vs default 1.000000
+mlp_gu HiFi2 2D 11x10 pm 7 pn 70 in0 4 out_block 1x70 sub 1x2:    4526.2 us  PCC vs default 1.000000
+mlp_gu HiFi2 BEST: [(6019.535195082426, '2D 11x10 pm 7 pn 70 in0 4 out_block 7x10 sub 1x2', (11, 10, 4, 2, 7, 10, 7, 70))]
+kda_in HiFi4 default:   10123.4 us
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2:    8272.9 us  PCC vs default 1.000000
+2026-10-18 06:35:40.875 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 4 out_block 7x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 5087232 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 4 out_block 1x47 sub 1x1:    9326.6 us  PCC vs default 1.000000
+2026-10-18 06:35:42.228 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2656768 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 4 out_block 7x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2656768 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 2 out_block 1x94 sub 1x2:   11465.9 us  PCC vs default 1.000000
+2026-10-18 06:35:43.593 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 4620800 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 2 out_block 7x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 4620800 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 2 out_block 1x47 sub 1x1:   13570.2 us  PCC vs default 1.000000
+2026-10-18 06:35:44.985 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2394880 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 2 out_block 7x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2394880 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 1 out_block 1x94 sub 1x2:   17237.4 us  PCC vs default 1.000000
+2026-10-18 06:35:46.372 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 4387584 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 1 out_block 7x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 4387584 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 1 out_block 1x47 sub 1x1:   21269.8 us  PCC vs default 1.000000
+2026-10-18 06:35:47.798 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2263936 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x10 pm 7 pn 94 in0 1 out_block 7x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-9] grow to 2263936 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:48.286 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2043392 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 4 out_block 1x129 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2043392 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+2026-10-18 06:35:48.729 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 6897152 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 4 out_block 7x129 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 6897152 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 4 out_block 1x43 sub 1x1:   12381.4 us  PCC vs default 1.000000
+2026-10-18 06:35:50.121 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2449920 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 4 out_block 7x43 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2449920 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 2 out_block 1x129 sub 1x1:   18041.4 us  PCC vs default 1.000000
+2026-10-18 06:35:51.528 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 6278400 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 2 out_block 7x129 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 6278400 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 2 out_block 1x43 sub 1x1:   18037.0 us  PCC vs default 1.000000
+2026-10-18 06:35:52.951 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2205440 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 2 out_block 7x43 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2205440 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 1 out_block 1x129 sub 1x1:   28951.9 us  PCC vs default 1.000000
+2026-10-18 06:35:54.429 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 5969024 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 1 out_block 7x129 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 5969024 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 1 out_block 1x43 sub 1x1:   29037.6 us  PCC vs default 1.000000
+2026-10-18 06:35:55.919 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2083200 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 8x10 pm 7 pn 129 in0 1 out_block 7x43 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2083200 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90d
+2026-10-18 06:35:56.367 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3305472 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 4 out_block 4x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 3305472 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:56.816 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 5681152 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 4 out_block 8x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 5681152 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:57.272 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 1741312 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 4 out_block 4x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 1741312 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:57.723 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2961920 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 4 out_block 8x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2961920 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:58.190 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2863616 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 2 out_block 4x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2863616 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:35:58.631 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 5206528 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 2 out_block 8x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 5206528 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 2 out_block 4x47 sub 1x1:   15167.9 us  PCC vs default 1.000000
+2026-10-18 06:36:00.041 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2691840 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 2 out_block 8x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2691840 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:36:00.490 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2642688 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 1 out_block 4x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2642688 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+2026-10-18 06:36:00.926 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 4969216 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 1 out_block 8x94 sub 1x2: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 4969216 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 1 out_block 4x47 sub 1x1:   24081.6 us  PCC vs default 1.000000
+2026-10-18 06:36:02.394 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2556800 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+kda_in HiFi4 2D 11x8 pm 8 pn 94 in0 1 out_block 8x47 sub 1x1: ERROR TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception | info: | Statically allocated circular buffers on core range [0-0 - 10-7] grow to 2556800 B which is beyond max L1 size of 1572864 B | --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x77e90
+kda_in HiFi4 BEST: [(8272.92655594647, '2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2', (11, 10, 4, 2, 1, 94, 7, 94))]
+kda_in HiFi4 l1acc default:    5488.4 us
+kda_in HiFi4 l1acc 2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2:    5370.3 us  PCC vs default 1.000000
+kda_in HiFi4 l1acc 2D 11x10 pm 7 pn 94 in0 4 out_block 1x47 sub 1x1:    5685.6 us  PCC vs default 1.000000
+kda_in HiFi4 l1acc 2D 11x10 pm 7 pn 94 in0 2 out_block 1x94 sub 1x2:    5708.3 us  PCC vs default 1.000000
+kda_in HiFi4 l1acc BEST: [(8272.92655594647, '2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2', (11, 10, 4, 2, 1, 94, 7, 94))]
+kda_in HiFi2 default:    8061.5 us
+kda_in HiFi2 2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2:    6072.1 us  PCC vs default 1.000000
+kda_in HiFi2 2D 11x10 pm 7 pn 94 in0 4 out_block 1x47 sub 1x1:    7221.1 us  PCC vs default 1.000000
+kda_in HiFi2 2D 11x10 pm 7 pn 94 in0 2 out_block 1x94 sub 1x2:    9206.7 us  PCC vs default 1.000000
+kda_in HiFi2 BEST: [(8272.92655594647, '2D 11x10 pm 7 pn 94 in0 4 out_block 1x94 sub 1x2', (11, 10, 4, 2, 1, 94, 7, 94))]
+=== exit code: 0 Sun Oct 18 06:36:09 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

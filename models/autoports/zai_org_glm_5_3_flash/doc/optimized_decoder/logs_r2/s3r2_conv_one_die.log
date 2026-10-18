@@ -1,0 +1,87 @@
+=== start Sun Oct 18 02:35:47 AM UTC 2026 : timeout -k 60 1800 python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py
+2026-10-18 02:35:49.130 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 4 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[1] B=1: qkv max rel err 1.01e-07
+B=1: h0 exact (non-finite idle rows stay non-finite)
+B=1: h1 exact (non-finite idle rows stay non-finite)
+B=1: h2 exact (non-finite idle rows stay non-finite)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[2] B=2: qkv max rel err 1.06e-07
+B=2: h0 exact (non-finite idle rows stay non-finite)
+B=2: h1 exact (non-finite idle rows stay non-finite)
+B=2: h2 exact (non-finite idle rows stay non-finite)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[8] B=8: qkv max rel err 1.33e-07
+B=8: h0 exact (non-finite idle rows stay non-finite)
+B=8: h1 exact (non-finite idle rows stay non-finite)
+B=8: h2 exact (non-finite idle rows stay non-finite)
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[32] B=32: qkv max rel err 1.27e-07
+B=32: h0 exact (non-finite idle rows stay non-finite)
+B=32: h1 exact (non-finite idle rows stay non-finite)
+B=32: h2 exact (non-finite idle rows stay non-finite)
+PASSED
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.24s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[1]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[32]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[2]
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[8]
+0.03s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[32]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[8]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[32]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[2]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[8]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[1]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[2]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[1]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[2]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[8]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_kda_decode_conv_one_die.py::test_kda_decode_conv_one_die[32]
+============================== 4 passed in 2.23s ===============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x7056c00708a8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7056c05b2d18 of type "ttnn._ttnn.tensor.CoreRangeSet"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function "create_submesh"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - leaked function ""
+ - leaked function "__repr__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "to"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 0 Sun Oct 18 02:35:54 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

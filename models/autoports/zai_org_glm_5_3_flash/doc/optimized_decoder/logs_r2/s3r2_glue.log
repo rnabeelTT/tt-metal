@@ -1,0 +1,35 @@
+=== start Sun Oct 18 02:49:21 AM UTC 2026 : timeout -k 60 3000 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_glue_probe
+2026-10-18 02:49:22.725 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+===== down
+2026-10-18 02:49:43.643 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+B=32     default: dn per_core_N 128 in0 4 sw 4 untilize_out False:    8168.6 us (    +0.0 vs default)  PCC vs default 1.000000 max|d| 0.00e+00
+2026-10-18 02:49:44.050 | critical |          Always | TT_FATAL: sparse_matmul (grouped): per_core_N (16) must equal Nt (128) (whole groups per core) (assert.hpp:104)
+B=32     dn per_core_N 16 in0 8 sw 4 untilize_out True       : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.cpp:93: per_core_N == Nt | info: | sparse_matmul (grouped): per_core_N (16) must equal Nt (128) (whole groups per core) | backtrace: | --- void tt::assert::detail::tt_throw<un
+2026-10-18 02:49:44.053 | critical |          Always | TT_FATAL: sparse_matmul (grouped): per_core_N (32) must equal Nt (128) (whole groups per core) (assert.hpp:104)
+B=32     dn per_core_N 32 in0 8 sw 4 untilize_out True       : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.cpp:93: per_core_N == Nt | info: | sparse_matmul (grouped): per_core_N (32) must equal Nt (128) (whole groups per core) | backtrace: | --- void tt::assert::detail::tt_throw<un
+pf2048   default: dn per_core_N 128 in0 4 sw 4 untilize_out False:   52086.9 us (    +0.0 vs default)  PCC vs default 1.000000 max|d| 0.00e+00
+2026-10-18 02:49:44.323 | critical |          Always | TT_FATAL: sparse_matmul (grouped): per_core_N (16) must equal Nt (128) (whole groups per core) (assert.hpp:104)
+pf2048   dn per_core_N 16 in0 8 sw 4 untilize_out True       : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.cpp:93: per_core_N == Nt | info: | sparse_matmul (grouped): per_core_N (16) must equal Nt (128) (whole groups per core) | backtrace: | --- void tt::assert::detail::tt_throw<un
+2026-10-18 02:49:44.340 | critical |          Always | TT_FATAL: sparse_matmul (grouped): per_core_N (32) must equal Nt (128) (whole groups per core) (assert.hpp:104)
+pf2048   dn per_core_N 32 in0 8 sw 4 untilize_out True       : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/sparse/factory/sparse_matmul_multicore_reuse_grouped.cpp:93: per_core_N == Nt | info: | sparse_matmul (grouped): per_core_N (32) must equal Nt (128) (whole groups per core) | backtrace: | --- void tt::assert::detail::tt_throw<un
+===== rec
+recurrent_decode B= 1:     74.6 us/call (host-timed trace)  state r+w    8.4 MB ->  112.5 GB/s
+recurrent_decode B= 2:    121.8 us/call (host-timed trace)  state r+w   16.8 MB ->  137.7 GB/s
+recurrent_decode B= 4:    178.9 us/call (host-timed trace)  state r+w   33.6 MB ->  187.5 GB/s
+recurrent_decode B= 8:    262.3 us/call (host-timed trace)  state r+w   67.1 MB ->  255.8 GB/s
+recurrent_decode B=16:    472.8 us/call (host-timed trace)  state r+w  134.2 MB ->  283.9 GB/s
+recurrent_decode B=32:    849.3 us/call (host-timed trace)  state r+w  268.4 MB ->  316.1 GB/s
+===== glue
+routing [1,32,8,1] fp32 -> [1,1,32,8]            ttnn.reshape (TILE)                             :     39.0 us  exact True
+routing [1,32,8,1] fp32 -> [1,1,32,8]            to RM -> reshape -> TILE                        :     30.1 us  exact True
+2026-10-18 02:49:45.461 | critical |          Always | TT_FATAL: The last dimension can not change in view, attempting to change last dimension from 1 to 8, use reshape instead (assert.hpp:104)
+routing [1,32,8,1] fp32 -> [1,1,32,8]            ttnn.view (TILE)                                : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/data_movement/view/view.cpp:37: (tensor_shape[-1] == shape[-1]) | info: | The last dimension can not change in view, attempting to change last dimension from 1 to 8, use reshape instead | --- void tt::assert::detail::tt_throw<unsigned long, u
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   ttnn.reshape (TILE)                             :     49.6 us  exact False
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   to RM -> reshape -> TILE                        :     33.5 us  exact False
+2026-10-18 02:49:45.713 | critical |          Always | TT_FATAL: The last dimension can not change in view, attempting to change last dimension from 4096 to 128, use reshape instead (assert.hpp:104)
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   ttnn.view (TILE)                                : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/data_movement/view/view.cpp:37: (tensor_shape[-1] == shape[-1]) | info: | The last dimension can not change in view, attempting to change last dimension from 4096 to 128, use reshape instead | --- void tt::assert::detail::tt_throw<unsigned lo
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   nlp_create_qkv_heads (head-major [1,32,32,128]) :     55.5 us  exact n/a (layout)
+=== exit code: 0 Sun Oct 18 02:49:46 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

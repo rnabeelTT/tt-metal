@@ -1,0 +1,55 @@
+=== start Sun Oct 18 02:51:16 AM UTC 2026 : timeout -k 60 2400 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro2
+2026-10-18 02:51:17.761 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 02:51:38.806 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 2048) tp=1 union~178
+W_UK: x (1, 64, 2048, 256) DataType.BFLOAT16 w (1, 64, 256, 512) DataType.BFLOAT8_B Mt 64
+  default config, A: PCC 0.999999
+  per_core_M  8 A device tensors  : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  8 B fresh x         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  8 C fresh w         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  8 D random x        : PCC 0.507302 finite True heads wrong 23/64
+  per_core_M  8 E fresh x + w     : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  4 A device tensors  : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  4 B fresh x         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  4 C fresh w         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  4 D random x        : PCC 0.542994 finite True heads wrong 29/64
+  per_core_M  4 E fresh x + w     : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  2 A device tensors  : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  2 B fresh x         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  2 C fresh w         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  2 D random x        : PCC 0.482786 finite True heads wrong 42/64
+  per_core_M  2 E fresh x + w     : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  1 A device tensors  : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  1 B fresh x         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  1 C fresh w         : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  1 D random x        : PCC 0.379533 finite True heads wrong 51/64
+  per_core_M  1 E fresh x + w     : PCC 0.999999 finite True heads wrong 0/64
+  per_core_M  8 F cleared cache   : PCC 0.999999
+  per_core_M  1 F cleared cache   : PCC 0.999999
+W_UV: x (1, 64, 2048, 512) DataType.BFLOAT16 w (1, 64, 512, 256) DataType.BFLOAT8_B Mt 64
+  default config, A: PCC 0.999999
+  per_core_M  8 A device tensors  : PCC 0.095332 finite True heads wrong 23/64
+  per_core_M  8 B fresh x         : PCC 0.095332 finite True heads wrong 23/64
+  per_core_M  8 C fresh w         : PCC 0.095332 finite True heads wrong 23/64
+  per_core_M  8 D random x        : PCC 0.345450 finite True heads wrong 23/64
+  per_core_M  8 E fresh x + w     : PCC 0.095332 finite True heads wrong 23/64
+  per_core_M  4 A device tensors  : PCC 0.336342 finite True heads wrong 4/64
+  per_core_M  4 B fresh x         : PCC 0.336342 finite True heads wrong 4/64
+  per_core_M  4 C fresh w         : PCC 0.336342 finite True heads wrong 4/64
+  per_core_M  4 D random x        : PCC 0.678688 finite True heads wrong 29/64
+  per_core_M  4 E fresh x + w     : PCC 0.336342 finite True heads wrong 4/64
+  per_core_M  2 A device tensors  : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  2 B fresh x         : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  2 C fresh w         : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  2 D random x        : PCC 0.677289 finite True heads wrong 42/64
+  per_core_M  2 E fresh x + w     : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  1 A device tensors  : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  1 B fresh x         : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  1 C fresh w         : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  1 D random x        : PCC 0.601164 finite True heads wrong 51/64
+  per_core_M  1 E fresh x + w     : PCC 0.359071 finite True heads wrong 4/64
+  per_core_M  8 F cleared cache   : PCC 0.359071
+  per_core_M  1 F cleared cache   : PCC 0.359071
+=== exit code: 0 Sun Oct 18 02:51:58 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

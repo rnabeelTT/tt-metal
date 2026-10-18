@@ -1,0 +1,13 @@
+##### --case uk --pm 8
+=== start Sun Oct 18 03:37:07 AM UTC 2026 : timeout -k 30 600 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 8
+2026-10-18 03:37:08.896 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,2048,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=8,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.773348  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.773348  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+=== exit code: 0 Sun Oct 18 03:37:15 AM UTC 2026
+##### --case uv --pm 8

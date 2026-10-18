@@ -261,6 +261,7 @@ must meet PCC 0.999 and |rms ratio - 1| <= 0.005. Final runs (2026-10-18 00:2x .
 the MoE layers): 44 passed; update PCC vs single die 0.999782 .. 0.999992, rms ratio 0.99651 .. 1.00353; decode-mean
 scale vs HF 1.0007 .. 1.0061; lowest update PCC vs HF 0.9728 (synthetic kda_moe prefill). `refs/baseline_opt.pt`
 behind those PCCs was regenerated on 2026-10-17 05:33 (post-fix kernels) and again by the review #1 rework run.
+`tools/baseline_dump.py` now builds the one-die baseline with the stage-3 single-die-only knobs off (`GLM53_BASELINE_FROZEN=1`, default: no `single_die_r2` / `kda_in_split_ds`, which TP4 does not run; W_UK prefill reuse on as at the 2026-10-18 00:21 dump), so a re-dump reproduces the frozen `refs/baseline_opt.pt` policy (host-side config diff against 08bac32f4c1: identical).
 2026-10-17 04:35 (`logs/s4_mc_suite2.log`): 43 passed, 1 failed (the single-die compare of the stage-4 path against
 the stale pre-fix baseline, kda_moe decode PCC 0.998733, rms 0.99395; see `work_log.md`).
 

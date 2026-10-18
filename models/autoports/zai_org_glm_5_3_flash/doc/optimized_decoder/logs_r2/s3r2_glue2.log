@@ -1,0 +1,16 @@
+=== start Sun Oct 18 03:36:18 AM UTC 2026 : timeout -k 60 900 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_glue_probe --only glue
+2026-10-18 03:36:20.512 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+===== glue
+routing [1,32,8,1] fp32 -> [1,1,32,8]            ttnn.reshape (TILE)                             :     39.0 us  exact True
+routing [1,32,8,1] fp32 -> [1,1,32,8]            to RM -> reshape -> TILE                        :     30.1 us  exact True
+2026-10-18 03:36:21.666 | critical |          Always | TT_FATAL: The last dimension can not change in view, attempting to change last dimension from 1 to 8, use reshape instead (assert.hpp:104)
+routing [1,32,8,1] fp32 -> [1,1,32,8]            ttnn.view (TILE)                                : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/data_movement/view/view.cpp:37: (tensor_shape[-1] == shape[-1]) | info: | The last dimension can not change in view, attempting to change last dimension from 1 to 8, use reshape instead | --- void tt::assert::detail::tt_throw<unsigned long, u
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   ttnn.reshape (TILE)                             :     49.6 us  exact True
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   to RM -> reshape -> TILE                        :     33.5 us  exact True
+2026-10-18 03:36:21.687 | critical |          Always | TT_FATAL: The last dimension can not change in view, attempting to change last dimension from 4096 to 128, use reshape instead (assert.hpp:104)
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   ttnn.view (TILE)                                : ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/data_movement/view/view.cpp:37: (tensor_shape[-1] == shape[-1]) | info: | The last dimension can not change in view, attempting to change last dimension from 4096 to 128, use reshape instead | --- void tt::assert::detail::tt_throw<unsigned lo
+indexer q [1,1,32,4096] bf16 -> [1,1,1024,128]   nlp_create_qkv_heads (head-major [1,32,32,128]) :     55.4 us  exact n/a (layout)
+=== exit code: 0 Sun Oct 18 03:36:22 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

@@ -89,6 +89,7 @@ def _x(n, seed):
 @pytest.mark.parametrize("rows", [128, 2048])
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_perf_prefill(kind, rows):
+    torch.manual_seed(int(os.environ.get("GLM53_PERF_SEED", "0")))  # reproducible inputs (32-user A/Bs)
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
@@ -115,25 +116,31 @@ def test_perf_prefill(kind, rows):
 @pytest.mark.parametrize("batch", [1, 32])
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_perf_traced_decode(kind, batch):
+    # GLM53_PERF_SEED: decode input rows (the 32-user active-expert set is data dependent); GLM53_PERF_POS: decode
+    # position (default 128, the dense-attention regime; >= 2051 puts the DSA layers in the sparse-attention regime,
+    # max_context grows to hold it)
+    torch.manual_seed(int(os.environ.get("GLM53_PERF_SEED", "0")))
+    p0 = int(os.environ.get("GLM53_PERF_POS", "128"))
+    max_ctx = max(4096, -(-(p0 + 64) // 2048) * 2048)
     rd = CheckpointReader()
     mesh = open_mesh()
     try:
         dec = build_layer(
-            mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=4096, decoder_cls=_decoder_cls()
+            mesh, rd, KINDS[kind], batch=batch, prefill_lengths=(128,), max_context=max_ctx, decoder_cls=_decoder_cls()
         )
         runner = DecodeRunner(dec, mesh, batch)
         rows = {s: torch.randn(H4) * 0.02 for s in range(batch)}
-        pos = [128] * batch
+        pos = [p0] * batch
         runner.eager_step(rows, pos)  # compile
-        runner.capture(rows, [129] * batch)
-        runner.traced_step(rows, [129] * batch)  # warm replay
+        runner.capture(rows, [p0 + 1] * batch)
+        runner.traced_step(rows, [p0 + 1] * batch)  # warm replay
         ttnn.synchronize_device(mesh)
         _flush(mesh)
         signpost("PERF_DECODE")
         t0 = time.time()
         iters = 3
         for i in range(iters):
-            runner.traced_step(rows, [130 + i] * batch, sync=False)
+            runner.traced_step(rows, [p0 + 2 + i] * batch, sync=False)
         ttnn.synchronize_device(mesh)
         dt = (time.time() - t0) / iters
         signpost("PERF_DECODE_END")

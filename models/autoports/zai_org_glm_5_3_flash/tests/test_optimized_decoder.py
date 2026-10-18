@@ -81,3 +81,22 @@ def test_policy_reached_weights(mesh, rd):
         else:
             assert dec.attn.w_uk.dtype == _opt.dsa_bmm_dtype and dec.attn.bmm_reuse == _opt.dsa_bmm_reuse
         print(f"{kind}: policy {_opt.describe()} reached the weights")
+    # review #2 hard check: the single-die program options are active (one die)
+    if _opt.single_die_mc and tuple(mesh.shape)[1] == 1:
+        for kind in ("kda_dense", "kda_moe", "dsa_moe"):
+            dec = _suite.get_layer(mesh, rd, _suite.KINDS[kind])
+            assert dec._norm_sharded, kind
+            if dec.attn_kind == "dsa":
+                assert type(dec.attn).__name__ == "MultichipDSA" and dec.attn.mc.dsa_pack, kind
+                if _opt.prefill_cfg:
+                    assert dec.attn.flash_prefill_pc is not None and dec.attn.prefill_o_2d, kind
+                    assert dec.attn.bmm_prefill_pm == 0, "per-head prefill reuse config must stay off"
+            if _opt.single_die_r2:
+                import os as _os
+
+                assert _os.environ.get("MHC_SINKHORN_PERM_FIDELITY") == "3"
+                if dec.attn_kind == "kda":
+                    assert type(dec.attn).__name__ == "SingleDieKDA" and dec.attn.mc.kda_conv_op, kind
+                if dec.mlp_kind == "dense":
+                    assert type(dec.mlp).__name__ == "MultichipMLP" and dec.mlp.mc.mlp_dn, kind
+            print(f"{kind}: single-die options active ({type(dec.attn).__name__}, {type(dec.mlp).__name__})")

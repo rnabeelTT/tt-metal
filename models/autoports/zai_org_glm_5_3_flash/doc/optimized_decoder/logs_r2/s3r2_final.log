@@ -1,0 +1,92 @@
+=== start Sun Oct 18 08:15:30 AM UTC 2026 : timeout -k 60 5400 bash /home/raahem/glm53-flash-bringup/scripts/s3r2_cases.sh
+##### sdpa probe
+2026-10-18 08:15:32.308 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+S= 1 T=16384 k_chunk  32:    428.9 us  PCC vs k32 1.000000
+2026-10-18 08:15:34.456 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S= 1 k_chunk 64: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+2026-10-18 08:15:34.458 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S= 1 k_chunk 128: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+S= 1 head split (2 rows x 32 heads, cache_batch_idx) k_chunk  32:    287.0 us  PCC vs k32 1.000000 exact True
+2026-10-18 08:15:35.350 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S= 1 head split k_chunk 64: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+2026-10-18 08:15:35.351 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S= 1 head split k_chunk 128: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+S=32 T=16384 k_chunk  32:    438.1 us  PCC vs k32 1.000000
+2026-10-18 08:15:36.596 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S=32 k_chunk 64: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+2026-10-18 08:15:36.596 | critical |          Always | TT_FATAL: k_chunk_size must divide TOPK (assert.hpp:104)
+S=32 k_chunk 128: ERROR TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/transformer/sdpa/device/sparse_sdpa_device_operation.cpp:200: TOPK % attrs.k_chunk_size == 0
+##### --case uk --pm 8 --swap
+2026-10-18 08:15:39.262 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,2048,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=8,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.773326  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.773326  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uv --pm 8
+2026-10-18 08:15:47.641 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uv: x [1,64,2048,512] bf16, w [1,64,512,256] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=8,per_core_N=8,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.773238  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.773238  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uk --pm 2
+2026-10-18 08:15:53.531 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,2048,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=2,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.745259  heads wrong 42 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.745259  heads wrong 42 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uv --pm 2
+2026-10-18 08:16:01.733 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uv: x [1,64,2048,512] bf16, w [1,64,512,256] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=2,per_core_N=8,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.745492  heads wrong 42 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.745492  heads wrong 42 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uk --pm 4 --m 128
+2026-10-18 08:16:07.618 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,128,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=4,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uv --pm 4 --m 128
+2026-10-18 08:16:11.628 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uv: x [1,64,128,512] bf16, w [1,64,512,256] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=4,per_core_N=8,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+##### --case uv --pm 8 --ib 4
+2026-10-18 08:16:15.625 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uv: x [1,64,2048,512] bf16, w [1,64,512,256] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=4,out_subblock_h=1,out_subblock_w=4,per_core_M=8,per_core_N=8,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  default config x1                 : PCC 0.999999  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (compile)                : PCC 0.999998  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (program-cache hit)      : PCC 0.773177  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 again (cache hit)        : PCC 0.999998  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+  reuse x2 (cache cleared first)    : PCC 0.773177  heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]  of which equal to the OTHER input's product (stale input) 0
+  reuse x1 (cache hit after x2)     : PCC 0.999998  heads wrong 0 []  of which equal to the OTHER input's product (stale input) 0
+=== exit code: 0 Sun Oct 18 08:16:20 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

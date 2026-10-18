@@ -124,3 +124,33 @@ kda8_exp4_lofi_pc 12111 µs.
   (`watcher_correctness/`); repeated runs 10 / 10 (`logs/s3r_final_stress.log`); Tracy 12 cases with advice
   (`tracy_r1/`). README "Performance" has the before / after.
 - Logs cited in the README are copied to `logs_r1/`.
+
+## 2026-10-18: re-review #2
+
+- Timing note (review #2): `tt/optimized_decoder.py` was edited at 01:31 (comment on the per-head prefill reuse knob)
+  after the final suite / watcher (00:52-01:20) and before the commit; the code path did not change (the knob was
+  already off) and the final Tracy rows show it off.
+- P1-A: `single_die_r2` (KDA `kda_decode_conv` for decode batches <= 8 slots, sinkhorn permutation HiFi3, `mlp_dn` /
+  `dsa_o` 1D 16-core specs) on top of the pinned single-die set; class `SingleDieKDA` (a MultichipKDA that keeps the
+  12-op chain above 8 slots). `kda_decode_conv` at the one-die width: `tests/test_kda_decode_conv_one_die.py` 4 / 4.
+- P1-B: trials `t_kda_in_ds_hifi2` (16 / 16, taken), `t_out_ds_hifi2` (26 / 26, slower: rejected), `t_out_ds_lofi`
+  (1 failed), `t_pf_hifi2` (21 / 21; decision in the README).
+- SELECTED keeps its name `opt_s5_pf`; its one-die contents changed (`single_die_r2`, `kda_in_split_ds="HiFi2"`).
+  `opt_s5_pf_r1` = the review #1 contents, `opt_s5_pf_r2a` = without the KDA in-proj split. TP4 is unaffected (all
+  single-die options are gated on `tp == 1` and not a MultichipDecoder; host-side config diff against s8_snapshot:
+  no difference on any common field). `tools/baseline_dump.py` builds the frozen stage-4 baseline policy
+  (`GLM53_BASELINE_FROZEN=1`: no single-die-only knobs, W_UK prefill reuse on as at the 00:21 dump).
+- Perf runs now pin the input seed (`GLM53_PERF_SEED`, the 32-user spread was data dependent).
+- Device queue: run-locked.sh got a FIFO ticket queue (coordinator); `s3r_tracy.sh` takes a ticket too. The remaining
+  steps of `s3r2_main.sh` were moved, while waiting at the queue, into one ticket (`s3r2_rest.sh`).
+- P2 probes (subagent): the per-head reuse bug repro (`tools/s3r2_bmm_repro3.py`), adapted 2D prefill configs
+  (`tools/s3r2_prefill2d.py`), glue / recurrence probes (`tools/s3r2_glue_probe.py`), deep-position DSA decode Tracy
+  and the head-split sparse SDPA probe (`tools/s3r2_sdpa_probe.py`). README "Review #2" sections.
+- Watcher on the review #2 default with the KDA in-proj split: aborted ("Watcher detected tripped assert", no details
+  captured; the dump stops after the idle device-0 cores, so the asserting core is likely on a chip the test does not
+  use). Bisection (`logs/s3r2_wbisect.log`, one sample each): the assert follows the 2-reader DRAM-sharded split only.
+  The split was dropped from the default; the last two bisection variants ran after the default had changed.
+- The prefill HiFi2 trial (`t_pf_hifi2`) was taken; final default = P1-A options + prefill HiFi2.
+- Final default (`glm53-s3r2-final3`, one ticket): suite 44 / 44 (`logs/s3r2_f3_suite.log`), watcher 20 / 20 + 3 / 3 with
+  0 suspicious lines (`watcher_correctness_r2/`), repeated runs 20 / 20 (`logs/s3r2_f3_stress.log`), decode Tracy
+  `candidates_r2/final/`, prefill Tracy `candidates_r2/opt_s5_pf_final/`.

@@ -53,6 +53,18 @@ class OptConfig:
     # (7707 -> 3708, 5792 -> 2778 us). The per-head reuse config on prefill rows (1900 -> 765 us in the probe) stays off:
     # it broke DSA continuation chunks (GLM53_PF_OFF=bmm_on turns it on for that check)
     prefill_cfg: bool = False
+    # review #2 P1-A: the further stage-5 decode options that win on one die (candidates_r1/mc_tp1 per-op deltas): the KDA
+    # decode conv as one op (kda_decode_conv: -161 us at 1 user, +221 us at 32 users -> only for decode batches of at most
+    # kda_conv_op_max_rows slots), the sinkhorn permutation matmuls at HiFi3 (bit-identical, -7 us), the dense-MLP down and
+    # DSA o_proj decode on 1D 16-core programs (-73 / -8 us). Applied with single_die_mc, one die only.
+    single_die_r2: bool = False
+    kda_conv_op_max_rows: int = 8
+    # review #2 P1-B trials (single die): KDA in-proj decode on a DRAM-sharded copy of its first 32768 columns + a 1D
+    # remainder at this math fidelity ("" = off); KDA / DSA output projection decode DRAM-sharded at this fidelity;
+    # math fidelity of the large prefill matmuls (DSA o_proj, dense-MLP gate|up and down; None = their HiFi4)
+    kda_in_split_ds: str = ""
+    out_proj_ds: str = ""
+    prefill_fidelity: object = None
 
     def describe(self) -> dict:
         m = self.moe
@@ -69,6 +81,10 @@ class OptConfig:
             "single_die_mc": self.single_die_mc,
             "mix_chunks_decode": self.mix_chunks_decode,
             "prefill_cfg": self.prefill_cfg,
+            "single_die_r2": self.single_die_r2,
+            "kda_in_split_ds": self.kda_in_split_ds,
+            "out_proj_ds": self.out_proj_ds,
+            "prefill_fidelity": str(self.prefill_fidelity),
         }
 
     def quant_spec(self) -> dict:
@@ -175,6 +191,26 @@ CANDIDATES.update(
         ),
     }
 )
+# review #2: P1-A further single-die options (on top of the review #1 default, `opt_s5_pf_r1` keeps that) and P1-B trials
+_pf = dict(single_die_mc=True, prefill_cfg=True)
+CANDIDATES["opt_s5_pf_r1"] = _r(_opt, "opt_s5_pf_r1", **_pf)
+_r2 = _r(_opt, "opt_s5_pf", single_die_r2=True, **_pf)
+CANDIDATES.update(
+    {
+        "t_kda_in_ds_hifi2": _r(_r2, "t_kda_in_ds_hifi2", kda_in_split_ds="HiFi2"),
+        "t_out_ds_hifi2": _r(_r2, "t_out_ds_hifi2", out_proj_ds="HiFi2"),
+        "t_out_ds_lofi": _r(_r2, "t_out_ds_lofi", out_proj_ds="LoFi"),
+        "t_pf_hifi2": _r(_r2, "t_pf_hifi2", prefill_fidelity=_HIFI2),
+    }
+)
+# the default: review #2 P1-A options + P1-B (c), the prefill rows of DSA o_proj and dense-MLP gate|up / down at HiFi2
+# with packer L1 accumulation (suite subset 21 / 21, logs/s3r2_pcc_t_pf_hifi2.log; prefill 2048 kda_dense 26987 ->
+# 20676 us, dsa_moe 77076 -> 74974 us). P1-B (a), the KDA in-proj split DRAM-sharded decode at HiFi2 (`t_kda_in_ds_hifi2`,
+# -84 us per KDA layer, suite subset 16 / 16), is NOT in the default: it trips a watcher assert in decode
+# (logs/s3r2_wbisect.log: the assert follows kda_in_split_ds alone). `opt_s5_pf_r2a` = P1-A only.
+CANDIDATES["opt_s5_pf_r2a"] = _r(_r2, "opt_s5_pf_r2a")
+CANDIDATES["opt_s5_pf_r2b"] = _r(_r2, "opt_s5_pf_r2b", kda_in_split_ds="HiFi2", prefill_fidelity=_HIFI2)
+CANDIDATES["opt_s5_pf"] = _r(_r2, "opt_s5_pf", prefill_fidelity=_HIFI2)
 # selected (review #1): `opt` + the stage-5 single-die decode options + the prefill program configs; routed experts
 # stay LoFi (HiFi3 removes the -0.5 % routed scale bias but costs +1.3 % / +3 % / +5 % at B=1 / B=32 / prefill on
 # the MoE layers; doc/optimized_decoder/README.md "Accuracy")
@@ -195,6 +231,173 @@ class _DecodeMixChunks(FusedHyperConnection):
             return super()._mixes_split_k(x)
         finally:
             _fd.mix_chunks = orig
+
+
+def _ckc(mesh, fid):
+    if isinstance(fid, str):
+        fid = getattr(ttnn.MathFidelity, fid)
+    return ttnn.init_device_compute_kernel_config(
+        mesh.arch(), math_fidelity=fid, math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True
+    )
+
+
+def _single_die_kda_cls():
+    from .multichip_decoder import MultichipKDA
+
+    class SingleDieKDA(MultichipKDA):
+        """MultichipKDA on one die (review #2): the fused decode conv op only for decode batches of at most
+        conv_op_max_rows slots (one die: 92 us at 1 slot, 477 us at 32 against about 256 us for the 12-op chain,
+        candidates_r1/mc_tp1); the KDA in-proj split DRAM-sharded trial (in_split)."""
+
+        conv_op_max_rows = 8
+        in_split = None
+
+        def _conv_step(self, proj, dstate, inputs, B):
+            if B > self.conv_op_max_rows:
+                return FusedGlmKDA_conv_step(self, proj, dstate, inputs, B)
+            return super()._conv_step(proj, dstate, inputs, B)
+
+        def _in_proj(self, x, w, cc):
+            if self.in_split is not None and int(x.padded_shape[-2]) == 32:
+                return self.in_split(x)
+            return super()._in_proj(x, w, cc)
+
+    return SingleDieKDA
+
+
+def FusedGlmKDA_conv_step(self, proj, dstate, inputs, B):
+    """The fused decoder's 12-op conv chain (the base of MultichipKDA._conv_step)."""
+    from .fused_decoder import FusedGlmKDA
+
+    return FusedGlmKDA._conv_step(self, proj, dstate, inputs, B)
+
+
+_SINGLE_DIE_KDA = []
+
+
+def _single_die_kda():
+    """The single-die KDA class, created on first use (tt/multichip_decoder imports this module)."""
+    if not _SINGLE_DIE_KDA:
+        _SINGLE_DIE_KDA.append(_single_die_kda_cls())
+    return _SINGLE_DIE_KDA[0]
+
+
+class _KdaInSplitDS:
+    """review #2 P1-B (a): KDA in-proj decode rows as a DRAM-sharded matmul over the first 32768 columns (128 tiles per
+    bank, 64 compute cores, in0 blocks of 2, 2 readers per bank; tools/s3r_probe_dense.py "split DS c64 in0 2 r2 + 1D")
+    plus a 1D matmul over the last 192 columns, concatenated, at `fid`. The DS part is a decode-only copy of the
+    columns (+142 MB per KDA layer); the interleaved weight keeps serving prefill."""
+
+    N1 = 32768
+
+    def __init__(self, w, mesh, fid):
+        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+        K, N = int(w.shape[-2]), int(w.shape[-1])
+        host = ttnn.to_torch(w).reshape(K, N)  # bfp8 values are exact in bf16; re-packing keeps them (same blocks)
+        self.w1 = ttnn.from_torch(
+            host[:, : self.N1].contiguous().reshape(1, 1, K, self.N1),
+            dtype=w.dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=tpc.create_dram_sharded_mem_config(K, self.N1),
+        )
+        self.w2 = ttnn.from_torch(
+            host[:, self.N1 :].contiguous().reshape(1, 1, K, N - self.N1),
+            dtype=w.dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+        cores, kt = 64, K // 32
+        self.pc = ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
+            in0_block_w=2, per_core_M=1, per_core_N=self.N1 // 32 // cores, fused_activation=None
+        )
+        self.pc.num_workers_per_dram_bank = 2
+        grid = mesh.compute_with_storage_grid_size()
+        self.pc2 = tpc.create_matmul_1d_decode_progcfg(32, K, N - self.N1, 6, fp32_acc=True, grid_w=grid.x)
+        rows = next(r for r in range(8, 0, -1) if cores % r == 0 and cores // r <= 8)
+        self.act = ttnn.create_sharded_memory_config(
+            shape=(32, K // cores),
+            core_grid=ttnn.CoreGrid(x=cores // rows, y=rows),
+            strategy=ttnn.ShardStrategy.WIDTH,
+            orientation=ttnn.ShardOrientation.ROW_MAJOR,
+            use_height_and_width_as_shard_shape=True,
+        )
+        self.ckc = _ckc(mesh, fid)
+        del kt
+
+    def __call__(self, x):
+        DRAM = ttnn.DRAM_MEMORY_CONFIG
+        xs = ttnn.to_memory_config(x, self.act)
+        a1 = ttnn.linear(
+            xs,
+            self.w1,
+            compute_kernel_config=self.ckc,
+            program_config=self.pc,
+            memory_config=ttnn.L1_WIDTH_SHARDED_MEMORY_CONFIG,
+        )
+        ttnn.deallocate(xs)
+        a = ttnn.to_memory_config(a1, DRAM)
+        ttnn.deallocate(a1)
+        b = ttnn.linear(x, self.w2, compute_kernel_config=self.ckc, program_config=self.pc2, memory_config=DRAM)
+        o = ttnn.concat([a, b], dim=-1, memory_config=DRAM)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        return o
+
+
+class _FidelityDS:
+    """review #2 P1-B (b): output-projection decode rows on a DRAM-sharded weight (tt/multichip_decoder role spec
+    "ds:r2", a decode-only DS copy; N = 4096 needs no bank padding) at math fidelity `fid`; other calls go to `inner`.
+    """
+
+    def __init__(self, inner, mesh, fid, role):
+        from .multichip_decoder import RoleMatmuls
+
+        self.inner, self.ckc, self.role = inner, _ckc(mesh, fid), role
+        self.mms = RoleMatmuls(mesh.compute_with_storage_grid_size().x)
+
+    def __call__(self, x, w, role, ckc, mc):
+        if role == "o" and int(x.padded_shape[-2]) == 32:
+            return self.mms.run("o", "ds:r2", x, w, self.ckc, out_mc=mc if mc is not None else ttnn.DRAM_MEMORY_CONFIG)
+        return self.inner(x, w, role, ckc, mc) if self.inner is not None else None
+
+
+def _prefill_ckc_mm(attn, ckc):
+    """review #2 P1-B (c): the DSA o_proj prefill rows at `ckc` (instance-level _mm wrapper)."""
+    import types
+
+    base = type(attn)._mm
+
+    def _mm(self, x, w, **kw):
+        if w is self.w_o and int(x.padded_shape[-2]) > 32:
+            keep, self.ckc = self.ckc, ckc
+            try:
+                return base(self, x, w, **kw)
+            finally:
+                self.ckc = keep
+        return base(self, x, w, **kw)
+
+    attn._mm = types.MethodType(_mm, attn)
+
+
+def _prefill_ckc_forward(mlp):
+    """review #2 P1-B (c): dense-MLP prefill rows (gate|up and down) at mlp.prefill_ckc."""
+    import types
+
+    base = type(mlp).forward
+
+    def forward(self, x):
+        if int(x.padded_shape[-2]) > 32:
+            keep, self.ckc = self.ckc, self.prefill_ckc
+            try:
+                return base(self, x)
+            finally:
+                self.ckc = keep
+        return base(self, x)
+
+    mlp.forward = types.MethodType(forward, mlp)
 
 
 class OptimizedDecoder(FusedDecoder):
@@ -285,7 +488,52 @@ class OptimizedDecoder(FusedDecoder):
                 if dec.mlp_kind == "moe":
                     _install_router_ds(dec.mlp, mc)
                 dec._norm_sharded = mc.norm_sharded
+                if opt.single_die_r2:
+                    dec._apply_single_die_r2(opt, mc)
+                dec._apply_trials(opt, state_dict)
         return dec
+
+    def _apply_single_die_r2(self, opt: OptConfig, mc):
+        """review #2 P1-A: KDA decode conv op (decode batches <= kda_conv_op_max_rows), sinkhorn permutation matmuls at
+        HiFi3, dense-MLP down / DSA o_proj decode on 1D 16-core programs (tt/multichip_decoder role specs)."""
+        from .fused_decoder import FusedGlmKDA
+        from .mlp import DenseMLP
+        from .multichip_decoder import MultichipMLP, RoleDecodeMM
+
+        off = set(os.environ.get("GLM53_R2_OFF", "").split(","))  # bisection: conv, sink, mlpdn, dsao
+        mc.kda_conv_op = "conv" not in off
+        mc.sinkhorn_perm_fidelity = 0 if "sink" in off else 3
+        mc.mlp_dn = "" if "mlpdn" in off else "1d:c16:ib4"
+        mc.dsa_o = "" if "dsao" in off else "1d:c16:ib4"
+        if isinstance(self.attn, FusedGlmKDA):
+            self.attn.__class__ = _single_die_kda()
+            self.attn.mc = mc
+            self.attn.conv_op_max_rows = opt.kda_conv_op_max_rows
+        grid_w = self.mesh.compute_with_storage_grid_size().x
+        if self.attn_kind == "dsa":
+            self.attn.decode_mm = RoleDecodeMM(getattr(self.attn, "decode_mm", None), mc, "dsa_o", grid_w)
+        if isinstance(self.mlp, DenseMLP):
+            self.mlp.__class__ = MultichipMLP
+            self.mlp.mc = mc
+        # bit-identical (the permutation operand is 0 / 1; tests/test_mhc_split_sinkhorn.py); read by the op's program
+        # factory, process-wide, as tt/multichip_decoder.MultichipDecoder sets it
+        if mc.sinkhorn_perm_fidelity:
+            os.environ.setdefault("MHC_SINKHORN_PERM_FIDELITY", "3")
+
+    def _apply_trials(self, opt: OptConfig, sd):
+        """review #2 P1-B trials (one die)."""
+        if opt.kda_in_split_ds and self.attn_kind == "kda" and "kdain" not in os.environ.get("GLM53_R2_OFF", ""):
+            self.attn.in_split = _KdaInSplitDS(self.attn.weights.input_projection, self.mesh, opt.kda_in_split_ds)
+        if opt.out_proj_ds:
+            role = "dsa_o" if self.attn_kind == "dsa" else "kda_out"
+            self.attn.decode_mm = _FidelityDS(self.attn.decode_mm, self.mesh, opt.out_proj_ds, role)
+        if opt.prefill_fidelity is not None:
+            ckc = _ckc(self.mesh, opt.prefill_fidelity)
+            if self.attn_kind == "dsa":
+                _prefill_ckc_mm(self.attn, ckc)
+            if self.mlp_kind == "dense":
+                self.mlp.prefill_ckc = ckc
+                _prefill_ckc_forward(self.mlp)
 
     def _norm(self, h, w):
         if self._norm_sharded and int(h.padded_shape[-2]) == 32 and h.dtype == ttnn.bfloat16:
