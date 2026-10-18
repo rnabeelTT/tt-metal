@@ -1,0 +1,143 @@
+2026-10-18 05:24:39.996 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... 2026-10-18 05:24:40.719 | WARNING  | tests.ttnn.conftest:pytest_collection_modifyitems:45 - Fast Runtime Mode is ON. Skipping tests tagged with @pytest.mark.requires_fast_runtime_mode_off
+collected 11 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-bf16_scale] T=32 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.30e-07 max elementwise rel err 4.22e-07
+T=32 bf16 a/b post: PCC 1.000000000 scale 0.999999989 max rel err 1.35e-07 max elementwise rel err 8.16e-07
+T=32 bf16 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 3.95e-07 max elementwise rel err 7.05e-07
+T=32: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-fp32_scale] T=32 fp32 a/b pre: PCC 1.000000000 scale 1.000000033 max rel err 1.11e-07 max elementwise rel err 4.33e-07
+T=32 fp32 a/b post: PCC 1.000000000 scale 1.000000011 max rel err 1.09e-07 max elementwise rel err 1.69e-07
+T=32 fp32 a/b comb: PCC 1.000000000 scale 1.000000031 max rel err 2.04e-07 max elementwise rel err 9.51e-07
+T=32: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-bf16_scale] T=96 bf16 a/b pre: PCC 1.000000000 scale 1.000000019 max rel err 1.28e-07 max elementwise rel err 5.45e-07
+T=96 bf16 a/b post: PCC 1.000000000 scale 0.999999992 max rel err 1.38e-07 max elementwise rel err 4.43e-07
+T=96 bf16 a/b comb: PCC 1.000000000 scale 1.000000048 max rel err 2.54e-07 max elementwise rel err 1.37e-06
+T=96: comb column-sum max |1 - s| 1.10e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-fp32_scale] T=96 fp32 a/b pre: PCC 1.000000000 scale 1.000000025 max rel err 1.05e-07 max elementwise rel err 4.81e-07
+T=96 fp32 a/b post: PCC 1.000000000 scale 1.000000004 max rel err 1.24e-07 max elementwise rel err 5.26e-07
+T=96 fp32 a/b comb: PCC 1.000000000 scale 1.000000058 max rel err 4.03e-07 max elementwise rel err 1.38e-06
+T=96: comb column-sum max |1 - s| 1.12e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-bf16_scale] T=2048 bf16 a/b pre: PCC 1.000000000 scale 1.000000022 max rel err 1.35e-07 max elementwise rel err 6.40e-07
+T=2048 bf16 a/b post: PCC 1.000000000 scale 0.999999998 max rel err 1.32e-07 max elementwise rel err 5.67e-07
+T=2048 bf16 a/b comb: PCC 1.000000000 scale 1.000000052 max rel err 4.02e-07 max elementwise rel err 1.43e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-fp32_scale] T=2048 fp32 a/b pre: PCC 1.000000000 scale 1.000000021 max rel err 1.92e-07 max elementwise rel err 8.16e-07
+T=2048 fp32 a/b post: PCC 1.000000000 scale 1.000000001 max rel err 1.99e-07 max elementwise rel err 6.83e-07
+T=2048 fp32 a/b comb: PCC 1.000000000 scale 1.000000050 max rel err 3.43e-07 max elementwise rel err 1.86e-06
+T=2048: comb column-sum max |1 - s| 1.16e-06
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded sharded T=7040 pre: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 1.70e-07
+sharded T=7040 post: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 1.84e-07
+sharded T=7040 comb: max |sharded - interleaved| 0.00e+00, max rel err vs fp64 4.09e-07
+PASSED
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01] 2026-10-18 05:24:43.973 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]: 2026-10-18 05:24:43 (UTC)
+2026-10-18 05:24:44.078 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000008569963 | max|Δ|=1.19e-07
+2026-10-18 05:24:44.078 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=1.000000000034407 | max|Δ|=2.38e-07
+2026-10-18 05:24:44.078 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=0.9999999998730573 | max|Δ|=2.98e-07
+PASSED2026-10-18 05:24:44.097 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0] 2026-10-18 05:24:44.098 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]: 2026-10-18 05:24:44 (UTC)
+2026-10-18 05:24:44.202 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-18 05:24:44.203 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-18 05:24:44.203 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-18 05:24:44.222 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1] 2026-10-18 05:24:44.223 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]: 2026-10-18 05:24:44 (UTC)
+2026-10-18 05:24:44.325 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-18 05:24:44.325 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-18 05:24:44.325 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-18 05:24:44.344 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5] 2026-10-18 05:24:44.345 | DEBUG    | ttnn:manage_config:53 - Set ttnn.CONFIG.report_name to tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]: 2026-10-18 05:24:44 (UTC)
+2026-10-18 05:24:44.449 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - pre: pcc=1.0000000007377576 | max|Δ|=1.79e-07
+2026-10-18 05:24:44.449 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - post: pcc=0.9999999986012547 | max|Δ|=3.58e-07
+2026-10-18 05:24:44.449 | INFO     | tests.ttnn.nightly.unit_tests.operations.experimental.deepseek_prefill.test_mhc_split_sinkhorn:_check:37 - comb: pcc=1.0000000000841975 | max|Δ|=4.17e-07
+PASSED2026-10-18 05:24:44.469 | DEBUG    | ttnn:manage_config:57 - Restored ttnn.CONFIG.report_name to None
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+1.32s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-bf16_scale]
+0.36s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-fp32_scale]
+0.29s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-bf16_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-fp32_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-fp32_scale]
+0.28s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+0.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-bf16_scale]
+0.10s setup    tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+0.10s setup    tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]
+0.10s setup    tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]
+0.10s setup    tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-bf16_scale]
+0.02s teardown tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-bf16_scale]
+0.02s teardown tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]
+0.02s teardown tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+0.02s teardown tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-fp32_scale]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-fp32_scale]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-bf16_scale]
+0.02s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-fp32_scale]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-bf16_scale]
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+0.00s call     tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=32-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=96-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-bf16_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[T=2048-fp32_scale]
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s0.01]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn[s1.0]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c20_tpc1]
+PASSED tests/ttnn/nightly/unit_tests/operations/experimental/deepseek_prefill/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_sharded[c4_tpc5]
+============================== 11 passed in 3.77s ==============================
+nanobind: leaked 2 instances!
+ - leaked instance 0x72e7f2eda4a8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x72e7f2788828 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 20 types!
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - leaked type "ttnn._ttnn.tensor.CoreRangeSet"
+ - ... skipped remainder
+nanobind: leaked 257 functions!
+ - leaked function ""
+ - leaked function "create_output_tensors"
+ - leaked function "merge"
+ - leaked function "enable_program_cache"
+ - leaked function "sfpu_eps"
+ - leaked function "arch"
+ - leaked function "__init__"
+ - leaked function "reshape"
+ - leaked function "from_json"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html

@@ -1,0 +1,8 @@
+# gate snapshot = s8_snapshot (d48b7fd06ad + stage-8 files) + the stage-5 files; md5 (12 hex) of files that differ from s8_snapshot, and the live tree
+tests/test_kda_decode_conv.py snapshot=27e08b6570ea s8=37a56433361a live=27e08b6570ea
+tools/dsa_out_probe.py snapshot=8ff908628d70 s8=none live=8ff908628d70
+tools/dtype_sweep_report.py snapshot=57205539691f s8=d80381860a5f live=d80381860a5f
+tools/mc_decode_ab.py snapshot=f344736a8106 s8=fa1ec9ed20b1 live=f344736a8106
+tools/sinkhorn_fidelity_probe.py snapshot=a7da8348fbf6 s8=e8d44cf01de7 live=a7da8348fbf6
+tt/fused_decoder.py snapshot=9950ff43360f s8=7b5daa3ad41a live=9950ff43360f
+tt/multichip_decoder.py snapshot=588398cfc6f9 s8=a48174376bbb live=588398cfc6f9

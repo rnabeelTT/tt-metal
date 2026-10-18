@@ -194,13 +194,23 @@ class GlmDSA(LightweightModule):
             self.NB = int(num_blocks)
             self.dummy_block = self.NB - 1
         if self.latent is None:
-            self.latent = ttnn.zeros(
-                (1, 1, self.NB * BLOCK, self.R),
-                dtype=ttnn.bfloat16,
-                layout=ttnn.ROW_MAJOR_LAYOUT,
-                device=self.mesh,
-                memory_config=DRAM,
-            )
+            if getattr(self, "latent_dtype", ttnn.bfloat16) == ttnn.fp8_e4m3:
+                self.latent = ttnn.from_torch(
+                    torch.zeros(1, 1, self.NB * BLOCK, self.R),
+                    dtype=ttnn.fp8_e4m3,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh,
+                    memory_config=DRAM,
+                    mesh_mapper=self._rep,
+                )
+            else:
+                self.latent = ttnn.zeros(
+                    (1, 1, self.NB * BLOCK, self.R),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh,
+                    memory_config=DRAM,
+                )
             # pool keys: >= NB blocks of 32 keys, sized as a whole number of P_alloc-long indexer views
             self.KB = -(-self.NB * 32 // self.P_alloc)  # indexer view batch
             self.pooled = ttnn.zeros(
@@ -495,6 +505,10 @@ class GlmDSA(LightweightModule):
         """c [1,1,rows,512] bf16 TILE -> latent pool rows row_idx (uint32 [1, rows]; 0xFFFFFFFF = skip). The block-sharded
         cache (tt/dsa_shard.py) overrides it."""
         c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
+        if self.latent.dtype != c_rm.dtype:
+            c8 = ttnn.typecast(c_rm, self.latent.dtype)
+            ttnn.deallocate(c_rm)
+            c_rm = c8
         ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (rows, self.R)), row_idx)
         ttnn.deallocate(c_rm)
 
@@ -514,7 +528,7 @@ class GlmDSA(LightweightModule):
             self.latent,
             idx,
             self.R,
-            kv_format=ttnn.SparseKVFormat.BF16,
+            kv_format=ttnn.SparseKVFormat.FP8_E4M3 if self.latent.dtype == ttnn.fp8_e4m3 else ttnn.SparseKVFormat.BF16,
             scale=self.scale,
             k_chunk_size=32,
             compute_kernel_config=self.sdpa_ckc,

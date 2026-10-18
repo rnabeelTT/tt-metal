@@ -1,0 +1,79 @@
+2026-10-18 02:02:59.100 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="mhc_split_sinkhorn_compute/13875567877581269114/" -DKERNEL_COMPILE_TIME_ARGS=20,897988541,4 -c -o /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_split_sinkhorn_compute/13875567877581269114/trisc1/trisck.13235174844676862346_278302.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/4279420110461955803/kernels/mhc_split_sinkhorn_compute/13875567877581269114/trisc1/trisck.13235174844676862346_278302.d
+In file included from ../chlkc_math.cpp:4,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void ckernel::sfpu::calculate_mhc_split_faces(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:73:50: warning: 'sfpi::vConst0' is deprecated: just use 0.0f or sfpi::vFloat(0.0f) [-Wdeprecated-declarations]
+   73 |                 sfpi::dst_reg[hi * tile] = sfpi::vConst0;
+      |                                                  ^~~~~~~
+In file included from /home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc/ckernel_sfpu.h:12,
+                 from /home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc/cmath_common.h:12,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_math_common_api.h:12,
+                 from /home/raahem/tt-metal/tt_metal/hw/inc/api/compute/common_globals.h:15,
+                 from /home/raahem/tt-metal/tt_metal/hw/inc/api/compute/common.h:7,
+                 from /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:25:
+/home/raahem/tt-metal/runtime/sfpi/include/sfpi.h:678:42: note: declared here
+  678 | constexpr impl_::LRegFile::vCReg<vFloat> vConst0(CREG_IDX_0);
+      |                                          ^~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:74:50: warning: 'sfpi::vConst0' is deprecated: just use 0.0f or sfpi::vFloat(0.0f) [-Wdeprecated-declarations]
+   74 |                 sfpi::dst_reg[lo * tile] = sfpi::vConst0;
+      |                                                  ^~~~~~~
+/home/raahem/tt-metal/runtime/sfpi/include/sfpi.h:678:42: note: declared here
+  678 | constexpr impl_::LRegFile::vCReg<vFloat> vConst0(CREG_IDX_0);
+      |                                          ^~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In function 'void ckernel::sfpu::calculate_mhc_zero_pad(uint32_t, uint32_t, uint32_t)':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:88:49: warning: 'sfpi::vConst0' is deprecated: just use 0.0f or sfpi::vFloat(0.0f) [-Wdeprecated-declarations]
+   88 |                 sfpi::dst_reg[x * tile] = sfpi::vConst0;
+      |                                                 ^~~~~~~
+/home/raahem/tt-metal/runtime/sfpi/include/sfpi.h:678:42: note: declared here
+  678 | constexpr impl_::LRegFile::vCReg<vFloat> vConst0(CREG_IDX_0);
+      |                                          ^~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp: In instantiation of 'void ckernel::sfpu::calculate_mhc_split_faces(uint32_t, uint32_t, uint32_t) [with long unsigned int MASK = 4294959104; uint32_t = long unsigned int]':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:115:5:   required from here
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:73:50: warning: 'sfpi::vConst0' is deprecated: just use 0.0f or sfpi::vFloat(0.0f) [-Wdeprecated-declarations]
+   73 |                 sfpi::dst_reg[hi * tile] = sfpi::vConst0;
+      |                                            ~~~~~~^~~~~~~
+/home/raahem/tt-metal/runtime/sfpi/include/sfpi.h:678:42: note: declared here
+  678 | constexpr impl_::LRegFile::vCReg<vFloat> vConst0(CREG_IDX_0);
+      |                                          ^~~~~~~
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/mhc_split_sinkhorn/device/kernels/compute/mhc_split_sinkhorn_compute.cpp:74:50: warning: 'sfpi::vConst0' is deprecated: just use 0.0f or sfpi::vFloat(0.0f) [-Wdeprecated-declarations]
+   74 |                 sfpi::dst_reg[lo * tile] = sfpi::vConst0;
+      |                                            ~~~~~~^~~~~~~
+/home/raahem/tt-metal/runtime/sfpi/include/sfpi.h:678:42: note: declared here
+  678 | constexpr impl_::LRegFile::vCReg<vFloat> vConst0(CREG_IDX_0);
+      |                                          ^~~~~~~
+SK {"T": 1, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 1.6436060325320228e-07, "bit_identical_to_hifi4": true, "us_per_call": 118.3927059173584}
+SK {"T": 1, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 1.6436060325320228e-07, "bit_identical_to_hifi4": true, "us_per_call": 88.86456489562988}
+SK {"T": 1, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.004758085658433232, "bit_identical_to_hifi4": false, "us_per_call": 85.10589599609375}
+SK {"T": 1, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 1.6436060325320228e-07, "bit_identical_to_hifi4": true, "us_per_call": 73.65584373474121}
+SK {"T": 8, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0956291649765364e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 8, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0956291649765364e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 8, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.009021088341929884, "bit_identical_to_hifi4": false, "us_per_call": null}
+SK {"T": 8, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0956291649765364e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 16, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.2855594817692938e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 16, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.2855594817692938e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 16, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.009665805264373344, "bit_identical_to_hifi4": false, "us_per_call": null}
+SK {"T": 16, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.2855594817692938e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 17, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.5810962746751814e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 17, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.5810962746751814e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 17, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.0119556802162299, "bit_identical_to_hifi4": false, "us_per_call": null}
+SK {"T": 17, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.5810962746751814e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 32, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 92.55766868591309}
+SK {"T": 32, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 88.85025978088379}
+SK {"T": 32, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.0078034956786528584, "bit_identical_to_hifi4": false, "us_per_call": 85.10828018188477}
+SK {"T": 32, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 79.51021194458008}
+SK {"T": 96, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.471083263044294e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 96, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.471083263044294e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 96, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.008897419063241036, "bit_identical_to_hifi4": false, "us_per_call": null}
+SK {"T": 96, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.471083263044294e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 4, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 3, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 2, "faces": false, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 0.009030003939202249, "bit_identical_to_hifi4": false, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}

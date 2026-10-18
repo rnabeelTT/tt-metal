@@ -1,4 +1,4 @@
-At 1.905s starting
+At 1.855s starting
 Legend:
 	Comma separated list specifies waypoint for BRISC, NCRISC, TRISC0, TRISC1, TRISC2
 	BRISC is main processor, others are subordinates
@@ -15,16 +15,16 @@ Legend:
 	smsg(subordinate run message): I/G/D for subordinate processors
 	k_ids: kernel IDs per processor (ID map to file at end of section)
 
-At 1.905s attach device 0
+At 1.855s attach device 0
 
-At 1.905s attach device 1
+At 1.855s attach device 1
 
-At 1.905s attach device 2
+At 1.855s attach device 2
 
-At 1.905s attach device 3
+At 1.855s attach device 3
 
 -----
-Dump #1 at 1.905s
+Dump #1 at 1.855s
 Device 0 worker core(x= 0,y= 0) virtual(x= 1,y= 2):   GW,   W,   W,   W,   W  rmsg:D0D|bnt h_id:  0 smsg:DDDD
 k_ids:  0|  0|  0|  0|  0
 Device 0 worker core(x= 1,y= 0) virtual(x= 2,y= 2):   GW,   W,   W,   W,   W  rmsg:D0D|bnt h_id:  0 smsg:DDDD
@@ -1213,8 +1213,8 @@ k_ids:  0
 Device 3 dram core(x= 7,y= 1) virtual(x=18,y=22):   GW,   X,   X,   X,   X  rmsg:H0D|dr h_id:  0
 k_ids:  0
 k_id[  0]: blank
-Dump #1 completed at 1.936s
-At 10.898s detach device 0
-At 10.898s detach device 1
-At 10.898s detach device 2
-At 10.898s detach device 3
+Dump #1 completed at 1.886s
+At 7.691s detach device 0
+At 7.691s detach device 1
+At 7.691s detach device 2
+At 7.691s detach device 3

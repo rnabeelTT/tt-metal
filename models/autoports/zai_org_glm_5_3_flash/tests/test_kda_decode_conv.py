@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""ttnn.experimental.deepseek_prefill.kda_decode_conv (stage 5: the fused KDA decode conv step) vs a torch reference
-(fp64 on the identical bf16 / fp32 inputs) and vs the unfused ttnn chain of tt/fused_decoder.FusedGlmKDA (multiply,
-3 x typecast + addcmul, SiLU, select, 3 shift selects): qkv to fp32 accuracy, the history update bit-exact (an idle
-slot's NaN history comes back as Inf: the bf16 packer's NaN encoding), NaN rows of an idle slot kept out of qkv."""
+"""ttnn.experimental.deepseek_prefill.kda_decode_conv (stage 5: the fused KDA decode conv step, which replaces the
+unfused chain of tt/fused_decoder.FusedGlmKDA: multiply, 3 x typecast + addcmul, SiLU, select, 3 shift selects) vs a
+torch fp64 reference on the identical bf16 / fp32 inputs: qkv to fp32 accuracy, the history update bit-exact (an idle
+slot's NaN history comes back as Inf: the bf16 packer's NaN encoding), NaN rows of an idle slot kept out of qkv. The
+in-layer equivalence with the unfused chain is covered by the decoder A/B (tools/mc_decode_ab.py --compare) and suite.
+"""
 
 import pytest
 import torch

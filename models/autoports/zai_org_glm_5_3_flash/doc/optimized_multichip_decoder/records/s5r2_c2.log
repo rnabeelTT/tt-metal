@@ -1,0 +1,43 @@
+=== s5r2 job C2 start; snapshot multichip_decoder md5 588398cfc6f9 2026-10-18T05:23:38+00:00
+2026-10-18 05:23:39.752 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+CODE /home/raahem/glm53-flash-bringup/s5r2_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py MCOpts(topology='auto', num_links=0, ccl_l1=True, norm_sharded=True, dsa_pack=True, router_ds=False, mix_nc=False, ag_persistent=False, ds_shared=True, pack_b_1d=True, router_1d=True, pack_a_1d=True, dsa_1d=True, prefill_2d=True, packs_prefill_2d=True, dsa_shard=False, pack_a_spec='1d:c32:ib8', pack_b_spec='', kda_in='', kda_out='1d:c16:ib4', dsa_o='1d:c16:ib4', dsa_qb='1d:c16:ib4', dsa_wqb='1d:c16:ib4', shared_gu='1d:c32:ib16', shared_dn='1d:c16:ib4', mlp_gu='1d:c16:ib4', mlp_dn='1d:c16:ib4', prefill_2d_ffn=True, sinkhorn_perm_fidelity=3, sinkhorn_faces=True, dsa_q_mm=True, dsa_o_mm=0, dsa_tail_shared=True, kda_gnorm_op=False, mix_chunks_decode=16, kda_conv_op=True, kda_conv_max_batch=16, kda_conv_mixed=False, moe_grouped_in0=8, router_topk_pad=0)
+=== sinkhorn tests faces=0: ============================== 11 passed in 3.75s ============================== 2026-10-18T05:24:38+00:00
+=== sinkhorn tests faces=1: ============================== 11 passed in 3.77s ============================== 2026-10-18T05:24:46+00:00
+=== kda_decode_conv test: ============================== 2 passed in 1.70s =============================== 2026-10-18T05:24:52+00:00
+=== tracy after done 2026-10-18T05:37:43+00:00
+=== tracy long position done 2026-10-18T05:40:15+00:00
+=== kda_dense batch 1 2026-10-18T05:40:15+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_dense_1_054015.log
+build kda_dense batch 1: 1 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 871.9682693481445, "step_us": 928.1237920125326, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== kda_moe batch 1 2026-10-18T05:41:11+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_1_054111.log
+build kda_moe batch 1: 26 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1079.1937510172525, "step_us": 1123.3409245808919, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== dsa_moe batch 1 2026-10-18T05:42:31+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_1_054231.log
+build dsa_moe batch 1: 25 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1367.807388305664, "step_us": 1460.4886372884116, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== kda_moe batch 32 2026-10-18T05:43:52+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_32_054352.log
+build kda_moe batch 32: 27 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4361.931482950847, "step_us": 4505.713780721028, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== dsa_moe batch 32 2026-10-18T05:45:17+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_32_054517.log
+build dsa_moe batch 32: 26 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4716.45991007487, "step_us": 4844.172795613607, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+=== stress done 2026-10-18T05:45:53+00:00
+=== dsa_moe batch 1 2026-10-18T05:45:53+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_1_054553.log
+build dsa_moe batch 1: 26 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 130000, "max_context": 131072, "eager_finite": true, "replay_us": 1919.738451639811, "step_us": 2068.273226420085, "traced_finite": true, "determinism": {"replays": 50, "bit_identical": true, "first_diff": [], "finite": true}}
+=== long position done 2026-10-18T05:46:23+00:00
+=== suite: ======================= 45 passed in 1042.61s (0:17:22) ======================== 2026-10-18T06:04:41+00:00
+=== fault suite: ============= 17 failed, 28 passed, 2 errors in 553.05s (0:09:13) ============== 2026-10-18T06:14:50+00:00

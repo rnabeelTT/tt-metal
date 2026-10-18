@@ -1,0 +1,49 @@
+=== s5r2 job A start 2026-10-18T02:01:41+00:00
+=== sinkhorn test faces=0: ============================== 7 passed in 3.14s =============================== 2026-10-18T02:02:38+00:00
+=== upstream sinkhorn faces=0: ============================== 4 passed in 1.56s =============================== 2026-10-18T02:02:43+00:00
+=== sinkhorn test faces=1: ============================== 7 passed in 4.27s =============================== 2026-10-18T02:02:52+00:00
+=== upstream sinkhorn faces=1: ============================== 4 passed in 1.50s =============================== 2026-10-18T02:02:57+00:00
+=== sk probe rc=0 2026-10-18T02:03:04+00:00
+SK {"T": 1, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 1.6436060325320228e-07, "bit_identical_to_hifi4": true, "us_per_call": 73.65584373474121}
+SK {"T": 8, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0956291649765364e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 16, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.2855594817692938e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 17, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.5810962746751814e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 32, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 79.51021194458008}
+SK {"T": 96, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.471083263044294e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 3, "faces": true, "repeat_identical": true, "finite": true, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+=== kda_dense batch 1 2026-10-18T02:03:54+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_dense_1_020354.log
+build kda_dense batch 1: 1 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 902.4381637573242, "step_us": 928.0522664388021, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_dense", "batch": 1, "variant": "skf", "spec": "env.MHC_SINKHORN_FACES=1", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 871.3324864705403, "step_us": 893.3703104654948, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_dense", "batch": 1, "variant": "fin2", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 902.5335311889648, "step_us": 924.2455164591471, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+=== kda_moe batch 1 2026-10-18T02:04:49+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_1_020449.log
+build kda_moe batch 1: 26 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1108.7497075398762, "step_us": 1152.7220408121746, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_moe", "batch": 1, "variant": "skf", "spec": "env.MHC_SINKHORN_FACES=1", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1078.5341262817383, "step_us": 1123.5475540161133, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_moe", "batch": 1, "variant": "fin2", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1108.8291803995767, "step_us": 1147.8741963704429, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+=== dsa_moe batch 1 2026-10-18T02:06:10+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_1_020610.log
+build dsa_moe batch 1: 27 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1414.4102732340493, "step_us": 1532.8168869018555, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "dsa_moe", "batch": 1, "variant": "skf", "spec": "env.MHC_SINKHORN_FACES=1", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1384.9814732869468, "step_us": 1496.9189961751304, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "dsa_moe", "batch": 1, "variant": "fin2", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1414.314905802409, "step_us": 1657.9945882161458, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+=== kda_moe batch 32 2026-10-18T02:07:33+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_kda_moe_32_020733.log
+build kda_moe batch 32: 44 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "kda_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4425.748189290365, "step_us": 20218.952496846516, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_moe", "batch": 32, "variant": "skf", "spec": "env.MHC_SINKHORN_FACES=1", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4382.538795471191, "step_us": 19564.98622894287, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "kda_moe", "batch": 32, "variant": "fin2", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4431.867599487305, "step_us": 17864.314715067547, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+=== dsa_moe batch 32 2026-10-18T02:09:29+00:00
+rc=0 full log /home/raahem/glm53-flash-bringup/logs/s5_ab_dsa_moe_32_020929.log
+build dsa_moe batch 32: 50 s; links 2
+usable topology (auto): Topology.Ring
+AB {"kind": "dsa_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4726.648330688477, "step_us": 42993.084589640304, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "dsa_moe", "batch": 32, "variant": "skf", "spec": "env.MHC_SINKHORN_FACES=1", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4691.123962402344, "step_us": 43813.03787231445, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+AB {"kind": "dsa_moe", "batch": 32, "variant": "fin2", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4714.051882425944, "step_us": 54782.589276631676, "traced_finite": true, "determinism": {"replays": 60, "bit_identical": true, "first_diff": [], "finite": true}}
+=== skf A/B done 2026-10-18T02:10:56+00:00

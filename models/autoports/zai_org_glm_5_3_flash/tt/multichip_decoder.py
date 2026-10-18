@@ -40,7 +40,7 @@ import ttnn
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.tt_transformers.tt.ccl import TT_CCL, tt_all_gather, tt_all_reduce
 
-from .dsa import GlmDSA
+from .dsa import BLOCK, IDX_WIDTH, KPOOL, SENTINEL_F, TOPK_POOLS, GlmDSA
 from .fused_decoder import FusedGlmKDA, FusedHyperConnection, mix_chunks
 from .mhc import DRAM, W
 from .mlp import DenseMLP
@@ -67,7 +67,9 @@ class MCOpts:
     dsa_pack: bool = False  # DSA decode: q_a | kv_a and indexer wk | gate | weights packed, DRAM-sharded matmuls
     router_ds: bool = False  # MoE decode router matmul on a DRAM-sharded (zero-padded 192 -> 256) weight
     mix_nc: bool = False  # mHC mix partial sums with fast_reduce_nc instead of ttnn.sum (transpose + reduce)
-    ag_persistent: bool = False  # decode all-gathers write into preallocated (per call site) output buffers
+    # decode all-gathers write into preallocated (per call site) output buffers. Rejected: breaks the stacked model
+    # (ttnn skips the all-gather start barrier with persistent outputs; see MeshCCL)
+    ag_persistent: bool = False
     # ds_shared: the DRAM-sharded packed DSA / router weights also serve the prefill rows (2D program config) and the
     # separate interleaved weights are freed at build: no second weight copy (decided at construction)
     ds_shared: bool = False
@@ -101,10 +103,36 @@ class MCOpts:
     # Sinkhorn permutation-sum fidelity (0 = the op default / environment; 3 = HiFi3, exact: the permutation is 0 / 1);
     # applied as MHC_SINKHORN_PERM_FIDELITY at construction unless the environment sets it
     sinkhorn_perm_fidelity: int = 0
+    # Sinkhorn normalizations on the used DST faces only (n*n = 16 columns: face 0 at <= 16 tokens, faces 0 / 2 otherwise;
+    # the padding of m zeroed once): applied as MHC_SINKHORN_FACES=1 at construction unless the environment sets it
+    sinkhorn_faces: bool = False
+    # DSA decode data movement at 1 slot (stage-5 review #2 P2-2; README "DSA attention data movement"):
+    # dsa_q_mm: q_abs of all heads as ONE matmul of the head-masked, row-replicated q_b output [32 heads (16 zero), 4096]
+    # with W_UK viewed as [H*256, 512] (instead of reshape + permute + per-head bmm + head pad + untilize): q_abs comes
+    # out with heads as rows, padded to the 32 heads sparse_sdpa takes, one row-major view away from its input
+    dsa_q_mm: bool = False
+    # dsa_o_mm: the per-head W_UV products as ONE matmul of the 16 attention rows [16, 512] with W_UV laid out [512, H*256],
+    # the off-head blocks masked to 0 and the rows summed (one nonzero per column: exact), instead of tilize of the
+    # [16 heads x 1 row] output + per-head bmm + concat (transpose + reshape)
+    # (1); 2 = the same products from W_UV viewed as [H*512, 256] (no relayout): the attention rows flattened to one row
+    # [1, H*512], head-masked into H rows, one matmul -> [H, 256], row-major concat
+    dsa_o_mm: int = 0
+    # dsa_tail_shared: the 0-3 tail tokens of the sparse index list (8 one-tile element-wise ops on the step's positions,
+    # ~34 µs) computed once per decode step by the model's first DSA layer and read by the other DSA layers from the
+    # step's shared input dict ("_tail"); a layer without it computes its own (a per-step host input "tail", A/B only,
+    # stands for a consumer layer)
+    dsa_tail_shared: bool = False
+    # kda_gnorm_op: the KDA decode o-norm + sigmoid gate as ttnn.experimental.kda.sigmoid_gated_rms_norm (head-first
+    # [B*H, T, V] with T a whole tile: each (slot, head) row relaid to its own tile row and back) instead of rms_norm +
+    # relayout + gate multiply (measurement of the review #1 rejection, review #2 P2-2)
+    kda_gnorm_op: bool = False
     mix_chunks_decode: int = 0  # mhc_mix K chunks at decode rows (0 = mix_chunks(): 64 at TP4; fewer = a smaller sum)
     kda_conv_op: bool = (
         False  # KDA decode conv step as one fused op (ttnn.experimental.deepseek_prefill.kda_decode_conv)
     )
+    # the fused conv op only up to this decode batch (0 = every batch): its per-row work grows with B, and at 32 slots
+    # the unfused chain is faster (review #2: kda_moe 4408 vs 4355 µs, records/kda_conv_cmp.jsonl)
+    kda_conv_max_batch: int = 0
     kda_conv_mixed: bool = False  # KDA decode conv: addcmul on the bf16 history rows directly (no fp32 typecasts)
     moe_grouped_in0: int = 0  # MoE grouped sparse matmuls: in0 K block (gate/up and down; 0 = the stage-3 value 4)
     router_topk_pad: int = 0  # MoE router top-k on a -1e30-padded width (256: power of two; 1024: multi-core top-k)
@@ -149,6 +177,14 @@ DEFAULT_MC = MCOpts(
     prefill_2d_ffn=True,
     kda_conv_op=True,
     sinkhorn_perm_fidelity=3,
+    # stage-5 review #2: Sinkhorn normalizations on the used DST faces (bit-identical; -30 to -43 µs per layer)
+    # stage-5 review #2 (full-model gate: teacher forcing 92 / 100 / 100 with these four, records/s5r2_tf_cand3.log):
+    # Sinkhorn normalizations on the used DST faces (bit-identical), the 1-slot DSA q_abs as one matmul (bit-identical),
+    # the sparse-index tail computed once per step (bit-identical), the fused KDA conv up to 16 slots
+    sinkhorn_faces=True,
+    dsa_q_mm=True,
+    dsa_tail_shared=True,
+    kda_conv_max_batch=16,
     mix_chunks_decode=16,
     # off: on the 45-layer model the persistent decode all-gather outputs (shared per call site across layers) broke
     # decode (1 slot: teacher forcing top-5 32 %; 8 slots: identical greedy runs differ), although 2 x 120 replays of
@@ -442,9 +478,13 @@ class MeshCCL:
     def __init__(self, mesh, tt_ccl, mc: MCOpts):
         self.mesh, self.tt_ccl, self.mc = mesh, tt_ccl, mc
         self._topo = {}
-        # ag_persistent output buffers, one per (call site, shape, dtype), shared by every layer on this TT_CCL: a
-        # buffer is rewritten only by the next all-gather of its site, whose barrier semaphore waits for every device
-        # to reach it (so the previous consumer of that buffer has run on every device)
+        # ag_persistent output buffers, one per (call site, shape, dtype), shared by every layer on this TT_CCL.
+        # REJECTED (off in DEFAULT_MC): with a persistent output ttnn skips the all-gather's start barrier
+        # (all_gather_async_default_program_factory.cpp: "use synchronize barrier semaphore" = barrier_semaphore &&
+        # !using_persistent_buffers), so nothing orders a remote write into a buffer after its consumer on the
+        # receiving die. 1-layer replays (2 x 120, 200) were bit-identical, but the 45-layer model was not repeatable,
+        # eager as well as traced (stage 7: s7_det_reduced_s8.log; teacher forcing top-5 32 %). Root cause not
+        # established. Any CCL / buffer option must pass the stacked repeatability probe (README "Stacked gate").
         self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
 
     def topology(self):
@@ -749,6 +789,228 @@ class MultichipDSA(GlmDSA):
             return sharded_rms_norm(x, w, self.eps, self.ckc)
         return super()._rms(x, w)
 
+    # ---------------------------------------------------------------- 1-slot decode data movement (dsa_q_mm / dsa_o_mm)
+    def _hm(self, x) -> bool:
+        return self.S == 1 and _decode_rows(x) and not getattr(self, "dsa_shard", False)
+
+    def _hm_consts(self):
+        c = self.__dict__.get("_hm_c")
+        if c is None:
+            H, Dn, Dv, R = self.H, self.Dn, self.Dv, self.R
+            Hq = H + (-H % 32)
+            qmask = torch.zeros(1, 1, Hq, H * Dn)
+            omask = torch.zeros(1, 1, H, H * Dv)
+            for h in range(H):
+                qmask[0, 0, h, h * Dn : (h + 1) * Dn] = 1.0
+                omask[0, 0, h, h * Dv : (h + 1) * Dv] = 1.0
+            grid_w = self.mesh.compute_with_storage_grid_size().x
+            # in0 blocks of 8 tiles = one head's K (256) for q / half the latent (512) for o, as the per-head bmm: the
+            # same partial sums per output (the other heads' blocks add exact zeros)
+            ib = Dn // 32 if Dn // 32 <= 8 else 8
+            c = types.SimpleNamespace(
+                Hq=Hq,
+                qmask=self._dev(qmask, ttnn.bfloat16),
+                omask=self._dev(omask, ttnn.bfloat16) if self.mc.dsa_o_mm == 1 else None,
+                wuk=ttnn.reshape(self.w_uk, (1, 1, H * Dn, R)),  # [1,H,256,512] tiles in the same order: a view
+                wuv=None,
+                pc_q=tpc.create_matmul_1d_decode_progcfg(
+                    32, H * Dn, R, min(R // 32, 64), fp32_acc=True, grid_w=grid_w, in0_block_w=ib
+                ),
+                pc_o=None,
+            )
+            nt = H * Dv // 32
+            c.pc_o = tpc.create_matmul_1d_decode_progcfg(
+                32, R, H * Dv, max(d for d in range(1, 65) if nt % d == 0), fp32_acc=True, grid_w=grid_w, in0_block_w=8
+            )
+            self._hm_c = c
+        if self.mc.dsa_o_mm == 2 and getattr(c, "wuv_v", None) is None:
+            H, R, Dv = self.H, self.R, self.Dv
+            om = torch.zeros(1, 1, H, H * R)
+            for h in range(H):
+                om[0, 0, h, h * R : (h + 1) * R] = 1.0
+            c.omask2 = self._dev(om, ttnn.bfloat16)
+            c.wuv_v = ttnn.reshape(self.w_uv_t, (1, 1, H * R, Dv))  # [1,H,512,256] tiles in order: a view
+            grid_w = self.mesh.compute_with_storage_grid_size().x
+            c.pc_o2 = tpc.create_matmul_1d_decode_progcfg(
+                32, H * R, Dv, Dv // 32, fp32_acc=True, grid_w=grid_w, in0_block_w=8
+            )
+        if self.mc.dsa_o_mm == 1 and c.omask is None:
+            H, Dv = self.H, self.Dv
+            om = torch.zeros(1, 1, H, H * Dv)
+            for h in range(H):
+                om[0, 0, h, h * Dv : (h + 1) * Dv] = 1.0
+            c.omask = self._dev(om, ttnn.bfloat16)
+        if self.mc.dsa_o_mm == 1 and c.wuv is None:
+            # W_UV as [512, H*256] (head h in columns h*256..): one-time relayout of [1,H,512,256] (+ H*512*256 weights)
+            p = ttnn.permute(self.w_uv_t, (0, 2, 1, 3), memory_config=DRAM)
+            c.wuv = ttnn.reshape(p, (1, 1, self.R, self.H * self.Dv))
+            if os.environ.get("GLM53_DSA_WUV_CHECK") == "1":  # diagnostic: the relayout against a host relayout
+                from loguru import logger
+
+                ref = ttnn.to_torch(ttnn.get_device_tensors(self.w_uv_t)[0]).float()  # [1,H,512,256]
+                got = ttnn.to_torch(ttnn.get_device_tensors(c.wuv)[0]).float().reshape(self.R, self.H, self.Dv)
+                d = (got - ref[0].permute(1, 0, 2)).abs().max()
+                logger.warning(f"DSA W_UV relayout ({self.w_uv_t.dtype} -> {c.wuv.dtype}): max |diff| {float(d):.3e}")
+        return c
+
+    def _q_abs(self, x, rows: int):
+        if not (self.mc.dsa_q_mm and self._hm(x)):
+            return super()._q_abs(x, rows)
+        c = self._hm_consts()
+        qr = self._rms(self._mm(x, self.w_q_a), self.q_a_norm)
+        q = self._mm(qr, self.w_q_b)  # [1,1,1,H*256]
+        qm = ttnn.multiply(c.qmask, q, memory_config=DRAM)  # row h = q on head h's columns (the row broadcast), 0 else
+        ttnn.deallocate(q)
+        qa = ttnn.matmul(qm, c.wuk, compute_kernel_config=self.ckc, program_config=c.pc_q, memory_config=DRAM)
+        ttnn.deallocate(qm)
+        # [1,1,Hq,512] tiles -> row-major [1, Hq, 1, 512]: the sparse_sdpa query (zero heads H..Hq-1 included)
+        q_rm = ttnn.reshape(ttnn.to_layout(qa, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM), (1, c.Hq, 1, self.R))
+        ttnn.deallocate(qa)
+        return q_rm, qr
+
+    def _sparse_attend(self, q_abs, index_f32, cache_batch_idx=None, latent_rows=None):
+        rm_q = q_abs.layout == ttnn.ROW_MAJOR_LAYOUT
+        o_rm = self.mc.dsa_o_mm and cache_batch_idx is None and self.S == 1 and not getattr(self, "dsa_shard", False)
+        if not (rm_q or o_rm):
+            return super()._sparse_attend(q_abs, index_f32, cache_batch_idx, latent_rows)
+        idx = ttnn.to_layout(ttnn.typecast(index_f32, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT)
+        if rm_q:
+            q_rm = q_abs
+        else:
+            pad = -int(q_abs.shape[1]) % 32
+            q_p = ttnn.pad(q_abs, [(0, 0), (0, pad), (0, 0), (0, 0)], 0.0) if pad else q_abs
+            q_rm = ttnn.to_layout(q_p, ttnn.ROW_MAJOR_LAYOUT)
+            if pad:
+                ttnn.deallocate(q_p)
+        o = ttnn.transformer.sparse_sdpa(
+            q_rm,
+            self.latent,
+            idx,
+            self.R,
+            kv_format=(
+                ttnn.SparseKVFormat.FP8_E4M3 if self.latent.dtype == ttnn.fp8_e4m3 else ttnn.SparseKVFormat.BF16
+            ),
+            scale=self.scale,
+            k_chunk_size=32,
+            compute_kernel_config=self.sdpa_ckc,
+            cache_batch_idx=cache_batch_idx,
+            page_table=self.page_table,
+            page_block_size=BLOCK,
+        )
+        ttnn.deallocate(idx)
+        ttnn.deallocate(q_rm)
+        o_h = ttnn.slice(o, (0, 0, 0, 0), (1, self.H, o.shape[2], o.shape[3]))  # row-major [1, H, 1, 512]
+        ttnn.deallocate(o)
+        if o_rm:
+            return o_h  # _out takes the row-major rows
+        out = ttnn.to_layout(o_h, ttnn.TILE_LAYOUT)
+        ttnn.deallocate(o_h)
+        return out
+
+    def _out(self, o_lat, rows: int):
+        if o_lat.layout != ttnn.ROW_MAJOR_LAYOUT:
+            return super()._out(o_lat, rows)
+        c = self._hm_consts()
+        if self.mc.dsa_o_mm == 2:
+            H, R, Dv = self.H, self.R, self.Dv
+            flat = ttnn.to_layout(ttnn.reshape(o_lat, (1, 1, 1, H * R)), ttnn.TILE_LAYOUT, memory_config=DRAM)
+            inm = ttnn.multiply(c.omask2, flat, memory_config=DRAM)  # row h = head h's 512 values in block h
+            ttnn.deallocate(flat)
+            oh = ttnn.matmul(inm, c.wuv_v, compute_kernel_config=self.ckc, program_config=c.pc_o2, memory_config=DRAM)
+            ttnn.deallocate(inm)
+            rm = ttnn.reshape(ttnn.to_layout(oh, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM), (1, 1, 1, H * Dv))
+            ttnn.deallocate(oh)
+            o = ttnn.to_layout(rm, ttnn.TILE_LAYOUT, memory_config=DRAM)
+            ttnn.deallocate(rm)
+            out = self.decode_mm(o, self.w_o, "o", self.ckc, DRAM) if self.decode_mm is not None else None
+            out = out if out is not None else self._mm(o, self.w_o)
+            ttnn.deallocate(o)
+            return out
+        ot = ttnn.to_layout(ttnn.reshape(o_lat, (1, 1, self.H, self.R)), ttnn.TILE_LAYOUT, memory_config=DRAM)
+        full = ttnn.matmul(ot, c.wuv, compute_kernel_config=self.ckc, program_config=c.pc_o, memory_config=DRAM)
+        ttnn.deallocate(ot)
+        masked = ttnn.multiply(full, c.omask, memory_config=DRAM)  # row h keeps head h's 256 columns
+        ttnn.deallocate(full)
+        # one nonzero per column: the concat, exact at HiFi4 (ttnn.sum's default fidelity truncates the value's
+        # mantissa: PCC 0.9992 in the A/B, records/dsa_dm_ab.jsonl)
+        o = ttnn.sum(masked, dim=-2, keepdim=True, memory_config=DRAM, compute_kernel_config=self.ckc)
+        ttnn.deallocate(masked)
+        out = self.decode_mm(o, self.w_o, "o", self.ckc, DRAM) if self.decode_mm is not None else None
+        out = out if out is not None else self._mm(o, self.w_o)
+        ttnn.deallocate(o)
+        return out
+
+    # ---------------------------------------------------------------------- sparse index tail (dsa_tail_shared)
+    def _decode_host_inputs(self, positions):
+        d = super()._decode_host_inputs(positions)
+        # A/B only (GLM53_AB_HOST_TAIL=1, with dsa_tail_shared): the tail as a host-written per-step input, standing for a
+        # layer that reads the first DSA layer's tail. Never in a model: DeviceDecodeInputs refreshes only its own fields
+        if (
+            os.environ.get("GLM53_AB_HOST_TAIL") == "1"
+            and getattr(self, "mc", None) is not None
+            and self.mc.dsa_tail_shared
+        ):
+            S = self.S
+            pos = torch.tensor([max(p, 0) for p in positions], dtype=torch.float32).reshape(S, 1)
+            tail_cols = IDX_WIDTH - TOPK_POOLS * KPOOL
+            tok = torch.floor((pos + 1) / KPOOL) * KPOOL + torch.arange(tail_cols).float().reshape(1, tail_cols)
+            tail = torch.where(tok <= pos, tok, torch.full_like(tok, SENTINEL_F))
+            d["tail"] = (tail.reshape(1, 1, S, tail_cols), ttnn.float32, ttnn.TILE_LAYOUT)
+        return d
+
+    def _tail(self, pos_dev):
+        """Tail tokens 4*floor((t+1)/4) .. t (0-3 of them), then sentinels: fp32 [1,1,rows,IDX_WIDTH - 2048]."""
+        tail_cols = IDX_WIDTH - TOPK_POOLS * KPOOL
+        j = self._const(("tail_j", tail_cols))
+        start = ttnn.multiply(ttnn.floor(ttnn.multiply(ttnn.add(pos_dev, 1.0), 1.0 / KPOOL)), float(KPOOL))
+        tail_tok = ttnn.add(start, j)
+        tail_ok = ttnn.le(tail_tok, pos_dev)
+        tail = ttnn.where(tail_ok, tail_tok, SENTINEL_F)
+        for t in (tail_tok, tail_ok, start):
+            ttnn.deallocate(t)
+        return tail
+
+    def _sparse_rows(self, top_pools, pos_dev, rows: int):
+        inp = self.__dict__.get("_step_inputs")
+        if inp is None:
+            return super()._sparse_rows(top_pools, pos_dev, rows)
+        own = None
+        tail = inp.get("tail")  # per-step host input (A/B: a consumer layer)
+        if tail is None:
+            if getattr(self, "_tail_producer", False):
+                # this step's tail, for the later DSA layers, in ONE fixed buffer per input dict (never freed: every
+                # captured trace of the model reads the address it was captured with; a fresh tensor per call freed the
+                # buffer an earlier trace still read, teacher forcing 10 / 48 / 100, records/s5r2_tf_cand.log)
+                t = self._tail(pos_dev)
+                buf = inp.get("_tail")
+                if buf is None or tuple(buf.shape) != tuple(t.shape):
+                    buf = inp["_tail"] = ttnn.clone(t)  # the first (eager) step: allocate, and compile the copy below
+                ttnn.copy(t, buf)
+                ttnn.deallocate(t)
+                tail = buf
+            elif "_tail" in inp:
+                tail = inp["_tail"]
+            else:
+                tail = own = self._tail(pos_dev)
+        offs = self._const("pool_offs")
+        p = ttnn.typecast(top_pools, ttnn.float32)
+        p4 = ttnn.repeat_interleave(p, KPOOL, dim=3)
+        ttnn.deallocate(p)
+        tok = ttnn.add(ttnn.multiply(p4, float(KPOOL)), offs)
+        ttnn.deallocate(p4)
+        out = ttnn.concat([tok, tail], dim=-1)
+        ttnn.deallocate(tok)
+        if own is not None:
+            ttnn.deallocate(own)
+        return out
+
+    def decode_forward(self, x, state=None, *, inputs):
+        self._step_inputs = inputs if self.mc.dsa_tail_shared else None
+        try:
+            return super().decode_forward(x, state, inputs=inputs)
+        finally:
+            self._step_inputs = None
+
 
 def _pad_rows(t, rows: int):
     """[1,1,r,C] TILE -> [1,1,rows,C] with zero rows (inside the tile: ttnn.pad; a row-major round trip if refused)."""
@@ -788,8 +1050,44 @@ class MultichipKDA(FusedGlmKDA):
     def update_decode_inputs(self, bufs, positions):
         super().update_decode_inputs(bufs, list(positions) + [-1] * (self._pad_batch(len(positions)) - len(positions)))
 
+    def _gated_norm(self, o, ogate, B, fold):
+        if not (hasattr(self, "mc") and self.mc.kda_gnorm_op):
+            return super()._gated_norm(o, ogate, B, fold)
+        H, V = self.H, self.V
+        w = self.__dict__.get("_gnorm_w")
+        if w is None:  # the o_norm weight as the op's bf16 [V] (the checkpoint weight is bf16: exact)
+            w = self._gnorm_w = ttnn.typecast(ttnn.reshape(self.o_norm_w, (V,)), ttnn.bfloat16)
+        # the op needs a whole tile of T: each (slot, head) row becomes its own tile row, padded to 32 zero rows
+        o1 = ttnn.reshape(o, (B * H, 1, V))
+        ttnn.deallocate(o)
+        o3 = ttnn.pad(o1, [(0, 0), (0, 31), (0, 0)], 0.0)
+        ttnn.deallocate(o1)
+        g = ogate if ogate.dtype == ttnn.bfloat16 else ttnn.typecast(ogate, ttnn.bfloat16)
+        g1 = ttnn.reshape(g, (B, 1, H * V))
+        g3 = ttnn.pad(g1, [(0, 0), (0, 31), (0, 0)], 0.0)
+        ttnn.deallocate(g1)
+        out = ttnn.experimental.kda.sigmoid_gated_rms_norm(
+            o3,
+            g3,
+            w,
+            H,
+            epsilon=self.cfg.norm_eps,
+            memory_config=DRAM,
+            compute_kernel_config=self.ckc,
+            output_dtype=ttnn.bfloat16,
+        )  # [B, 32, H*V]
+        for t in (o3, g3, ogate) if g is ogate else (o3, g3, g, ogate):
+            ttnn.deallocate(t)
+        row = ttnn.slice(out, (0, 0, 0), (B, 1, H * V))
+        ttnn.deallocate(out)
+        return ttnn.reshape(row, (1, 1, B, H * V))
+
     def _conv_step(self, proj, dstate, inputs, B):
-        if not (hasattr(self, "mc") and self.mc.kda_conv_op) or not self.flags.kda_decode_fold:
+        if (
+            not (hasattr(self, "mc") and self.mc.kda_conv_op)
+            or not self.flags.kda_decode_fold
+            or (self.mc.kda_conv_max_batch and B > self.mc.kda_conv_max_batch)
+        ):
             return super()._conv_step(proj, dstate, inputs, B)
         # one op: conv (fp32) + SiLU + idle-slot select, history shifted in place (tests/test_kda_decode_conv.py)
         return ttnn.experimental.deepseek_prefill.kda_decode_conv(
@@ -972,6 +1270,12 @@ class MultichipDecoder(OptimizedDecoder):
         tp = tuple(mesh_device.shape)[1]
         tt_ccl = kw.get("tt_ccl") or (TT_CCL(mesh_device) if tp > 1 else None)
         kw["tt_ccl"] = tt_ccl
+        # stage-8 datatype-sweep candidate (GLM53_PRECISION, tt/precision.py; unset = the shipped policy, no change)
+        from .precision import PrecisionOverrides
+
+        prec, last = PrecisionOverrides.from_env(), hf_config["num_hidden_layers"] - 1
+        kw["opt"] = prec.layer_opt(kw.get("opt"), layer_idx, 0, last)
+        kw["weight_cache"] = prec.layer_cache(kw.get("weight_cache"), layer_idx)
         dec = super().from_state_dict(
             state_dict, hf_config=hf_config, layer_idx=layer_idx, mesh_device=mesh_device, **kw
         )
@@ -983,6 +1287,9 @@ class MultichipDecoder(OptimizedDecoder):
         if dec.attn_kind == "dsa":
             dec.attn.__class__ = MultichipDSA
             dec.attn.mc_init(dec.mc)
+            # the model's first DSA layer computes the step's shared sparse-index tail (dsa_tail_shared)
+            kinds = hf_config["layer_types"]
+            dec.attn._tail_producer = layer_idx == next(i for i, k in enumerate(kinds) if k != "linear_attention")
             if dec.mc.ds_shared and dec.mc.dsa_pack:
                 dec.attn.free_separate()
             if dec.mc.dsa_shard and tp > 1:
@@ -1009,6 +1316,8 @@ class MultichipDecoder(OptimizedDecoder):
             dec.mlp.mc = dec.mc
         if dec.mc.sinkhorn_perm_fidelity and "MHC_SINKHORN_PERM_FIDELITY" not in os.environ:
             os.environ["MHC_SINKHORN_PERM_FIDELITY"] = str(dec.mc.sinkhorn_perm_fidelity)
+        if dec.mc.sinkhorn_faces and "MHC_SINKHORN_FACES" not in os.environ:
+            os.environ["MHC_SINKHORN_FACES"] = "1"
         if tp > 1:
             dec.attn_hc = MultichipHyperConnection(dec.attn_hc, state_dict["hc_attn_fn"], tp, dec.ccl)
             dec.ffn_hc = MultichipHyperConnection(dec.ffn_hc, state_dict["hc_ffn_fn"], tp, dec.ccl)
@@ -1021,6 +1330,7 @@ class MultichipDecoder(OptimizedDecoder):
                 dec.mlp.args.ccl_num_links = dec.ccl.links
                 dec.mlp.args.router_topk_pad = lambda: dec.mc.router_topk_pad
                 dec.mlp.args.ccl_out_memory_config = lambda t: L1 if (dec.mc.ccl_l1 and _decode_rows(t)) else DRAM
+        prec.apply_layer(dec, layer_idx, 0, last)
         return dec
 
     def _reduce(self, y):

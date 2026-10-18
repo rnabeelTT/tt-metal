@@ -114,8 +114,14 @@ def set_opts(dec, spec: str):
     new = dataclasses.replace(base, **kw)
     for f in dataclasses.fields(new):  # in place: the CCL, DSA and router hooks hold this object
         setattr(dec.mc, f.name, getattr(new, f.name))
+    env0 = dec.__dict__.setdefault("_env0", {})  # the construction's values (e.g. DEFAULT_MC's MHC_SINKHORN_*)
+    for k in set(env) - set(env0):
+        env0[k] = os.environ.get(k)
     for k in dec.__dict__.get("_env_keys", set()) - set(env):
-        os.environ.pop(k, None)
+        if env0.get(k) is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = env0[k]
     for k, v in env.items():
         os.environ[k] = v
     dec._env_keys = set(env)
@@ -311,11 +317,13 @@ def default_spec() -> str:
     items = []
     for f in dataclasses.fields(d):
         v = getattr(d, f.name)
-        if v == getattr(base, f.name) or f.name in ("ds_shared", "sinkhorn_perm_fidelity"):
+        if v == getattr(base, f.name) or f.name in ("ds_shared", "sinkhorn_perm_fidelity", "sinkhorn_faces"):
             continue
         items.append(f"{f.name}={int(v) if isinstance(v, bool) else v}")
     if d.sinkhorn_perm_fidelity:
         items.append(f"env.MHC_SINKHORN_PERM_FIDELITY={d.sinkhorn_perm_fidelity}")
+    if d.sinkhorn_faces:
+        items.append("env.MHC_SINKHORN_FACES=1")
     return ",".join(items)
 
 
@@ -343,6 +351,35 @@ def run_variant(dec, mesh, B, rows, args, rec, pos0):
         rec["error"] = f"{type(e).__name__}: {str(e)[:400]}"
     finally:
         runner.release()
+
+
+def sequence(dec, mesh, B, rows, n, pos0):
+    """One eager step and n traced steps from a fresh state: the outputs (every variant on the same inputs)."""
+    reset_state(dec, B)
+    runner = DecodeRunner(dec, mesh, B)
+    try:
+        ys = [runner.eager_step(rows, [pos0] * B)]
+        runner.capture(rows, [pos0 + 1] * B)
+        ys += [runner.traced_step(rows, [pos0 + 1 + i] * B) for i in range(n)]
+    finally:
+        runner.release()
+    return ys
+
+
+def compare(ref, got):
+    """Outputs of a variant vs the first variant's: bit identity, worst relative error and PCC over all steps."""
+    a, b = torch.stack([r.double() for r in ref]), torch.stack([g.double() for g in got])
+    fin = bool(torch.isfinite(b).all())
+    d = (a - b).abs()
+    am, bm = a - a.mean(), b - b.mean()
+    return {
+        "steps": len(ref),
+        "bit_identical": all(torch.equal(x, y) for x, y in zip(ref, got)),
+        "max_rel": float(d.max() / a.abs().max()) if fin else None,
+        "pcc": float((am * bm).sum() / (am.norm() * bm.norm())) if fin else None,
+        "rms_ratio": float(b.norm() / a.norm()) if fin else None,
+        "finite": fin,
+    }
 
 
 def determinism(dec, mesh, B, rows, n, pos0):
@@ -378,6 +415,7 @@ def main():
         choices=("stage4", "default"),
         help="build and variant base: stage-4 options (run-time toggles) or DEFAULT_MC (the shipped build)",
     )
+    ap.add_argument("--compare", type=int, default=0, help="per variant: n traced steps vs the first variant's")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     out = open(args.out, "a")
@@ -422,6 +460,7 @@ def main():
             units(dec, mesh, out, usable)
         B = args.batch
         rows = {s: torch.randn(H4, generator=torch.Generator().manual_seed(s)) * 0.02 for s in range(B)}
+        ref_seq = None
         for item in [v for v in args.variants.split(";") if v.strip()]:
             name, spec = item.split(":", 1) if ":" in item else (item, "")  # bash read strips a trailing ":"
             if name == "fin" and not spec and args.base == "stage4":  # "fin:" = DEFAULT_MC as run-time options
@@ -439,6 +478,15 @@ def main():
                 "max_context": args.max_context,
             }
             run_variant(dec, mesh, B, rows, args, rec, args.pos)
+            if args.compare and "error" not in rec:
+                try:
+                    seq = sequence(dec, mesh, B, rows, args.compare, args.pos)
+                    if ref_seq is None:
+                        ref_seq, rec["compare_ref"] = seq, True
+                    else:
+                        rec["vs_first"] = compare(ref_seq, seq)
+                except Exception as e:  # noqa: BLE001
+                    rec["vs_first"] = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
             if args.determinism and "error" not in rec:
                 try:
                     rec["determinism"] = determinism(dec, mesh, B, rows, args.determinism, args.pos)

@@ -305,6 +305,15 @@ class FusedGlmKDA(GlmKDA):
             ttnn.deallocate(t)
 
         # ---- gated RMSNorm over V per head (fp32) and output projection
+        o = self._gated_norm(o, ogate, B, fold)
+        y = decode_linear(self, o, w.output_projection, "o", cc)
+        ttnn.deallocate(o)
+        return y
+
+    def _gated_norm(self, o: ttnn.Tensor, ogate: ttnn.Tensor, B: int, fold: bool) -> ttnn.Tensor:
+        """o [1,1,B*H,V] fp32 (row b*H + h), ogate [1,1,B,H*V] -> bf16 [1,1,B,H*V] = rmsnorm(o) * o_norm * sigmoid(gate)
+        (frees o and ogate)."""
+        H, V = self.H, self.V
         o = ttnn.rms_norm(
             o, epsilon=self.cfg.norm_eps, weight=self.o_norm_w, memory_config=DRAM, compute_kernel_config=self.ckc
         )
@@ -328,9 +337,7 @@ class FusedGlmKDA(GlmKDA):
             ttnn.deallocate(og)
             ttnn.deallocate(ogate)
             o = ttnn.typecast(ttnn.reshape(o, (1, 1, B, H * V)), ttnn.bfloat16)
-        y = decode_linear(self, o, w.output_projection, "o", cc)
-        ttnn.deallocate(o)
-        return y
+        return o
 
 
 class FusedDecoder(FunctionalDecoder):

@@ -1,0 +1,8 @@
+2026-10-17 15:36:10.340 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+SK {"T": 32, "perm_fidelity": 4, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 118.30687522888184}
+SK {"T": 32, "perm_fidelity": 3, "max_rel_err_vs_fp64": 2.0266106781247156e-07, "bit_identical_to_hifi4": true, "us_per_call": 88.85860443115234}
+SK {"T": 32, "perm_fidelity": 2, "max_rel_err_vs_fp64": 0.0078034956786528584, "bit_identical_to_hifi4": false, "us_per_call": 85.15000343322754}
+SK {"T": 2048, "perm_fidelity": 4, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 3, "max_rel_err_vs_fp64": 3.540897031701095e-07, "bit_identical_to_hifi4": true, "us_per_call": null}
+SK {"T": 2048, "perm_fidelity": 2, "max_rel_err_vs_fp64": 0.009030003939202249, "bit_identical_to_hifi4": false, "us_per_call": null}

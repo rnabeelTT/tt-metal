@@ -17,6 +17,11 @@ struct MhcSplitSinkhornParams {
     // which skips only the srcA-low x srcB-low phase: the permutation operand (srcA) is 0 / 1, so that phase adds exact
     // zeros.
     uint32_t perm_fidelity;
+    // Face-restricted Sinkhorn (MHC_SINKHORN_FACES=1, n*n <= 16): the 40 normalizations run their SFPU work only on the
+    // DST faces that hold the n*n used columns: 1 = face 0 (one token-tile, T <= 16 rows), 2 = faces 0 and 2 (columns
+    // 0-15, all rows); 0 = all 4 faces. The padding of m is zeroed once after exp, so it stays exactly 0 through every
+    // permutation matmul; comb's padding comes out 0 (it was ~1 before). Valid entries are bit-identical.
+    uint32_t faces;
 };
 
 // mixes: fused-projection output [T, (2+n)*n].  consts: [8, 32, 32] host-prepared tiles

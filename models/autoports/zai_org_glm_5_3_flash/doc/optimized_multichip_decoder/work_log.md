@@ -107,3 +107,58 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
 - 21:06 Round 9 (`records/s5_baseline_fault9.log`): baseline compare with `GLM53_FAULT_ROUTED_SCALE=0.9722`: kda_dense
   rows pass, dsa_moe prefill_a fails on the rms assert (PCC 0.999904 passes the bar; rms ratio 0.97828). The rms
   assert catches the scale fault that the PCC bar misses.
+
+## 2026-10-18: ag_persistent revert, final suite, review #2 rework (`artifacts/stage5_review_2.md`)
+
+- 2026-10-17 21:06 -> 2026-10-18 00:30 (coordinator / stage 7): `ag_persistent` broke the 45-layer model (1 slot teacher
+  forcing top-5 32 %; 8 slots: eager and traced runs not repeatable, `records/s7_det_reduced_s8.log`); with it off the
+  model repeats exactly (`records/s7_det_reduced_s8_noagp.log`, `records/s7_final_s8.log`) and reaches 92 / 100 / 100.
+  `DEFAULT_MC.ag_persistent = False`. Final suite on that default (stage-4 rework, 2026-10-18 00:36):
+  `records/s4r_suite_default_final.log`, 45 passed. Committed: code 08bac32f4c1, docs 6272b83d6c9.
+- 01:59 ttnn rebuilt (`cmake --build build_Release --target ttnn`, 24 s; `_ttnn.so` replaced atomically): sinkhorn
+  `faces` attribute (`MHC_SINKHORN_FACES`), HiFi2 permutation sums refused unless `MHC_SINKHORN_ALLOW_INEXACT=1`.
+- 02:01 Job A (`records/s5r2_a.log`): sinkhorn tests 7 / 7 and upstream 4 / 4 with faces off and on; probe
+  (`records/s5r2_sk_probe.log`): faces bit-identical to HiFi4 at T = 1 / 8 / 16 / 17 / 32 / 96 / 2048, repeat-identical,
+  88.9 -> 73.7 µs (T = 1, face 0) and 88.9 -> 79.5 µs (T = 32, faces 0 / 2) per call (probe wall). In-layer
+  (`records/skf_ab.jsonl`, 2 x 60 replays bit-identical each): -30 / -30 / -29 µs at 1 user, -43 / -35 µs at 32 users.
+- 02:13 Job B (`records/dsa_dm_ab.jsonl`, `kda_gn_ab.jsonl`; `--compare 8` = 1 eager + 8 traced steps vs `fin`): dsa_q_mm
+  bit-identical, -17 µs; host tail bit-identical, -37 µs; dsa_o_mm PCC 0.99924 vs `fin`; KDA fused gated norm slower
+  (+28 / +52 / +228 µs) and wrong on kda_moe (PCC 0.08): rejected.
+- 02:22 `DEFAULT_MC.sinkhorn_faces = True` was set in the live tree for ~45 min, then set back to False until the
+  full-model gate (coordinator: every DEFAULT_MC change needs a stacked teacher-forcing run).
+- 02:27 Job C1 (`records/dsa_dm_ab2*.jsonl`, `kda_conv_cmp.jsonl`): the shared tail (producer / consumer) bit-identical;
+  the fused KDA conv is bit-identical to the unfused chain at 1 and 32 users, faster at 1 user (-78 µs) and slower at 32
+  (+53 µs).
+- 02:45 Job C1b (`records/dsa_dm_ab3*.jsonl`, `s5r2_c1b.log`): W_UV relayout exact (max |diff| 0); the stacked-view
+  o-path slower (+33 µs); conv crossover: fused -62 µs at 8 users, -28 at 16, +53 at 32 -> `kda_conv_max_batch = 16`.
+- 03:04 `tools/dsa_out_probe.py` (`records/s5r2_dsa_out_probe.log`): the one-matmul W_UV product is as exact as the
+  per-head bmm against fp64 (rel L2 1.70e-3 vs 1.72e-3); the two differ by bf16 rounding (max 4.5e-3), which the
+  layer A/B shows as PCC 0.99924. Gain -12 µs for +2 MB of relaid W_UV per DSA layer per die: not adopted.
+- 03:03-04:45 Full-model gate (stacked teacher forcing, 1 slot, `tools/s7_probe.py --do ready`), code snapshot outside the
+  live tree (`~/glm53-flash-bringup/s5r2_snapshot`: the stage-8 snapshot that scored 92 / 100 / 100 on the shipped
+  default, `s8/shipped.log`, plus the stage-5 files; run from the snapshot directory so `python -m` does not put the
+  live tree first). First runs: a live-tree leak (`python -m` from `$TT_METAL_HOME`) and a HEAD snapshot without the
+  weight cache (22 min builds) were discarded. Candidates (`sinkhorn_faces`, `dsa_q_mm`, `dsa_tail_shared`,
+  `kda_conv_max_batch = 16`): teacher forcing 10 / 48 / 100 (`records/s5r2_tf_cand.log`). Cause: the shared tail was a
+  fresh tensor per call, and the producer freed the previous one; the generator captures several decode traces (model
+  + sampler variants), so a later capture freed the buffer an earlier trace's consumers still read (single-layer A/Bs
+  have one trace and cannot see it). Fix: one fixed buffer per input dict, never freed, written with `ttnn.copy`; the
+  first fix failed the trace capture (`ttnn.copy` first used inside the capture, `records/s5r2_tf_cand2.log`): the
+  buffer is now created with `ttnn.clone` + `ttnn.copy` in the eager warm-up step.
+- 05:02 Gate job D4 (`records/s5r2_d4.log`; weight cache on): control (review-2 files, flags off) 92 / 100 / 100;
+  candidates with the fixed tail (`records/s5r2_tf_cand3.log`) 92 / 100 / 100, prefill check 91 / 100 / 100; 8 slots on
+  layers 0, 3-7: eager and traced repeat equal (`records/s5r2_det_reduced_cand.log`). The full-model 8-slot run hit a
+  fabric mapping failure at open (`topology_mapper.cpp:559`) and was rerun in job E. The optional `ag_persistent` +
+  linear-topology bisect was skipped (coordinator). `DEFAULT_MC` set: `sinkhorn_faces`, `dsa_q_mm`, `dsa_tail_shared`,
+  `kda_conv_max_batch = 16` (the cand3 options; md5 588398cfc6f9 of `tt/multichip_decoder.py`).
+- 05:23-06:14 Job C2 (`records/s5r2_c2.log`, gate snapshot, `PYTHONSAFEPATH=1`, pytest `--import-mode=importlib`; a
+  first attempt with `--import-mode=append` broke the conftest import and was discarded): kernel tests 11 + 11 + 2
+  passed; Tracy decode 844 / 1053 / 1287 / 4368 / 4611 µs, prefill 10025 / 24410 / 30647 µs, dsa_moe at position
+  130,000 1848 µs; replay stress 872 / 1079 / 1368 / 4362 / 4717 µs, 200 replays bit-identical each; position 130,000
+  1920 µs (50 replays bit-identical); suite 45 passed; fault suite 17 failed + 2 errors, 28 passed. The watcher and the
+  ring-fabric prefill runs were cut by the queue rule (raw flock) and re-queued through `run-locked.sh` (job F).
+- 06:19 Job E (`records/s5r2_e.log`, `s5r2_det_full_final.log`): full model, 8 slots, final default: eager and traced
+  repeat equal, tokens = stage 7's final run.
+- 07:42 Job F (through `run-locked.sh`, `records/s5r2_watcher.log`): watcher on the final default, 7 cases PASSED, 0
+  suspicious lines (teardown abort exit 134, known). 08:44-10:0x: FABRIC_1D vs FABRIC_1D_RING prefill on the review-2
+  options (`records/pf_ring_r2.jsonl`): bit-identical, walls within +-3 %.

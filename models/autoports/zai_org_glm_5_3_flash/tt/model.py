@@ -29,6 +29,7 @@ from .ckpt import CheckpointReader
 from .decode_inputs import DeviceDecodeInputs
 from .multichip_decoder import TOPOLOGY, MultichipDecoder, _ds_grid, _width_shard, sharded_rms_norm
 from .optimized_decoder import SELECTED, OptConfig
+from .precision import PrecisionOverrides
 from .weight_cache import cached, weight_cache_from_env
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -176,6 +177,8 @@ class Glm53Model:
             packer_l1_acc=False,
         )
 
+        # stage-8 datatype-sweep candidate (GLM53_PRECISION, tt/precision.py; unset = shipped policy): LM head group
+        PrecisionOverrides.from_env().apply_model(self, 0, tc["num_hidden_layers"] - 1)
         self.layers = []
         for i in self.layer_indices:
             t0 = time.time()

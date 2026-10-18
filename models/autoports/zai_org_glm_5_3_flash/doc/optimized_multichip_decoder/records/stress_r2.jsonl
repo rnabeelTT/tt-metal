@@ -1,0 +1,10 @@
+{"kind": "kda_dense", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_dense", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 871.9682693481445, "step_us": 928.1237920125326, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "kda_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1079.1937510172525, "step_us": 1123.3409245808919, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 1367.807388305664, "step_us": 1460.4886372884116, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "kda_moe", "batch": 32, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "kda_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4361.931482950847, "step_us": 4505.713780721028, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}
+{"kind": "dsa_moe", "batch": 32, "usable_topology": "Topology.Ring", "links": 2, "max_context": 4096, "pos": 128}
+{"kind": "dsa_moe", "batch": 32, "variant": "fin", "spec": "", "pos": 128, "max_context": 4096, "eager_finite": true, "replay_us": 4716.45991007487, "step_us": 4844.172795613607, "traced_finite": true, "determinism": {"replays": 200, "bit_identical": true, "first_diff": [], "finite": true}}

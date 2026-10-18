@@ -378,7 +378,8 @@ def dsa_bytes_per_token(dsa_layers) -> float:
         if getattr(a, "dsa_shard", False):
             tot += a.dsa_bytes_per_block() / BLOCK
         else:
-            tot += (BLOCK * a.R * 2 + 32 * a.ID * 2) / BLOCK
+            lat = 1 if str(getattr(a, "latent_dtype", "")).endswith("FP8_E4M3") else 2  # stage-8 fp8 latent pool
+            tot += (BLOCK * a.R * lat + 32 * a.ID * 2) / BLOCK
     return tot
 
 

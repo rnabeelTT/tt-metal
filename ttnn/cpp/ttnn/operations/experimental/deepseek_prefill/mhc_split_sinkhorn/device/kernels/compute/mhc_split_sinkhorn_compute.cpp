@@ -50,6 +50,48 @@ inline void calculate_mhc_split(const std::uint32_t x, const std::uint32_t hi, c
         sfpi::dst_reg++;
     }
 }
+
+#ifdef SK_FACES
+// Face-restricted forms (SK_FACES = 1: face 0; 2: faces 0 and 2), each called once per tile (VectorMode::None) and
+// walking all 4 faces itself (8 sfpi rows per face, 32 per tile).
+constexpr bool sk_face_valid(int f) { return SK_FACES == 1 ? f == 0 : (f == 0 || f == 2); }
+
+// split on the used faces; hi / lo of the padding faces are written as exact zeros (no stale DST value can reach the
+// permutation matmuls, whose padding rows multiply them by 0)
+template <std::uint32_t MASK>
+inline void calculate_mhc_split_faces(const std::uint32_t x, const std::uint32_t hi, const std::uint32_t lo) {
+    constexpr std::uint32_t tile = 32;
+    for (int f = 0; f < 4; f++) {
+        const bool valid = sk_face_valid(f);
+        for (int d = 0; d < 8; d++) {
+            if (valid) {
+                sfpi::vFloat v = sfpi::dst_reg[x * tile];
+                sfpi::vFloat h = sfpi::as<sfpi::vFloat>(sfpi::as<sfpi::vUInt>(v) & MASK);
+                sfpi::dst_reg[hi * tile] = h;
+                sfpi::dst_reg[lo * tile] = v - h;
+            } else {
+                sfpi::dst_reg[hi * tile] = sfpi::vConst0;
+                sfpi::dst_reg[lo * tile] = sfpi::vConst0;
+            }
+            sfpi::dst_reg++;
+        }
+    }
+}
+
+// zero the padding faces of DST[x] (m after exp: its padding then stays exactly 0)
+inline void calculate_mhc_zero_pad(const std::uint32_t x, const std::uint32_t, const std::uint32_t) {
+    constexpr std::uint32_t tile = 32;
+    for (int f = 0; f < 4; f++) {
+        const bool valid = sk_face_valid(f);
+        for (int d = 0; d < 8; d++) {
+            if (!valid) {
+                sfpi::dst_reg[x * tile] = sfpi::vConst0;
+            }
+            sfpi::dst_reg++;
+        }
+    }
+}
+#endif
 }  // namespace ckernel::sfpu
 #endif
 
@@ -63,6 +105,49 @@ ALWI void split_tile(uint32_t x, uint32_t hi, uint32_t lo) {
     MATH((SFPU_BINARY_INIT(unused)));
     MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_mhc_split, (MASK, 8), x, hi, lo, VectorMode::RC)));
 }
+
+#ifdef SK_FACES
+// the SFPU ops of the normalizations on the used faces only: face 0 (VectorMode::None runs the 8-row body once at
+// face 0) or faces 0 and 2 (VectorMode::C)
+constexpr VectorMode SK_VM = SK_FACES == 1 ? VectorMode::None : VectorMode::C;
+ALWI void m_split(uint32_t x, uint32_t hi, uint32_t lo) {
+    MATH((SFPU_BINARY_INIT(unused)));
+    MATH((SFPU_BINARY_CALL(
+        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_mhc_split_faces, (IN0_MASK), x, hi, lo, VectorMode::None)));
+}
+ALWI void zero_pad(uint32_t x) {
+    MATH((SFPU_BINARY_INIT(unused)));
+    MATH((SFPU_BINARY_CALL_NO_TEMPLATE_ARGS(
+        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_mhc_zero_pad, x, x, x, VectorMode::None)));
+}
+ALWI void add_eps(uint32_t x, uint32_t eps_bits) {
+    MATH(SFPU_UNARY_CALL(
+        DST_SYNC_MODE,
+        DST_ACCUM_MODE,
+        calculate_binop_with_scalar,
+        (APPROX, ckernel::ADD_UNARY, 8, DST_ACCUM_MODE),
+        x,
+        SK_VM,
+        eps_bits));
+}
+ALWI void recip_m(uint32_t x) { recip_tile<false>(x, SK_VM); }
+ALWI void mul_m(uint32_t a, uint32_t b, uint32_t o) {
+    MATH((SFPU_BINARY_CALL(
+        DST_SYNC_MODE,
+        DST_ACCUM_MODE,
+        calculate_sfpu_binary_mul,
+        (APPROX, ckernel::BinaryOp::MUL, 8, DST_ACCUM_MODE),
+        a,
+        b,
+        o,
+        SK_VM)));
+}
+#else
+ALWI void m_split(uint32_t x, uint32_t hi, uint32_t lo) { split_tile(x, hi, lo); }
+ALWI void add_eps(uint32_t x, uint32_t eps_bits) { add_unary_tile(x, eps_bits); }
+ALWI void recip_m(uint32_t x) { recip_tile<false>(x); }
+ALWI void mul_m(uint32_t a, uint32_t b, uint32_t o) { mul_binary_tile(a, b, o); }
+#endif
 
 constexpr uint32_t CB_MIXES = 0;   // c_0  (mixes, streamed; UnpackToDestFp32)
 constexpr uint32_t CB_CONSTS = 1;  // c_1  (8 resident tiles; UnpackToDestFp32)
@@ -133,7 +218,7 @@ ALWI void project(uint32_t sel, uint32_t base) {
 
 // pack DST[x] (exact) to CB_M and its split halves to CB_MH / CB_ML (uses DST[x+1], DST[x+2])
 ALWI void pack_m(uint32_t x) {
-    split_tile(x, x + 1, x + 2);
+    m_split(x, x + 1, x + 2);
     tile_regs_commit();
     CircularBuffer cm(CB_M), ch(CB_MH), cl(CB_ML);
     cm.reserve_back(1);
@@ -166,19 +251,19 @@ FORCE_INLINE void normalize(bool rows, bool denom_eps, bool post_eps, uint32_t e
     }
     if (denom_eps) {
         binop_with_scalar_tile_init();
-        add_unary_tile(0, eps_bits);
+        add_eps(0, eps_bits);
     }
     // non-legacy reciprocal: fp32-accurate (the legacy_compat default runs a fixed 3-step Newton from a linear guess,
     // ~1.4e-3 low for some inputs, which biases every Sinkhorn normalization)
     recip_tile_init<false>();
-    recip_tile<false>(0);
+    recip_m(0);
     copy_from(CB_M);
     copy_tile(CB_M, 0, 1);
     mul_binary_tile_init();
-    mul_binary_tile(1, 0, 1);
+    mul_m(1, 0, 1);
     if (post_eps) {
         binop_with_scalar_tile_init();
-        add_unary_tile(1, eps_bits);
+        add_eps(1, eps_bits);
     }
     cm.pop_front(1);
     ch.pop_front(1);
@@ -265,6 +350,9 @@ void kernel_main() {
         unary_min_tile(0, 0x42a00000u);  // min(x, 80.0f)
         exp_tile_init();
         exp_tile(0);
+#ifdef SK_FACES
+        zero_pad(0);
+#endif
         pack_m(0);
         normalize<n>(true, false, true, eps_bits, false);        // row softmax, + eps
         normalize<n>(false, true, false, eps_bits, iters == 1);  // first column norm

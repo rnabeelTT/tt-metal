@@ -136,6 +136,9 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
         if (operation_attributes.perm_fidelity != 4) {
             compute.defines.emplace_back("PERM_FIDELITY", std::to_string(operation_attributes.perm_fidelity));
         }
+        if (operation_attributes.faces != 0) {
+            compute.defines.emplace_back("SK_FACES", std::to_string(operation_attributes.faces));
+        }
         compute.config = ComputeConfigDescriptor{
             .math_fidelity = MathFidelity::HiFi4,
             .fp32_dest_acc_en = true,
@@ -222,6 +225,9 @@ ProgramDescriptor MhcSplitSinkhornProgramFactory::create_descriptor(
     compute.compile_time_args = std::move(compute_ct);
     if (operation_attributes.perm_fidelity != 4) {
         compute.defines.emplace_back("PERM_FIDELITY", std::to_string(operation_attributes.perm_fidelity));
+    }
+    if (operation_attributes.faces != 0) {
+        compute.defines.emplace_back("SK_FACES", std::to_string(operation_attributes.faces));
     }
     compute.config = ComputeConfigDescriptor{
         .math_fidelity = MathFidelity::HiFi4,

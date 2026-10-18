@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Sinkhorn permutation-sum fidelity (MHC_SINKHORN_PERM_FIDELITY = 4 / 3 / 2): bit-identity of pre / post / comb against
-the HiFi4 kernel on the same inputs, error against the fp64 reference, and the device time of one decode-sized call
-(T = 32: one token tile, one core) from traced replays.
+"""Sinkhorn permutation-sum fidelity (MHC_SINKHORN_PERM_FIDELITY = 4 / 3 / 2) and the face-restricted normalizations
+(MHC_SINKHORN_FACES = 1): bit-identity of pre / post / comb against the HiFi4 (all-faces) kernel on the same inputs,
+error against the fp64 reference, and the device time of one decode-sized call (one token tile, one core) from traced
+replays. HiFi2 is not exact and needs MHC_SINKHORN_ALLOW_INEXACT=1 (set here).
 
   python -m models.autoports.zai_org_glm_5_3_flash.tools.sinkhorn_fidelity_probe
 """
@@ -50,9 +51,10 @@ def timed(dev, mixes, consts, reps=200):
 
 def main():
     dev = ttnn.open_device(device_id=0, trace_region_size=16 << 20)
+    os.environ["MHC_SINKHORN_ALLOW_INEXACT"] = "1"
     res = []
     try:
-        for T in (32, 2048):
+        for T in (1, 8, 16, 17, 32, 96, 2048):
             g = torch.Generator().manual_seed(T)
             mixes = torch.randn(T, (2 + N) * N, generator=g)
             scale = (torch.rand(3, generator=g) * 0.5 + 0.5).bfloat16().float()
@@ -65,23 +67,32 @@ def main():
             )
             ref = [pre_r, post_r, comb_r.reshape(T, N * N)]
             outs = {}
-            for f in ("4", "3", "2"):
-                os.environ["MHC_SINKHORN_PERM_FIDELITY"] = f
+            for f in ("4", "3", "2", "3f"):
+                os.environ["MHC_SINKHORN_PERM_FIDELITY"] = f[0]
+                os.environ["MHC_SINKHORN_FACES"] = "1" if f.endswith("f") else "0"
                 got = run(dev, mixes, consts)
+                again = run(dev, mixes, consts)  # a second call: no stale DST state may change the result
                 got = [got[0][:T, :N], got[1][:T, :N], got[2][:T, : N * N]]
                 outs[f] = got
                 err = max(float((g_.double() - r).abs().max() / r.abs().max()) for g_, r in zip(got, ref))
                 rec = {
                     "T": T,
-                    "perm_fidelity": int(f),
+                    "perm_fidelity": int(f[0]),
+                    "faces": f.endswith("f"),
+                    "repeat_identical": all(
+                        torch.equal(a, b)
+                        for a, b in zip(got, [again[0][:T, :N], again[1][:T, :N], again[2][:T, : N * N]])
+                    ),
+                    "finite": all(torch.isfinite(g_).all().item() for g_ in got),
                     "max_rel_err_vs_fp64": err,
                     "bit_identical_to_hifi4": all(torch.equal(a, b) for a, b in zip(got, outs["4"])),
-                    "us_per_call": timed(dev, mixes, consts) if T == 32 else None,
+                    "us_per_call": timed(dev, mixes, consts) if T in (1, 32) else None,
                 }
                 print("SK", json.dumps(rec))
                 res.append(rec)
     finally:
-        os.environ.pop("MHC_SINKHORN_PERM_FIDELITY", None)
+        for k in ("MHC_SINKHORN_PERM_FIDELITY", "MHC_SINKHORN_FACES", "MHC_SINKHORN_ALLOW_INEXACT"):
+            os.environ.pop(k, None)
         ttnn.close_device(dev)
 
 

@@ -120,11 +120,22 @@ std::array<Tensor, 3> mhc_split_sinkhorn(
     if (const char* pf = std::getenv("MHC_SINKHORN_PERM_FIDELITY"); pf != nullptr) {
         perm_fidelity = static_cast<uint32_t>(std::atoi(pf));
     }
+    // HiFi2 drops srcA-high x srcB-low bits of m (not exact, ~0.8 %): probes only (MHC_SINKHORN_ALLOW_INEXACT=1)
+    const char* inexact = std::getenv("MHC_SINKHORN_ALLOW_INEXACT");
+    const bool allow_inexact = inexact != nullptr && std::atoi(inexact) == 1;
     TT_FATAL(
-        perm_fidelity >= 2 && perm_fidelity <= 4,
-        "MHC_SINKHORN_PERM_FIDELITY must be 2, 3 or 4, got {}",
+        perm_fidelity == 3 || perm_fidelity == 4 || (allow_inexact && perm_fidelity == 2),
+        "MHC_SINKHORN_PERM_FIDELITY must be 3 or 4 (2 only with MHC_SINKHORN_ALLOW_INEXACT=1), got {}",
         perm_fidelity);
-    auto operation_attributes = OperationType::operation_attributes_t{n, sinkhorn_iters, eps, max_cores, perm_fidelity};
+    // MHC_SINKHORN_FACES=1: face-restricted normalizations (see MhcSplitSinkhornParams::faces). The mode depends on
+    // the token count, so it is resolved here and hashed with the attributes.
+    uint32_t faces = 0;
+    if (const char* fc = std::getenv("MHC_SINKHORN_FACES"); fc != nullptr && std::atoi(fc) == 1 && n * n <= 16) {
+        const uint32_t T = mixes.logical_shape()[-2];
+        faces = T <= 16 ? 1 : 2;
+    }
+    auto operation_attributes =
+        OperationType::operation_attributes_t{n, sinkhorn_iters, eps, max_cores, perm_fidelity, faces};
     auto tensor_args = OperationType::tensor_args_t{mixes, consts};
     return ttnn::device_operation::launch<OperationType>(operation_attributes, tensor_args);
 }
