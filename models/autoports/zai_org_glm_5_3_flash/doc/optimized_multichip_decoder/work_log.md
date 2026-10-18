@@ -160,5 +160,49 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
 - 06:19 Job E (`records/s5r2_e.log`, `s5r2_det_full_final.log`): full model, 8 slots, final default: eager and traced
   repeat equal, tokens = stage 7's final run.
 - 07:42 Job F (through `run-locked.sh`, `records/s5r2_watcher.log`): watcher on the final default, 7 cases PASSED, 0
-  suspicious lines (teardown abort exit 134, known). 08:44-10:0x: FABRIC_1D vs FABRIC_1D_RING prefill on the review-2
+  suspicious lines (teardown abort exit 134, known). 08:44-09:26: FABRIC_1D vs FABRIC_1D_RING prefill on the review-2
   options (`records/pf_ring_r2.jsonl`): bit-identical, walls within +-3 %.
+
+## 2026-10-18: review #3 rework (`artifacts/stage5_review_3.md`, commit cdab692b0ec)
+
+- Code: the double free on the `dsa_q_mm` path removed (`_sparse_attend` no longer frees the caller's q_abs); one
+  head mask per mesh; `dsa_q_mm_ib`, `dsa_idx_rep` options; the sinkhorn kernel stores `0.0f` instead of
+  `sfpi::vConst0`; `tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_faces` (T = 1 / 8 / 16 / 17 / 32);
+  `tools/s5_sparse_probe.py`; `s5_watcher.sh` counts "tripped assert" in console.log.
+- `dsa_tail_shared` buffer (coordinator: the stage-6/7 generator's first run on cdab692 gave 10 / 48 / 100): the
+  review-2 producer created the buffer lazily per input dict with `ttnn.clone`, so a new dict during a later warm-up or
+  capture re-created it and dropping the old dict freed a buffer earlier traces read. Now allocated once when the first
+  DSA layer is built, held in a module registry (mesh, slots), never freed; the producer marks the step dict.
+- Snapshot `~/glm53-flash-bringup/s5r3_snapshot` = HEAD cdab692 + these edits (without the stage-8 agent's 2
+  root_cache lines in the live `tt/multichip_decoder.py`). Device work through `run-locked.sh` (QPRIO unset), three
+  tickets in sequence.
+- 10:48-11:11 Ticket 1 (`records/s5r3.log`): kernel tests 18 passed; decode A/B `--compare 8` at positions 128 / 3000 /
+  130,000, 1 and 32 slots (`records/sparse_ab.jsonl`, `dense_ab.jsonl`): `dsa_tail_shared` (producer and consumer),
+  `dsa_q_mm` (in0 blocks 8 / 16 / 32 / 64), `sinkhorn_faces` bit-identical everywhere; `dsa_idx_rep` bit-identical at 1
+  slot (-25 to -27 µs), not at 32 (PCC 0.99919, +157 µs). `DEFAULT_MC`: `dsa_q_mm_ib = 64`, `dsa_idx_rep` (1 slot only)
+  set during the ticket, before its full-model runs. Teacher forcing on the final default 92 / 100 / 100, prefill check
+  91 / 100 / 100. Full model in the sparse regime, with and without `dsa_tail_shared`: logits and tokens equal. Watcher
+  without the eth cores: both dsa_moe cases clean.
+- 11:4x-12:41 Ticket 2 (`records/s5r3.log`): full model, sparse regime, final default vs `dsa_idx_rep=0,
+  dsa_q_mm_ib=8`: prefill logits differ (max |diff| 9.9 at 3000). Cause: `dsa_idx_rep` keyed on the slot count (S = 1),
+  so it also reordered the index list of sparse prefill chunks, where the order changes sparse_sdpa's result (as at
+  32-user decode). Fixed: one decode row only (`rows == 1`). Ticket 4 re-runs teacher forcing and the sparse-regime
+  comparisons on the fixed default, in one ticket.
+- 13:00 Ticket 3 (`records/stress_r3.jsonl`, `longpos_r3.jsonl`, `tracy/after_r3*`): the 1-slot dsa_moe layer on that
+  default: replay 1334 µs (200 replays bit-identical), 1886 µs at position 130,000; Tracy 1250 / 1813 µs.
+- 14:20-14:30 Ticket 4 (`records/s5r3.log`): with `dsa_idx_rep` limited to one decode row, full-model teacher forcing
+  gave 14 / 32 / 90 (`records/s5r3_tf_final2.log`). Same signature as the open prefill-to-decode race the stage-6/7
+  work is chasing; unclassified. Sparse regime: default vs `dsa_idx_rep=0, dsa_q_mm_ib=8`: prefill equal, decode logits
+  differ (max 8.7), tokens diverge at 3004; default vs `dsa_tail_shared=0`: equal. `dsa_idx_rep` rejected (not exact;
+  the layer A/B's mostly empty cache hid the order dependence). It had been in the live `DEFAULT_MC` from ~10:53 to
+  ~14:45; reverted (coordinator: the live default changes only after the gate passes on a snapshot).
+- Ticket 5: HEAD moved to b8198430147 (stage 8: default precision combo_a_kv). New snapshot
+  `~/glm53-flash-bringup/s5r3h_snapshot` = that HEAD + the review-3 edits; teacher forcing on the shipping default
+  (GLM53_PRECISION unset) and with `dsa_tail_shared=0`; full model in the sparse regime, `dsa_q_mm_ib` 64 vs 8.
+- 15:23-15:34 Ticket 5, the stage-5 gate (`records/s5r3.log`): snapshot HEAD b8198430147 + the review-3 edits, the
+  shipping precision (combo_a_kv), no `GLM53_MC`: teacher forcing 91 / 100 / 100, prefill check 91 / 100 / 100; with
+  `dsa_tail_shared=0` the same. Sparse regime, `dsa_q_mm_ib` 64 vs 8: prefill and decode logits and tokens equal.
+  `dsa_q_mm_ib = 64` kept.
+- 15:44-15:50 Ticket 6 (`records/stress_r3b.jsonl`, `longpos_r3b.jsonl`, `tracy/after_r3*`): the 1-slot dsa_moe layer
+  on the final default at the stage-5 reference precision (`GLM53_PRECISION=none`): replay 1360 µs (200 replays
+  bit-identical), 1912 µs at position 130,000 (50 replays); Tracy 1278 / 1838 µs. Stack 50.7 ms per token.

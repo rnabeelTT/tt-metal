@@ -1,0 +1,2 @@
+{"kind": "dsa_moe", "batch": 1, "usable_topology": "Topology.Ring", "links": 2, "max_context": 131072, "pos": 130000}
+{"kind": "dsa_moe", "batch": 1, "variant": "fin", "spec": "", "pos": 130000, "max_context": 131072, "eager_finite": true, "replay_us": 1911.9501113891602, "step_us": 2004.3134689331057, "traced_finite": true, "determinism": {"replays": 50, "bit_identical": true, "first_diff": [], "finite": true}}

@@ -119,7 +119,7 @@
       "kda_state_per_slot": "1 MiB recurrent state (16 local heads) + conv history per KDA layer per die",
       "one_slot_padding": "max_batch = 1: KDA kda.recurrent_decode needs batch x 16 heads % 32 == 0, so a 1-slot decoder allocates 2 KDA state slots: +1 MiB per KDA layer per die (34 MiB per die, ~2.9K tokens of DSA cache)",
       "collective_buffers": "none persistent: ag_persistent is rejected (it broke the 45-layer model); decode collective outputs are per-call L1 tensors",
-      "review2_constants": "dsa_q_mm head mask [32, 4096] bf16 per DSA layer (0.25 MB; W_UK is a view), one shared [32, 32] fp32 sparse-index tail tile per model (dsa_tail_shared)"
+      "review2_constants": "dsa_q_mm head mask [32, 4096] bf16 (0.25 MB), one per mesh shared by all DSA layers (W_UK is a view); one dsa_tail_shared sparse-index tail tile [1, 1, S, 32] fp32 per model, allocated when the first DSA layer is built"
     },
     "weights": "unchanged: both DSA packs are concatenations of the separate weights (ds_shared frees those), the 1D decode programs read the same interleaved weights",
     "supported_context": "full_model.supported_context (measured 1-slot limit 104,448 tokens with this decoder's state; per-slot profiles there)",

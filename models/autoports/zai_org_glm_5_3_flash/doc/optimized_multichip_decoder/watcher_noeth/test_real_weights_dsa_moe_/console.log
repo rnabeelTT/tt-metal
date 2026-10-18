@@ -1,0 +1,248 @@
+2026-10-18 11:06:04.792 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/tt-metal
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-18 11:06:05.610 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 11:06:05.610 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 11:06:05.610 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 11:06:05.610 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 11:06:05.616 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 11:06:05.617 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 11:06:05.695 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 11:06:05.695 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 11:06:05.695 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 11:06:05.695 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 11:06:05.696 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 11:06:05.904 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 11:06:06.043 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 11:06:06.043 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 11:06:06.043 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 11:06:06.043 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 11:06:06.043 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 11:06:06.677 | info     |       LLRuntime | Watcher log file: models/autoports/zai_org_glm_5_3_flash/doc/optimized_multichip_decoder/watcher_noeth/test_real_weights_dsa_moe_/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 11:06:06.678 | info     |       LLRuntime | Watcher server initialized, disabled features: ETH (watcher_server.cpp:568)
+2026-10-18 11:06:06.678 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:06.685 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:06.685 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 11:06:06.696 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:06.702 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:09.983 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 11:06:09.983 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 11:06:16.889 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:16.900 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:16.909 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:16.919 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:26.934 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:26.941 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:26.948 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:26.956 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:36.973 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:36.980 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:36.987 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:36.994 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:43.994 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 11:06:47.011 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:47.020 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:47.028 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:47.037 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/4535515945238150168/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc0/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc0/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_unpack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/4535515945238150168/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc2/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc2/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_pack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/4535515945238150168/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc1/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/4535515945238150168/trisc1/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_math.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+2026-10-18 11:06:57.051 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:57.058 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:57.065 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:06:57.072 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/5417406448285667243/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc0/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc0/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_unpack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/5417406448285667243/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc2/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc2/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_pack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/5417406448285667243/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc1/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/5417406448285667243/trisc1/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_math.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc0, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=2 -DUCK_CHLKC_UNPACK -DCOMPILE_FOR_TRISC=0 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/6437228926099698840/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc0/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc0/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_unpack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:26,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc2, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=4 -DUCK_CHLKC_PACK -DCOMPILE_FOR_TRISC=2 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/6437228926099698840/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc2/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc2/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_pack.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:21,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+Building trisc1, compile step:
+/home/raahem/tt-metal/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -I. -I.. -I/home/raahem/tt-metal/ -I/home/raahem/tt-metal/ttnn -I/home/raahem/tt-metal/ttnn/cpp -I/home/raahem/tt-metal/tt_metal -I/home/raahem/tt-metal/tt_metal/hw/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/common -I/home/raahem/tt-metal/tt_metal/tt-llk/tools/include -I/home/raahem/tt-metal/tt_metal/hostdevcommon/api -I/home/raahem/tt-metal/tt_metal/api/ -I/home/raahem/tt-metal/runtime/sfpi/include -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/raahem/tt-metal/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/raahem/tt-metal/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx -I/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DWATCHER_ENABLED -DWATCHER_NOINLINE -DWATCHER_DISABLE_ETH -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="layernorm/6437228926099698840/" -include named_ct_arg_map_generated.h -c -o /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc1/trisck.5544519081853776659_2243609.o /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/raahem/.cache/tt-metal-cache/1723788565936048354/kernels/layernorm/6437228926099698840/trisc1/trisck.5544519081853776659_2243609.d
+In file included from ../chlkc_math.cpp:6,
+                 from /home/raahem/tt-metal/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/raahem/tt-metal/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:13:
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp: In function 'void kernel_main()':
+/home/raahem/tt-metal/ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp:128:20: warning: variable 'dfb_x_id' set but not used [-Wunused-but-set-variable]
+  128 |     constexpr auto dfb_x_id = dfb_in_id;
+      |                    ^~~~~~~~
+2026-10-18 11:07:07.085 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:07.092 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:07.099 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:07.106 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:17.118 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:17.125 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:17.132 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:17.139 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:27.152 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:27.159 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:27.165 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:27.172 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:37.185 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:37.192 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:37.199 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:37.206 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:47.218 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:47.226 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:47.233 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:47.239 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:57.252 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:57.259 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:57.266 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:07:57.273 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:08:07.286 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:08:07.293 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:08:07.300 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:08:07.307 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+L3 slot 5 prefill 100: delta PCC 0.999799 full PCC 0.999901 update rms ratio 0.9956
+L3 slot 5 prefill 100: vs checkpoint ref (quantization delta): delta PCC 0.994870 update rms ratio 1.0073
+L3 slot 5 decode pos 100: delta PCC 0.999958 full PCC 0.999979 update rms ratio 0.9905 (HF router margin 7.8e-03)
+L3 slot 5 decode pos 100: vs checkpoint ref (quantization delta): delta PCC 0.997027 update rms ratio 0.9930
+L3 slot 5 decode pos 101: delta PCC 0.999962 full PCC 0.999976 update rms ratio 0.9954 (HF router margin 2.1e-03)
+L3 slot 5 decode pos 101: vs checkpoint ref (quantization delta): delta PCC 0.993542 update rms ratio 1.0139
+L3 slot 5 decode pos 102: delta PCC 0.999958 full PCC 0.999971 update rms ratio 0.9866 (HF router margin 1.5e-02)
+L3 slot 5 decode pos 102: vs checkpoint ref (quantization delta): delta PCC 0.996356 update rms ratio 0.9906
+PASSEDrouter near-tie y_swap matches: 0 of 3 MoE decode tokens (cap 1); module total 0 of 3 (cap 2)
+quantization delta (port vs the checkpoint reference, 4 checks): min delta PCC 0.993542, update rms ratio 0.9906 .. 1.0139
+module y_swap matches 0 of 3 MoE decode tokens (cap 2)
+
+
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/tt-metal/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+118.23s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+6.95s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+0.05s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_real_weights[dsa_moe]
+======================== 1 passed in 125.38s (0:02:05) =========================
+nanobind: leaked 159 instances!
+ - leaked instance 0x768e8c6da2f8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x766cf8ca53c8 of type "ttnn._ttnn.global_semaphore.global_semaphore"
+ - leaked instance 0x766cf8ca57c8 of type "ttnn._ttnn.global_semaphore.global_semaphore"
+ - leaked instance 0x766cf8ca5648 of type "ttnn._ttnn.global_semaphore.global_semaphore"
+ - leaked instance 0x768e9bd8a658 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x768ece9d8d68 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8d5187f8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x766cf8ca5268 of type "ttnn._ttnn.global_semaphore.global_semaphore"
+ - leaked instance 0x768ece9da958 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768ece9d89d8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8c6dbcd8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8c6dbc18 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8c6d9db8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8c6daad8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768ece9d8e88 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768ece9d8fa8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768e8c76cb88 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x768ece941998 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x768ece9d8c18 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x768ece9d8ac8 of type "ttnn._ttnn.tensor.Tensor"
+ - ... skipped remainder
+nanobind: leaked 77 keep_alive records!
+nanobind: leaked 40 types!
+ - leaked type "DispatchCoreAxis"
+ - leaked type "ttnn._ttnn.device.SubDeviceManagerId"
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - ... skipped remainder
+nanobind: leaked 342 functions!
+ - leaked function "get_system_mesh_id"
+ - leaked function "ClearKernelCache"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "buffer_unique_id"
+ - leaked function "reshape"
+ - leaked function ""
+ - leaked function "pad"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-18 11:08:12.495 | info     |    BuildKernels | JIT cache stats: 0/918 hits (0.0%) [0 cached, 461 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 11:08:12.495 | info     |    BuildKernels | JIT telemetry: 2 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 11:08:12.497 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 11:08:12.512 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 11:08:12.512 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 11:08:13.043 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 11:08:13.043 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 11:08:13.043 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)

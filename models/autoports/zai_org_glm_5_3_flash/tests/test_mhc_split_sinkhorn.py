@@ -102,3 +102,34 @@ def test_mhc_split_sinkhorn_sharded(device):
             f"max rel err vs fp64 {s['max_rel']:.2e}"
         )
         assert torch.equal(xs, ys) and s["max_rel"] < 1e-5
+
+
+@pytest.mark.parametrize("T", [1, 8, 16, 17, 32])
+def test_mhc_split_sinkhorn_faces(device, monkeypatch, T):
+    """MHC_SINKHORN_FACES=1 (the decode path that ships: face 0 at T <= 16, faces 0 / 2 above) gives the same used
+    entries as the all-faces kernel, bit for bit, at HiFi3 permutation sums (the shipped fidelity)."""
+    g = torch.Generator().manual_seed(100 + T)
+    mix = (2 + N) * N
+    mixes = torch.randn(T, mix, generator=g)
+    scale = (torch.rand(3, generator=g) * 0.5 + 0.5).bfloat16().float()
+    base = (torch.randn(mix, generator=g) * 0.5).bfloat16().float()
+    consts = build_consts(HcConfig(n=N, sinkhorn_iters=ITERS, eps=HC_EPS, norm_eps=1e-5), scale, base)
+    up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+    monkeypatch.setenv("MHC_SINKHORN_PERM_FIDELITY", "3")
+    outs = {}
+    for faces in ("0", "1", "1"):  # faces on twice: a repeat call must not see stale DST state
+        monkeypatch.setenv("MHC_SINKHORN_FACES", faces)
+        pre, post, comb = ttnn.experimental.deepseek_prefill.mhc_split_sinkhorn(
+            up(mixes), up(consts.reshape(8, 32, 32)), N, ITERS, HC_EPS
+        )
+        got = [
+            ttnn.to_torch(pre).float()[:T, :N],
+            ttnn.to_torch(post).float()[:T, :N],
+            ttnn.to_torch(comb).float()[:T, : N * N],
+        ]
+        outs.setdefault(faces, []).append(got)
+    ref = outs["0"][0]
+    for run in outs["1"]:
+        for name, a, b in zip(("pre", "post", "comb"), ref, run):
+            assert torch.isfinite(b).all(), (T, name)
+            assert torch.equal(a, b), (T, name, float((a - b).abs().max()))

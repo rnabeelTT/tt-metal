@@ -1,6 +1,12 @@
+# review-3 gate snapshot ~/glm53-flash-bringup/s5r3h_snapshot = b8198430147 + stage-5 review-3 edits (tt/multichip_decoder.py, tests/test_mhc_split_sinkhorn.py, tools/s5_sparse_probe.py); md5 (12 hex): snapshot / live
+tt/multichip_decoder.py snapshot=f6bda8012666 live=16b9673568d1
+tests/test_mhc_split_sinkhorn.py snapshot=19a89cfd1475 live=19a89cfd1475
+tools/s5_sparse_probe.py snapshot=c0d0a7281e5d live=7bc1b156ff26
+live differs from the snapshot only by the stage-8 agent's edits: one comment line in tt/multichip_decoder.py (from_state_dict precision hook) and the GLM53_PRECISION setdefault line in tools/s5_sparse_probe.py
+
 # gate snapshot = s8_snapshot (d48b7fd06ad + stage-8 files) + the stage-5 files; md5 (12 hex) of files that differ from s8_snapshot, and the live tree
 tests/test_kda_decode_conv.py snapshot=27e08b6570ea s8=37a56433361a live=27e08b6570ea
-tools/dsa_out_probe.py snapshot=8ff908628d70 s8=none live=8ff908628d70
+tools/dsa_out_probe.py snapshot=ce3ff5da368d s8=none live=ce3ff5da368d
 tools/dtype_sweep_report.py snapshot=57205539691f s8=d80381860a5f live=d80381860a5f
 tools/mc_decode_ab.py snapshot=f344736a8106 s8=fa1ec9ed20b1 live=f344736a8106
 tools/sinkhorn_fidelity_probe.py snapshot=a7da8348fbf6 s8=e8d44cf01de7 live=a7da8348fbf6

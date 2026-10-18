@@ -70,8 +70,8 @@ inline void calculate_mhc_split_faces(const std::uint32_t x, const std::uint32_t
                 sfpi::dst_reg[hi * tile] = h;
                 sfpi::dst_reg[lo * tile] = v - h;
             } else {
-                sfpi::dst_reg[hi * tile] = sfpi::vConst0;
-                sfpi::dst_reg[lo * tile] = sfpi::vConst0;
+                sfpi::dst_reg[hi * tile] = 0.0f;
+                sfpi::dst_reg[lo * tile] = 0.0f;
             }
             sfpi::dst_reg++;
         }
@@ -85,7 +85,7 @@ inline void calculate_mhc_zero_pad(const std::uint32_t x, const std::uint32_t, c
         const bool valid = sk_face_valid(f);
         for (int d = 0; d < 8; d++) {
             if (!valid) {
-                sfpi::dst_reg[x * tile] = sfpi::vConst0;
+                sfpi::dst_reg[x * tile] = 0.0f;
             }
             sfpi::dst_reg++;
         }

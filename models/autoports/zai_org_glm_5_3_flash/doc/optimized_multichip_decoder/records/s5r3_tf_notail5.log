@@ -1,0 +1,182 @@
+2026-10-18 15:26:37.345 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 15:26:38.682 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:285 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-18 15:26:40.051 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:139 - precision policy: stage-8 selected 'combo_a_kv' (/home/raahem/glm53-flash-bringup/s5r3h_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+2026-10-18 15:26:40.355 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:40.450 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:40.471 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 0 (kda/dense) loaded in 0.2s
+2026-10-18 15:26:40.579 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:40.678 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:40.733 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 1 (kda/dense) loaded in 0.3s
+2026-10-18 15:26:40.829 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:40.916 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:40.961 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 2 (kda/dense) loaded in 0.2s
+2026-10-18 15:26:42.381 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:42.390 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:42.445 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 3 (dsa/moe) loaded in 1.5s
+2026-10-18 15:26:42.556 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:44.038 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:44.044 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:44.094 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 4 (kda/moe) loaded in 1.6s
+2026-10-18 15:26:44.194 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:45.638 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 5: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:45.648 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:45.698 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 5 (kda/moe) loaded in 1.6s
+2026-10-18 15:26:45.794 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:47.207 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 6: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:47.213 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:47.265 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 6 (kda/moe) loaded in 1.6s
+2026-10-18 15:26:48.829 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 7: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:48.836 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:48.876 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 7 (dsa/moe) loaded in 1.6s
+2026-10-18 15:26:48.984 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:50.437 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 8: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:50.443 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:50.495 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 8 (kda/moe) loaded in 1.6s
+2026-10-18 15:26:50.590 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:52.136 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 9: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:52.145 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:52.200 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 9 (kda/moe) loaded in 1.7s
+2026-10-18 15:26:52.320 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:54.092 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 10: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:54.101 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:54.155 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 10 (kda/moe) loaded in 2.0s
+2026-10-18 15:26:56.113 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 11: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:56.120 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:56.161 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 11 (dsa/moe) loaded in 2.0s
+2026-10-18 15:26:56.287 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:57.878 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 12: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:57.912 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:57.969 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 12 (kda/moe) loaded in 1.8s
+2026-10-18 15:26:58.081 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:26:59.771 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 13: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:26:59.780 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:26:59.836 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 13 (kda/moe) loaded in 1.9s
+2026-10-18 15:26:59.974 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:01.635 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 14: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:01.644 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:01.708 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 14 (kda/moe) loaded in 1.9s
+2026-10-18 15:27:03.492 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 15: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:03.500 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:03.548 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 15 (dsa/moe) loaded in 1.8s
+2026-10-18 15:27:03.675 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:05.351 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 16: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:05.361 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:05.413 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 16 (kda/moe) loaded in 1.9s
+2026-10-18 15:27:05.529 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:07.820 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 17: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:07.846 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:07.906 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 17 (kda/moe) loaded in 2.5s
+2026-10-18 15:27:08.234 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:10.697 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 18: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:10.741 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:10.811 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 18 (kda/moe) loaded in 2.9s
+2026-10-18 15:27:12.803 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 19: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:12.813 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:12.871 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 19 (dsa/moe) loaded in 2.1s
+2026-10-18 15:27:12.996 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:14.995 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 20: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:15.003 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:15.073 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 20 (kda/moe) loaded in 2.2s
+2026-10-18 15:27:15.216 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:17.015 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 21: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:17.023 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:17.104 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 21 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:17.244 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:18.939 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 22: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:18.957 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:19.040 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 22 (kda/moe) loaded in 1.9s
+2026-10-18 15:27:20.909 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 23: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:20.919 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:20.990 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 23 (dsa/moe) loaded in 2.0s
+2026-10-18 15:27:21.132 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:22.962 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 24: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:22.974 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:23.030 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 24 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:23.141 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:24.729 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 25: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:24.740 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:24.800 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 25 (kda/moe) loaded in 1.8s
+2026-10-18 15:27:24.949 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:28.834 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 26: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:28.845 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:28.928 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 26 (kda/moe) loaded in 4.1s
+2026-10-18 15:27:30.961 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 27: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:30.971 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:31.058 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 27 (dsa/moe) loaded in 2.1s
+2026-10-18 15:27:31.205 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:32.848 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 28: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:32.856 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:32.916 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 28 (kda/moe) loaded in 1.9s
+2026-10-18 15:27:33.029 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:34.684 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 29: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:34.695 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:34.765 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 29 (kda/moe) loaded in 1.8s
+2026-10-18 15:27:34.899 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:36.700 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 30: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:36.711 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:36.794 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 30 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:38.781 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 31: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:38.789 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:38.847 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 31 (dsa/moe) loaded in 2.1s
+2026-10-18 15:27:38.979 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:40.741 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 32: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:40.750 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:40.813 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 32 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:40.939 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:42.858 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 33: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:42.870 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:42.943 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 33 (kda/moe) loaded in 2.1s
+2026-10-18 15:27:43.076 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:44.821 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 34: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:44.830 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:44.898 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 34 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:46.803 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 35: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:46.812 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:46.872 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 35 (dsa/moe) loaded in 2.0s
+2026-10-18 15:27:47.009 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:48.836 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 36: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:48.844 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:48.912 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 36 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:49.040 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:50.784 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 37: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:50.793 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:50.867 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 37 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:50.997 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:27:52.726 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 38: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:52.742 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:27:52.826 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 38 (kda/moe) loaded in 2.0s
+2026-10-18 15:27:59.915 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 39: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:27:59.938 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:00.010 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 39 (dsa/moe) loaded in 7.2s
+2026-10-18 15:28:00.126 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:28:01.766 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 40: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:28:01.775 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:01.841 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 40 (kda/moe) loaded in 1.8s
+2026-10-18 15:28:01.963 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:28:03.670 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 41: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:28:03.700 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:03.779 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 41 (kda/moe) loaded in 1.9s
+2026-10-18 15:28:03.908 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:28:05.399 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 42: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:28:05.410 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:05.466 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 42 (kda/moe) loaded in 1.7s
+2026-10-18 15:28:07.249 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 43: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:28:07.265 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:07.316 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 43 (dsa/moe) loaded in 1.8s
+2026-10-18 15:28:07.434 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 15:28:11.210 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 44: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 15:28:11.222 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder:from_env:160 - GLM53_MC='dsa_tail_shared=0' overrides the multichip decoder options (A/B runs only)
+2026-10-18 15:28:11.230 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:200 - layer 44 (kda/moe) loaded in 3.9s
+2026-10-18 15:28:11.458 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:213 - model weights loaded in 92.8s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 914 hits, 0 stored)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-18 15:28:15.817 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:576 - MoE prefill row split: {'mode': 'auto', 'rows': '0', 'largest_free_bytes_per_die': 2939380736, 'need_bytes': 1073741824}
+2026-10-18 15:28:25.955 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:151 - decode traces captured (model + sampler); prefill traces []
+S7 built S=1 seq=4096 in 107s
+entry[0]             top1=0.910 (91/100)  top5=1.000 (100/100)  top100=1.000 (100/100)  TTFT=419.80ms  decode=19.57 t/s/u  e2e=18.25 t/s/u
+AGGREGATE            top1=0.910 (91/100)  top5=1.000 (100/100)  top100=1.000 (100/100)  TTFT=419.80ms  decode=19.57 t/s/u  e2e=18.25 t/s/u
+READINESS_RESULT teacher-forcing [{"top1": 0.91, "top5": 1.0, "top100": 1.0, "matches_top1": 91, "matches_top5": 100, "matches_top100": 100, "total": 100, "k": 100, "elapsed_s": 5.478621301939711, "e2e_t/s/u": 18.252767345790975, "ttft_ms": 419.79960491880774, "decode_tokens": 99.0, "decode_elapsed_s": 5.058795407181606, "decode_t/s/u": 19.5698762316928}]
+entry[0]             top1=0.910 (91/100)  top5=1.000 (100/100)  top100=1.000 (100/100)
+AGGREGATE            top1=0.910 (91/100)  top5=1.000 (100/100)  top100=1.000 (100/100)
+READINESS_RESULT prefill-check [{"top1": 0.91, "top5": 1.0, "top100": 1.0, "matches_top1": 91, "matches_top5": 100, "matches_top100": 100, "total": 100, "k": 100}]
+S7_RESULT {"args": {"slots": 1, "seq_len": 4096, "do": "ready", "prompts": "128,2048", "active": "1", "ptcheck": "100,128,161", "steps": 20, "tracy_prefill": 128, "reference": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt", "report_dir": null, "trace_region": 67108864, "out": "/home/raahem/glm53-flash-bringup/artifacts/s5r3/tf_notail5.json"}, "layers": "all", "env_mc": "dsa_tail_shared=0", "build_s": 107.31016445159912, "trace_alloc_per_bank": 5005312, "trace_total_per_bank": 8388608, "dram_free_per_bank": 365499904, "dram_alloc_per_bank": 3898452864, "teacher_forcing": [{"top1": 0.91, "top5": 1.0, "top100": 1.0, "matches_top1": 91, "matches_top5": 100, "matches_top100": 100, "total": 100, "k": 100, "elapsed_s": 5.478621301939711, "e2e_t/s/u": 18.252767345790975, "ttft_ms": 419.79960491880774, "decode_tokens": 99.0, "decode_elapsed_s": 5.058795407181606, "decode_t/s/u": 19.5698762316928}], "prefill_check": [{"top1": 0.91, "top5": 1.0, "top100": 1.0, "matches_top1": 91, "matches_top5": 100, "matches_top100": 100, "total": 100, "k": 100}]}

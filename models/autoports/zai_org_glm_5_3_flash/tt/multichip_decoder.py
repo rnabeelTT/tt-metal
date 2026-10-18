@@ -48,6 +48,10 @@ from .optimized_decoder import OptimizedDecoder
 
 TOPOLOGY = ttnn.Topology.Linear  # stage-4 default; MCOpts.topology selects per decoder (stage 5)
 L1 = ttnn.L1_MEMORY_CONFIG
+_QMASK = {}  # dsa_q_mm head masks, one per (mesh, shape)
+# dsa_tail_shared: one sparse-index tail buffer per (mesh, slot count), allocated when the model's first DSA layer is
+# BUILT (before any warm-up or trace capture), never freed or replaced: every captured trace reads the same address
+_TAIL_BUF = {}
 
 
 @dataclass
@@ -111,6 +115,13 @@ class MCOpts:
     # with W_UK viewed as [H*256, 512] (instead of reshape + permute + per-head bmm + head pad + untilize): q_abs comes
     # out with heads as rows, padded to the 32 heads sparse_sdpa takes, one row-major view away from its input
     dsa_q_mm: bool = False
+    dsa_q_mm_ib: int = 8  # its in0 block (tiles of K); 8 = one head's K, as the per-head bmm (review #3: 16 / 32 / 64)
+    # dsa_idx_rep: the 2048 selected-token indices of the sparse list as repeat(pool ids, 4) * 4 + offsets laid out
+    # offset-major (a tile repeat along the width) instead of repeat_interleave (transpose, untilize, concat of 4
+    # scalars, tilize, transpose); the list order changes. One decode row only (1 slot): bit-identical there (positions
+    # 128 / 3000 / 130,000); with more rows (32-slot decode: PCC 0.9992, +157 µs, records/sparse_ab.jsonl; sparse
+    # prefill chunks) sparse_sdpa's result depends on the order
+    dsa_idx_rep: bool = False
     # dsa_o_mm: the per-head W_UV products as ONE matmul of the 16 attention rows [16, 512] with W_UV laid out [512, H*256],
     # the off-head blocks masked to 0 and the rows summed (one nonzero per column: exact), instead of tilize of the
     # [16 heads x 1 row] output + per-head bmm + concat (transpose + reshape)
@@ -185,6 +196,8 @@ DEFAULT_MC = MCOpts(
     dsa_q_mm=True,
     dsa_tail_shared=True,
     kda_conv_max_batch=16,
+    # stage-5 review #3 (records/sparse_ab.jsonl, dense_ab.jsonl: bit-identical at 1 slot, positions 128 / 3000 / 130,000)
+    dsa_q_mm_ib=64,
     mix_chunks_decode=16,
     # off: on the 45-layer model the persistent decode all-gather outputs (shared per call site across layers) broke
     # decode (1 slot: teacher forcing top-5 32 %; 8 slots: identical greedy runs differ), although 2 x 120 replays of
@@ -482,8 +495,10 @@ class MeshCCL:
         # REJECTED (off in DEFAULT_MC): with a persistent output ttnn skips the all-gather's start barrier
         # (all_gather_async_default_program_factory.cpp: "use synchronize barrier semaphore" = barrier_semaphore &&
         # !using_persistent_buffers), so nothing orders a remote write into a buffer after its consumer on the
-        # receiving die. 1-layer replays (2 x 120, 200) were bit-identical, but the 45-layer model was not repeatable,
-        # eager as well as traced (stage 7: s7_det_reduced_s8.log; teacher forcing top-5 32 %). Root cause not
+        # receiving die. 1-layer replays (2 x 120, 200) were bit-identical, but the stacked model was not: the reduced
+        # 0 / 3 / 4 model (1 active slot of 8) gave different traced-decode tokens on repeated runs with either prefill
+        # path (s7_probe "eager" / "traced" select the prefill path only; decode is always traced; stage 7:
+        # s7_det_reduced_s8.log), and 45-layer teacher forcing fell to top-5 32 %. Root cause not
         # established. Any CCL / buffer option must pass the stacked repeatability probe (README "Stacked gate").
         self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
 
@@ -806,10 +821,16 @@ class MultichipDSA(GlmDSA):
             grid_w = self.mesh.compute_with_storage_grid_size().x
             # in0 blocks of 8 tiles = one head's K (256) for q / half the latent (512) for o, as the per-head bmm: the
             # same partial sums per output (the other heads' blocks add exact zeros)
-            ib = Dn // 32 if Dn // 32 <= 8 else 8
+            ib = self.mc.dsa_q_mm_ib or (Dn // 32 if Dn // 32 <= 8 else 8)
+            key = (id(self.mesh), Hq, H * Dn)  # one head mask per mesh, shared by every DSA layer (0.25 MB per die)
+            ent = _QMASK.get(key)
+            if ent is None or ent[0] is not self.mesh:  # the entry holds its mesh: a reopened mesh never reuses it
+                ent = _QMASK[key] = (self.mesh, self._dev(qmask, ttnn.bfloat16))
+            qm = ent[1]
             c = types.SimpleNamespace(
                 Hq=Hq,
-                qmask=self._dev(qmask, ttnn.bfloat16),
+                qib=ib,
+                qmask=qm,
                 omask=self._dev(omask, ttnn.bfloat16) if self.mc.dsa_o_mm == 1 else None,
                 wuk=ttnn.reshape(self.w_uk, (1, 1, H * Dn, R)),  # [1,H,256,512] tiles in the same order: a view
                 wuv=None,
@@ -857,6 +878,17 @@ class MultichipDSA(GlmDSA):
         if not (self.mc.dsa_q_mm and self._hm(x)):
             return super()._q_abs(x, rows)
         c = self._hm_consts()
+        if c.qib != self.mc.dsa_q_mm_ib and self.mc.dsa_q_mm_ib:  # run-time A/B of the in0 block
+            c.qib = self.mc.dsa_q_mm_ib
+            c.pc_q = tpc.create_matmul_1d_decode_progcfg(
+                32,
+                self.H * self.Dn,
+                self.R,
+                min(self.R // 32, 64),
+                fp32_acc=True,
+                grid_w=self.mesh.compute_with_storage_grid_size().x,
+                in0_block_w=c.qib,
+            )
         qr = self._rms(self._mm(x, self.w_q_a), self.q_a_norm)
         q = self._mm(qr, self.w_q_b)  # [1,1,1,H*256]
         qm = ttnn.multiply(c.qmask, q, memory_config=DRAM)  # row h = q on head h's columns (the row broadcast), 0 else
@@ -898,7 +930,8 @@ class MultichipDSA(GlmDSA):
             page_block_size=BLOCK,
         )
         ttnn.deallocate(idx)
-        ttnn.deallocate(q_rm)
+        if not rm_q:  # our row-major copy; the caller's q_abs (dsa_q_mm) is the caller's to free
+            ttnn.deallocate(q_rm)
         o_h = ttnn.slice(o, (0, 0, 0, 0), (1, self.H, o.shape[2], o.shape[3]))  # row-major [1, H, 1, 512]
         ttnn.deallocate(o)
         if o_rm:
@@ -972,30 +1005,39 @@ class MultichipDSA(GlmDSA):
 
     def _sparse_rows(self, top_pools, pos_dev, rows: int):
         inp = self.__dict__.get("_step_inputs")
-        if inp is None:
+        if inp is None and not (self.mc.dsa_idx_rep and rows == 1):
             return super()._sparse_rows(top_pools, pos_dev, rows)
         own = None
-        tail = inp.get("tail")  # per-step host input (A/B: a consumer layer)
+        tail = inp.get("tail") if inp is not None else None  # per-step host input (A/B: a consumer layer)
         if tail is None:
-            if getattr(self, "_tail_producer", False):
-                # this step's tail, for the later DSA layers, in ONE fixed buffer per input dict (never freed: every
-                # captured trace of the model reads the address it was captured with; a fresh tensor per call freed the
-                # buffer an earlier trace still read, teacher forcing 10 / 48 / 100, records/s5r2_tf_cand.log)
+            buf = self._shared_tail() if inp is not None else None
+            if buf is not None and getattr(self, "_tail_producer", False):
+                inp["_tail"] = buf  # marks this step dict as served by a producer (a reference, never an allocation)
+                # the model's first DSA layer writes this step's tail into the build-time buffer (in place: no
+                # allocation, so no capture or warm-up order can move it); the later DSA layers of the step read it.
+                # (The first version kept a per-call tensor in the step's input dict and freed it: 10 / 48 / 100,
+                # records/s5r2_tf_cand.log)
                 t = self._tail(pos_dev)
-                buf = inp.get("_tail")
-                if buf is None or tuple(buf.shape) != tuple(t.shape):
-                    buf = inp["_tail"] = ttnn.clone(t)  # the first (eager) step: allocate, and compile the copy below
                 ttnn.copy(t, buf)
                 ttnn.deallocate(t)
                 tail = buf
-            elif "_tail" in inp:
+            elif inp is not None and inp.get("_tail") is not None:  # a producer ran earlier in this model's step
                 tail = inp["_tail"]
-            else:
+            else:  # no producer layer in this model (e.g. a layer subset without the first DSA layer)
                 tail = own = self._tail(pos_dev)
-        offs = self._const("pool_offs")
         p = ttnn.typecast(top_pools, ttnn.float32)
-        p4 = ttnn.repeat_interleave(p, KPOOL, dim=3)
-        ttnn.deallocate(p)
+        if self.mc.dsa_idx_rep and rows == 1:  # one decode row: bit-identical (not prefill chunks or 32 users)
+            n_tok = TOPK_POOLS * KPOOL
+            offs = self._const(
+                "pool_offs_major",
+                lambda: self._dev(torch.arange(KPOOL).float().repeat_interleave(TOPK_POOLS).reshape(1, 1, 1, n_tok)),
+            )
+            p4 = ttnn.repeat(p, (1, 1, 1, KPOOL))  # [p_0 .. p_511] x 4 along the width
+        else:
+            offs = self._const("pool_offs")
+            p4 = ttnn.repeat_interleave(p, KPOOL, dim=3)
+        if p4 is not p:
+            ttnn.deallocate(p)
         tok = ttnn.add(ttnn.multiply(p4, float(KPOOL)), offs)
         ttnn.deallocate(p4)
         out = ttnn.concat([tok, tail], dim=-1)
@@ -1003,6 +1045,26 @@ class MultichipDSA(GlmDSA):
         if own is not None:
             ttnn.deallocate(own)
         return out
+
+    def _shared_tail(self):
+        ent = _TAIL_BUF.get((id(self.mesh), self.S))
+        return ent[1] if ent is not None and ent[0] is self.mesh else None
+
+    def make_shared_tail(self):
+        """Build time, on the model's first DSA layer: the step tail buffer [1,1,S,IDX_WIDTH - 2048] fp32."""
+        key = (id(self.mesh), self.S)
+        ent = _TAIL_BUF.get(key)
+        if ent is None or ent[0] is not self.mesh:
+            cols = IDX_WIDTH - TOPK_POOLS * KPOOL
+            buf = ttnn.from_torch(
+                torch.zeros(1, 1, self.S, cols),
+                dtype=ttnn.float32,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                memory_config=DRAM,
+                mesh_mapper=self._rep,
+            )
+            _TAIL_BUF[key] = (self.mesh, buf)
 
     def decode_forward(self, x, state=None, *, inputs):
         self._step_inputs = inputs if self.mc.dsa_tail_shared else None
@@ -1270,7 +1332,7 @@ class MultichipDecoder(OptimizedDecoder):
         tp = tuple(mesh_device.shape)[1]
         tt_ccl = kw.get("tt_ccl") or (TT_CCL(mesh_device) if tp > 1 else None)
         kw["tt_ccl"] = tt_ccl
-        # stage-8 datatype-sweep candidate (GLM53_PRECISION, tt/precision.py; unset = the shipped policy, no change)
+        # stage-8 precision policy (GLM53_PRECISION, tt/precision.py; unset = the selected default, none = stage 7)
         from .precision import PrecisionOverrides
 
         prec, last = PrecisionOverrides.from_env(), hf_config["num_hidden_layers"] - 1
@@ -1291,6 +1353,8 @@ class MultichipDecoder(OptimizedDecoder):
             # the model's first DSA layer computes the step's shared sparse-index tail (dsa_tail_shared)
             kinds = hf_config["layer_types"]
             dec.attn._tail_producer = layer_idx == next(i for i, k in enumerate(kinds) if k != "linear_attention")
+            if dec.attn._tail_producer:
+                dec.attn.make_shared_tail()  # always (also with the option off: an A/B may switch it on later)
             if dec.mc.ds_shared and dec.mc.dsa_pack:
                 dec.attn.free_separate()
             if dec.mc.dsa_shard and tp > 1:

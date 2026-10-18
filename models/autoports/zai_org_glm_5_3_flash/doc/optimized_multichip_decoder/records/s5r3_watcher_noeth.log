@@ -1,0 +1,11 @@
+=== watcher test_real_weights[dsa_moe] 2026-10-18T11:06:02+00:00
+watcher test_real_weights[dsa_moe] exit=0
+======================== 1 passed in 125.38s (0:02:05) =========================
+watcher suspicious lines: 0
+console tripped asserts: 0
+=== watcher test_batch32_all_active[dsa_moe] 2026-10-18T11:09:03+00:00
+watcher test_batch32_all_active[dsa_moe] exit=0
+========================= 1 passed in 97.80s (0:01:37) =========================
+watcher suspicious lines: 0
+console tripped asserts: 0
+=== done 2026-10-18T11:11:35+00:00
