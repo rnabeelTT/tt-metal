@@ -55,6 +55,20 @@ _FID = {
     "HiFi3": ttnn.MathFidelity.HiFi3,
     "HiFi4": ttnn.MathFidelity.HiFi4,
 }
+# layer kind (attention or MLP) whose module a decode-program field drives
+_SPEC_KIND = {
+    "kda_in": "kda",
+    "kda_out": "kda",
+    "dsa_o": "dsa",
+    "dsa_qb": "dsa",
+    "dsa_wqb": "dsa",
+    "pack_a_spec": "dsa",
+    "pack_b_spec": "dsa",
+    "shared_gu": "moe",
+    "shared_dn": "moe",
+    "mlp_gu": "dense",
+    "mlp_dn": "dense",
+}
 _MOE_DTYPE_FIELDS = ("routed_gate_up_dtype", "routed_down_dtype", "shared_dtype", "router_dtype")
 # decode-row matmuls run through the fidelity wrappers, per (group, fidelity): the per-step propagation check
 # (tools/dtype_sweep.py --do fidcount resets it and runs one eager decode step)
@@ -329,6 +343,9 @@ class PrecisionOverrides:
                 _swap_ckc_on_decode(mlp, "forward", _ckc_like(mlp.ckc, mesh, f), "dense_mlp")
                 self.applied.append((i, "dense_mlp", f"decode fidelity {f}"))
         for fld, d in self.decode_specs.items():
+            kind = _SPEC_KIND.get(fld)
+            if kind is not None and kind not in (dec.attn_kind, dec.mlp_kind):
+                continue  # e.g. kda_in on a DSA layer: inert, not applied or logged
             if self._in(d.get("layers", "all"), i, first, last) and hasattr(getattr(dec, "mc", None), fld):
                 setattr(dec.mc, fld, d["spec"])  # dec.mc is this layer's own MCOpts copy (MCOpts.from_env)
                 attn = dec.attn._inner if hasattr(dec.attn, "_inner") else dec.attn
@@ -429,6 +446,7 @@ class PrecisionOverrides:
         f = self.fid("lm_head", -1, first, last)
         if f is not None:
             model.ckc = _ckc_like(model.ckc, model.mesh, f)
+            self.applied.append(("model", "lm_head", f"fidelity {f}"))
         spec = (self.decode_specs.get("lm_head") or {}).get("spec")
         if spec and getattr(model, "lm_head", None) is not None:
             # decode rows of the LM head on an explicit role program (tt/multichip_decoder.make_role_mm) on the same
@@ -445,7 +463,6 @@ class PrecisionOverrides:
 
             model._lm_head = _lm_head
             self.applied.append(("model", "lm_head", f"decode spec {spec}"))
-            self.applied.append(("model", "lm_head", f"fidelity {f}"))
 
     def record(self) -> dict:
         d = {f.name: getattr(self, f.name) for f in dataclasses.fields(self) if f.name != "_cache"}
