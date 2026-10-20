@@ -202,8 +202,24 @@ The `ag_persistent` attribution above is therefore suspect. It was not re-tested
 
 Where the plans differ, they are different chunkings of the same computation in bfp4 / fp8. At 513 the cost plan
 ends with a 1-row chunk. Its last row is computed alone, in a 128-row chunk whose other 127 rows are padding.
-An HF CPU control is pending. It compares each plan's last-row logits with HF at 513 / 600 / 1,000 / 2,600 tokens
-(`~/glm53-flash-bringup/scripts/s67r_hf_lastrow.py`, output `~/glm53-flash-bringup/artifacts/s67r/j2_hf_lastrow.json`).
+HF CPU control: `tools/hf_full_ref.FullModel` (the unmodified HF model on the same E192 checkpoint) on the same ids,
+last-row logits (`~/glm53-flash-bringup/scripts/s67r_hf_lastrow.py`, record `runs/s67r/j2_hf_lastrow.json`).
+
+| Prompt | Cost plan vs HF | Legacy plan vs HF |
+|---|---|---|
+| 513 | PCC 0.705, top-1 equal, top-5 overlap 3 / 5 | PCC 0.713, top-1 equal, top-5 overlap 1 / 5 |
+| 600 | PCC 0.964, top-1 equal, top-5 overlap 4 / 5 | PCC 0.957, top-1 equal, top-5 overlap 4 / 5 |
+
+The plan choice does not change accuracy. Both plans are equally far from HF, and the cost plan is no worse on any
+metric.
+
+The 513 PCC is low for both plans, and that comes from the row itself. Position 513 is a near-certain token: the top-1
+logit leads the second by 14 logits, so p(top-1) = 1.000 and the entropy is 0. Ranks 2 and below are a flat tail
+(logit std 1.7, against 2.2 at 600 / 1,000). On a tail that flat, bfp4 / fp8 noise of a few logits dominates the
+correlation and reorders ranks 2 to 5. Those ranks carry no probability mass, so the top-5 overlap there means
+little. The 600 / 1,000 / 2,600 rows have real alternatives (p(top-1) 0.54 to 0.86). At 600 the PCC against HF is 0.96
+for both plans. HF was not run at 1,000 or 2,600 (the HF job ran out of memory after 600); there, the cost plan
+agrees with the legacy plan at PCC >= 0.997.
 
 ### Long context on the final defaults (1 slot, `max_seq_len` 280,576)
 

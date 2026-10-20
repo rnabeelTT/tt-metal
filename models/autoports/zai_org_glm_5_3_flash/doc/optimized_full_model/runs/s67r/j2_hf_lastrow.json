@@ -1,0 +1,58 @@
+{
+ "513": {
+  "seconds": 360.9,
+  "cost_vs_hf": {
+   "pcc": 0.705029,
+   "top1_equal": true,
+   "top5_overlap": 0.6,
+   "max_abs_diff": 10.156
+  },
+  "legacy_vs_hf": {
+   "pcc": 0.712636,
+   "top1_equal": true,
+   "top5_overlap": 0.2,
+   "max_abs_diff": 7.406
+  },
+  "cost_vs_legacy": {
+   "pcc": 0.673757,
+   "top1_equal": true,
+   "top5_overlap": 0.6,
+   "max_abs_diff": 10.156
+  },
+  "hf_top5": [
+   13,
+   14314,
+   25075,
+   62,
+   220
+  ]
+ },
+ "600": {
+  "seconds": 424.6,
+  "cost_vs_hf": {
+   "pcc": 0.963751,
+   "top1_equal": true,
+   "top5_overlap": 0.8,
+   "max_abs_diff": 2.953
+  },
+  "legacy_vs_hf": {
+   "pcc": 0.956879,
+   "top1_equal": true,
+   "top5_overlap": 0.8,
+   "max_abs_diff": 3.688
+  },
+  "cost_vs_legacy": {
+   "pcc": 0.990668,
+   "top1_equal": true,
+   "top5_overlap": 0.8,
+   "max_abs_diff": 1.531
+  },
+  "hf_top5": [
+   2197,
+   8473,
+   3772,
+   4629,
+   2150
+  ]
+ }
+}
