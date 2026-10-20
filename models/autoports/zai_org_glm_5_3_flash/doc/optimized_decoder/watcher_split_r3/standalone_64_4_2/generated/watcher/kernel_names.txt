@@ -1,0 +1,13 @@
+0: blank
+1: tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
+2: tt_metal/impl/dispatch/kernels/cq_dispatch.cpp
+3: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp
+4: tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate_compute.cpp
+5: tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp
+6: tt_metal/impl/dispatch/kernels/cq_realtime_profiler_push.cpp
+7: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_padding.cpp
+8: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_receiver.cpp
+9: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_writer_padding.cpp
+10: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp
+11: ttnn/cpp/ttnn/operations/data_movement/sharded/device/kernels/dataflow/reader_unary_sharded_blocks_interleaved_start_id.cpp
+12: ttnn/cpp/ttnn/operations/data_movement/sharded/device/kernels/dataflow/writer_unary_sharded.cpp

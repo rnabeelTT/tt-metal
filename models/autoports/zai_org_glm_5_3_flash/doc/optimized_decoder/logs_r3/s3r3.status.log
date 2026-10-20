@@ -1,0 +1,26 @@
+2026-10-18T18:16:30+00:00 split decoder watcher 1: Watcher detected tripped assert and stopped device.
+2026-10-18T18:17:34+00:00 split decoder watcher 1: Watcher detected tripped assert and stopped device.
+2026-10-18T18:18:33+00:00 split r1 decoder watcher: ======================= 1 failed, 43 deselected in 5.77s =======================
+2026-10-18T18:19:36+00:00 split standalone watcher 64 2 2: Watcher detected tripped assert and stopped device. === exit code: 134 Sun Oct 18 06:19:36 PM UTC 2026
+2026-10-18T18:21:26+00:00 split standalone watcher 64 2 1: === exit code: 1 Sun Oct 18 06:21:26 PM UTC 2026
+2026-10-18T18:23:16+00:00 split standalone watcher 64 4 2: === exit code: 1 Sun Oct 18 06:23:16 PM UTC 2026
+2026-10-18T18:25:14+00:00 split standalone watcher 64 1 2: Watcher detected tripped assert and stopped device. === exit code: 134 Sun Oct 18 06:25:14 PM UTC 2026
+2026-10-18T18:27:11+00:00 split standalone watcher 32 2 2: Watcher detected tripped assert and stopped device. === exit code: 134 Sun Oct 18 06:27:11 PM UTC 2026
+2026-10-18T18:29:02+00:00 split standalone watcher 32 4 1: === exit code: 1 Sun Oct 18 06:29:02 PM UTC 2026
+2026-10-18T18:30:52+00:00 split standalone watcher 64 4 1: === exit code: 1 Sun Oct 18 06:30:52 PM UTC 2026
+2026-10-18T18:34:29+00:00 bmm oob done
+2026-10-18T18:35:23+00:00 conv rows done
+2026-10-18T18:39:58+00:00 pcc t_r3: ================ 29 passed, 15 deselected in 221.45s (0:03:41) =================
+2026-10-18T18:44:31+00:00 pcc t_r3_specs: ================ 29 passed, 15 deselected in 219.13s (0:03:39) =================
+2026-10-18T18:47:22+00:00 pcc t_kda_pf_hifi2: ============ 9 failed, 9 passed, 26 deselected in 117.44s (0:01:57) ============
+2026-10-18T18:54:49+00:00 tracy opt_s5_pf_r2 done
+2026-10-18T19:02:13+00:00 tracy t_r3 done
+2026-10-18T19:10:14+00:00 tracy t_r3_specs done
+2026-10-18T19:15:29+00:00 tracy prefill done
+2026-10-18T19:16:19+00:00 A done
+2026-10-18T20:45:37+00:00 suite (r3 default): ======================== 47 passed in 513.70s (0:08:33) ========================
+2026-10-18T20:53:24+00:00 watcher suite (r3): ================ 23 passed, 24 deselected in 370.13s (0:06:10) =================
+2026-10-18T20:53:24+00:00 watcher suite (r3) suspicious: 0
+2026-10-18T20:55:53+00:00 watcher decode B=1 (r3): ============================== 3 passed in 54.88s ==============================
+2026-10-18T20:55:53+00:00 watcher decode1 (r3) suspicious: 0
+2026-10-18T20:57:57+00:00 tracy dsa_moe-1 (r3) done: PERF dsa_moe traced decode batch 1: 2.941 ms/step host wall (3 replays, incl. input copies)

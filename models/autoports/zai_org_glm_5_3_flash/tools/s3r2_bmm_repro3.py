@@ -8,7 +8,11 @@
 Cases: uk (K 256, N 512, the DSA W_UK shape) and uv (K 512, N 256, W_UV), M 2048 rows, per_core_M 8 / 2; and uk at M 128
 (per_core_M 4 = Mt, the shape that works in the decoder).
 
-usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 8 --m 2048"""
+--oob (review #3, discriminating): no prior default call; the reuse matmul writes into a NaN-prefilled output
+(optional_output_tensor) followed in DRAM by a canary tensor of 7.0; reports the output tiles never written (still NaN),
+the canary elements overwritten (out-of-bounds writes), and the correct / wrong heads.
+
+usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 8 --m 2048 [--oob]"""
 
 import argparse
 
@@ -27,6 +31,7 @@ def main():
     ap.add_argument("--m", type=int, default=2048)
     ap.add_argument("--ib", type=int, default=0, help="in0_block_w override (0 = min(Kt, 8))")
     ap.add_argument("--swap", action="store_true", help="x2's values first (order / address vs data dependence)")
+    ap.add_argument("--oob", action="store_true", help="NaN-prefilled output + canary, no prior default call")
     a = ap.parse_args()
     K, N = (256, 512) if a.case == "uk" else (512, 256)
     H, M = 64, a.m
@@ -78,6 +83,32 @@ def main():
                 flush=True,
             )
 
+        if a.oob:
+            bpc = -(-(M // 32) // a.pm)  # M blocks; blocks per core over the grid
+            print(f"  M blocks {bpc} x H {H} = {bpc * H} blocks on {grid.x * grid.y} cores", flush=True)
+            nan = torch.full((1, H, M, N), float("nan")).bfloat16()
+            out = ttnn.from_torch(nan, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM)
+            canary = ttnn.from_torch(
+                torch.full((1, H, M, N), 7.0).bfloat16(),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=mesh,
+                memory_config=DRAM,
+            )
+            ttnn.matmul(
+                txs[0], tw, compute_kernel_config=ckc, memory_config=DRAM, program_config=pc, optional_output_tensor=out
+            )
+            o = ttnn.to_torch(out).float()
+            c = ttnn.to_torch(canary).float()
+            tiles = o.reshape(1, H, M // 32, 32, N // 32, 32).isnan().any(-1).any(-2)  # [1, H, Mt, Nt]
+            per_head = [pcc(torch.nan_to_num(o[0, h]), refs[0][0, h]) for h in range(H)]
+            bad = [h for h in range(H) if per_head[h] < 0.999]
+            print(
+                f"  oob: output tiles never written {int(tiles.sum())} of {tiles.numel()} (heads {sorted(set(tiles.nonzero()[:, 1].tolist()))[:16]}); "
+                f"canary elements overwritten {int((c != 7.0).sum())} of {c.numel()}; heads wrong {len(bad)} {bad[:12]}",
+                flush=True,
+            )
+            return
         run(0, "default config x1", default=True)
         run(0, "reuse x1 (compile)")
         run(1, "reuse x2 (program-cache hit)")

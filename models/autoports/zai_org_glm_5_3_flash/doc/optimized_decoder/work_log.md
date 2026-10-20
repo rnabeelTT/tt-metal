@@ -146,11 +146,24 @@ kda8_exp4_lofi_pc 12111 µs.
 - P2 probes (subagent): the per-head reuse bug repro (`tools/s3r2_bmm_repro3.py`), adapted 2D prefill configs
   (`tools/s3r2_prefill2d.py`), glue / recurrence probes (`tools/s3r2_glue_probe.py`), deep-position DSA decode Tracy
   and the head-split sparse SDPA probe (`tools/s3r2_sdpa_probe.py`). README "Review #2" sections.
-- Watcher on the review #2 default with the KDA in-proj split: aborted ("Watcher detected tripped assert", no details
-  captured; the dump stops after the idle device-0 cores, so the asserting core is likely on a chip the test does not
-  use). Bisection (`logs/s3r2_wbisect.log`, one sample each): the assert follows the 2-reader DRAM-sharded split only.
+- Watcher on the review #2 default with the KDA in-proj split: aborted ("Watcher detected tripped assert"; the details
+  were hidden by `TT_METAL_LOGGER_LEVEL=Error` from env.sh, and review #2 wrongly guessed an unused chip - review #3
+  showed it is the test's own chip, watcher Device 1). Bisection (`logs/s3r2_wbisect.log`, one sample each): the assert follows the 2-reader DRAM-sharded split only.
   The split was dropped from the default; the last two bisection variants ran after the default had changed.
 - The prefill HiFi2 trial (`t_pf_hifi2`) was taken; final default = P1-A options + prefill HiFi2.
 - Final default (`glm53-s3r2-final3`, one ticket): suite 44 / 44 (`logs/s3r2_f3_suite.log`), watcher 20 / 20 + 3 / 3 with
   0 suspicious lines (`watcher_correctness_r2/`), repeated runs 20 / 20 (`logs/s3r2_f3_stress.log`), decode Tracy
   `candidates_r2/final/`, prefill Tracy `candidates_r2/opt_s5_pf_final/`.
+
+## 2026-10-18: review #3
+
+- Device rules: one decisive case per run-locked ticket, QPRIO unset; `TT_METAL_LOGGER_LEVEL=Warning` in every watcher
+  run from now on. Runs on a snapshot of HEAD 656c998e3df + the stage-3 edits (`s3r3_a.sh` then `s3r3_one.sh`). The
+  first ticket (`s3r3_a.sh`) held the device for about 90 minutes over several cases; the coordinator asked for single
+  cases per ticket after it.
+- Split watcher details (`logs/s3r3_split_decoder.log`, `s3r3_split_standalone.log`): BRISC data race in
+  `reader_bmm_tile_layout_in1_sender_dram_sharded.cpp` (multi-reader path); 1-reader geometries illegal. Blocked (TTNN).
+- Batched reuse matmul: out-of-bounds writes confirmed with a NaN-prefilled output and a canary (`logs/s3r3_bmm_oob.log`).
+- `sinkhorn_faces` and the role specs `kda_out` / `shared_gu` / `shared_dn` taken; `dsa_q_mm` rejected on one die
+  (TT_FATAL num_blocks_total <= num_cores at 64 heads); `kda_conv_op_max_rows` 16; KDA prefill HiFi2 rejected (L0 scale).
+- `test_single_slot_decode[kind]` added (1-slot layers; the 8-slot suite missed the 1-slot dsa_q_mm failure).

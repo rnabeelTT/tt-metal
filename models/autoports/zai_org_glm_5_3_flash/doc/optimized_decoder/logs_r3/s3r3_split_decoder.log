@@ -1,0 +1,212 @@
+=== start Sun Oct 18 06:16:16 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_1 GLM53_OPT=t_kda_in_ds_hifi2 timeout -k 60 900 /home/raahem/tt-metal/python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k test_decode_only and kda_dense
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s3r3_snapshot
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 18:16:18.686 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] 2026-10-18 18:16:18.817 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:16:18.817 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:16:18.817 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:16:18.817 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:16:18.824 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:16:18.824 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:16:18.905 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:16:18.906 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:16:18.906 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:16:18.906 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:16:18.907 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:16:19.079 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:16:19.215 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:16:19.215 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:16:19.215 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:16:19.215 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:16:19.215 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:16:19.301 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:16:19.301 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:16:19.301 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:16:19.301 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:19.308 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:19.314 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:19.321 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:20.960 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 18:16:29.335 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:29.342 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:16:29.342 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 18:16:29.342 | warning  |           Metal | Device 1 worker core(x= 0,y= 0) virtual(x= 1,y= 2): BRISC detected an inter-kernel data race due to kernel completing with pending NOC transactions (missing NOC reads flushed barrier). Current kernel: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 18:16:29.342 | info     |           Metal | Last waypoint: NKFW,   W,   W,   W,   W (watcher_device_reader.cpp:1155)
+2026-10-18 18:16:29.342 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 18:16:29.342 | info     |           Metal |  BRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:16:29.342 | info     |           Metal |  NCRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:16:29.342 | info     |           Metal |  TRISC0: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:16:29.342 | info     |           Metal |  TRISC1: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:16:29.342 | info     |           Metal |  TRISC2: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:16:29.342 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x76fa9e5a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x76faf0ef5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x76faf3e9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x76faf3f29ecc]
+
+Fatal Python error: Aborted
+
+Thread 0x000076faf4074740 (most recent call first):
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/ttnn/ttnn/operations/core.py", line 445 in to_torch
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 103 in stream_out
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 197 in eager_step
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 557 in test_decode_only
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/raahem/tt-metal/python_env/bin/pytest", line 12 in <module>
+
+Extension modules: markupsafe._speedups, zmq.backend.cython._zmq, tornado.speedups, msgpack._cmsgpack, psutil._psutil_linux, _brotli, backports.zstd._zstd, charset_normalizer.md, charset_normalizer.cd, simplejson._speedups, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, PIL._imaging, PIL._imagingft, yaml._yaml, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, kiwisolver._cext, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.cluster._vq, scipy.cluster._hierarchy, scipy.cluster._optimal_leaf_ordering (total: 169)
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 06:16:30 PM UTC 2026
+=== start Sun Oct 18 06:17:20 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_2 GLM53_OPT=t_kda_in_ds_hifi2 timeout -k 60 900 /home/raahem/tt-metal/python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k test_decode_only and kda_dense
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s3r3_snapshot
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 18:17:22.796 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] 2026-10-18 18:17:22.878 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:17:22.878 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:17:22.878 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:17:22.878 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:17:22.885 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:17:22.885 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:17:22.967 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:17:22.967 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:17:22.967 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:17:22.967 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:17:22.968 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:17:23.160 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:17:23.295 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:17:23.295 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:17:23.295 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:17:23.295 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:17:23.295 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:17:23.377 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_2/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:17:23.377 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:17:23.377 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:17:23.377 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:23.384 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:23.391 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:23.398 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:24.963 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 18:17:33.411 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:33.418 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:17:33.418 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 18:17:33.418 | warning  |           Metal | Device 1 worker core(x= 0,y= 0) virtual(x= 1,y= 2): BRISC detected an inter-kernel data race due to kernel completing with pending NOC transactions (missing NOC reads flushed barrier). Current kernel: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 18:17:33.418 | info     |           Metal | Last waypoint: NKFW,   W,   W,   W,   W (watcher_device_reader.cpp:1155)
+2026-10-18 18:17:33.418 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 18:17:33.418 | info     |           Metal |  BRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:17:33.418 | info     |           Metal |  NCRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:17:33.418 | info     |           Metal |  TRISC0: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:17:33.418 | info     |           Metal |  TRISC1: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:17:33.418 | info     |           Metal |  TRISC2: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:17:33.418 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x77bb759a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x77bbc7ef5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x77bbcae9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x77bbcaf29ecc]
+
+Fatal Python error: Aborted
+
+Thread 0x000077bbcb1a3740 (most recent call first):
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/tt-metal/ttnn/ttnn/operations/core.py", line 445 in to_torch
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106 in __call__
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 103 in stream_out
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/harness.py", line 197 in eager_step
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py", line 557 in test_decode_only
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/raahem/tt-metal/python_env/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/raahem/tt-metal/python_env/bin/pytest", line 12 in <module>
+
+Extension modules: markupsafe._speedups, zmq.backend.cython._zmq, tornado.speedups, msgpack._cmsgpack, psutil._psutil_linux, _brotli, backports.zstd._zstd, charset_normalizer.md, charset_normalizer.cd, simplejson._speedups, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, PIL._imaging, PIL._imagingft, yaml._yaml, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, kiwisolver._cext, _cyutility, scipy._cyutility, scipy._lib._ccallback_c, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.spatial._ckdtree, scipy._lib.messagestream, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._batched_linalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_schur_sqrtm, scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.spatial._qhull, scipy.spatial._voronoi, scipy.special._ufuncs_cxx, scipy.special._ellip_harm_2, scipy.special._special_ufuncs, scipy.special._gufuncs, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.spatial._hausdorff, scipy.spatial._distance_wrap, scipy.spatial.transform._rotation_cy, scipy.spatial.transform._rigid_transform_cy, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpacklib, scipy.sparse.linalg._propack, scipy.optimize._group_columns, scipy.optimize._trlib._trlib, scipy.optimize._lbfgsb, _moduleTNC, scipy.optimize._moduleTNC, scipy.optimize._slsqplib, scipy.optimize._minpack, scipy.optimize._lsq.givens_elimination, scipy.optimize._zeros, scipy._lib._uarray._uarray, scipy.linalg._decomp_interpolative, scipy.optimize._bglu_dense, scipy.optimize._lsap, scipy.optimize._direct, scipy.integrate._odepack, scipy.integrate._quadpack, scipy.integrate._vode, scipy.integrate._dop, scipy.interpolate._fitpack, scipy.interpolate._dfitpack, scipy.interpolate._dierckx, scipy.interpolate._ppoly, scipy.interpolate._interpnd, scipy.interpolate._rbfinterp_pythran, scipy.interpolate._rgi_cython, scipy.special.cython_special, scipy.stats._stats, scipy.stats._biasedurn, scipy.stats._stats_pythran, scipy.stats._levy_stable.levyst, scipy.stats._ansari_swilk_statistics, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.stats._sobol, scipy.stats._qmc_cy, scipy.stats._rcont.rcont, scipy.stats._qmvnt_cy, scipy.ndimage._nd_image, scipy.ndimage._rank_filter_1d, _ni_label, scipy.ndimage._ni_label, scipy.cluster._vq, scipy.cluster._hierarchy, scipy.cluster._optimal_leaf_ordering (total: 169)
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 06:17:34 PM UTC 2026

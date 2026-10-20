@@ -1,0 +1,8 @@
+=== start Sun Oct 18 06:35:19 PM UTC 2026 : timeout -k 60 900 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_conv_rows
+2026-10-18 18:35:20.725 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+B= 1: kda_decode_conv    97.5 us, 12-op chain   265.5 us -> op
+B= 8: kda_decode_conv   140.3 us, 12-op chain   264.5 us -> op
+B=16: kda_decode_conv   255.6 us, 12-op chain   266.4 us -> op
+B=32: kda_decode_conv   484.1 us, 12-op chain   264.3 us -> chain
+=== exit code: 0 Sun Oct 18 06:35:23 PM UTC 2026

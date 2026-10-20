@@ -11,6 +11,8 @@ import importlib.util
 import os
 from pathlib import Path
 
+import pytest
+
 import ttnn
 from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES, SELECTED, OptimizedDecoder
 
@@ -99,4 +101,43 @@ def test_policy_reached_weights(mesh, rd):
                     assert type(dec.attn).__name__ == "SingleDieKDA" and dec.attn.mc.kda_conv_op, kind
                 if dec.mlp_kind == "dense":
                     assert type(dec.mlp).__name__ == "MultichipMLP" and dec.mlp.mc.mlp_dn, kind
+            if _opt.single_die_r3:
+                assert os.environ.get("MHC_SINKHORN_FACES") == "1" and dec.mc.sinkhorn_faces, kind
+            if _opt.single_die_specs:
+                assert dec.mc.kda_out and dec.mc.shared_gu and dec.mc.shared_dn, kind
             print(f"{kind}: single-die options active ({type(dec.attn).__name__}, {type(dec.mlp).__name__})")
+
+
+@pytest.mark.parametrize("kind", list(_suite.KINDS))
+def test_single_slot_decode(mesh, rd, kind):
+    """Review #3: a decoder built for ONE slot (the 1-user serving profile; the suite's other layers have 8 or 32 slots).
+    One-slot-only paths (the KDA conv op, the 1-slot DSA programs) run here: the test_real_weights sequence (cached HF
+    reference) in slot 0, prefill then eager + traced decode, against HF on the quantization-aware reference."""
+    from models.autoports.zai_org_glm_5_3_flash.tests.harness import DecodeRunner, build_layer, prefill_user
+
+    layer = _suite.KINDS[kind]
+    for k in list(_suite._LAYERS):  # one layer resident (DRAM)
+        del _suite._LAYERS[k]
+    dec = build_layer(mesh, rd, layer, "real", batch=1, decoder_cls=_suite.DECODER_CLS)
+    ref = _suite.reference(layer, "real", 1, 100, 3)
+    x, y = ref
+    out = prefill_user(dec, mesh, x, 100, 0)
+    _suite.check(f"L{layer} 1-slot prefill 100", out, x[:100], y[:100])
+    runner = DecodeRunner(dec, mesh, 1)
+    for i in range(3):
+        pos = [100 + i]
+        if i == 0:
+            o = runner.eager_step({0: x[100]}, pos)[0]
+            runner.capture({0: x[101]}, [101])
+        else:
+            o = runner.traced_step({0: x[100 + i]}, pos)[0]
+        _suite.check(
+            f"L{layer} 1-slot decode pos {100 + i}",
+            o,
+            x[100 + i],
+            y[100 + i],
+            margin=ref.row_margin(100 + i),
+            y_alt=ref.alt(100 + i),
+        )
+    runner.release()
+    del dec

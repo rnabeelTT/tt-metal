@@ -58,13 +58,24 @@ class OptConfig:
     # kda_conv_op_max_rows slots), the sinkhorn permutation matmuls at HiFi3 (bit-identical, -7 us), the dense-MLP down and
     # DSA o_proj decode on 1D 16-core programs (-73 / -8 us). Applied with single_die_mc, one die only.
     single_die_r2: bool = False
-    kda_conv_op_max_rows: int = 8
+    kda_conv_op_max_rows: int = (
+        16  # review #3 (tools/s3r3_conv_rows.py): op 140 / 256 / 484 us vs chain 265 / 266 / 264 at 8 / 16 / 32
+    )
     # review #2 P1-B trials (single die): KDA in-proj decode on a DRAM-sharded copy of its first 32768 columns + a 1D
     # remainder at this math fidelity ("" = off); KDA / DSA output projection decode DRAM-sharded at this fidelity;
     # math fidelity of the large prefill matmuls (DSA o_proj, dense-MLP gate|up and down; None = their HiFi4)
     kda_in_split_ds: str = ""
+    kda_in_ds_cfg: tuple = (64, 2, 2)  # (compute cores, in0_block_w, readers per DRAM bank) of the split's DS part
     out_proj_ds: str = ""
     prefill_fidelity: object = None
+    # review #3: the committed bit-identical stage-5 option on one die (P1-1): sinkhorn on the valid faces only
+    # (`sinkhorn_faces`, -30 us per layer at 1 user; `dsa_q_mm` fails on one die, see from_state_dict), and the stage-5
+    # decode role specs kda_out / shared_gu / shared_dn (`single_die_specs`, -3 .. -5 us at 1 user, -47 us kda_moe 32
+    # users). KDA prefill input / output projection fidelity (P2-2; None = HiFi4; HiFi2 rejected: L0 prefill scale
+    # 0.987 .. 0.990 with the MLP prefill HiFi2).
+    single_die_r3: bool = False
+    single_die_specs: bool = False
+    kda_prefill_fidelity: object = None
 
     def describe(self) -> dict:
         m = self.moe
@@ -85,6 +96,9 @@ class OptConfig:
             "kda_in_split_ds": self.kda_in_split_ds,
             "out_proj_ds": self.out_proj_ds,
             "prefill_fidelity": str(self.prefill_fidelity),
+            "single_die_r3": self.single_die_r3,
+            "single_die_specs": self.single_die_specs,
+            "kda_prefill_fidelity": str(self.kda_prefill_fidelity),
         }
 
     def quant_spec(self) -> dict:
@@ -211,6 +225,19 @@ CANDIDATES.update(
 CANDIDATES["opt_s5_pf_r2a"] = _r(_r2, "opt_s5_pf_r2a")
 CANDIDATES["opt_s5_pf_r2b"] = _r(_r2, "opt_s5_pf_r2b", kda_in_split_ds="HiFi2", prefill_fidelity=_HIFI2)
 CANDIDATES["opt_s5_pf"] = _r(_r2, "opt_s5_pf", prefill_fidelity=_HIFI2)
+# review #3 trials on top of the review #2 default
+_d2 = CANDIDATES["opt_s5_pf"]
+CANDIDATES.update(
+    {
+        "opt_s5_pf_r2": _r(_d2, "opt_s5_pf_r2"),  # the review #2 default (control)
+        "t_r3": _r(_d2, "t_r3", single_die_r3=True),
+        "t_r3_specs": _r(_d2, "t_r3_specs", single_die_r3=True, single_die_specs=True),
+        "t_kda_pf_hifi2": _r(_d2, "t_kda_pf_hifi2", kda_prefill_fidelity=_HIFI2),
+        "t_split_r1": _r(_d2, "t_split_r1", kda_in_split_ds="HiFi2", kda_in_ds_cfg=(64, 2, 1)),
+    }
+)
+# review #3 default: review #2 default + sinkhorn faces + stage-5 decode role specs, conv op up to 16 slots
+CANDIDATES["opt_s5_pf"] = _r(_d2, "opt_s5_pf", single_die_r3=True, single_die_specs=True)
 # selected (review #1): `opt` + the stage-5 single-die decode options + the prefill program configs; routed experts
 # stay LoFi (HiFi3 removes the -0.5 % routed scale bias but costs +1.3 % / +3 % / +5 % at B=1 / B=32 / prefill on
 # the MoE layers; doc/optimized_decoder/README.md "Accuracy")
@@ -282,6 +309,15 @@ def _single_die_kda():
     return _SINGLE_DIE_KDA[0]
 
 
+def _r2_fields(mc):
+    """review #2 P1-A single-die MCOpts fields (GLM53_R2_OFF: bisection knob)."""
+    off = set(os.environ.get("GLM53_R2_OFF", "").split(","))
+    mc.kda_conv_op = "conv" not in off
+    mc.sinkhorn_perm_fidelity = 0 if "sink" in off else 3
+    mc.mlp_dn = "" if "mlpdn" in off else "1d:c16:ib4"
+    mc.dsa_o = "" if "dsao" in off else "1d:c16:ib4"
+
+
 class _KdaInSplitDS:
     """review #2 P1-B (a): KDA in-proj decode rows as a DRAM-sharded matmul over the first 32768 columns (128 tiles per
     bank, 64 compute cores, in0 blocks of 2, 2 readers per bank; tools/s3r_probe_dense.py "split DS c64 in0 2 r2 + 1D")
@@ -290,7 +326,7 @@ class _KdaInSplitDS:
 
     N1 = 32768
 
-    def __init__(self, w, mesh, fid):
+    def __init__(self, w, mesh, fid, cfg=(64, 2, 2)):
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
         K, N = int(w.shape[-2]), int(w.shape[-1])
@@ -309,11 +345,13 @@ class _KdaInSplitDS:
             device=mesh,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
-        cores, kt = 64, K // 32
+        cores, in0, readers = cfg
+        kt = K // 32
         self.pc = ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
-            in0_block_w=2, per_core_M=1, per_core_N=self.N1 // 32 // cores, fused_activation=None
+            in0_block_w=in0, per_core_M=1, per_core_N=self.N1 // 32 // cores, fused_activation=None
         )
-        self.pc.num_workers_per_dram_bank = 2
+        if readers > 1:
+            self.pc.num_workers_per_dram_bank = readers
         grid = mesh.compute_with_storage_grid_size()
         self.pc2 = tpc.create_matmul_1d_decode_progcfg(32, K, N - self.N1, 6, fp32_acc=True, grid_w=grid.x)
         rows = next(r for r in range(8, 0, -1) if cores % r == 0 and cores // r <= 8)
@@ -479,6 +517,20 @@ class OptimizedDecoder(FusedDecoder):
                     router_1d=True,
                     ds_shared=True,
                 )
+                if opt.single_die_r2:
+                    _r2_fields(mc)
+                if opt.single_die_r3:  # committed bit-identical stage-5 option (review #3 P1-1)
+                    mc.sinkhorn_faces = True
+                    # dsa_q_mm (1-slot DSA q_abs as one masked matmul) is NOT taken on one die: with 64 heads its 1D
+                    # program fails TT_FATAL matmul_device_operation.cpp:761 num_blocks_total <= num_cores
+                    # (candidates_r3/t_r3/test_perf_traced_decode_dsa_moe-1_/console.log)
+                    if os.environ.get("GLM53_R3_DSA_Q_MM") == "1":
+                        mc.dsa_q_mm = True
+                        mc.dsa_q_mm_ib = 64
+                if opt.single_die_specs:  # stage-5 decode role specs (review #3 P1-1 trial)
+                    mc.kda_out = "1d:c16:ib4"
+                    mc.shared_gu = "1d:c32:ib16"
+                    mc.shared_dn = "1d:c16:ib4"
                 dec.mc = mc
                 if dec.attn_kind == "dsa":
                     dec.attn.__class__ = MultichipDSA
@@ -500,18 +552,14 @@ class OptimizedDecoder(FusedDecoder):
         from .mlp import DenseMLP
         from .multichip_decoder import MultichipMLP, RoleDecodeMM
 
-        off = set(os.environ.get("GLM53_R2_OFF", "").split(","))  # bisection: conv, sink, mlpdn, dsao
-        mc.kda_conv_op = "conv" not in off
-        mc.sinkhorn_perm_fidelity = 0 if "sink" in off else 3
-        mc.mlp_dn = "" if "mlpdn" in off else "1d:c16:ib4"
-        mc.dsa_o = "" if "dsao" in off else "1d:c16:ib4"
         if isinstance(self.attn, FusedGlmKDA):
             self.attn.__class__ = _single_die_kda()
             self.attn.mc = mc
             self.attn.conv_op_max_rows = opt.kda_conv_op_max_rows
         grid_w = self.mesh.compute_with_storage_grid_size().x
-        if self.attn_kind == "dsa":
-            self.attn.decode_mm = RoleDecodeMM(getattr(self.attn, "decode_mm", None), mc, "dsa_o", grid_w)
+        self.attn.decode_mm = RoleDecodeMM(
+            getattr(self.attn, "decode_mm", None), mc, "dsa_o" if self.attn_kind == "dsa" else "kda_out", grid_w
+        )
         if isinstance(self.mlp, DenseMLP):
             self.mlp.__class__ = MultichipMLP
             self.mlp.mc = mc
@@ -519,11 +567,24 @@ class OptimizedDecoder(FusedDecoder):
         # factory, process-wide, as tt/multichip_decoder.MultichipDecoder sets it
         if mc.sinkhorn_perm_fidelity:
             os.environ.setdefault("MHC_SINKHORN_PERM_FIDELITY", "3")
+        if mc.sinkhorn_faces:  # read by the op's program factory, process-wide, as MultichipDecoder sets it
+            os.environ.setdefault("MHC_SINKHORN_FACES", "1")
+        if self.mlp_kind == "moe" and (mc.shared_gu or mc.shared_dn):
+            from .multichip_decoder import _install_shared
+
+            _install_shared(self.mlp, mc)
 
     def _apply_trials(self, opt: OptConfig, sd):
         """review #2 P1-B trials (one die)."""
         if opt.kda_in_split_ds and self.attn_kind == "kda" and "kdain" not in os.environ.get("GLM53_R2_OFF", ""):
-            self.attn.in_split = _KdaInSplitDS(self.attn.weights.input_projection, self.mesh, opt.kda_in_split_ds)
+            self.attn.in_split = _KdaInSplitDS(
+                self.attn.weights.input_projection, self.mesh, opt.kda_in_split_ds, opt.kda_in_ds_cfg
+            )
+        if opt.kda_prefill_fidelity is not None and self.attn_kind == "kda":  # review #3 P2-2
+            ckc = _ckc(self.mesh, opt.kda_prefill_fidelity)  # fp32 accumulation, packer L1 accumulation (as upstream)
+            for p in self.attn._prefill.values():
+                p.input_projection_compute_config = ckc
+                p.output_projection_compute_config = ckc
         if opt.out_proj_ds:
             role = "dsa_o" if self.attn_kind == "dsa" else "kda_out"
             self.attn.decode_mm = _FidelityDS(self.attn.decode_mm, self.mesh, opt.out_proj_ds, role)

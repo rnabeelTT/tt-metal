@@ -1,0 +1,247 @@
+=== start Sun Oct 18 06:20:26 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 2 --readers 2 --n 50
+2026-10-18 18:20:27.851 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+split DS cores 64 in0 2 readers 2: PCC 0.999999 335.1 us/call (host)
+=== exit code: 0 Sun Oct 18 06:20:31 PM UTC 2026
+=== start Sun Oct 18 06:22:16 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 2 --readers 1 --n 50
+2026-10-18 18:22:17.683 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:22:20.199 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+info:
+Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1741824 B which is beyond max L1 size of 1572864 B
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x7dc6f5d9ff0a]
+ --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevice const*)
+ --- tt::tt_metal::detail::ProgramImpl::compile_and_allocate(tt::tt_metal::IDevice*, bool)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::EnqueueMeshWorkload(tt::tt_metal::distributed::MeshCommandQueue&, tt::tt_metal::distributed::MeshWorkload&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail21enqueue_mesh_workloadITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSI_12MeshWorkloadEb+0x359) [0x7dc6f4927cf9]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x113786a) [0x7dc6f493786a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x106) [0x7dc6f49268c6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x7dc6f4923f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x7dc6f4908662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x7dc6f4893b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x7dc6f48951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x7dc6f6be7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x7dc6f6be7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7dc6f679c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7dc73ac2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7dc73ac2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+=== exit code: 1 Sun Oct 18 06:22:21 PM UTC 2026
+=== start Sun Oct 18 06:24:05 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 4 --readers 2 --n 50
+2026-10-18 18:24:07.464 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:24:09.998 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4) (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1365: (shard_shape[1] / in0_tile.get_width()) % program_config.in0_block_w == 0
+info:
+MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4)
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x110d24a) [0x71f27830d24a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1103da1) [0x71f278303da1]
+ --- ttnn::prim::MatmulDeviceOperation::validate_on_program_cache_miss(ttnn::prim::MatmulParams const&, ttnn::prim::MatmulInputs const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x2c) [0x71f2783267ec]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x71f278323f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x71f278308662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x71f278293b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x71f2782951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x71f27a5e7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x71f27a5e7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x71f27a19c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x71f2be62a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x71f2be62a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+=== exit code: 1 Sun Oct 18 06:24:11 PM UTC 2026
+=== start Sun Oct 18 06:26:03 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 1 --readers 2 --n 50
+2026-10-18 18:26:05.227 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+split DS cores 64 in0 1 readers 2: PCC 0.999999 432.3 us/call (host)
+=== exit code: 0 Sun Oct 18 06:26:08 PM UTC 2026
+=== start Sun Oct 18 06:28:01 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 32 --in0 2 --readers 2 --n 50
+2026-10-18 18:28:03.051 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+split DS cores 32 in0 2 readers 2: PCC 0.999999 521.1 us/call (host)
+=== exit code: 0 Sun Oct 18 06:28:06 PM UTC 2026
+=== start Sun Oct 18 06:29:51 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 32 --in0 4 --readers 1 --n 50
+2026-10-18 18:29:53.298 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:29:55.822 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+info:
+Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2585600 B which is beyond max L1 size of 1572864 B
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x78a4eeb9ff0a]
+ --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevice const*)
+ --- tt::tt_metal::detail::ProgramImpl::compile_and_allocate(tt::tt_metal::IDevice*, bool)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::EnqueueMeshWorkload(tt::tt_metal::distributed::MeshCommandQueue&, tt::tt_metal::distributed::MeshWorkload&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail21enqueue_mesh_workloadITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSI_12MeshWorkloadEb+0x359) [0x78a4ed727cf9]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x113786a) [0x78a4ed73786a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x106) [0x78a4ed7268c6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x78a4ed723f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x78a4ed708662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x78a4ed693b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x78a4ed6951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x78a4ef9e7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x78a4ef9e7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x78a4ef59c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x78a533c2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x78a533c2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+=== exit code: 1 Sun Oct 18 06:29:57 PM UTC 2026
+=== start Sun Oct 18 06:31:41 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 4 --readers 1 --n 50
+2026-10-18 18:31:43.265 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:31:45.808 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4) (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1365: (shard_shape[1] / in0_tile.get_width()) % program_config.in0_block_w == 0
+info:
+MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4)
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x110d24a) [0x730ded30d24a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1103da1) [0x730ded303da1]
+ --- ttnn::prim::MatmulDeviceOperation::validate_on_program_cache_miss(ttnn::prim::MatmulParams const&, ttnn::prim::MatmulInputs const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x2c) [0x730ded3267ec]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x730ded323f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x730ded308662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x730ded293b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x730ded2951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x730def5e7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x730def5e7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x730def19c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x730e33a2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x730e33a2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+=== exit code: 1 Sun Oct 18 06:31:47 PM UTC 2026

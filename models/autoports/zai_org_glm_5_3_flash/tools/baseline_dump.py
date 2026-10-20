@@ -56,7 +56,9 @@ def frozen_baseline_policy(opt):
     single-die-only knobs that TP4 does not run are off (stage-3 review #2: the kda_decode_conv swap, the 1D mlp_dn /
     dsa_o specs, the HiFi2 DRAM-sharded KDA in-projection, the sinkhorn HiFi3 setting; those all come with
     single_die_r2 / kda_in_split_ds), and the DSA per-head reuse config on prefill rows of W_UK is on, as it was in the
-    code at 00:21 (GLM53_PF_OFF=bmm_on; the baseline prefills are first chunks, where that config is correct).
+    code at 00:21 (GLM53_PF_OFF=bmm_on). That config is correct here because the baseline prefills (100 / 64 rows on
+    the 128-row bucket) have Mt = 4 <= per_core_M, one M block per core; it writes out of bounds only when a core gets
+    several blocks (per_core_M < Mt, review #3: the reuse kernels' per-block batch stride).
     GLM53_BASELINE_FROZEN=0: the current SELECTED instead."""
     import dataclasses
 

@@ -1,0 +1,21 @@
+=== start Sun Oct 18 06:32:36 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 8 --m 2048 --oob
+2026-10-18 18:32:38.138 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,2048,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=8,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  M blocks 8 x H 64 = 512 blocks on 110 cores
+  oob: output tiles never written 14848 of 65536 (heads [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56]); canary elements overwritten 786432 of 67108864; heads wrong 23 [0, 1, 2, 3, 45, 46, 47, 48, 49, 50, 51, 52]
+=== exit code: 0 Sun Oct 18 06:32:41 PM UTC 2026
+=== start Sun Oct 18 06:33:31 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uv --pm 2 --m 2048 --oob
+2026-10-18 18:33:32.771 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uv: x [1,64,2048,512] bf16, w [1,64,512,256] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=2,per_core_N=8,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  M blocks 32 x H 64 = 2048 blocks on 110 cores
+  oob: output tiles never written 8336 of 32768 (heads [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); canary elements overwritten 3342336 of 33554432; heads wrong 42 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+=== exit code: 0 Sun Oct 18 06:33:36 PM UTC 2026
+=== start Sun Oct 18 06:34:25 PM UTC 2026 : timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 4 --m 128 --oob
+2026-10-18 18:34:27.272 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+case uk: x [1,64,128,256] bf16, w [1,64,256,512] bfp8, grid 11x10, MatmulMultiCoreReuseProgramConfig(compute_with_storage_grid_size=11-10,in0_block_w=8,out_subblock_h=1,out_subblock_w=4,per_core_M=4,per_core_N=16,allowed_worker_cores=std::nullopt,skip_padding_groups=0,untilize_out=0)
+  M blocks 1 x H 64 = 64 blocks on 110 cores
+  oob: output tiles never written 0 of 4096 (heads []); canary elements overwritten 0 of 4194304; heads wrong 0 []
+=== exit code: 0 Sun Oct 18 06:34:29 PM UTC 2026

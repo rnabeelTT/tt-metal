@@ -1,0 +1,4 @@
+=== start Sun Oct 18 08:56:39 PM UTC 2026 : bash -c rm -rf /home/raahem/tt-metal/generated/profiler/reports; cd /home/raahem/glm53-flash-bringup/s3r3_snapshot_tracy_dsa1 && GLM53_DECODER=optimized timeout -k 60 2400 /home/raahem/tt-metal/python_env/bin/python -m tracy -r -p -v -m pytest '/home/raahem/glm53-flash-bringup/s3r3_snapshot_tracy_dsa1/models/autoports/zai_org_glm_5_3_flash/tests/test_perf_decoder.py::test_perf_traced_decode[dsa_moe-1]' -s -p no:cacheprovider > /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/candidates_r3/final/test_perf_traced_decode_dsa_moe-1_/console.log 2>&1
+=== exit code: 0 Sun Oct 18 08:57:11 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

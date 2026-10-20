@@ -1,0 +1,250 @@
+=== start Sun Oct 18 06:18:24 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_r1 GLM53_OPT=t_split_r1 timeout -k 60 900 /home/raahem/tt-metal/python_env/bin/pytest -sv -p no:cacheprovider /home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py -k test_decode_only and kda_dense
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python3
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s3r3_snapshot
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 18:18:26.823 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+optimized suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 44 items / 43 deselected / 1 selected
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense] 2026-10-18 18:18:26.905 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:18:26.905 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:18:26.905 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:18:26.905 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:18:26.911 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:18:26.911 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:18:27.000 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:18:27.000 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:18:27.000 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:18:27.000 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:18:27.001 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:18:27.260 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:18:27.393 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:18:27.393 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:18:27.393 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:18:27.394 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:18:27.394 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:18:27.475 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/decoder_r1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:18:27.475 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:18:27.475 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:18:27.475 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:18:27.482 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:18:27.489 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:18:27.495 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:18:29.096 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 2383 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (64 heads, 2048 rows per device).
+2026-10-18 18:18:30.952 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1758208 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+FAILED
+
+=================================== FAILURES ===================================
+_________________________ test_decode_only[kda_dense] __________________________
+
+mesh = MeshDevice(1x1 grid, 1 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7fba8e662b10>
+kind = 'kda_dense'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_decode_only(mesh, rd, kind):
+        """Decode positions 0..3 of a fresh sequence (no prefill: zero KDA state and conv history, empty DSA cache), eager
+        first step then traced. Also the watcher case of the KDA layers (whose prefill kernel does not fit the kernel
+        config buffer once watcher-instrumented; doc/functional_decoder/README.md)."""
+        layer = KINDS[kind]
+        dec = get_layer(mesh, rd, layer)
+        steps, slot = 4, 6
+        req = {"layer": layer, "weights": "real", "tokens": tokens(77, steps), "segments": [1] * steps}
+        ref = make_ref(req, hf_layer_reference(req), range(steps))
+        x, y = ref
+        if dec.attn_kind == "kda":  # fresh sequence: zero carry in the slot
+            st = dec.attn.new_prefill_state()
+            dec.commit_prefill(slot, st)
+        runner = DecodeRunner(dec, mesh, BATCH)
+        for i in range(steps):
+            pos = [-1] * BATCH
+            pos[slot] = i
+            if i == 0:
+>               o = runner.eager_step({slot: x[0]}, pos)[slot]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:557:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:196: in eager_step
+    y = self._forward()
+        ^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tests/harness.py:192: in _forward
+    return self.dec.decode_forward(self.x_buf, inputs=self.dsa_bufs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:600: in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py:291: in decode_forward
+    y = self.attn.decode_forward(x, self.decode_state, inputs=inputs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py:1194: in decode_forward
+    return super().decode_forward(x, dstate, inputs=inputs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py:271: in decode_forward
+    proj = self._in_proj(x, w.input_projection, cc)  # [1,1,B,P]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:284: in _in_proj
+    return self.in_split(x)
+           ^^^^^^^^^^^^^^^^
+models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py:366: in __call__
+    a1 = ttnn.linear(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = FastOperation(python_fully_qualified_name='ttnn.linear', function=<ttnn._ttnn.operations.matmul.linear_t object at 0x7...<function default_postprocess_golden_function_outputs at 0x7fba2d1cccc0>, is_cpp_operation=True, is_experimental=False)
+function_args = (ttnn.Tensor([[[[ 0.0000e+00,  0.0000e+00,  ...,  0.0000e+00,  0.0000e+00],
+               [ 0.0000e+00,  0.0000e+00, ...  ..., -1.9531e-03, -2.2949e-02]]]], shape=Shape([1, 1, 4096, 32768]), dtype=DataType::BFLOAT8_B, layout=Layout::TILE))
+function_kwargs = {'compute_kernel_config': <ttnn._ttnn.operations.core.WormholeComputeKernelConfig object at 0x7fba8e6a03f0>, 'memory_c...ardedProgramConfig(in0_block_w=2,per_core_M=1,per_core_N=16,fused_activation=std::nullopt,num_workers_per_dram_bank=1)}
+cq_id = None, recording = False, started = False, python_io_record = None
+
+    def __call__(self, *function_args, **function_kwargs):
+        if self._requires_slow_runtime():
+            return self._slow_operation_instance()(*function_args, **function_kwargs)
+
+        cq_id = None
+        if "queue_id" in function_kwargs:
+            cq_id = function_kwargs.pop("queue_id")
+        elif "cq_id" in function_kwargs:
+            cq_id = function_kwargs.pop("cq_id")
+
+        recording = ttnn.graph.is_python_io_recording_enabled()
+        started = False
+        python_io_record = None
+        try:
+            if recording:
+                ttnn.graph.track_function_start(self.python_fully_qualified_name)
+                started = True
+                python_io_record = ttnn.graph.append_python_io_record(self.python_fully_qualified_name)
+                ttnn.graph.record_python_operation(
+                    self.python_fully_qualified_name,
+                    function_args,
+                    function_kwargs,
+                    record=python_io_record,
+                )
+                input_tensors = get_all_tensors((function_args, function_kwargs))
+                set_tensor_id(input_tensors)
+
+            if cq_id is None:
+>               result = self.function(*function_args, **function_kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               RuntimeError: TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+E               info:
+E               Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1758208 B which is beyond max L1 size of 1572864 B
+E               backtrace:
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x7fba7f39ff0a]
+E                --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevice const*)
+E                --- tt::tt_metal::detail::ProgramImpl::compile_and_allocate(tt::tt_metal::IDevice*, bool)
+E                --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+E                --- tt::tt_metal::distributed::EnqueueMeshWorkload(tt::tt_metal::distributed::MeshCommandQueue&, tt::tt_metal::distributed::MeshWorkload&, bool)
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail21enqueue_mesh_workloadITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSI_12MeshWorkloadEb+0x359) [0x7fba7df27cf9]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x113786a) [0x7fba7df3786a]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x106) [0x7fba7df268c6]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x7fba7df23f75]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x7fba7df08662]
+E                --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x7fba7de93b84]
+E                --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x7fba7de951ca]
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x7fba801e7c93]
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x7fba801e7970]
+E                --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7fba7fd9c604]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1abf1a2]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18c2d1a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(PyEval_EvalCode+0xde) [0x18a54ba]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x18a5c9d]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e9605]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_SimpleFileObject+0x106) [0x19e93c6]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_PyRun_AnyFileObject+0x4a) [0x19e914a]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e90d0]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x19e8fdd]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x1ad9763]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f61f]
+E                --- /home/raahem/tt-metal/python_env/bin/python3() [0x197f42c]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7fbad582a1ca]
+E                --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7fbad582a28b]
+E                --- /home/raahem/tt-metal/python_env/bin/python3(_start+0x29) [0x19a78a9]
+
+../../tt-metal/ttnn/ttnn/decorators.py:1106: RuntimeError
+=========================== short test summary info ============================
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_optimized_decoder.py::test_decode_only[kda_dense]
+======================= 1 failed, 43 deselected in 5.77s =======================
+nanobind: leaked 76 instances!
+ - leaked instance 0x7fba8e68c618 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8e6a03a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba80573888 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7fba80571ed8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7fba2ced8768 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8e6a0498 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba80573648 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8e68c528 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7fba806d9848 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastProgramConfig"
+ - leaked instance 0x7fba80572508 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7fba80572808 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7f98ad8b6aa8 of type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked instance 0x7fba805725f8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba2ccd67d8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8e663948 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8057d788 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7fba8e612598 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7fba8e689bc8 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - leaked instance 0x7fba8e65d218 of type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked instance 0x7fba8057d208 of type "ttnn._ttnn.activation.UnaryWithParam"
+ - ... skipped remainder
+nanobind: leaked 27 keep_alive records!
+nanobind: leaked 26 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.experimental.kda.QkvCausalConv1dSiluProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - ... skipped remainder
+nanobind: leaked 277 functions!
+ - leaked function "clear_loaded_sub_device_manager"
+ - leaked function ""
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function "host_buffer"
+ - leaked function "to_json"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "buffer_address"
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-18 18:18:33.054 | info     |    BuildKernels | JIT cache stats: 196/201 hits (97.5%) [196 cached, 54 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 18:18:33.054 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 18:18:33.055 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 18:18:33.069 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 18:18:33.069 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 18:18:33.592 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 18:18:33.592 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 18:18:33.592 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 1 Sun Oct 18 06:18:33 PM UTC 2026

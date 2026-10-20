@@ -190,7 +190,7 @@ Validation (`dsa_shard/`; layer 3 = DSA + MoE, real weights, (1, 4) mesh, `DEFAU
 | `tests/test_dsa_shard.py` (`dsa_shard/s4r_shard_ab.log`): sharded vs replicated layout, same weights / inputs, randomly permuted GLOBAL block table; 8 slots (9001-token synthetic user: 4 sparse chunks; 4000-token real-token user; 2049-token user whose decode crosses the dense -> sparse boundary; 100-token user) and 1 slot (6001 tokens); eager + traced decode | **2 passed**. Attention sub-block output: worst PCC 0.999908, worst \|rms ratio - 1\| 0.0034 over every prefill sequence and decode token |
 | Same, layer update | all keys >= 0.9999 except 4 (2 per case): two long synthetic prefills (0.99831 / 0.99854) and one decode token per case (0.99267 / 0.98363), each with a matching attention output |
 | Diagnosis of those 4 (`tools/dsa_shard_probe.py`, `dsa_shard/s4r_probe1*.log`) | on the failing token every head's attention output agrees to PCC >= 0.99994 (eager and traced give the same 0.983629), no per-die sink weight underflows (w >= 2.8e-4): a MoE router near-tie flip downstream (the synthetic streams route in the near-tie regime) |
-| Suite DSA cases vs HF with the sharded cache (`dsa_shard/s4r_shard_suite.log`, `GLM53_DSA_SHARD=1 ... -k "(dsa_moe or paged_permuted) and not single_die_baseline"`) | **16 passed** (real / synthetic weights, lengths 1 .. 4000 incl. 2049 / 2051 / 2177, batched users, determinism, no host fallback, decode-only, permuted blocks, 32 active users, inactive slots); 184 checks, lowest update PCC 0.98213 (synthetic MoE bar 0.98), decode-mean scale 0.9919 .. 0.9958, y_swap 2 of 161 |
+| Suite DSA cases vs HF with the sharded cache (`dsa_shard/s4r_shard_suite.log`, `GLM53_DSA_SHARD=1 ... -k "(dsa_moe or paged_permuted) and not single_die_baseline"`) | **16 passed** (real / synthetic weights, lengths 1 .. 4000 incl. 2049 / 2051 / 2177, batched users, determinism, no host fallback, decode-only, permuted blocks, 32 active users, inactive slots); 184 checks, lowest update PCC 0.98213 (real weights, the L3 32-slot decode near-tie token slot 2 pos 38, margin 8.0e-4, which matches the swapped-expert reference at 0.999885; bar 0.98), decode-mean scale 0.9919 .. 0.9958, y_swap 2 of 161 |
 | Single-die compare with the sharded cache (`dsa_shard/s4r_cmp_shard.log`, `opt_s5` baseline) | passed: dsa_moe prefill 0.999954 / 0.999937, decode 0.999977 (rms 1.00052 .. 1.00058); the KDA layers are unchanged by the option |
 
 Capacity (`dsa_shard/capacity/`, `GLM53_TP=4 GLM53_DSA_SHARD=1 tools/memory_probe.py capacity --trace-region 67108864
@@ -224,7 +224,7 @@ lengths (not separately profiled with Tracy). Memory: the latent pool of the 8-s
 |---|---|
 | Update PCC vs single die (bar 0.999) | kda_dense 0.999992 .. 0.999996, dsa_moe 0.999847 .. 0.999980, kda_moe 0.999962 .. 0.999993 |
 | Update rms ratio vs single die (bar 1 +- 0.005) | 0.99971 .. 1.00196 |
-| HF checks (510; quantization-aware reference on the MoE layers) | lowest update PCC 0.98224 (synthetic MoE layer, bar 0.98), update rms ratio 0.9719 .. 1.0352 per check |
+| HF checks (510; quantization-aware reference on the MoE layers) | lowest update PCC 0.98224 (real weights, L3 32-slot decode slot 2 pos 38: an HF router near-tie token, margin 8.0e-4, that matches the swapped-expert reference y_swap at 0.999885; lowest non-near-tie check 0.98968, L4 slot 3 prefill 200; bar 0.98), update rms ratio 0.9719 .. 1.0352 per check |
 | Decode update scale vs HF, per-test mean (bar 1 +- 0.01) | 0.9920 .. 1.0010 |
 | Router near-tie y_swap matches (module) | 4 of 298 MoE decode tokens (cap 8) |
 | 1-slot vs 2-slot KDA decode (`test_single_slot_kda_decode`) | PCC 1.0000000, max abs 0 |
@@ -252,7 +252,7 @@ must meet PCC 0.999 and |rms ratio - 1| <= 0.005. Final runs (2026-10-18 00:2x .
 
 | Run | Result |
 |---|---|
-| Full multichip suite, `DEFAULT_MC` (`s4r_suite_default_final.log`) | **45 passed**; single-die compare kda_dense 0.999994 .. 0.999996, dsa_moe 0.999910 .. 0.999950, kda_moe 0.999963 .. 0.999976 (decode 0.998790 with the near-tie row set aside, other rows 0.999998), rms 0.99821 .. 1.00098; HF: 508 checks, lowest update PCC 0.98227 (synthetic MoE, bar 0.98), decode-mean scale 0.9931 .. 1.0003, y_swap 2 of 298 |
+| Full multichip suite, `DEFAULT_MC` (`s4r_suite_default_final.log`) | **45 passed**; single-die compare kda_dense 0.999994 .. 0.999996, dsa_moe 0.999910 .. 0.999950, kda_moe 0.999963 .. 0.999976 (decode 0.998790 with the near-tie row set aside, other rows 0.999998), rms 0.99821 .. 1.00098; HF: 508 checks, lowest update PCC 0.98227 (real weights, L3 32-slot decode slot 2 pos 38: an HF router near-tie token, margin 8.0e-4, that matches the swapped-expert reference y_swap at 0.999885; lowest non-near-tie check 0.98968, L4 slot 3 prefill 200; bar 0.98), decode-mean scale 0.9931 .. 1.0003, y_swap 2 of 298 |
 | Single-die compare, stage-4 options (`s4r_cmp_s4opts_final.log`) | passed: 0.999803 .. 0.999996 (kda_moe decode near-tie row set aside), rms 0.99838 .. 1.00141 |
 | Sharded DSA cache A/B (`dsa_shard/s4r_shard_ab_final.log`) | 2 passed: attention output worst PCC 0.999908, worst rms deviation 0.0034 |
 | Suite DSA cases + single-die compare, sharded cache (`dsa_shard/s4r_shard_suite_final.log`) | **17 passed**; dsa_moe vs single die 0.999910 .. 0.999977 |

@@ -1,0 +1,576 @@
+=== start Sun Oct 18 06:19:23 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_2_2 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 2 --readers 2 --n 5
+2026-10-18 18:19:24.840 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:19:24.888 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:19:24.888 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:19:24.888 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:19:24.888 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:19:24.894 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:19:24.895 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:19:24.974 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:19:24.974 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:19:24.974 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:19:24.974 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:19:24.975 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:19:25.159 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:19:25.294 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:19:25.294 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:19:25.294 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:19:25.294 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:19:25.294 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:19:25.375 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_2_2/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:19:25.375 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:19:25.375 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:19:25.375 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:25.382 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:25.389 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:25.396 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:35.408 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:35.415 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:19:35.416 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 18:19:35.416 | warning  |           Metal | Device 1 worker core(x= 0,y= 0) virtual(x= 1,y= 2): BRISC detected an inter-kernel data race due to kernel completing with pending NOC transactions (missing NOC reads flushed barrier). Current kernel: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 18:19:35.416 | info     |           Metal | Last waypoint: NKFW,   W,   W,   W,   W (watcher_device_reader.cpp:1155)
+2026-10-18 18:19:35.416 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 18:19:35.416 | info     |           Metal |  BRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:19:35.416 | info     |           Metal |  NCRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:19:35.416 | info     |           Metal |  TRISC0: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:19:35.416 | info     |           Metal |  TRISC1: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:19:35.416 | info     |           Metal |  TRISC2: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:19:35.416 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x799af8ba77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x799b250f5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x799b3ce9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x799b3cf29ecc]
+
+[qb2-120-p11t05:3870285] *** Process received signal ***
+[qb2-120-p11t05:3870285] Signal: Aborted (6)
+[qb2-120-p11t05:3870285] Signal code:  (-6)
+[qb2-120-p11t05:3870285] [ 0] /lib/x86_64-linux-gnu/libc.so.6(+0x45330)[0x799b3ce45330]
+[qb2-120-p11t05:3870285] [ 1] /lib/x86_64-linux-gnu/libc.so.6(pthread_kill+0x11c)[0x799b3ce9ec0c]
+[qb2-120-p11t05:3870285] [ 2] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x1e)[0x799b3ce4527e]
+[qb2-120-p11t05:3870285] [ 3] /lib/x86_64-linux-gnu/libc.so.6(abort+0xdf)[0x799b3ce288ff]
+[qb2-120-p11t05:3870285] [ 4] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xac2b5)[0x799b250ac2b5]
+[qb2-120-p11t05:3870285] [ 5] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xc31ea)[0x799b250c31ea]
+[qb2-120-p11t05:3870285] [ 6] /lib/x86_64-linux-gnu/libstdc++.so.6(_ZSt10unexpectedv+0x0)[0x799b250abcac]
+[qb2-120-p11t05:3870285] [ 7] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xabcc6)[0x799b250abcc6]
+[qb2-120-p11t05:3870285] [ 8] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal13WatcherServer4Impl17poll_watcher_dataEv+0x7ee)[0x799af4a0263e]
+[qb2-120-p11t05:3870285] [ 9] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79)[0x799b250f5c79]
+[qb2-120-p11t05:3870285] [10] /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84)[0x799b3ce9cb84]
+[qb2-120-p11t05:3870285] [11] /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc)[0x799b3cf29ecc]
+[qb2-120-p11t05:3870285] *** End of error message ***
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 06:19:36 PM UTC 2026
+=== start Sun Oct 18 06:21:21 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_2_1 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 2 --readers 1 --n 5
+2026-10-18 18:21:22.641 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:21:22.688 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:21:22.688 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:21:22.688 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:21:22.688 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:21:22.694 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:21:22.695 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:21:22.774 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:21:22.774 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:21:22.774 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:21:22.774 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:21:22.776 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:21:22.939 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:21:23.071 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:21:23.071 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:21:23.071 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:21:23.071 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:21:23.071 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:21:23.153 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_2_1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:21:23.153 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:21:23.153 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:21:23.153 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:21:23.160 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:21:23.166 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:21:23.173 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:21:25.434 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1758208 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+info:
+Statically allocated circular buffers on core range [0-0 - 7-9] grow to 1758208 B which is beyond max L1 size of 1572864 B
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x79c6bfb9ff0a]
+ --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevice const*)
+ --- tt::tt_metal::detail::ProgramImpl::compile_and_allocate(tt::tt_metal::IDevice*, bool)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::EnqueueMeshWorkload(tt::tt_metal::distributed::MeshCommandQueue&, tt::tt_metal::distributed::MeshWorkload&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail21enqueue_mesh_workloadITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSI_12MeshWorkloadEb+0x359) [0x79c6be727cf9]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x113786a) [0x79c6be73786a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x106) [0x79c6be7268c6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x79c6be723f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x79c6be708662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x79c6be693b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x79c6be6951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x79c6c09e7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x79c6c09e7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x79c6c059c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x79c704c2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x79c704c2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+2026-10-18 18:21:25.839 | info     |    BuildKernels | JIT cache stats: 32/32 hits (100.0%) [32 cached, 3 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 18:21:25.839 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 18:21:25.839 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 18:21:25.852 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 18:21:25.852 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 18:21:26.461 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 18:21:26.461 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 18:21:26.461 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 1 Sun Oct 18 06:21:26 PM UTC 2026
+=== start Sun Oct 18 06:23:10 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_4_2 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 4 --readers 2 --n 5
+2026-10-18 18:23:12.379 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:23:12.426 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:23:12.426 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:23:12.426 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:23:12.426 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:23:12.433 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:23:12.434 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:23:12.512 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:23:12.512 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:23:12.512 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:23:12.512 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:23:12.513 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:23:12.711 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:23:12.847 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:23:12.847 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:23:12.847 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:23:12.847 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:23:12.847 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:23:12.929 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_4_2/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:23:12.929 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:23:12.929 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:23:12.929 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:23:12.936 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:23:12.942 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:23:12.949 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:23:15.226 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4) (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1365: (shard_shape[1] / in0_tile.get_width()) % program_config.in0_block_w == 0
+info:
+MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4)
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x110d24a) [0x7b98a610d24a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1103da1) [0x7b98a6103da1]
+ --- ttnn::prim::MatmulDeviceOperation::validate_on_program_cache_miss(ttnn::prim::MatmulParams const&, ttnn::prim::MatmulInputs const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x2c) [0x7b98a61267ec]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x7b98a6123f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x7b98a6108662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x7b98a6093b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x7b98a60951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x7b98a83e7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x7b98a83e7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7b98a7f9c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7b98ec42a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7b98ec42a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+2026-10-18 18:23:15.599 | info     |    BuildKernels | JIT cache stats: 27/27 hits (100.0%) [27 cached, 3 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 18:23:15.599 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 18:23:15.599 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 18:23:15.612 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 18:23:15.612 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 18:23:16.234 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 18:23:16.234 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 18:23:16.234 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 1 Sun Oct 18 06:23:16 PM UTC 2026
+=== start Sun Oct 18 06:25:00 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_1_2 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 1 --readers 2 --n 5
+2026-10-18 18:25:02.212 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:25:02.258 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:25:02.258 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:25:02.259 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:25:02.259 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:25:02.265 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:25:02.266 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:25:02.345 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:25:02.345 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:25:02.345 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:25:02.345 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:25:02.347 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:25:02.516 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:25:02.650 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:25:02.650 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:25:02.650 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:25:02.650 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:25:02.650 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:25:02.732 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_1_2/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:25:02.732 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:25:02.732 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:25:02.732 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:02.739 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:02.745 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:02.752 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:12.764 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:12.772 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:25:12.772 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 18:25:12.772 | warning  |           Metal | Device 1 worker core(x= 0,y= 0) virtual(x= 1,y= 2): BRISC detected an inter-kernel data race due to kernel completing with pending NOC transactions (missing NOC reads flushed barrier). Current kernel: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 18:25:12.772 | info     |           Metal | Last waypoint: NKFW,   W,   W,   W,   W (watcher_device_reader.cpp:1155)
+2026-10-18 18:25:12.772 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 18:25:12.772 | info     |           Metal |  BRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:25:12.772 | info     |           Metal |  NCRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:25:12.772 | info     |           Metal |  TRISC0: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:25:12.772 | info     |           Metal |  TRISC1: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:25:12.772 | info     |           Metal |  TRISC2: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:25:12.772 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x7d86ca3a77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x7d86f66f5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x7d870e49cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x7d870e529ecc]
+
+[qb2-120-p11t05:3889006] *** Process received signal ***
+[qb2-120-p11t05:3889006] Signal: Aborted (6)
+[qb2-120-p11t05:3889006] Signal code:  (-6)
+[qb2-120-p11t05:3889006] [ 0] /lib/x86_64-linux-gnu/libc.so.6(+0x45330)[0x7d870e445330]
+[qb2-120-p11t05:3889006] [ 1] /lib/x86_64-linux-gnu/libc.so.6(pthread_kill+0x11c)[0x7d870e49ec0c]
+[qb2-120-p11t05:3889006] [ 2] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x1e)[0x7d870e44527e]
+[qb2-120-p11t05:3889006] [ 3] /lib/x86_64-linux-gnu/libc.so.6(abort+0xdf)[0x7d870e4288ff]
+[qb2-120-p11t05:3889006] [ 4] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xac2b5)[0x7d86f66ac2b5]
+[qb2-120-p11t05:3889006] [ 5] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xc31ea)[0x7d86f66c31ea]
+[qb2-120-p11t05:3889006] [ 6] /lib/x86_64-linux-gnu/libstdc++.so.6(_ZSt10unexpectedv+0x0)[0x7d86f66abcac]
+[qb2-120-p11t05:3889006] [ 7] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xabcc6)[0x7d86f66abcc6]
+[qb2-120-p11t05:3889006] [ 8] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal13WatcherServer4Impl17poll_watcher_dataEv+0x7ee)[0x7d86c620263e]
+[qb2-120-p11t05:3889006] [ 9] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79)[0x7d86f66f5c79]
+[qb2-120-p11t05:3889006] [10] /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84)[0x7d870e49cb84]
+[qb2-120-p11t05:3889006] [11] /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc)[0x7d870e529ecc]
+[qb2-120-p11t05:3889006] *** End of error message ***
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 06:25:14 PM UTC 2026
+=== start Sun Oct 18 06:26:58 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_32_2_2 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 32 --in0 2 --readers 2 --n 5
+2026-10-18 18:26:59.987 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:27:00.035 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:27:00.035 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:27:00.035 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:27:00.035 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:27:00.042 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:27:00.043 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:27:00.124 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:27:00.124 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:27:00.124 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:27:00.124 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:27:00.125 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:27:00.331 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:27:00.469 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:27:00.469 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:27:00.469 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:27:00.469 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:27:00.469 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:27:00.551 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_32_2_2/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:27:00.551 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:27:00.551 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:00.551 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:27:00.558 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:00.564 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:00.571 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:10.585 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:10.592 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:27:10.592 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 18:27:10.592 | warning  |           Metal | Device 1 worker core(x= 0,y= 0) virtual(x= 1,y= 2): BRISC detected an inter-kernel data race due to kernel completing with pending NOC transactions (missing NOC reads flushed barrier). Current kernel: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 18:27:10.592 | info     |           Metal | Last waypoint: NKFW,   W,   W,   W,   W (watcher_device_reader.cpp:1155)
+2026-10-18 18:27:10.592 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 18:27:10.592 | info     |           Metal |  BRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:27:10.592 | info     |           Metal |  NCRISC: ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in0_sender_dram_sharded.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:27:10.592 | info     |           Metal |  TRISC0: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:27:10.592 | info     |           Metal |  TRISC1: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:27:10.592 | info     |           Metal |  TRISC2: ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_large_block_zm_fused_bias_activation.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 18:27:10.592 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x75e5c2ba77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x75e5eeef5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x75e606c9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x75e606d29ecc]
+
+[qb2-120-p11t05:3895470] *** Process received signal ***
+[qb2-120-p11t05:3895470] Signal: Aborted (6)
+[qb2-120-p11t05:3895470] Signal code:  (-6)
+[qb2-120-p11t05:3895470] [ 0] /lib/x86_64-linux-gnu/libc.so.6(+0x45330)[0x75e606c45330]
+[qb2-120-p11t05:3895470] [ 1] /lib/x86_64-linux-gnu/libc.so.6(pthread_kill+0x11c)[0x75e606c9ec0c]
+[qb2-120-p11t05:3895470] [ 2] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x1e)[0x75e606c4527e]
+[qb2-120-p11t05:3895470] [ 3] /lib/x86_64-linux-gnu/libc.so.6(abort+0xdf)[0x75e606c288ff]
+[qb2-120-p11t05:3895470] [ 4] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xac2b5)[0x75e5eeeac2b5]
+[qb2-120-p11t05:3895470] [ 5] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xc31ea)[0x75e5eeec31ea]
+[qb2-120-p11t05:3895470] [ 6] /lib/x86_64-linux-gnu/libstdc++.so.6(_ZSt10unexpectedv+0x0)[0x75e5eeeabcac]
+[qb2-120-p11t05:3895470] [ 7] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xabcc6)[0x75e5eeeabcc6]
+[qb2-120-p11t05:3895470] [ 8] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal13WatcherServer4Impl17poll_watcher_dataEv+0x7ee)[0x75e5bea0263e]
+[qb2-120-p11t05:3895470] [ 9] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79)[0x75e5eeef5c79]
+[qb2-120-p11t05:3895470] [10] /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84)[0x75e606c9cb84]
+[qb2-120-p11t05:3895470] [11] /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc)[0x75e606d29ecc]
+[qb2-120-p11t05:3895470] *** End of error message ***
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 06:27:11 PM UTC 2026
+=== start Sun Oct 18 06:28:56 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_32_4_1 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 32 --in0 4 --readers 1 --n 5
+2026-10-18 18:28:57.814 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:28:57.863 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:28:57.863 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:28:57.863 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:28:57.863 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:28:57.870 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:28:57.870 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:28:57.951 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:28:57.951 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:28:57.951 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:28:57.951 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:28:57.952 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:28:58.127 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:28:58.262 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:28:58.262 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:28:58.262 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:28:58.262 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:28:58.262 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:28:58.343 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_32_4_1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:28:58.343 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:28:58.343 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:28:58.343 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:28:58.350 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:28:58.357 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:28:58.363 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:29:01.051 | critical |          Always | TT_THROW: Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2601984 B which is beyond max L1 size of 1572864 B (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/program/program.cpp:2065: tt::exception
+info:
+Statically allocated circular buffers on core range [0-0 - 7-9] grow to 2601984 B which is beyond max L1 size of 1572864 B
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x259ff0a) [0x7b13b0f9ff0a]
+ --- tt::tt_metal::detail::ProgramImpl::validate_circular_buffer_region(tt::tt_metal::IDevice const*)
+ --- tt::tt_metal::detail::ProgramImpl::compile_and_allocate(tt::tt_metal::IDevice*, bool)
+ --- tt::tt_metal::distributed::MeshWorkloadImpl::compile(tt::tt_metal::distributed::MeshDevice*)
+ --- tt::tt_metal::distributed::EnqueueMeshWorkload(tt::tt_metal::distributed::MeshCommandQueue&, tt::tt_metal::distributed::MeshWorkload&, bool)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail21enqueue_mesh_workloadITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSI_12MeshWorkloadEb+0x359) [0x7b13afb27cf9]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x113786a) [0x7b13afb3786a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x106) [0x7b13afb268c6]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x7b13afb23f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x7b13afb08662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x7b13afa93b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x7b13afa951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x7b13b1de7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x7b13b1de7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7b13b199c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7b13f602a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7b13f602a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+2026-10-18 18:29:01.422 | info     |    BuildKernels | JIT cache stats: 27/32 hits (84.4%) [27 cached, 3 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 18:29:01.422 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 18:29:01.422 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 18:29:01.434 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 18:29:01.434 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 18:29:02.053 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 18:29:02.053 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 18:29:02.053 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 1 Sun Oct 18 06:29:02 PM UTC 2026
+=== start Sun Oct 18 06:30:46 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_4_1 timeout -k 60 600 /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 4 --readers 1 --n 5
+2026-10-18 18:30:48.179 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 18:30:48.227 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 18:30:48.227 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 18:30:48.227 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 18:30:48.227 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 18:30:48.234 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 18:30:48.234 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 18:30:48.313 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 18:30:48.314 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 18:30:48.314 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 18:30:48.314 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 18:30:48.315 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 18:30:48.503 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 18:30:48.641 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 18:30:48.641 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 18:30:48.641 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 18:30:48.642 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 18:30:48.642 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 18:30:48.723 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_decoder/watcher_split_r3/standalone_64_4_1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 18:30:48.723 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 18:30:48.723 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 18:30:48.723 | warning  |           Metal | Opening subset of mmio devices slows down UMD read/write to remote chips. If opening more devices, consider using distributed::MeshDevice::create_unit_meshes(). (device_manager.cpp:264)
+2026-10-18 18:30:48.730 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 18:30:48.737 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 18:30:48.743 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 18:30:51.084 | critical |          Always | TT_FATAL: MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4) (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 61, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/s3r3_split_watch.py", line 47, in main
+    out = ttnn.to_torch(mm(x)).float()
+                        ^^^^^
+  File "/home/raahem/glm53-flash-bringup/s3r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 366, in __call__
+    a1 = ttnn.linear(
+         ^^^^^^^^^^^^
+  File "/home/raahem/tt-metal/ttnn/ttnn/decorators.py", line 1106, in __call__
+    result = self.function(*function_args, **function_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/ttnn/cpp/ttnn/operations/matmul/device/matmul_device_operation.cpp:1365: (shard_shape[1] / in0_tile.get_width()) % program_config.in0_block_w == 0
+info:
+MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig: shard_shape[1] / in0_tile.get_width() (2) must be divisible by in0_block_w (4)
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x110d24a) [0x7e5ec1b0d24a]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1103da1) [0x7e5ec1b03da1]
+ --- ttnn::prim::MatmulDeviceOperation::validate_on_program_cache_miss(ttnn::prim::MatmulParams const&, ttnn::prim::MatmulInputs const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail30create_and_cache_mesh_workloadITkNS0_22DeviceOperationConceptENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceERNSH_13program_cache6detail12ProgramCacheERKNSM_15ProgramCacheKeyE+0x2c) [0x7e5ec1b267ec]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail29launch_operation_with_adapterITkNS0_36DeviceOperationWithMeshDeviceAdapterENS0_26MeshDeviceOperationAdapterINS_4prim21MatmulDeviceOperationEEEEEvRKNT_22operation_attributes_tERKNS7_13tensor_args_tERNS7_21tensor_return_value_tEPN2tt8tt_metal11distributed10MeshDeviceE+0x1b5) [0x7e5ec1b23f75]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn16device_operation6detail6launchITkNS0_22DeviceOperationConceptENS_4prim21MatmulDeviceOperationEEENT_21tensor_return_value_tERKNS5_22operation_attributes_tERKNS5_13tensor_args_tE+0x512) [0x7e5ec1b08662]
+ --- ttnn::prim::matmul(ttnn::Tensor const&, ttnn::Tensor const&, std::optional<ttnn::Tensor> const&, std::optional<ttnn::Tensor> const&, ttnn::prim::MatmulParams const&)
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(+0x1093b84) [0x7e5ec1a93b84]
+ --- /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations6matmul6linearERKNS_6TensorES4_RKSt8optionalIS3_EbbRKS5_IKN2tt8tt_metal12MemoryConfigEES5_IKNSA_8DataTypeEERKS5_IKSt7variantIJNS1_28MatmulMultiCoreProgramConfigENS1_33MatmulMultiCoreReuseProgramConfigENS1_42MatmulMultiCoreReuseMultiCastProgramConfigENS1_44MatmulMultiCoreReuseMultiCast1DProgramConfigENS1_53MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfigENS1_60MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfigEEEERKS5_IKSJ_IJNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENS0_5unary19BasicUnaryWithParamIJfEEEEEES5_IKNS_19ComputeKernelConfigEES5_IKNS_5types8CoreGridEERKS5_IKNSA_4TileEES5_IS2_ERKS5_IKNSA_12experimental20GlobalCircularBufferEERKS5_IN4ttsl10StrongTypeIhNSA_14SubDeviceIdTagEEEE+0x25a) [0x7e5ec1a951ca]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7c93) [0x7e5ec3de7c93]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7e7970) [0x7e5ec3de7970]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7e5ec399c604]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4) [0x181e0e4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x1abf1a2]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0) [0x18c2de0]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18c2d1a]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de) [0x1815ade]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7e5f0802a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7e5f0802a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+2026-10-18 18:30:51.499 | info     |    BuildKernels | JIT cache stats: 27/27 hits (100.0%) [27 cached, 3 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 18:30:51.499 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 18:30:51.499 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 18:30:51.512 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 18:30:51.512 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 18:30:52.041 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 18:30:52.041 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 18:30:52.041 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 1 Sun Oct 18 06:30:52 PM UTC 2026
