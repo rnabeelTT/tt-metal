@@ -433,7 +433,7 @@ Prefill (2048 rows), µs per call: ttnn auto -> explicit 2D (best in0 block) at 
 ## Sparse-matmul geometry at TP4 (review #1 P1-2)
 
 The grouped sparse matmuls came from single-die tuning: `in0_block_w = 4`, subblock 1 x 8 capped at 4 by fp32
-accumulation. They serve the pairs path at 1 user and the sorted path at 32 users and in prefill. TP4 sweep
+accumulation. At 1 user the routed experts take the gather path (see below), so the 1-user column only measures the pairs fallback. They serve the sorted path at 32 users and in prefill. TP4 sweep
 (`moe.grouped_*`), replay µs / prefill ms:
 
 | Geometry | kda_moe 1 user | kda_moe 32 users | dsa_moe 32 users | prefill kda_moe 2048 |
@@ -553,7 +553,7 @@ Results:
 | first `dsa_tail_shared` (review #2 work) | same | 10 / 48 / 100 | 91 / 100 / 100 | - |
 | review #3 final (ticket 5) | `DEFAULT_MC`, no override, combo_a_kv precision | 91 / 100 / 100 | 91 / 100 / 100 | sparse regime, 1 slot, in0 block 64 vs 8: equal |
 | review #3, tickets 1 / 4 | stage-7 precision | 92 / 100 / 100 (ticket 1) | 91 / 100 / 100 | sparse regime, 1 slot, tail on vs off: equal |
-| review #4 (s5r4 snapshot, HEAD 8e9efeb7dd7) | `DEFAULT_MC`, combo_a_kv | 91 / 100 / 100 | 91 / 100 / 100 | 8 slots: full model repeats; tail 1 vs 0 at 8 slots, sparse regime: equal; layers 0, 3-7: R4_RED |
+| review #4 (s5r4 snapshot, HEAD 8e9efeb7dd7) | `DEFAULT_MC`, combo_a_kv | 91 / 100 / 100 | 91 / 100 / 100 | 8 slots: full model repeats; tail 1 vs 0 at 8 slots, sparse regime: equal; layers 0, 3-7: not repeated on this snapshot; repeated with every deallocate off and on s5r4c (tt/model.py lifetime fixes, see the work log) |
 | review #3, `dsa_idx_rep` in the default (ticket 4) | stage-7 precision | 14 / 32 / 90 | 91 / 100 / 100 | the stage-6 logits-pad lifetime bug (ledger) |
 | stage 7, `ag_persistent` | round-6 default | 14 / 32 / 90 | - | 8 slots do not repeat |
 
