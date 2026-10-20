@@ -164,7 +164,9 @@ def test_tool_ingest_refresh(monkeypatch, tmp_path, expect_error):
     from models.autoports.zai_org_glm_5_3_flash.tools import serving_profiles as tool
 
     data_p = tmp_path / "serving_profiles.json"
-    data_p.write_text(sp.path().read_text())
+    base = json.loads(sp.path().read_text())
+    base["measured"] = {}  # independent of what the shipped file has measured already
+    data_p.write_text(json.dumps(base))
     monkeypatch.setenv("GLM53_SERVING_PROFILES", str(data_p))
     d = sp.load()
     probe = {
@@ -244,6 +246,10 @@ def test_apply_precision_default(monkeypatch, expect_error):
     monkeypatch.setenv("GLM53_PRECISION", "")  # unset -> the selected policy id of the data file
     gv.apply_precision_default(d)
     assert gv._precision_id() == d["precision"]["id"]
+    # a PATH to a policy with another KV latent dtype (the bf16-latent stage-7 config): refused as well
+    monkeypatch.setenv("GLM53_PRECISION", "doc/datatype_sweep/configs/shipped.json")
+    with expect_error(ValueError, "does not serve"):
+        gv.apply_precision_default(d)
 
 
 def test_resolve_checkpoint_parent_overlay(monkeypatch, tmp_path, expect_error):

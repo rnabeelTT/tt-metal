@@ -28,7 +28,7 @@ source:
     - models/autoports/zai_org_glm_5_3_flash/vllm_bundle
     - models/autoports/zai_org_glm_5_3_flash/serving_profiles.json                             # read by generator_vllm
     - models/autoports/zai_org_glm_5_3_flash/doc/context_contract.json                         # read by generator_vllm
-    - models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json # combo_a_kv policy
+    - models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json # combo_a_kv_dense4_g4 policy
     - models/autoports/zai_org_glm_5_3_flash/tools/__init__.py
     - models/autoports/zai_org_glm_5_3_flash/tools/serving_profiles.py
     - models/autoports/zai_org_glm_4_5_air/__init__.py   # tt/moe_opt.py imports sparse_matmul_program_config
@@ -56,7 +56,7 @@ serve:
   port: 8000
   block_size: 128          # DSA page block: 32 pool keys = one tile row (tt/dsa.py BLOCK); any other value is refused
   max_num_seqs: 16         # @profiles:default.max_num_seqs
-  max_model_len: 229376    # @profiles:default.max_model_len
+  max_model_len: 243712    # @profiles:default.max_model_len
   capabilities:
     tool_parser: glm47       # <tool_call>name<arg_key>..</arg_key><arg_value>..</arg_value></tool_call> (chat_template.jinja)
     reasoning_parser: glm45  # always-thinking template: <|assistant|><think>
@@ -85,27 +85,27 @@ serve:
 # BEGIN generated from serving_profiles.json
 serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies, tensor parallel 4), 16 sequences sharing one DSA pool. 16 x 229376 tokens (ESTIMATE, pending the G9 capacity probe).
+    description: Two p300 boards (4 dies, tensor parallel 4), 16 sequences sharing one DSA pool. 16 x 243712 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
   - name: p300x2-long
-    description: Two p300 boards, one sequence, the largest context the device DRAM allows. 1 x 309248 tokens (ESTIMATE, pending the G9 capacity probe).
+    description: Two p300 boards, one sequence, the largest context the device DRAM allows. 1 x 325632 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 1
-    max_model_len: 309248
+    max_model_len: 325632
   - name: p300x2-wide
-    description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 137216 tokens (ESTIMATE, pending the G9 capacity probe).
+    description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 151552 tokens (ESTIMATE, pending the G9 capacity probe).
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 32
-    max_model_len: 137216
+    max_model_len: 151552
   - name: p150x4
-    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 hardware (the identical (1, 4) mesh). 16 x 229376 tokens (ESTIMATE, pending the G9 capacity probe).
+    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 hardware (the identical (1, 4) mesh). 16 x 243712 tokens (measured).
     hardware: p150x4
     mesh_device: P150x4
     max_num_seqs: 16
-    max_model_len: 229376
+    max_model_len: 243712
 default_profile: p300x2
 # END generated from serving_profiles.json
 
@@ -148,18 +148,18 @@ card:
     DRAM: the weights fill about 28.9 of the 31.8 GiB of each die; the 11 DSA layers need 6,336 B per token per die
     (replicated on every die) and every decode slot holds 34 MiB of KDA state per die.
     <!-- BEGIN profiles: serving_profiles.json -->
-    - `p300x2` (default): 16 sequences, 229,376-token context, DSA pool 232,576 tokens shared by all sequences [estimate, pending measurement].
-    - `p300x2-long`: 1 sequence, 309,248-token context, DSA pool 311,296 tokens shared by all sequences [estimate, pending measurement].
-    - `p300x2-wide`: 32 sequences, 137,216-token context, DSA pool 142,464 tokens shared by all sequences [estimate, pending measurement].
-    - `p150x4`: 16 sequences, 229,376-token context, DSA pool 232,576 tokens shared by all sequences [estimate, pending measurement].
+    - `p300x2` (default): 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
+    - `p300x2-long`: 1 sequence, 325,632-token context, DSA pool 325,760 tokens shared by all sequences.
+    - `p300x2-wide`: 32 sequences, 151,552-token context, DSA pool 157,056 tokens shared by all sequences [estimate, pending measurement].
+    - `p150x4`: 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
     <!-- END profiles: serving_profiles.json -->
     The advertised context of the checkpoint is 1,048,576 tokens; no profile reaches it on four dies.
 
     ### Precision
-    Selected by a datatype sweep of the full model (policy `combo_a_kv`):
+    Selected by a datatype sweep of the full model (policy `combo_a_kv_dense4_g4`):
     - routed experts: bfp4 (LoFi), all MoE layers;
     - KDA input / output projections, DSA projections, shared expert: bfp4 (LoFi) on layers 1-43, bfp8 on the first
-      and last layer; dense MLP (layers 0-2): bfp8;
+      and last layer; dense MLP: bfp4 (LoFi) on layers 1-2, bfp8 on layer 0;
     - LM head: bfp4 (LoFi); router: bf16 (HiFi4); DSA W_UK / W_UV: bfp8; indexer: bf16;
     - DSA latent cache: fp8 e4m3; indexer keys: bf16; KDA recurrent state: fp32; residual and collectives: bf16.
 
@@ -169,18 +169,18 @@ card:
 
     | prompt | teacher forcing | prefill check |
     | --- | --- | --- |
-    | AIME24 #0 | 0.91 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
-    | AIME24 #1 | 0.96 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
-    | AIME24 #2 | 0.91 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
+    | AIME24 #0 | 0.92 / 1.00 / 1.00 | 0.92 / 1.00 / 1.00 |
+    | AIME24 #1 | 0.95 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
+    | AIME24 #2 | 0.92 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
 
     TODO(stage 8): long-context TT-vs-TT gate. TODO(stage 9): vLLM sampling-parameter conformance (vllm-tt-plugin
     suite). TODO(stage 11): TTI release evals (meta_ifeval, meta_gpqa_cot, ...). The accuracy of E192 against the full
     288-expert GLM-5.3-Flash was not measured here.
 
     ### Performance
-    TODO(stages 9-10): served numbers (vLLM 0.26, this bundle). Measured so far outside vLLM, one slot: 53.2 ms per
-    decode token (18.8 tokens/s, model + sampler trace replays with device token feedback); time to first token
-    0.23 s / 0.37 s / 1.03 s at 128 / 161 / 2048 prompt tokens (warm).
+    TODO(stages 9-10): served numbers (vLLM 0.26, this bundle). Measured so far outside vLLM, one slot: 49.9 ms per
+    decode token (20.0 tokens/s, model + sampler trace replays with device token feedback); time to first token
+    0.23 s / 0.38 s / 1.02 s at 128 / 161 / 2048 prompt tokens (warm). Source: stage 8 final_default_h9.
 
     ### Limitations
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.

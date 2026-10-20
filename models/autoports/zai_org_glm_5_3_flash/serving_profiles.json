@@ -18,19 +18,44 @@
  "dsa_layout": "replicated",
  "trace_region_bytes": 67108864,
  "budget": {
-  "status": "PARTIAL: free_after_load_bytes and dsa_bytes_per_block are measured at bind time by the combo_a_kv 1-slot (pending the combo_a_kv_dense4_g4 G9 rerun) capacity probe; reserve_bytes = the 1,024 MiB serving workspace of that probe. Slot counts without a measured entry use this rule until the G9 probes (1 / 16 / 32 slots) are ingested.",
-  "free_after_load_bytes": 3047399936,
+  "status": "MEASURED for 1 slot: free_after_load_bytes and dsa_bytes_per_block come from the combo_a_kv_dense4_g4 1-slot capacity probe (doc/vllm/capacity/s1); reserve_bytes = the 1,024 MiB serving workspace of the G9 probes. A slot count without a measured entry uses this rule.",
+  "free_after_load_bytes": 3139928064,
   "kda_bytes_per_slot": 35651584,
   "dsa_bytes_per_block": 811008,
   "reserve_bytes": 1073741824,
   "evidence": {
-   "free_after_load_bytes": "doc/datatype_sweep/capacity/combo_a_kv_s1/capacity.json after_load (64 MiB trace region, 2 KDA slots)",
-   "dsa_bytes_per_block": "doc/datatype_sweep/capacity/combo_a_kv_s1/capacity.json dsa_bytes_per_block_all_layers (11 DSA layers x 128 x (512 B fp8 latent + 64 B bf16 pool key)) = 6,336 B per token",
+   "free_after_load_bytes": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json after_load",
+   "dsa_bytes_per_block": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json dsa_bytes_per_block_all_layers",
    "kda_bytes_per_slot": "doc/full_model/memory_budget.json kda_state_per_slot_bytes (34 layers x 16 local heads x 128 x 128 fp32)",
-   "reserve_bytes": "serving workspace 1,024 MiB (stage 8 review #2: the combo_a_kv 1-slot capacity probe doc/datatype_sweep/capacity/combo_a_kv_s1 completed at --workspace-mib 1024; 832 MiB failed in the warm-up prefill, doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832); the G9 probes use the same workspace"
+   "reserve_bytes": "serving workspace 1,024 MiB: every G9 probe (doc/vllm/capacity/s*) ran at --workspace-mib 1024 (stage 8 review #2: 832 MiB failed in the warm-up prefill, doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832)"
   }
  },
- "measured": {},
+ "measured": {
+  "1": {
+   "pool_blocks": 2546,
+   "capped_by_max_seq_len": true,
+   "max_model_len_tested": 325632,
+   "prompt_len": 325571,
+   "copy_accuracy": 1.0,
+   "free_at_prefill_peak_bytes": 233533952,
+   "trace_allocated_bytes": 39387136,
+   "free_after_load_bytes": 3139928064,
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json",
+   "date": "2026-10-20"
+  },
+  "16": {
+   "pool_blocks": 1933,
+   "capped_by_max_seq_len": false,
+   "max_model_len_tested": 245760,
+   "prompt_len": 245699,
+   "copy_accuracy": 1.0,
+   "free_at_prefill_peak_bytes": 247670784,
+   "trace_allocated_bytes": 43581440,
+   "free_after_load_bytes": 2640805888,
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s16/capacity.json",
+   "date": "2026-10-20"
+  }
+ },
  "measured_note": "slots -> {pool_blocks, max_model_len_tested, prompt_len, copy_accuracy, free_at_prefill_peak_bytes, evidence, date}; written by tools/serving_profiles.py ingest from a COMPLETED capacity probe (load, bind, warm-up, capture, longest prefill, traced decode). A measured entry wins over the budget rule for that slot count.",
  "profiles": [
   {
@@ -39,8 +64,8 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 16,
-   "max_model_len": 229376,
-   "status": "estimate"
+   "max_model_len": 243712,
+   "status": "measured"
   },
   {
    "name": "p300x2-long",
@@ -48,8 +73,8 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 1,
-   "max_model_len": 309248,
-   "status": "estimate"
+   "max_model_len": 325632,
+   "status": "measured"
   },
   {
    "name": "p300x2-wide",
@@ -57,7 +82,7 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 32,
-   "max_model_len": 137216,
+   "max_model_len": 151552,
    "status": "estimate"
   },
   {
@@ -66,14 +91,14 @@
    "hardware": "p150x4",
    "mesh_device": "P150x4",
    "max_num_seqs": 16,
-   "max_model_len": 229376,
-   "status": "estimate"
+   "max_model_len": 243712,
+   "status": "measured"
   }
  ],
  "default_profile": "p300x2",
  "default_profile_note": "PENDING stage 10: choose the default from the measured decode speed of the 16-slot build (one decode trace width for all slots) against the 1-slot build.",
  "pending": [
-  "G9: completed capacity probes at 1, 16 and 32 slots with the combo_a_kv policy on the merged code (tools/serving_profiles.py ingest each), then refresh + render-yaml",
+  "G9: completed capacity probes at 1, 16 and 32 slots with the selected policy (combo_a_kv_dense4_g4) on the committed code (tools/serving_profiles.py ingest each), then refresh + render-yaml",
   "Trace region: re-confirm 64 MiB covers the model trace and every sampler variant at 16 and 32 slots (capacity probe trace_allocated)"
  ]
 }

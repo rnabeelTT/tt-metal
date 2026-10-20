@@ -1,0 +1,10 @@
+{
+  "arch": "Glm5NextForConditionalGeneration",
+  "main_class": "models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration",
+  "hf_model": "zai-org/GLM-5.3-Flash",
+  "mesh_device": [
+    "P300x2",
+    "P150x4"
+  ],
+  "notes": "GLM-5.3-Flash with the E192 expert subset (192 of 288 routed experts per MoE layer): 34 KDA linear-attention layers (per-slot recurrent + conv state inside the model) + 11 DSA layers (MLA latent + lightning indexer, paged 128-token blocks indexed by vLLM's block table) + mHC, tensor parallel 4 on a (1,4) Blackhole mesh; registered by the vLLM TT plugin from EXTRA_MODELS_DIR (vllm_bundle/)."
+}

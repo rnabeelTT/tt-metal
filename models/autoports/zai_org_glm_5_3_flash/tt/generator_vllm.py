@@ -107,12 +107,25 @@ def apply_precision_default(data: dict | None = None):
     if cur:
         if not Path(cur).exists() and (MODEL_DIR / cur).exists():
             os.environ["GLM53_PRECISION"] = str(MODEL_DIR / cur)
-        return
-    if not cfg:
-        return
-    if not (MODEL_DIR / cfg).exists():
-        raise RuntimeError(f"selected precision policy {MODEL_DIR / cfg} is missing (serving_profiles.json precision)")
-    os.environ["GLM53_PRECISION"] = str(MODEL_DIR / cfg)
+    elif cfg:
+        if not (MODEL_DIR / cfg).exists():
+            raise RuntimeError(
+                f"selected precision policy {MODEL_DIR / cfg} is missing (serving_profiles.json precision)"
+            )
+        os.environ["GLM53_PRECISION"] = str(MODEL_DIR / cfg)
+    # the DSA pool is sized with the data file's bytes per block: a policy with another KV latent dtype (e.g. a path
+    # to the bf16-latent stage-7 config) would overfill the DRAM
+    want = (data.get("precision") or {}).get("kv_latent_dtype")
+    if want:
+        from .precision import PrecisionOverrides
+
+        got = PrecisionOverrides.from_env().kv_latent_dtype
+        if got != want:
+            raise ValueError(
+                f"GLM53_PRECISION={os.environ.get('GLM53_PRECISION')!r} has kv_latent_dtype {got!r}; "
+                f"serving_profiles.json budgets {want!r} (policy {(data.get('precision') or {}).get('id')}): "
+                "the vLLM path does not serve it"
+            )
 
 
 def _check_weight_cache():
@@ -352,8 +365,9 @@ class Glm5NextForConditionalGeneration:
         t0 = time.time()
         # defer_caches: weights + KDA slot state now; DSA pools in allocate_kv_cache (vLLM's num_blocks), warm-up and
         # trace capture in the plugin's warm-up phases. The DRAM check is serving_profiles.check_fit above (measured
-        # data); budget_check=False skips the generator's constant budget (tt/generator.BUDGET), which does not know
-        # the selected precision (fp8 latent, bfp4 projections). The layout is the one the profiles were measured with.
+        # data per slot count); budget_check=False skips the generator's own budget (tt/generator._budget: the same
+        # data file, but with the standalone GLM53_DRAM_RESERVE_MIB floor of 1,200 MiB instead of the measured
+        # 1,024 MiB serving workspace). The layout is the one the profiles were measured with.
         self._gen = Glm53Generator(
             mesh_device,
             max_batch_size=B,
