@@ -118,9 +118,8 @@ class MCOpts:
     dsa_q_mm_ib: int = 8  # its in0 block (tiles of K); 8 = one head's K, as the per-head bmm (review #3: 16 / 32 / 64)
     # dsa_idx_rep: the 2048 selected-token indices of the sparse list as repeat(pool ids, 4) * 4 + offsets laid out
     # offset-major (a tile repeat along the width) instead of repeat_interleave (transpose, untilize, concat of 4
-    # scalars, tilize, transpose); the list order changes. One decode row only (1 slot): bit-identical there (positions
-    # 128 / 3000 / 130,000); with more rows (32-slot decode: PCC 0.9992, +157 µs, records/sparse_ab.jsonl; sparse
-    # prefill chunks) sparse_sdpa's result depends on the order
+    # scalars, tilize, transpose); the list order changes. NOT EXACT, REJECTED (review #3): sparse_sdpa's result depends
+    # on the order; full-model decode logits differ by up to 8.7 (records/s5r3.log). Kept off for A/B only.
     dsa_idx_rep: bool = False
     # dsa_o_mm: the per-head W_UV products as ONE matmul of the 16 attention rows [16, 512] with W_UV laid out [512, H*256],
     # the off-head blocks masked to 0 and the rows summed (one nonzero per column: exact), instead of tilize of the
@@ -129,9 +128,11 @@ class MCOpts:
     # [1, H*512], head-masked into H rows, one matmul -> [H, 256], row-major concat
     dsa_o_mm: int = 0
     # dsa_tail_shared: the 0-3 tail tokens of the sparse index list (8 one-tile element-wise ops on the step's positions,
-    # ~34 µs) computed once per decode step by the model's first DSA layer and read by the other DSA layers from the
-    # step's shared input dict ("_tail"); a layer without it computes its own (a per-step host input "tail", A/B only,
-    # stands for a consumer layer)
+    # ~34 µs) computed once per decode step by the model's first DSA layer and read by the other DSA layers. The buffer
+    # lives in the module registry _TAIL_BUF, keyed by (mesh, slots), allocated when the first DSA layer is built and
+    # never freed; the producer writes it in place each step and marks the step dict ("_tail") with a reference, which
+    # the consumers read. A model without a producer layer computes its own tail; a per-step host input "tail"
+    # (GLM53_AB_HOST_TAIL, A/B only) stands for a consumer layer
     dsa_tail_shared: bool = False
     # kda_gnorm_op: the KDA decode o-norm + sigmoid gate as ttnn.experimental.kda.sigmoid_gated_rms_norm (head-first
     # [B*H, T, V] with T a whole tile: each (slot, head) row relaid to its own tile row and back) instead of rms_norm +
@@ -146,6 +147,12 @@ class MCOpts:
     kda_conv_max_batch: int = 0
     kda_conv_mixed: bool = False  # KDA decode conv: addcmul on the bf16 history rows directly (no fp32 typecasts)
     moe_grouped_in0: int = 0  # MoE grouped sparse matmuls: in0 K block (gate/up and down; 0 = the stage-3 value 4)
+    # MoE 1-token gather path (routed experts at 1 decode row): sparse-matmul 1D geometry, 0 = the stage-3 single-die
+    # value of the MoE OptimizationConfig (gate/up 64 cores -> 32 used, in0 32; down 64 cores, in0 32 -> 16 used)
+    moe_gather_gu_cores: int = 0
+    moe_gather_gu_in0: int = 0
+    moe_gather_dn_cores: int = 0
+    moe_gather_dn_in0: int = 0
     router_topk_pad: int = 0  # MoE router top-k on a -1e30-padded width (256: power of two; 1024: multi-core top-k)
 
     @classmethod
@@ -1026,7 +1033,7 @@ class MultichipDSA(GlmDSA):
             else:  # no producer layer in this model (e.g. a layer subset without the first DSA layer)
                 tail = own = self._tail(pos_dev)
         p = ttnn.typecast(top_pools, ttnn.float32)
-        if self.mc.dsa_idx_rep and rows == 1:  # one decode row: bit-identical (not prefill chunks or 32 users)
+        if self.mc.dsa_idx_rep and rows == 1:  # not exact; rejected (see MCOpts.dsa_idx_rep); A/B only
             n_tok = TOPK_POOLS * KPOOL
             offs = self._const(
                 "pool_offs_major",
@@ -1279,6 +1286,32 @@ def _install_shared(moe, mc: MCOpts):
     moe._shared = types.MethodType(_shared, moe)
 
 
+def apply_moe_gather(mlp, mc: MCOpts):
+    """(Re)build the 1-token gather sparse-matmul configs of an optimized MoE block from its OptimizationConfig and
+    the MCOpts overrides (construction and every run-time A/B change)."""
+    if not hasattr(mlp, "cfg_gate_up_gather") or not hasattr(mlp, "opt"):
+        return
+    from .moe import sparse_matmul_program_config
+
+    opt, H, Nl = mlp.opt, mlp.hidden, mlp.inter_local
+    tile_gu = getattr(opt, "gather_gate_up_output_tile", None)
+    mlp.cfg_gate_up_gather = sparse_matmul_program_config(
+        1,
+        2 * Nl,
+        H,
+        target_cores=mc.moe_gather_gu_cores or opt.gather_gate_up_cores,
+        in0_block_w_cap=mc.moe_gather_gu_in0 or opt.gather_gate_up_in0,
+        tile_w=(tile_gu[1] if tile_gu else 32),
+    )
+    mlp.cfg_down_gather = sparse_matmul_program_config(
+        1,
+        H,
+        Nl,
+        target_cores=mc.moe_gather_dn_cores or opt.gather_down_cores,
+        in0_block_w_cap=mc.moe_gather_dn_in0 or opt.gather_down_in0,
+    )
+
+
 def _install_router_ds(moe, mc: MCOpts):
     """MoE decode router logits [T, 4096] x [4096, 192] on a 1D config (router_1d, the interleaved weight, 6 cores with
     in0 blocks of 8) or on a DRAM-sharded weight zero-padded to 256 columns (router_ds) instead of ttnn's 6-core default
@@ -1371,6 +1404,7 @@ class MultichipDecoder(OptimizedDecoder):
         if dec.mlp_kind == "moe":
             _install_router_ds(dec.mlp, dec.mc)
             _install_shared(dec.mlp, dec.mc)
+            apply_moe_gather(dec.mlp, dec.mc)
             if dec.mc.moe_grouped_in0:  # TP4 geometry sweep (README "Sparse matmul geometry")
                 dec.mlp.opt = dataclasses.replace(
                     dec.mlp.opt, grouped_gate_up_in0=dec.mc.moe_grouped_in0, grouped_down_in0=dec.mc.moe_grouped_in0

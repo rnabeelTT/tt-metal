@@ -1,6 +1,6 @@
 # Stage 5 work log (optimized multichip decoder)
 
-Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe records under
+Times are UTC, 2026-10-17 until the section dated 2026-10-18. Logs are under `~/glm53-flash-bringup/logs/`, probe records under
 `~/glm53-flash-bringup/artifacts/s5/`.
 
 - 00:20 Read the stage-4 Tracy windows per device (`scripts/s5_ops.py`). One decode pass holds 6 collectives at 95 to
@@ -111,7 +111,8 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
 ## 2026-10-18: ag_persistent revert, final suite, review #2 rework (`artifacts/stage5_review_2.md`)
 
 - 2026-10-17 21:06 -> 2026-10-18 00:30 (coordinator / stage 7): `ag_persistent` broke the 45-layer model (1 slot teacher
-  forcing top-5 32 %; 8 slots: eager and traced runs not repeatable, `records/s7_det_reduced_s8.log`); with it off the
+  forcing top-5 32 %; reduced 0 / 3 / 4 model, 1 of 8 slots active: repeated runs differ with either prefill path, decode traced;
+  `records/s7_det_reduced_s8.log`); with it off the
   model repeats exactly (`records/s7_det_reduced_s8_noagp.log`, `records/s7_final_s8.log`) and reaches 92 / 100 / 100.
   `DEFAULT_MC.ag_persistent = False`. Final suite on that default (stage-4 rework, 2026-10-18 00:36):
   `records/s4r_suite_default_final.log`, 45 passed. Committed: code 08bac32f4c1, docs 6272b83d6c9.
@@ -147,7 +148,7 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
   buffer is now created with `ttnn.clone` + `ttnn.copy` in the eager warm-up step.
 - 05:02 Gate job D4 (`records/s5r2_d4.log`; weight cache on): control (review-2 files, flags off) 92 / 100 / 100;
   candidates with the fixed tail (`records/s5r2_tf_cand3.log`) 92 / 100 / 100, prefill check 91 / 100 / 100; 8 slots on
-  layers 0, 3-7: eager and traced repeat equal (`records/s5r2_det_reduced_cand.log`). The full-model 8-slot run hit a
+  layers 0, 3-7: repeats equal with both prefill paths (decode traced) (`records/s5r2_det_reduced_cand.log`). The full-model 8-slot run hit a
   fabric mapping failure at open (`topology_mapper.cpp:559`) and was rerun in job E. The optional `ag_persistent` +
   linear-topology bisect was skipped (coordinator). `DEFAULT_MC` set: `sinkhorn_faces`, `dsa_q_mm`, `dsa_tail_shared`,
   `kda_conv_max_batch = 16` (the cand3 options; md5 588398cfc6f9 of `tt/multichip_decoder.py`).
@@ -157,8 +158,8 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
   130,000 1848 µs; replay stress 872 / 1079 / 1368 / 4362 / 4717 µs, 200 replays bit-identical each; position 130,000
   1920 µs (50 replays bit-identical); suite 45 passed; fault suite 17 failed + 2 errors, 28 passed. The watcher and the
   ring-fabric prefill runs were cut by the queue rule (raw flock) and re-queued through `run-locked.sh` (job F).
-- 06:19 Job E (`records/s5r2_e.log`, `s5r2_det_full_final.log`): full model, 8 slots, final default: eager and traced
-  repeat equal, tokens = stage 7's final run.
+- 06:19 Job E (`records/s5r2_e.log`, `s5r2_det_full_final.log`): full model, 8 slots, final default: repeats equal with both prefill paths
+  (decode traced), tokens = stage 7's final run.
 - 07:42 Job F (through `run-locked.sh`, `records/s5r2_watcher.log`): watcher on the final default, 7 cases PASSED, 0
   suspicious lines (teardown abort exit 134, known). 08:44-09:26: FABRIC_1D vs FABRIC_1D_RING prefill on the review-2
   options (`records/pf_ring_r2.jsonl`): bit-identical, walls within +-3 %.
@@ -169,10 +170,12 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
   head mask per mesh; `dsa_q_mm_ib`, `dsa_idx_rep` options; the sinkhorn kernel stores `0.0f` instead of
   `sfpi::vConst0`; `tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_faces` (T = 1 / 8 / 16 / 17 / 32);
   `tools/s5_sparse_probe.py`; `s5_watcher.sh` counts "tripped assert" in console.log.
-- `dsa_tail_shared` buffer (coordinator: the stage-6/7 generator's first run on cdab692 gave 10 / 48 / 100): the
-  review-2 producer created the buffer lazily per input dict with `ttnn.clone`, so a new dict during a later warm-up or
-  capture re-created it and dropping the old dict freed a buffer earlier traces read. Now allocated once when the first
-  DSA layer is built, held in a module registry (mesh, slots), never freed; the producer marks the step dict.
+- `dsa_tail_shared` buffer: the review-2 producer created the buffer lazily per input dict with `ttnn.clone`. Now it
+  is allocated once when the first DSA layer is built, held in a module registry (mesh, slots), never freed; the
+  producer marks the step dict. Review #4 reclassified the trigger: the only 10 / 48 / 100 run on cdab692
+  (`~/glm53-flash-bringup/logs/s67r/press_B3.log`) is unclassified, seen only under the stage-6/7 DRAM-pressure config,
+  which fails without the option (press_B1 / B2, b7_E). The generator keeps one `dsa_bufs` dict, so the review-2 clone
+  was never dropped; the build-time buffer is a hardening, not a fix.
 - Snapshot `~/glm53-flash-bringup/s5r3_snapshot` = HEAD cdab692 + these edits (without the stage-8 agent's 2
   root_cache lines in the live `tt/multichip_decoder.py`). Device work through `run-locked.sh` (QPRIO unset), three
   tickets in sequence.
@@ -183,20 +186,21 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
   set during the ticket, before its full-model runs. Teacher forcing on the final default 92 / 100 / 100, prefill check
   91 / 100 / 100. Full model in the sparse regime, with and without `dsa_tail_shared`: logits and tokens equal. Watcher
   without the eth cores: both dsa_moe cases clean.
-- 11:4x-12:41 Ticket 2 (`records/s5r3.log`): full model, sparse regime, final default vs `dsa_idx_rep=0,
+- 12:39-12:41 Ticket 2 (`records/s5r3.log`): full model, sparse regime, final default vs `dsa_idx_rep=0,
   dsa_q_mm_ib=8`: prefill logits differ (max |diff| 9.9 at 3000). Cause: `dsa_idx_rep` keyed on the slot count (S = 1),
   so it also reordered the index list of sparse prefill chunks, where the order changes sparse_sdpa's result (as at
   32-user decode). Fixed: one decode row only (`rows == 1`). Ticket 4 re-runs teacher forcing and the sparse-regime
   comparisons on the fixed default, in one ticket.
-- 13:00 Ticket 3 (`records/stress_r3.jsonl`, `longpos_r3.jsonl`, `tracy/after_r3*`): the 1-slot dsa_moe layer on that
+- 13:00 Ticket 3 (`records/stress_r3.jsonl`, `longpos_r3.jsonl`; its Tracy in `tracy/after_r3*` was replaced by ticket
+  6's): the 1-slot dsa_moe layer on that
   default: replay 1334 µs (200 replays bit-identical), 1886 µs at position 130,000; Tracy 1250 / 1813 µs.
 - 14:20-14:30 Ticket 4 (`records/s5r3.log`): with `dsa_idx_rep` limited to one decode row, full-model teacher forcing
-  gave 14 / 32 / 90 (`records/s5r3_tf_final2.log`). Same signature as the open prefill-to-decode race the stage-6/7
-  work is chasing; unclassified. Sparse regime: default vs `dsa_idx_rep=0, dsa_q_mm_ib=8`: prefill equal, decode logits
+  gave 14 / 32 / 90 (`records/s5r3_tf_final2.log`). Same signature as the stage-6/7 decode corruption. Review #4 classified it: the TF positions are dense, so dsa.py discards the reordered list; it is
+  the stage-6/7 deterministic layout-dependent decode corruption. Sparse regime: default vs `dsa_idx_rep=0, dsa_q_mm_ib=8`: prefill equal, decode logits
   differ (max 8.7), tokens diverge at 3004; default vs `dsa_tail_shared=0`: equal. `dsa_idx_rep` rejected (not exact;
   the layer A/B's mostly empty cache hid the order dependence). It had been in the live `DEFAULT_MC` from ~10:53 to
   ~14:45; reverted (coordinator: the live default changes only after the gate passes on a snapshot).
-- Ticket 5: HEAD moved to b8198430147 (stage 8: default precision combo_a_kv). New snapshot
+- 15:00 Ticket 5 prepared: HEAD moved to b8198430147 (stage 8: default precision combo_a_kv). New snapshot
   `~/glm53-flash-bringup/s5r3h_snapshot` = that HEAD + the review-3 edits; teacher forcing on the shipping default
   (GLM53_PRECISION unset) and with `dsa_tail_shared=0`; full model in the sparse regime, `dsa_q_mm_ib` 64 vs 8.
 - 15:23-15:34 Ticket 5, the stage-5 gate (`records/s5r3.log`): snapshot HEAD b8198430147 + the review-3 edits, the
@@ -206,3 +210,21 @@ Times are UTC, 2026-10-17. Logs are under `~/glm53-flash-bringup/logs/`, probe r
 - 15:44-15:50 Ticket 6 (`records/stress_r3b.jsonl`, `longpos_r3b.jsonl`, `tracy/after_r3*`): the 1-slot dsa_moe layer
   on the final default at the stage-5 reference precision (`GLM53_PRECISION=none`): replay 1360 µs (200 replays
   bit-identical), 1912 µs at position 130,000 (50 replays); Tracy 1278 / 1838 µs. Stack 50.7 ms per token.
+
+## 2026-10-18 / 20: review #4 rework (on 8e9efeb7dd7)
+
+- Code: `MCOpts.moe_gather_gu_cores / _gu_in0 / _dn_cores / _dn_in0` and `apply_moe_gather` (the 1-token MoE gather
+  configs rebuilt from the MoE OptimizationConfig and the overrides; `tools/mc_decode_ab.py` rebuilds them on every
+  run-time change); `tools/s5_sparse_probe.py --slots`; comments for `dsa_idx_rep` (rejected) and the `_TAIL_BUF`
+  registry; `s5_watcher.sh` takes `WATCHER_TEST_FILE`.
+- 17:31-17:49 Ticket 1 (`records/s5r4.log`, snapshot s5r4 = HEAD 8e9efeb7dd7 + the edits): gather sweep at 1 user
+  (`records/gather_ab.jsonl`): all bit-identical, none faster than the default (gate/up 32 cores in0 32, down 64 cores):
+  nothing adopted. Shipping precision: TF 91 / 100 / 100; full model 8 slots repeats; sparse regime 8 slots, tail 1 vs 0
+  equal. Reduced stack 8 slots did not repeat. Watcher kda_moe (eth off) collected nothing: the live test file then
+  lacked `import pytest` (stage-8 fixture).
+- 19:19-19:22 Ticket 2: the reduced repeat failed again; with every `ttnn.deallocate` forced to `force=False`
+  (`records/s5_nofree.py`) all repeats were equal: the stage-6 logits-pad lifetime bug (tt/model.py decode_step freed
+  the storage of a padded-logits view), found and fixed by the 6/7 agent.
+- 20:58-21:03 Ticket 3 (snapshot s5r4c = HEAD 656c998e3df + the edits + model.py 9615f14a971a with the fix): reduced
+  stack 8 slots repeats equal; watcher `test_real_weights[kda_moe]` (eth off, snapshot test file) PASSED, 0 tripped
+  asserts. The session was paused after this ticket (resumed 2026-10-20).

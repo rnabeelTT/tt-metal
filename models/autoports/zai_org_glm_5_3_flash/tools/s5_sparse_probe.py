@@ -27,33 +27,34 @@ def _ids(L, seed=0):
     return torch.randint(1000, 100000, (L,), generator=g, dtype=torch.int64)
 
 
-def run(lengths, steps, seq_len, save):
+def run(lengths, steps, seq_len, save, slots=1):
     os.environ.setdefault("HF_MODEL", "zai-org/GLM-5.3-Flash")
     from models.autoports.zai_org_glm_5_3_flash.tools.readiness import _open_mesh
     from models.autoports.zai_org_glm_5_3_flash.tt.generator import Glm53Generator
 
     mesh = _open_mesh(int(os.environ.get("GLM53_TRACE_REGION", 64 << 20)))
-    out = {"env_mc": os.environ.get("GLM53_MC", ""), "cases": {}}
+    out = {"env_mc": os.environ.get("GLM53_MC", ""), "slots": slots, "cases": {}}
     g = None
     try:
         t0 = time.time()
-        g = Glm53Generator(mesh, max_batch_size=1, max_seq_len=seq_len)
+        g = Glm53Generator(mesh, max_batch_size=slots, max_seq_len=seq_len)
         print(f"S5SP built in {time.time() - t0:.0f}s", flush=True)
         V = g.model.vocab
         for L in lengths:
-            ids = _ids(L, seed=L + 11)
+            # one prompt per slot (slot 0 keeps the 1-slot prompt), every slot decoding the same positions
+            ids = torch.stack([_ids(L, seed=L + 11 + 1000 * b) for b in range(slots)])
             g.reset()
-            lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[L])[0, -1, :V].float()
-            tok, pos = int(lg.argmax()), L
-            step_logits, toks = [], [tok]
+            lg = g.prefill_forward(ids, prompt_lens=[L] * slots)[:, -1, :V].float()  # [S, V]
+            tok, pos = lg.argmax(-1), L
+            step_logits, toks = [], [tok.tolist()]
             for i in range(steps):
                 o = g.decode_forward(
-                    torch.tensor([[tok]]), torch.tensor([pos]), enable_trace=True, on_device_sampling=False
+                    tok.reshape(slots, 1), torch.tensor([pos] * slots), enable_trace=True, on_device_sampling=False
                 )
-                row = o[0, :V].float()
+                row = o[:, :V].float()  # [S, V]
                 step_logits.append(row)
-                tok, pos = int(row.argmax()), pos + 1
-                toks.append(tok)
+                tok, pos = row.argmax(-1), pos + 1
+                toks.append(tok.tolist())
             out["cases"][L] = {"prefill_logits": lg, "decode_logits": torch.stack(step_logits), "tokens": toks}
             fin = bool(torch.isfinite(torch.stack(step_logits)).all())
             print(f"S5SP L={L} positions {L}..{L + steps - 1} tokens {toks} finite {fin}", flush=True)
@@ -87,13 +88,14 @@ def main():
     ap.add_argument("--lengths", default="2100,3000")
     ap.add_argument("--steps", type=int, default=8)
     ap.add_argument("--seq-len", type=int, default=4096)
+    ap.add_argument("--slots", type=int, default=1)
     ap.add_argument("--save")
     ap.add_argument("--compare", nargs=2)
     a = ap.parse_args()
     if a.compare:
         compare(*a.compare)
     else:
-        run([int(x) for x in a.lengths.split(",")], a.steps, a.seq_len, a.save)
+        run([int(x) for x in a.lengths.split(",")], a.steps, a.seq_len, a.save, a.slots)
 
 
 if __name__ == "__main__":

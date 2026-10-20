@@ -16,6 +16,7 @@ runs all S slots per step; the per-step DSA / KDA inputs are shared by every lay
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import time
 from types import SimpleNamespace
@@ -28,7 +29,7 @@ from models.tt_transformers.tt.ccl import TT_CCL, tt_all_gather
 
 from .ckpt import CheckpointReader
 from .decode_inputs import DeviceDecodeInputs
-from .multichip_decoder import TOPOLOGY, MultichipDecoder, _ds_grid, _width_shard, sharded_rms_norm
+from .multichip_decoder import DEFAULT_MC, TOPOLOGY, MultichipDecoder, _ds_grid, _width_shard, sharded_rms_norm
 from .optimized_decoder import SELECTED, OptConfig
 from .precision import PrecisionOverrides
 from .weight_cache import cached, weight_cache_from_env
@@ -93,13 +94,16 @@ class Glm53Model:
         weight_cache="env",
         allocate_dsa: bool = True,
         lockstep_sampling: bool = False,
+        dsa_shard: bool | None = None,
     ):
         """weight_cache: "env" = tt/weight_cache.weight_cache_from_env (GLM53_CACHE_DIR), None = no cache, or a
         WeightCache. A cached build loads the final device weights without reading the checkpoint tensors.
         allocate_dsa=False (vLLM serving): the DSA layers' paged pools and the shared decode inputs are allocated
         later by allocate_dsa_caches(num_blocks), when vLLM's block count is known. lockstep_sampling: every die
         feeds back die 0's sampled token (tt/serving_state.install_lockstep_sampling; required for sampled serving
-        on a multi-die mesh)."""
+        on a multi-die mesh). dsa_shard: the DSA latent pool layout (True = block-sharded over the dies, tt/dsa_shard.py;
+        False = replicated; None = MCOpts.dsa_shard / GLM53_DSA_SHARD). tt/generator.plan_context chooses it from the
+        requested context."""
         t_load = time.time()
         self.mesh = mesh
         self.rd = rd or CheckpointReader()
@@ -180,6 +184,10 @@ class Glm53Model:
 
         # stage-8 precision (GLM53_PRECISION, tt/precision.py; unset = selected default, none = stage 7): LM head
         PrecisionOverrides.from_env().apply_model(self, 0, tc["num_hidden_layers"] - 1)
+        mc = None
+        if dsa_shard is not None:  # explicit layout (wins over GLM53_DSA_SHARD; GLM53_MC still applies on top)
+            mc = dataclasses.replace(DEFAULT_MC, dsa_shard=bool(dsa_shard))
+            saved_env = os.environ.pop("GLM53_DSA_SHARD", None)
         self.layers = []
         for i in self.layer_indices:
             t0 = time.time()
@@ -192,29 +200,65 @@ class Glm53Model:
                 prefill_lengths=self.prefill_lengths,
                 dsa_kwargs={"max_context": max_context, "num_blocks": num_blocks},
                 tt_ccl=self.tt_ccl,
+                mc=mc,
                 opt=opt,
                 weight_cache=self.weight_cache,
             )
-            if allocate_dsa or dec.attn_kind != "dsa":
+            if (allocate_dsa and allocate_dsa != "early") or dec.attn_kind != "dsa":
                 dec.allocate_decode_state(max_batch)
             self.layers.append(dec)
             logger.info(f"layer {i} ({dec.attn_kind}/{dec.mlp_kind}) loaded in {time.time() - t0:.1f}s")
+        if dsa_shard is not None and saved_env is not None:
+            os.environ["GLM53_DSA_SHARD"] = saved_env
         dsa = next((d.attn for d in self.layers if d.attn_kind == "dsa"), None)
         kda = next((d.attn for d in self.layers if d.attn_kind == "kda"), None)
-        self.inputs = DeviceDecodeInputs(mesh, dsa=dsa, kda=kda, batch=max_batch) if allocate_dsa else None
+        self.dsa_shard = bool(getattr(dsa, "dsa_shard", False))
+        if self.dsa_shard and any(
+            getattr(d.attn, "latent_dtype", ttnn.bfloat16) != ttnn.bfloat16 for d in self.layers if d.attn_kind == "dsa"
+        ):
+            raise ValueError(
+                "the block-sharded DSA cache supports the bf16 latent only (GLM53_PRECISION kv_latent_dtype)"
+            )
+        early = allocate_dsa == "early"  # diagnostic (GLM53_DEFER_POOL=2): the deferred API, before the sampler
+        self.inputs = (
+            DeviceDecodeInputs(mesh, dsa=dsa, kda=kda, batch=max_batch) if allocate_dsa and not early else None
+        )
         self._install_inactive_skip()
-        self.sampling = self._make_sampler()
-        if lockstep_sampling and self.sampling is not None:
-            from .serving_state import install_lockstep_sampling
-
-            install_lockstep_sampling(self.sampling, mesh)
-            self.sampling.seed_manager.salt_duplicate_seeds = False
+        if early:
+            self.allocate_dsa_caches(num_blocks or max_batch * (max_context // 128) + 1)
+        # the sampler is built after the DSA pools and the shared decode inputs: built before a deferred pool
+        # (allocate_dsa_caches after construction), traced decode replays diverged from eager (stage-6/7 rework
+        # bisect, 2026-10-18: reduced 8-slot probe, deferred pool after the sampler fails, deferred pool before the
+        # sampler passes). Deferred builds create it in allocate_dsa_caches.
+        self._lockstep = lockstep_sampling
+        self.sampling = None
+        if self.inputs is not None:
+            self._init_sampler()
         wc = self.weight_cache
         self.load_seconds = time.time() - t_load
         logger.info(
             f"model weights loaded in {self.load_seconds:.1f}s ("
             + (f"weight cache {wc.root}: {wc.hits} hits, {wc.misses} stored)" if wc else "no weight cache)")
         )
+
+    def _init_sampler(self):
+        self.sampling = self._make_sampler()
+        if self.sampling is not None and os.environ.get("GLM53_PENALTY_CLONE", "1") == "1":
+            # TTPenalties.update_output_tokens reshapes the token tensor it is given and deallocates that view
+            # (token_bin_counts_and_mask: new_tokens.deallocate()); handed the decode token buffer (tt_out_tok) it can
+            # free it, after which the decode trace reads its token input from recycled memory. Count a copy instead.
+            tp = self.sampling.tt_penalties
+            orig_upd = tp.update_output_tokens
+
+            def update_output_tokens(new_tokens, _o=orig_upd):
+                return _o(ttnn.clone(new_tokens))
+
+            tp.update_output_tokens = update_output_tokens
+        if self._lockstep and self.sampling is not None:
+            from .serving_state import install_lockstep_sampling
+
+            install_lockstep_sampling(self.sampling, self.mesh)
+            self.sampling.seed_manager.salt_duplicate_seeds = False
 
     def allocate_dsa_caches(self, num_blocks: int):
         """Deferred DSA allocation (allocate_dsa=False): every DSA layer's latent / pooled-key pool for `num_blocks`
@@ -230,6 +274,8 @@ class Glm53Model:
         self.inputs = DeviceDecodeInputs(self.mesh, dsa=dsa, kda=kda, batch=self.S)
         if not self.skip_inactive:
             self._install_inactive_skip()
+        if self.sampling is None and hasattr(self, "_lockstep"):  # (early allocation runs before _lockstep is set)
+            self._init_sampler()
         return [(d.attn.latent, d.attn.pooled) for d in self.layers if d.attn_kind == "dsa"]
 
     # --------------------------------------------------------------------------------------------- pieces
@@ -463,8 +509,11 @@ class Glm53Model:
     # --------------------------------------------------------------------------------------------- prefill
     def chunk_plan(self, L: int, sizes=None):
         """[(n, valid rows)] of an L-token prompt. sizes: forced chunk lengths (warm-up). GLM53_PREFILL_PLAN=cost:
-        the multiset of constructed lengths with the least estimated time that covers L (a 161-token prompt runs two
-        128-row chunks, not one 2048-row chunk), largest first, so every chunk but the last is full."""
+        the multiset of constructed lengths with the least estimated time (PREFILL_COST_MS) that covers L, largest
+        first, so every chunk but the last is full (lengths 128 / 512 / 2048: 161 -> one 512 chunk, 600 -> 512 + 128,
+        2600 -> 2048 + 512 + 128). GLM53_PREFILL_PLAN=legacy: the largest length, then the smallest that holds the rest
+        (2600 -> 2048 + 2048). The estimates ignore the chunk's start position (a deep chunk's sparse path costs more).
+        """
         lens = self.prefill_lengths
         if sizes is None and self.prefill_plan == "cost" and len(lens) > 1:
             unit = lens[0]
@@ -505,7 +554,8 @@ class Glm53Model:
         device_logits=True: the last row's logits stay on the device, copied to all S rows: [1,1,S,V/tp] bf16 (the
         on-device sampler's decode-logits shape; row `slot` is sampled with the slot's params)."""
         L = int(ids.numel())
-        assert 0 < L <= self.max_context, (L, self.max_context)
+        if not 0 < L <= self.max_context:
+            raise ValueError(f"prompt length {L} outside 1 .. max_seq_len {self.max_context}")
         states = [None] * len(self.layers)
         outs = []
         last = None
@@ -560,7 +610,8 @@ class Glm53Model:
         if os.environ.get("GLM53_MOE_SPLIT_AUTO", "1") != "1":
             self.moe_split = {"mode": "default", "rows": os.environ.get("GLM53_MOE_SORTED_ROWS", "default")}
             return self.moe_split
-        if "GLM53_MOE_SORTED_ROWS" in os.environ and not getattr(self, "_moe_split_auto", False):
+        # an explicit GLM53_MOE_SORTED_ROWS wins; one written by an earlier automatic choice (marker) does not
+        if "GLM53_MOE_SORTED_ROWS" in os.environ and os.environ.get("_GLM53_MOE_ROWS_AUTO") != "1":
             self.moe_split = {"mode": "env", "rows": os.environ["GLM53_MOE_SORTED_ROWS"]}
             return self.moe_split
         need = int(float(os.environ.get("GLM53_MOE_NOSPLIT_FREE_MIB", "1024")) * 2**20)
@@ -572,7 +623,7 @@ class Glm53Model:
             free = 0
         rows = "0" if free >= need else os.environ.get("GLM53_MOE_SORTED_ROWS_SPLIT", "1024")
         os.environ["GLM53_MOE_SORTED_ROWS"] = rows  # read per call by moe_opt.sorted_rows_cap
-        self._moe_split_auto = True
+        os.environ["_GLM53_MOE_ROWS_AUTO"] = "1"
         self.moe_split = {"mode": "auto", "rows": rows, "largest_free_bytes_per_die": free, "need_bytes": need}
         logger.info(f"MoE prefill row split: {self.moe_split}")
         return self.moe_split
@@ -720,7 +771,12 @@ class Glm53Model:
         logits = self.head(X)
         if self.SR > self.S:  # sampler rows: zero rows for the padding (never read back)
             padded = ttnn.pad(logits, [(0, 0), (0, 0), (0, self.SR - self.S), (0, 0)], 0.0)
-            ttnn.deallocate(logits)
+            # no ttnn.deallocate(logits): a pad inside the tile padding returns a VIEW of `logits`, and deallocate
+            # (force=True by default) freed the storage the returned tensor - the decode trace's persistent logits
+            # output - still uses. The allocator then handed that block to later tensors and every replay wrote the
+            # logits into them (stage-6/7 rework 2026-10-18: teacher forcing 14/32/90 whenever the block was reused,
+            # e.g. under DRAM pressure; found with ttnn.deallocate(force=False) + an is_allocated() check). Python
+            # releases `logits` when it goes out of scope; the shared storage lives as long as `padded`.
             logits = padded
         ttnn.deallocate(X)
         self.inputs.advance()  # pos += 1 for active slots: the next replay decodes the next position

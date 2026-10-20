@@ -18,15 +18,18 @@ Device ops that belong to the stage:
 - `mhc_split_sinkhorn`, `faces` attribute (`MHC_SINKHORN_FACES=1`, default off): the SFPU work of the 40
   normalizations runs only on the DST faces that hold the 16 used columns (`sinkhorn_faces`). See "Sinkhorn".
 
-Review history (`~/glm53-flash-bringup/artifacts/stage5_review_{1,2,3}.md`):
+Review history (`~/glm53-flash-bringup/artifacts/stage5_review_{1,2,3}.md`; the review-3 file is a summary of the
+required items, saved from the coordinator's relay):
 
 - Review #1 asked for the deferred items. Round 6 answers them (sections marked "review #1").
 - Review #2 found the headline numbers measured with `ag_persistent` on, which the final default does not have. The
   2026-10-18 rework re-measured everything on the final default. It added the face-restricted Sinkhorn, the DSA
   data-movement audit and the stacked (full-model) gate.
 - Review #3 found the sparse-regime paths unchecked and some labels wrong. The second 2026-10-18 rework (marked
-  "review #3") adds the sparse-regime checks, fixes a buffer-lifetime hazard in `dsa_tail_shared`, and corrects the
+  "review #3") adds the sparse-regime checks, hardens the `dsa_tail_shared` buffer lifetime, and corrects the
   labels.
+- Review #4 asked for the 8-slot gate on the review-3 code, a TP4 sweep of the 1-token MoE gather geometry, and label
+  corrections (marked "review #4").
 
 ## Result
 
@@ -63,7 +66,7 @@ Decode, device time of one traced replay (Tracy, device 0, µs). `tracy/before` 
 The 32-user rows move by up to 5 % between Tracy runs of the same build. The cause is the DRAM-bound sparse expert
 matmuls and row gather: 2499 / 2718 / 2684 µs in three runs. The replay table (200 replays) is the stable figure.
 
-The long-position step costs +563 µs over position 128 (review-2 Tracy pair: 1287 -> 1848), all in the sparse
+The long-position step costs +561 µs over position 128 (review-2 Tracy pair: 1287 -> 1848), all in the sparse
 attention path:
 
 - sparse_sdpa 33 -> 356 µs (2,048 selected tokens gathered from a 131K-token cache instead of 129);
@@ -113,15 +116,22 @@ Full model (the stage gate, see "Stacked gate"):
   `dsa_idx_rep` in the default at the time (rejected later, see the audit).
 - Review #2 (`records/s5r2_tf_cand3.log`): teacher forcing 92 / 100 / 100, prefill check 91 / 100 / 100. That run set
   the four review-2 options through `GLM53_MC` on the file before they became the default; the values are the same.
-- Sparse regime (review #3): the full model decodes positions 2100-2107 and 3000-3007 (`tools/s5_sparse_probe.py`).
-  With and without `dsa_tail_shared`, the prefill logits, all 16 decode steps' logits and the tokens are equal (max
-  |diff| 0; tickets 1 and 4, `records/s5r3_sparse_full_compare.txt`). `dsa_q_mm_ib` 64 vs 8 on the shipping default:
-  equal as well (ticket 5).
-- Repeatability, 8 slots (review #2): decode is always traced; each prompt ran twice with each prefill path. Tokens
+- Sparse regime (review #3, 1 slot): the full model decodes positions 2100-2107 and 3000-3007
+  (`tools/s5_sparse_probe.py`). With and without `dsa_tail_shared`, the prefill logits, all 16 decode steps' logits
+  and the tokens are equal (max |diff| 0). That ran in tickets 1 and 4 at the stage-7 precision
+  (`records/s5r3_sparse_full_compare.txt`). `dsa_q_mm_ib` 64 vs 8 at the shipping precision: equal as well (ticket 5).
+- Review #4 at the shipping precision, 8 slots (`records/s5r4.log`): the full model repeats (both prefill paths,
+  decode traced; `records/s5r4_det_full.log`). In the sparse regime, `dsa_tail_shared` 1 vs 0 gives equal prefill and
+  decode logits and tokens at 2100 and 3000, with 8 slots decoding different tokens (`records/s5r4_sparse8_compare.txt`).
+  Teacher forcing (1 slot) 91 / 100 / 100. The reduced stack (layers 0, 3-7) did not repeat; that is the stage-6 logits
+  lifetime bug, not a stage-5 option (see the anomaly ledger):
+  with the logits-pad fix in `tt/model.py` (snapshot s5r4c: HEAD 656c998e3df + review-4 edits + model.py 9615f14a971a), tokens, eager-prefill and traced-prefill repeats all equal (`records/s5r4_det_reduced_fix.log`).
+- Repeatability, 8 slots (review-2 code): decode is always traced; each prompt ran twice with each prefill path. Tokens
   were equal and max |diff| 0, on layers 0, 3-7 (`records/s5r2_det_reduced_cand.log`) and on the full model
   (`records/s5r2_det_full_final.log`). The full-model tokens equal stage 7's final run (`records/s7_final_s8.log`).
 
-Layer suite and fault injection:
+Layer suite and fault injection (review-2 code; the review-3 / review-4 code was checked with the kernel tests, the
+option compares, the gates above and the watcher rerun below):
 
 - `tests/test_multichip_decoder.py` (TP4, `records/s5r2_suite.log`): 45 passed.
 - The single-die baseline compare passes with the stage-4 rework's capped near-tie allowance. kda_moe decode row 2
@@ -148,7 +158,7 @@ Kernels, replays and option equivalence:
 - Option equivalence uses `tools/mc_decode_ab.py --compare 8`: 1 eager and 8 traced decode steps from a fresh state,
   compared bit by bit with the variant that has the review-2 options off. Results are in "Option equivalence".
 
-Watcher (`records/s5r2_watcher.log`, `watcher/<case>/console.log`), 7 cases on the final default:
+Watcher (review-2 code; `records/s5r2_watcher.log`, `watcher/<case>/console.log`), 7 cases on that default:
 
 - All 7 tests PASSED. No watcher.log line flags a model kernel or a collective.
 - Every process ends abnormally at teardown, in one of two forms seen on this board before. The 122B port's control
@@ -158,9 +168,10 @@ Watcher (`records/s5r2_watcher.log`, `watcher/<case>/console.log`), 7 cases on t
   (0, 9) / virtual (29, 25). The message is "subordinate_erisc detected invalid NOC command buffer state", in
   `fabric_erisc_router.cpp`. It appears after the test PASSED, when a watcher dump falls into the teardown window.
 - `scripts/s5_watcher.sh` now counts "tripped assert" in console.log as well as watcher.log lines.
-- With the eth cores' watcher off (`TT_METAL_WATCHER_DISABLE_ETH=1`, `records/s5r3_watcher_noeth.log`): both dsa_moe cases that showed form (ii) pass with
+- With the eth cores' watcher off (`TT_METAL_WATCHER_DISABLE_ETH=1`, `records/s5r3_watcher_noeth.log`, review-3 code): both dsa_moe cases that showed form (ii) pass with
   exit 0, 0 suspicious lines and 0 tripped asserts. The assert belongs to the eth fabric-router teardown, not to the
-  decoder's kernels.
+  decoder's kernels. The third form-(ii) case, `test_real_weights[kda_moe]` (review #4, snapshot test file,
+  `records/s5r4_watcher_noeth.log`): PASSED, exit 0, 0 tripped asserts.
 
 ## Option equivalence (review #3 P1-1, P2-1)
 
@@ -298,8 +309,8 @@ Details of the DSA and KDA rows (review #2 / #3 P2-2):
   and with one decode row the decode logits changed (max |diff| 8.7, tokens diverge at position 3004;
   `records/s5r3.log`, tickets 2 and 4). At 32 users the layer A/B already showed PCC 0.99919 and +157 µs.
 - Rejected: the option is not exact. A full-model teacher-forcing run with it in the default gave 14 / 32 / 90
-  (ticket 4). That is also the signature of the open prefill-to-decode race the stage-6/7 work is chasing, so that
-  run is unclassified.
+  (ticket 4). Those TF positions are dense, where dsa.py discards the sparse list, so that run is the stage-6 logits-pad
+  lifetime bug (deterministic, layout-dependent decode corruption), not this option.
 - DSA open-pool online softmax (the pooled index key): ~14 `BinaryNg` / `Unary` / `Typecast` ops on [1, 128] fp32, plus
   3 `Ternary` + `Copy` state writes, ~80 µs. There is no RoPE in the indexer; review #2's "indexer RoPE chain" is
   this update. It needs a new fused fp32 kernel: open.
@@ -433,7 +444,23 @@ accumulation. They serve the pairs path at 1 user and the sorted path at 32 user
 | in0 16 | - | 4380 | - | 25.23 |
 | subblock w 4 | - | - | - | 25.31 |
 
-in0 8 is selected (`moe_grouped_in0 = 8`).
+in0 8 is selected (`moe_grouped_in0 = 8`). The 32-user down projection still runs in0 blocks of 4: the grouped
+factory's L1 budget shrinks the K block until the resident expert block fits (`tt/moe_opt.py` `_grouped_configs`).
+
+1-token gather path (review #4 P2-C). At 1 user the routed experts run the gather path: gate/up on
+`cfg_gate_up_gather` (32 output tiles, so 32 cores at most with 32-wide tiles; in0 32) and down on `cfg_down_gather`
+(64 cores, in0 16). Sweep with `--compare 8`, kda_moe / dsa_moe, 1 user (`records/gather_ab.jsonl`, replay µs):
+
+| gate/up cores x in0 | kda_moe | dsa_moe | | down cores | kda_moe | dsa_moe |
+|---|---|---|---|---|---|---|
+| 32 x 32 (default) | 1078.2 | 1360.3 | | 64 (default) | 1078.3 | 1360.9 |
+| 32 x 16 / 64 / 128 | 1100.9 / 1078.8 / 1089.0 | 1382.6 / 1359.9 / 1370.6 | | 32 | 1079.0 | 1360.2 |
+| 16 x 16 to 128 | 1110.2 to 1114.4 | 1391.8 to 1396.1 | | 16 | 1101.1 | 1381.8 |
+| 8 x 16 to 128 | 1198.3 to 1224.0 | 1479.1 to 1504.2 | | | | |
+
+Every variant is bit-identical; none beats the default, which stays. More gate/up cores need 16-wide output tiles
+(`gather_gate_up_output_tile`, 64 cores), which changes the weight tiling and the weight cache: not attempted here. At
+8 and 32 users the routed experts take the pairs and sorted paths, which do not use these configs.
 
 ## Fidelity (review #1 P1-1)
 
@@ -487,32 +514,35 @@ Rejected collective families, measured on this board by the 122B port (same ops 
 ## Stacked gate (review #2 P2-1, review #3 P1-1)
 
 Single-layer gates (suite, replay stress, determinism, watcher) do not cover hazards that only appear with many layers
-or several captured traces. Two such hazards appeared in this stage:
+or several captured traces. Two such hazards appeared in this stage (the second one twice):
 
 - `ag_persistent`: every one-layer gate passed; the stacked model was not repeatable (see Candidates).
 - `dsa_tail_shared`, first version: the step tail lived in the step's input dict as a fresh tensor, and the producer
   freed the previous one. The generator captures several decode traces, so a later capture freed a buffer that an
   earlier trace still read. Every single-layer A/B was bit-identical (one trace); teacher forcing fell to 10 / 48 / 100.
-- `dsa_tail_shared`, review-2 version: one buffer per input dict, created with `ttnn.clone` on the first call. A
-  generator that hands the layers a new dict during a later warm-up or capture re-creates it, and dropping the old dict
-  frees a buffer that earlier traces read. The stage-6/7 generator's first run on cdab692 showed the same signature
-  (10 / 48 / 100); this path is the likely cause.
-- `dsa_tail_shared`, review-3 version: the buffer is allocated once, when the model's first DSA layer is built, before
-  any warm-up or capture. It lives in a module registry keyed by mesh and slot count and is never freed or replaced.
-  The producer writes it in place and marks the step dict with a reference to it; consumers read it through that mark.
+- `dsa_tail_shared`, review-2 version: one buffer per input dict, created with `ttnn.clone` on the first call. The
+  generator passes one persistent `dsa_bufs` dict for every step (`tt/model.py`), so that clone is never dropped. The
+  only 10 / 48 / 100 run on cdab692 (`~/glm53-flash-bringup/logs/s67r/press_B3.log`, 65536 tokens + 480 MB ballast)
+  is unclassified: it was seen only under the stage-6/7 DRAM-pressure config, which fails without the option too
+  (press_B1 / press_B2 on s8_snapshot, b7_E with eager decode: 14 / 32 / 90).
+- `dsa_tail_shared`, review-3 version (a hardening, not a fix): the buffer is allocated once, when the model's first
+  DSA layer is built, before any warm-up or capture. It lives in the module registry `_TAIL_BUF`, keyed by mesh and
+  slot count, and is never freed or replaced. The producer writes it in place and marks the step dict with a
+  reference; consumers read it through that mark.
 
 Every `DEFAULT_MC` change, collective option or buffer-sharing option must pass, before it becomes the default. The
 live tree's `DEFAULT_MC` changes only after the gate has passed on a snapshot: in review #3, `dsa_idx_rep` sat in the
 live default for about 4 hours before its full-model check failed.
 
-1. Full-model teacher forcing, 1 slot (`tools/s7_probe.py --slots 1 --do ready`, the stage-7 reference), at the stage-7
-   level (92 / 100 / 100). Code comes from a snapshot outside the live tree.
+1. Full-model teacher forcing, 1 slot (`tools/s7_probe.py --slots 1 --do ready`). The bar depends on the precision
+   policy: 92 / 100 / 100 at the stage-7 policy (`GLM53_PRECISION=none`), 91 / 100 / 100 at stage 8's shipping
+   combo_a_kv (`GLM53_PRECISION` unset). Code comes from a snapshot outside the live tree.
 2. Stacked repeatability, 8 slots (`tools/s7_probe.py --slots 8 --do ptcheck`). Decode is always traced; each prompt
    runs twice with each prefill path, and the tokens must repeat. The run covers a reduced stack with a producer and a
    consumer DSA layer (layers 0, 3-7) and the full model.
 3. The sparse regime (review #3): full-model decode at positions above 2050
-   (`tools/s5_sparse_probe.py --lengths 2100,3000`). Prefill logits, every decode step's logits and the tokens must
-   be equal with and without the option.
+   (`tools/s5_sparse_probe.py --lengths 2100,3000`, 1 and 8 slots). Prefill logits, every decode step's logits and the
+   tokens must be equal with and without the option.
 
 Results:
 
@@ -520,9 +550,11 @@ Results:
 |---|---|---|---|---|
 | review #2 control | round-6 default, review-2 files | 92 / 100 / 100 | 91 / 100 / 100 | - |
 | review #2 final | + the 4 review-2 options (`GLM53_MC`) | 92 / 100 / 100 | 91 / 100 / 100 | 8 slots repeat; tokens = stage 7 |
-| first `dsa_tail_shared` | same | 10 / 48 / 100 | 91 / 100 / 100 | - |
-| review #3 final (ticket 5) | `DEFAULT_MC`, no override, combo_a_kv precision | 91 / 100 / 100 | 91 / 100 / 100 | sparse regime equal with / without the tail and with in0 block 8 |
-| review #3, `dsa_idx_rep` in the default (ticket 4) | stage-7 precision | 14 / 32 / 90 | 91 / 100 / 100 | unclassified (see the anomaly ledger) |
+| first `dsa_tail_shared` (review #2 work) | same | 10 / 48 / 100 | 91 / 100 / 100 | - |
+| review #3 final (ticket 5) | `DEFAULT_MC`, no override, combo_a_kv precision | 91 / 100 / 100 | 91 / 100 / 100 | sparse regime, 1 slot, in0 block 64 vs 8: equal |
+| review #3, tickets 1 / 4 | stage-7 precision | 92 / 100 / 100 (ticket 1) | 91 / 100 / 100 | sparse regime, 1 slot, tail on vs off: equal |
+| review #4 (s5r4 snapshot, HEAD 8e9efeb7dd7) | `DEFAULT_MC`, combo_a_kv | 91 / 100 / 100 | 91 / 100 / 100 | 8 slots: full model repeats; tail 1 vs 0 at 8 slots, sparse regime: equal; layers 0, 3-7: R4_RED |
+| review #3, `dsa_idx_rep` in the default (ticket 4) | stage-7 precision | 14 / 32 / 90 | 91 / 100 / 100 | the stage-6 logits-pad lifetime bug (ledger) |
 | stage 7, `ag_persistent` | round-6 default | 14 / 32 / 90 | - | 8 slots do not repeat |
 
 ## Inter-layer residual contract (for the full model)
@@ -565,7 +597,8 @@ Face-restricted normalizations (`sinkhorn_faces`, review #2):
 - Test: `tests/test_mhc_split_sinkhorn.py::test_mhc_split_sinkhorn_faces` (review #3 P2-2) asserts `torch.equal` on the
   used entries, faces on vs off, at T = 1 / 8 / 16 / 17 / 32, and a repeat call.
 - In the layer, the option is bit-identical over 9 steps (`records/dense_ab.jsonl`, `sparse_ab.jsonl`). Tracy per call: 85.8 -> 70.8 µs at 1 user (face
-  0), 85.9 -> 76.6 µs at 32 users (faces 0 / 2). Replay: -30 µs per layer at 1 user, -35 to -43 µs at 32 users.
+  0), 85.9 -> 76.6 µs at 32 users (faces 0 / 2), i.e. 2 x 9.3 µs per layer of device time. Replay: -30 µs per layer
+  at 1 user, -26 to -43 µs at 32 users.
 
 What stays: the 8 permutation matmuls and the 3 packs per normalization still move whole 32 x 32 fp32 tiles.
 A 16-row form was not attempted in this stage. It needs 16 x 32 tiles for the m buffers, the permutation matmul on a
@@ -603,8 +636,8 @@ Every TP4 KDA prefill of 2048 rows logs "KDA chunk terms need 595 KiB per core .
 - nothing else: the packs replace the separate weights, and there are no persistent collective buffers.
 
 The DSA latent cache cannot drop to bfp8 here. `sparse_sdpa` takes a ROW_MAJOR bf16 or FP8_E4M3 KV
-(`sparse_sdpa_device_operation.cpp:71,117`), and bfp8 is a tile format. FP8_E4M3 (3 mantissa bits) needs both
-`scatter_rows` write paths cast to FP8 and a model-accuracy check: a stage-8 item. The sequence-sharded latent that
+(`sparse_sdpa_device_operation.cpp:71,117`), and bfp8 is a tile format. Stage 8 shipped the FP8_E4M3 latent in its
+default policy (6,336 B per token per die); the stage-5 numbers here use the bf16 latent (11,968 B). The sequence-sharded latent that
 reaches the advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/context_contract.json` records this.
 
 ## Rejected and not adopted
@@ -632,7 +665,8 @@ reaches the advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/
 | Anomaly | Evidence | Status |
 |---|---|---|
 | `ag_persistent` breaks the stacked model; every 1-layer gate passes | `records/s7_det_reduced_s8.log`; TF 14 / 32 / 90 | controlled: off; cause not established |
-| first and review-2 `dsa_tail_shared`: TF 10 / 48 / 100 | `records/s5r2_tf_cand.log`; the 6/7 agent's run | fixed: build-time buffer (Stacked gate) |
+| first `dsa_tail_shared`: TF 10 / 48 / 100 | `records/s5r2_tf_cand.log` | fixed in review #2 (one persistent buffer) |
+| review-2 `dsa_tail_shared` under the stage-6/7 DRAM-pressure config: TF 10 / 48 / 100 | `~/glm53-flash-bringup/logs/s67r/press_B3.log` | unclassified: seen only under that config, which fails without the option (press_B1 / B2, b7_E); review-3 build-time buffer is a hardening |
 | baseline compare: one kda_moe decode row on a router near-tie | `records/baseline8_rows.txt` | controlled: capped allowance |
 | KDA in-projection: -52 µs in the harness, 0 in the layer | `records/mm6.jsonl`, `ab6.jsonl` | explained: different baseline program |
 | idle slot's NaN conv history comes back Inf | `records/s5r_kernel_tests.log` | benign: non-finite either way, masked |
@@ -641,7 +675,8 @@ reaches the advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/
 | `kda_gnorm_op`: PCC 0.08 vs the unfused path on kda_moe (0.9999999 on kda_dense) | `records/kda_gn_ab.jsonl` | rejected candidate; not diagnosed |
 | KDA prefill host wall +10-13 % in the ring-fabric runs vs round 6, device time unchanged (10025 vs 10084 µs) | `records/pf_ring_r2.jsonl`, Tracy | host contention on the shared machine |
 | `dsa_idx_rep` passed the 1-slot layer A/B but changes full-model logits | `records/s5r3.log` tickets 2 / 4 | rejected; the A/B cache was mostly empty |
-| teacher forcing 14 / 32 / 90 with `dsa_idx_rep` in the default (ticket 4) | `records/s5r3_tf_final2.log` | same signature as the open prefill-to-decode race; unclassified |
+| reduced stack (0, 3-7), 8 slots, shipping precision: repeats differ (review #4) | `records/s5r4_det_reduced.log`, `_rep.log`; with every `ttnn.deallocate` forced to `force=False` all repeats equal (`records/s5r4_det_reduced_nofree.log`, `s5_nofree.py`) | the stage-6 logits-pad lifetime bug (`tt/model.py` decode_step freed the storage of a padded-logits view; fixed in model.py by the 6/7 agent); after the fix all repeats equal (`records/s5r4_det_reduced_fix.log`) |
+| teacher forcing 14 / 32 / 90 with `dsa_idx_rep` in the default (ticket 4) | `records/s5r3_tf_final2.log` | the stage-6 logits-pad lifetime bug (deterministic, layout-dependent decode corruption): TF positions are dense, so dsa.py's `where(dense, dense_idx, sparse)` discards the reordered list |
 
 ## Open items
 
@@ -682,5 +717,7 @@ These are measured costs that stay. None is a deferred option of this stage.
   # full-model gate, from a snapshot directory (PYTHONSAFEPATH=1 keeps the live tree off sys.path)
   GLM53_TP=4 GLM53_CACHE_DIR=~/.cache/glm53_flash python -m models.autoports.zai_org_glm_5_3_flash.tools.s7_probe \
       --slots 1 --seq-len 4096 --do ready --reference <readiness_aime24_chat.refpt>
-  GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.s5_sparse_probe --lengths 2100,3000 --save a.pt
+  # the probe defaults to GLM53_PRECISION=none (stage 7); GLM53_PRECISION= (empty) runs the shipping policy
+  GLM53_PRECISION= GLM53_TP=4 python -m models.autoports.zai_org_glm_5_3_flash.tools.s5_sparse_probe --slots 8 \
+      --lengths 2100,3000 --save a.pt
   ```

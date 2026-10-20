@@ -141,6 +141,7 @@ def set_opts(dec, spec: str):
         if cur != m.opt:
             m.opt = cur
             m._cfg_grouped = None
+        mcd.apply_moe_gather(m, dec.mc)  # the 1-token gather configs follow opt.gather_* and the MCOpts overrides
     for g in _FID_GROUPS:
         if g in fid or (g, _FID_GROUPS[g](dec)[1]) in dec.__dict__.get("_orig_ckc", {}):
             try:
