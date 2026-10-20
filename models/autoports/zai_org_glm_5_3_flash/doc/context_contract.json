@@ -193,12 +193,13 @@
     "top_level": "supported_context, capacity_evidence and limiting_reason_detail are the final-weights stage-8 values; capability_reduction is owned by the DSA-1M work",
     "supported_context_1slot_note": "stage-8 standalone capacity probe on the final weights (capacity_evidence at the top level). It is evidence of the largest feasible value of the replicated fp8 layout; it does not set the served max_model_len (see context_sizing).",
     "context_sizing": {
-      "rule": "one rule for the replicated layout, in tt/serving_profiles.py (data serving_profiles.json) and tt/generator.plan_context: pool_blocks = measured[S].pool_blocks if serving_profiles.json has a probe for S slots, else floor((free_after_load - (kda_slots(S) - 2) x 35,651,584 B - reserve) / 811,008 B); max_model_len = the largest multiple of 2,048 with ceil(L / 128) + (S - 1) + 2 <= pool_blocks",
+      "rule": "one rule for the replicated layout, in tt/serving_profiles.py (data serving_profiles.json) and tt/generator.plan_context (which reads the serving_profiles.json budget when its precision.id is the build's policy id): pool_blocks = measured[S].pool_blocks if serving_profiles.json has a probe for S slots, else floor((free_after_load - (kda_slots(S) - 2) x 35,651,584 B - reserve) / 811,008 B); max_model_len = the largest multiple of 2,048 with ceil(L / 128) + (S - 1) + 2 <= pool_blocks",
       "reserve": "serving (vLLM, serving_profiles.json budget.reserve_bytes): 1,024 MiB. Standalone Glm53Generator: max(that, GLM53_DRAM_RESERVE_MIB, default 1,200 MiB): 176 MiB more headroom; GLM53_DRAM_RESERVE_MIB=1024 gives the serving value",
       "values_1slot_final_weights": {
         "stage8_standalone_probe_measured": 325632,
         "rule_at_1024MiB_reserve_computed": 325632,
-        "standalone_generator_default_computed": 294912,
+        "standalone_generator_default_code": 280576,
+        "standalone_generator_default_note": "what tt/generator.plan_context(1) gives now: the serving_profiles.json budget (still the combo_a_kv free DRAM 3,047,399,936 B, conservative) with the 1,200 MiB reserve. It changes when stage 9 ingests the final-weights budget (294,912 with free 3,139,928,064 B). Guarded by tests/test_generator_vllm_host.py::test_default_precision_uses_serving_budget (>= 280,576; the generator uses the data-file budget only when serving_profiles.json precision.id equals the default policy id, fixed in d16e6b9c2f0)",
         "stage9_serving_probe_measured": "pending (stage 9 A2: doc/vllm/capacity/s1, 1,024 MiB workspace, code-default split options)"
       },
       "governs_serving": "the stage-9 serving probe. tools/serving_profiles.py ingest writes it to serving_profiles.json measured['1'], and a measured entry wins over the rule. Until then serving_profiles.json holds the combo_a_kv budget (free 3,047,399,936 B): its rule gives 309,248 at 1 slot (stage 9 owns the file).",

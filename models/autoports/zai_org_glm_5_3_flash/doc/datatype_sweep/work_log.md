@@ -289,3 +289,27 @@ Three device tickets, `scripts/s8r3{a,b,c}_inner.sh`:
     without a same-code stage-7 build, the final-weights capacity probes. Run:
     `python -m models.autoports.zai_org_glm_5_3_flash.tools.dtype_sweep_report --selected final_default_h9
     --code-ref HEAD` (no md5 warning).
+
+## Review #4 rework (19a4dda4f47 + eb92932986b reviewed: MORE-WORK-NEEDED, 1 P1 + 14 P3)
+
+Host and docs only; no device job.
+- P1 (the default id switch made `tt/generator._profiles_budget` fall back to the stage-7 budget: 112,640 tokens at
+  1 slot): the coordinator committed `serving_profiles.json` `precision.id` = `combo_a_kv_dense4_g4` (d16e6b9c2f0).
+  New host test `tests/test_generator_vllm_host.py::test_default_precision_uses_serving_budget`: the default policy
+  id equals the data file's id, the budget source is `serving_profiles.json`, `plan_context(1)` >= 280,576, and at the
+  serving reserve `plan_context(1, supported_context(data), serving=True)` does not raise.
+  `pytest tests/test_generator_vllm_host.py tests/test_precision_host.py`: 29 passed, 1 failed. The failure is
+  `test_dsa_shard_keeps_bf16_latent`, against the DSA-1M agent's uncommitted `tt/precision.py` (fp8 sharded latent);
+  that agent owns the test.
+- The standalone generator default is 280,576 (the code, combo_a_kv budget, 1,200 MiB reserve), not 294,912; 294,912
+  applies after stage 9 ingests the final-weights budget (README, `context_contract.json`).
+- P3: the stage-6/7 citation of `final_default_h9` (their owner updates them); the free-run HF control (first
+  40 tokens 67.5 % vs 80-85 %, loop entry through rank-5 / rank-21 picks, chat-prompt control 153 vs 156); the
+  `measured_on` text and both config md5s (run d96fae9836a8, committed fe43daaeb567: newline + `measured_on`);
+  `sweep_results` `pass` = the gate on the minimum over all references (`pass_p0` kept) and one context value per
+  weight set (dense4_r1 now 325,632 measured); the p2 = 89 mechanism stated as probable, not proven; "hash identical"
+  qualified to the random input; the LM-head program bound (+/- 0.05 ms, sign unknown); the -3.9 % across code
+  generations (linked by kdain 50.38 / 50.40 ms); single-point `_h9` frontier.
+- Not done (recorded): the 256-row split and the intermediate capacity steps, the long-context rerun, the LM-head
+  split, combo_a_all with the fp8 latent, a chat-domain HF score trajectory.
+- `full_model.supported_context` (311,296) in `doc/context_contract.json` is stage 6's; not changed here.

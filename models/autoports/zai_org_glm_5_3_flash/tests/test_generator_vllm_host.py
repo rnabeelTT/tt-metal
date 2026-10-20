@@ -206,6 +206,28 @@ def test_selected_precision_policy_loads():
     assert o.id == d["precision"]["id"] and o.kv_latent_dtype == d["precision"]["kv_latent_dtype"]
 
 
+def test_default_precision_uses_serving_budget(monkeypatch):
+    """Stage-8 review #4 P1: the generator's DRAM budget must come from serving_profiles.json for the default precision
+    (GLM53_PRECISION unset). If the default policy id and the data file's precision id differ, the generator falls
+    back to the stage-7 built-in budget and the default 1-slot context drops (112,640 instead of 280,576)."""
+    from models.autoports.zai_org_glm_5_3_flash.tt.precision import PrecisionOverrides
+
+    for k in ("GLM53_PRECISION", "GLM53_DRAM_RESERVE_MIB", "GLM53_BUDGET_FREE_BYTES", "GLM53_DSA_SHARD"):
+        monkeypatch.delenv(k, raising=False)
+    d = sp.load()
+    assert PrecisionOverrides.from_env().id == d["precision"]["id"], "default policy id != serving_profiles.json id"
+    budget = gen_mod._budget()
+    assert budget["source"].startswith("serving_profiles.json"), budget["source"]
+    assert budget["latent_dtype"] == d["precision"]["kv_latent_dtype"]
+    monkeypatch.setattr(gen_mod, "BUDGET", budget)
+    plan = gen_mod.plan_context(1)  # the standalone default (1,200 MiB reserve)
+    assert plan["layout"] == "replicated" and plan["max_seq_len"] >= 280576, plan
+    # one sizing rule: at the serving reserve, the generator accepts the data file's 1-slot value
+    monkeypatch.setenv("GLM53_DRAM_RESERVE_MIB", str(int(d["budget"]["reserve_bytes"]) >> 20))
+    monkeypatch.setattr(gen_mod, "BUDGET", gen_mod._budget())
+    gen_mod.plan_context(1, sp.supported_context(d), serving=True)  # must not raise
+
+
 def test_apply_precision_default(monkeypatch):
     d = sp.load()
     monkeypatch.setenv("GLM53_PRECISION", "")

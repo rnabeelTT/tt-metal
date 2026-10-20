@@ -60,7 +60,8 @@ def row(r, bases, cfg_dir: Path):
     cap_id = "combo_a_kv" if cid == "selected_default" else cid  # the post-selection runs are the selected policy
     # decode programs (decode_specs) do not change the weights: the combo_a_kv capacity probes cover these variants
     cap_src = "combo_a_kv" if cid.startswith("combo_a_kv_g4") else cap_id
-    if cid in ("combo_a_kv_dense4_g4", "combo_a_kv_dense4_kdain"):  # the final weights: capacity/final_s1_* probes
+    # the final weights (dense4; decode programs do not change the weights): capacity/final_s1_* probes
+    if cid in ("combo_a_kv_dense4", "combo_a_kv_dense4_g4", "combo_a_kv_dense4_kdain"):
         cap_src = "final"
     gen = r.get("base_commit") or "ac03689d2bb (s8_snapshot)"
     cfg = cfg_dir / f"{cap_id}.json"
@@ -166,7 +167,9 @@ def row(r, bases, cfg_dir: Path):
         "ptcheck_tokens_equal": (
             all(v.get("tokens_equal") for v in (r.get("ptcheck") or {}).values()) if r.get("ptcheck") else None
         ),
-        "pass": ok and traced,
+        # the skill gate (top-1 / top-5 / top-100 on TF and the prefill check) on the minimum over every reference run
+        "pass": bool(traced and min1 is not None and min1 >= TOP1_MIN and min5 >= TOP5_MIN and min100 >= TOP100_MIN),
+        "pass_p0": ok and traced,
         "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
         "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
         "commit": r.get("commit"),

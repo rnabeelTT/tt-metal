@@ -6,8 +6,10 @@ datatypes of the optimized full model (stage 7).
 
 ## Result
 
-**Selected: `combo_a_kv_dense4_g4`** (`selected_precision_config.json`, md5 d96fae9836a8; policy fields equal
-`configs/combo_a_kv_dense4_g4.json`). It is the stage-7 policy plus these changes:
+**Selected: `combo_a_kv_dense4_g4`** (`selected_precision_config.json`; policy fields equal
+`configs/combo_a_kv_dense4_g4.json`). The runs used the file with md5 d96fae9836a8. The committed file (md5 fe43daaeb567)
+differs only in an end-of-file newline (pre-commit) and the `base.measured_on` text (review #4); the policy fields are
+identical. It is the stage-7 policy plus these changes:
 
 | Group | Stage 7 (`GLM53_PRECISION=none`) | Selected (default) |
 |---|---|---|
@@ -27,8 +29,9 @@ The DSA cache drops from 11,968 to 6,336 bytes per token per die.
 337,920 runs out of DRAM. The stage-9 serving probe at the 1,024 MiB workspace governs the served max_model_len
 (section "Capacity and context contract").
 
-**Headline: the gate of the default on HEAD (`runs/final_default_h9`).** Stages 6 and 7 cite this run as the default's
-TF / PC / decode evidence on HEAD.
+**Headline: the gate of the default on HEAD (`runs/final_default_h9`).** The stage-6 and stage-7 READMEs are being
+updated by their owner to cite this run as the default's TF / PC / decode evidence. At commit eb92932986b they still
+name combo_a_kv and 280,576.
 - Code: `~/glm53-flash-bringup/s8r3b_snapshot` = `git archive 9fcc17c0dc4 models/` (HEAD, with the logits-pad fix
   46b2a5a601d) plus `tt/precision.py` (md5 6f46fec82f0f: HEAD + the stage-8 review-3 hunks only) and the selected
   config. Every other `tt/*.py` in the record equals 9fcc17c0dc4 (e.g. `model.py` 5fee3c6742a7).
@@ -48,7 +51,9 @@ TF / PC / decode evidence on HEAD.
 | Model weight load, warm cache | 99.8 s | 98.1 s (a second build: 168 s, host-side variance) |
 
 - The stage-7 policy measured 51.96 ms on the code generation before (914af5b9594, `shipped_r2`); no stage-7 build of
-  HEAD was run.
+  HEAD was run. The -3.9 % therefore compares two code generations. The review-2 default gives the link: it measured
+  50.38 ms on 914af5b9594 (`combo_a_kv_g4_kdain_r2`) and 50.40 ms on HEAD (`kdain_default_h9`), so the two
+  generations have the same decode speed for one policy.
 - **Performance regime:** every stage-8 speed is at max_seq_len 16,384 and 1 slot. Decode slows by about 10 % at a
   long max_seq_len (the indexer scores every allocated pool slot), and the bfp4 decode programs are measured at 1 slot
   only. Stage 9 re-measures token-out at the served max_model_len and in its 8- and 32-slot gates.
@@ -59,9 +64,12 @@ Qualitative and autoregressive checks of the selected default (`runs/final_defau
   of thermodynamics, Fibonacci code.
   - q5 leaves "Bonjour, how are you today?" untranslated. The HF control does the same (doc/full_model/qualitative/VERDICT.md).
   - Adjacent duplication <= 0.034 in every answer; no wrong language or control-token leakage.
-- **Autoregressive check**: two runs bit-identical; `check_degenerate_output` exit 0 (adjacent duplication 0.0).
-  TT matches HF's greedy token 0 (" a") and branches at token 1 (" small", HF's rank 2, 0.06 logits below " strange").
-  The free run then loops one sentence, as in stage 6.
+- **Autoregressive check**: two runs bit-identical; `check_degenerate_output` exit 0 (adjacent duplication 0.0,
+  trigram loop fraction 0.23). TT matches HF's greedy token 0 (" a") and branches at token 1 (" small", HF rank 1, 0.06 logits below " strange").
+  From token 24 the free run repeats one sentence about 17 times, as in stage 6. The degenerate check does not catch
+  a loop of a long sentence; the loop is accepted by comparison with stage 6, where HF continues the same loop.
+  - The same-code previous default (`kdain_default_h9`) branches at token 0 (" something" vs " a"). The difference
+    between the two free runs is the policy (dense4 + programs), not the code.
 - **Known observation: HF control of the free run.** `tools/hf_full_ref.py --mode score-trajectory` (CPU) teacher-forces
   HF over the TT trajectory (`checks/autoregressive/hf_scores_tt_trajectory.json`):
 
@@ -71,13 +79,29 @@ Qualitative and autoregressive checks of the selected default (`runs/final_defau
   | stage 8 previous default (`runs/selected_default_r1`) | 93.75 % | 100 % | 4 |
   | **stage 8 selected (`runs/final_default_h9`)** | **94.9 %** | **99.2 %** | **21** |
 
-  The two picks outside HF's top 5 sit at flat story-branch points inside the repeated-sentence loop: position 22
-  ("." 1.6 logits below the top) and position 24 (" sat", 2.2 logits below a top-5 spread of 0.25). It is recorded as
-  numerics drift of the bfp4 policy in a raw-prompt free run; teacher forcing, the prefill check and the qualitative
-  suite are clean, and the degenerate check passes.
+  The full-run agreement is high mainly because of the loop tail, where HF continues the loop. Before the loop the
+  divergence is larger than in the earlier runs:
+
+  | Trajectory | HF top-1 agreement, first 40 tokens | Largest gap of a TT pick below the HF top-1 (logits) |
+  |---|---|---|
+  | stage 6 (doc/full_model/autoregressive) | 85 % | 1.875 |
+  | stage 7 | 82.5 % | 1.75 |
+  | stage 8 previous default (`selected_default_r1`) | 80 % | 1.875 |
+  | **stage 8 selected (`final_default_h9`)** | **67.5 %** | **2.625** |
+
+  - Four TT picks are 1.6 logits or more below HF's top 1: position 5 (" broken", rank 4, 2.4), 12 (" watched",
+    rank 3, 2.6), 22 (".", rank 5, 1.6) and 24 (" sat", rank 21, 2.2; HF's own top-1 margin there is 0.125).
+  - Positions 22 and 24 are the entry to the loop: the rank-5 and rank-21 picks start the repeated sentence.
+  - **Chat-prompt control: no regression.** The review-4 reviewer computed the first position where TT diverges from
+    HF greedy (128 tokens) on the six qualitative prompts q1-q6: final 38 / 25 / 10 / 15 / 38 / 27 (sum 153);
+    `kdain_default_h9` 15 / 25 / 10 / 26 / 53 / 27 (sum 156); stage 6 38 / 75 / 10 / 27 / 31 / 29 (sum 210). The final
+    and the previous default are equal within noise.
+  - Recorded as a known observation: bfp4 numerics drift in a raw-prompt free run. Teacher forcing, the prefill check
+    and the qualitative suite pass. A chat-domain HF score trajectory (q1 / q5, CPU) was not run.
 
 **Acceptance gate** (skill default): teacher-forcing top-1 >= 90 %, top-5 >= 98 % and top-100 = 100 %. The prefill
-check must meet the same values (`tools/dtype_sweep_report.py` applies all six).
+check must meet the same values. `tools/dtype_sweep_report.py` applies all six to the minimum over every reference of a
+run (`pass` in `sweep_results.*`); `pass_p0` is the gate on p0 alone, and `pass_selection_rule` adds the 91 % rule.
 
 **Selection rule** (coordinator, on top of the gate):
 1. The minimum top-1 over teacher forcing and prefill check on three AIME24 chat references must be >= 91 %.
@@ -99,8 +123,9 @@ is the gate.
 - `min_top1_perf.png`: x = the minimum top-1 over p0 / p1 / p2. Only three-reference runs are points. The line is at 91 %.
 - `top1_perf_pareto.png` and `top5_perf_pareto.png`: x = accuracy on p0. Every evaluated full-model run is a point.
 - On the top-5 chart every point except the old `combo_a_all` / `dense4_g4` collapses ties at 100 %.
-- Points from four code generations appear (Method), with one marker and one frontier per generation. Compare speeds
-  only within one generation:
+- Points from four code generations appear (Method), with one marker and one frontier per generation. A frontier of
+  one point has no line: on the `_h9` generation `combo_a_kv_dense4_g4_h9` / `final_default_h9` dominate every other
+  `_h9` row, so that frontier is the red point alone. Compare speeds only within one generation:
   - `_h9` runs: HEAD 9fcc17c0dc4 (logits-pad fix). **Only these decide the selection.**
   - `_r2` runs: 914af5b9594; `_r1` runs: b8198430147 (both before the logits-pad fix).
   - All other runs: s8_snapshot (ac03689d2bb).
@@ -279,9 +304,15 @@ intact prefill check.
 - **combo_a_all and combo_a_kv_dense4_g4: the collapses were this bug.** On HEAD, combo_a_all reads 91 / 95 / 90 (no
   collapse; it fails the gate by one prefill-check token on p2) and dense4_g4 reads 92 / 95 / 92 (passes).
 - **The p2 = 89 shift with all programs (or all but kda_in) on combo_a_kv weights is not the bug**: it reproduces on
-  HEAD. It is a real numerics shift of those programs. At op level each program's output hash on the sweep's random
-  input equals the current program's (`geometry/summary.json`), so the hash does not cover every input. With the
-  dense bfp4 weights, the same programs pass (p2 92 / 91).
+  HEAD, so it comes from the numerics of those programs. With the dense bfp4 weights the same programs pass
+  (p2 92 / 91). **The exact mechanism is not proven.**
+  - At op level each program's output hash equals the current program's, but only on the sweep's random (randn)
+    input (`geometry/summary.json`).
+  - Probable mechanism (not measured): with fp32 dest and packer-L1 accumulation, a different `in0_block_w` groups
+    the fp32 partial K-sums differently. On randn inputs the bf16-rounded output seldom changes; on real activations
+    with outliers some outputs change by one bf16 step. Over 45 layers that can move a close top-1 on p2 (one token
+    of 100).
+  - No layer bisect was run: the selection was gated with all ten programs in place, so the shift does not affect it.
 - The classification runs of review #1 (layer 0 only / layer 44 only for combo_a_all) were not needed: the collapse
   is gone, and combo_a_all fails on accuracy alone.
 
@@ -342,15 +373,18 @@ Results: `geometry/bfp4_lofi_decode.jsonl`, summary `geometry/summary.json` (`to
 
 "Buildable" means `make_role_mm` builds the same core count: the 1D core count divides the N tiles. "Within noise"
 means the error against fp64 is within 5 % of the current program's error. "Hash identical" means the output's sha256
-on the sweep's input equals the current program's.
+on the sweep's random input equals the current program's. It does not prove equal outputs on real activations (see
+the p2 = 89 shift in "Candidates and results").
 
 **The sweep's baseline for the two "ttnn default" roles is not the in-model program.** The sweep times "default" with
 `packer_l1_acc=False` on a 2-D weight. In the model (Tracy, `profile/combo_a_kv/perf_decode_report.csv`):
 - kda_in runs at 90.2 µs on 87 cores (in0 block 2), not 151 µs. The in-model gain per layer is therefore about 16 µs,
   not 77 µs; that explains the 0.68 ms realized vs 2.4 ms predicted on the `_r2` code.
-- The LM head runs at 307.6 µs on 110 cores (in0 block 2, `packer_l1_acc=True`), so the sweep's 330.8 µs program may
-  be slower than the in-model default. It is adopted with the selection as measured end to end (the full selected
-  config is the fastest run); a split of the LM-head program's own cost was not measured.
+- The LM head runs at 307.6 µs on 110 cores (in0 block 2, `packer_l1_acc=True`). The sweep's program runs at
+  330.8 µs in a harness that times the default at 355.3 µs. The sign of its in-model effect is therefore unknown;
+  the bound is about +/- 0.05 ms per token (once per step). It is adopted with the selection as measured end to end
+  (the full selected config is the fastest run). Not measured: a `combo_a_kv_dense4_g4` run without the `lm_head`
+  spec, or a Tracy decode window of the final config. Either settles it.
 
 Model-level adoption (rule (b) of the coordinator: the 3-reference gate with the programs in place):
 - On the `_r2` code (before the logits-pad fix): all programs and all-but-kda_in gave p2 TF 89 % on combo_a_kv
@@ -387,7 +421,9 @@ Model-level adoption (rule (b) of the coordinator: the 3-reference gate with the
 - For L = 2K, 32K and 100K: prefill L - 200 tokens, then run 199 traced decode steps teacher-forced with the
   document's tokens. The prefill logits and the 199 decode steps give 200 scored positions (host logits).
 - The check compares combo_a_kv with the stage-7 policy on the s8_snapshot code (before the logits-pad fix). The final
-  selection adds the dense bfp4 layers 1-2 and the decode programs; it was not re-run at long context.
+  selection adds the dense bfp4 layers 1-2 and the decode programs; it was not re-run at long context (not done in
+  review #4; a 32K / 100K rerun can go into stage 9). The risk is low: the added changes are weight and program
+  changes that do not depend on the position, and the KV-cache dtype is unchanged (fp8 latent in both).
 
 `tools/long_ctx_compare.py` compares the two builds (`long_context/compare_shipped_vs_combo_a_kv.json`):
 
@@ -434,8 +470,12 @@ block).
 
 - The options are `GLM53_MOE_SORTED_ROWS=512` and `GLM53_DSA_INDEX_BLOCK_MB=32`. Both are bit-identical row / block
   splits (stage 6), but they are not the code defaults (1,024 rows, 64 MB).
-- The bracket: **325,632 passes and 337,920 fails.** The 2,048-token steps between them (327,680 to 335,872) were not
-  probed. A step must be a multiple of 2,048 (the prefill bucket); a 324,608-token try was rejected at construction.
+- The bracket: **325,632 passes and 337,920 fails** (3.7 % apart). The 2,048-token steps between them (327,680 to
+  335,872) were not probed. A 256-row MoE split at 337,920 was not probed either (not done in review #4): its buffer is
+  (2,048 + 31 x 192 + 32) rows x 8,192 B = 8.22 MB per bank, just below F2's largest free block of 8.55 MB per bank.
+- The code-default auto split picks 1,024 rows (`tt/model.py` `choose_moe_split`), so the default path at 325,632 is
+  not proven here; the stage-9 probe at code defaults decides it. A possible change (not made): let the auto split
+  choose 512 rows and 32 MB indexer blocks when the pool is large. A step must be a multiple of 2,048 (the prefill bucket); a 324,608-token try was rejected at construction.
 - Files: `capacity/final_s1_337920_ws832_moe512`, `final_s1_337920_ws832_moe512_ix32`,
   `final_s1_325632_ws1000_moe512_ix32` (each `capacity.json` + `provenance.json` with the md5 map).
 
@@ -468,10 +508,17 @@ With the final weights (free 3,139,928,064 B) and the 1,024 MiB serving reserve,
 |---|---|---|---|
 | Stage-8 standalone capacity probe (F3) | 325,632 | measured, 1,000 MiB workspace, MoE split 512 and indexer blocks 32 MB | evidence of the largest feasible value of the replicated fp8 layout on the final weights |
 | Stage-9 serving capacity (A2, `doc/vllm/capacity/s1`) | pending | measured on the serving path at the 1,024 MiB workspace, code-default options | **serving** (vLLM max_model_len, `serving_profiles.json` `measured["1"]` after `tools/serving_profiles.py ingest`) |
-| Standalone generator default (`Glm53Generator`, no max_seq_len) | the rule with reserve max(1,024 MiB, `GLM53_DRAM_RESERVE_MIB`, default 1,200 MiB) | computed | the standalone generator only: 176 MiB more headroom (294,912 tokens with the final weights; `GLM53_DRAM_RESERVE_MIB=1024` gives the serving value) |
+| Standalone generator default (`Glm53Generator` / `build_generator()`, no max_seq_len) | **280,576** now | computed by the code: the rule on the `serving_profiles.json` budget (still the combo_a_kv free DRAM, 3,047,399,936 B) with reserve max(1,024 MiB, `GLM53_DRAM_RESERVE_MIB`, default 1,200 MiB) | the standalone generator only (176 MiB more headroom than serving). It changes when stage 9 ingests the final-weights budget (then 294,912 with the 1,200 MiB reserve); `GLM53_DRAM_RESERVE_MIB=1024` gives the serving value |
 
 - Until stage 9 ingests its probe, `serving_profiles.json` still holds the combo_a_kv budget (free 3,047,399,936 B):
-  its rule gives 309,248 at 1 slot. Stage 9 owns that file.
+  its rule gives 309,248 at 1 slot. This is conservative (the final weights leave 92 MB more per die). Stage 9 owns
+  that file.
+- The generator uses the `serving_profiles.json` budget only when its `precision.id` equals the default policy id;
+  otherwise it falls back to the stage-7 budget (112,640 tokens at 1 slot). The stage-8 commit changed the default id
+  and broke this (review #4 P1); d16e6b9c2f0 sets `precision.id` = `combo_a_kv_dense4_g4`. Host test
+  `tests/test_generator_vllm_host.py::test_default_precision_uses_serving_budget` now guards it: the default must use
+  the data-file budget, the 1-slot default must be >= 280,576, and at the serving reserve the generator must accept
+  the data file's 1-slot value.
 - If the stage-9 probe at code defaults fails at 325,632, the serving value is lower than the stage-8 number. The
   stage-8 number then stays the largest feasible value with the two split options set.
 
@@ -530,8 +577,12 @@ measured here.
 - The 1-slot capacity is bracketed, not exact: 325,632 passes, 337,920 fails; the steps between were not probed. The
   passing probe sets two non-default split options (MoE rows 512, indexer score blocks 32 MB). The serving value at
   code defaults is the stage-9 probe.
-- The free-run HF control of the selection is slightly below stage 6 (94.9 / 99.2 % vs 97.7 / 99.6 %, worst rank 21;
-  Result).
+- The free-run HF control of the selection diverges more before the loop than earlier runs (first 40 tokens: 67.5 %
+  HF top-1 agreement vs 80-85 %; the loop is entered through rank-5 and rank-21 picks). The chat-prompt control shows
+  no regression against the previous default (153 vs 156; Result).
+- Not done (recorded for stage 9 or later): the 256-row MoE split and the steps between 325,632 and 337,920; a long-
+  context rerun of the final selection; a split of the LM-head program's own cost; `combo_a_all` with the fp8 latent
+  (optional: combo_a_all fails the gate and is slower); a chat-domain HF score trajectory.
 - All performance numbers are for 1 slot at max_seq_len 16,384. Multi-slot decode and the decode programs at 8 / 32
   slots were not measured per candidate (stage 9).
 - The fp8 +0.17-0.19 ms inside the combinations is mostly not in the device op time; the cause is open.

@@ -43,7 +43,7 @@
    "optimized_decoder.SELECTED": "opt_s5_pf",
    "multichip_decoder.DEFAULT_MC": "stage-5 default of commit 9fcc17c0dc4 (incl. sinkhorn_faces, dsa_q_mm, dsa_q_mm_ib=64, dsa_tail_shared, kda_conv_max_batch=16; ag_persistent=False)",
    "mesh": "(1, 4), TP4, FABRIC_1D",
-   "measured_on": "selection: 3-reference reselection on git archive 9fcc17c0dc4 (logits-pad fix) + tt/precision.py (HEAD + the stage-8 review-3 hunks), runs/*_r3 and runs/final_default_h9 (GLM53_PRECISION unset)"
+   "measured_on": "selection: 3-reference reselection on git archive 9fcc17c0dc4 (logits-pad fix) + tt/precision.py (HEAD + the stage-8 review-3 hunks), runs/*_h9 (the reselection) and runs/final_default_h9 (GLM53_PRECISION unset)"
   },
   "layer_range_note": "'inner' = layers 1-43 for KDA / DSA / shared expert; the dense MLP is bfp4 on layers 1-2 (layer 0 keeps bfp8); the first layer 0 and the last layer 44 keep bfp8 KDA projections and shared expert. combo_a_all (bfp4 also on layers 0 / 44) gives min top-1 89 on the fixed code (prefill check p2): rejected",
   "weights": {
