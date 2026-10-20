@@ -152,7 +152,11 @@ class FunctionalDecoder(LightweightModule):
         self.input_norm_w = norm_w(sd["input_layernorm.weight"])
         self.post_norm_w = norm_w(sd["post_attention_layernorm.weight"])
         # per-component cache scopes (a source edit of one component's weight build re-keys only that component)
-        wc = (lambda kind: weight_cache.sub(f"layer_{layer_idx}").component(kind)) if weight_cache is not None else None
+        wc = (
+            (lambda kind, policy=None: weight_cache.sub(f"layer_{layer_idx}").component(kind, policy))
+            if weight_cache is not None
+            else None
+        )
 
         if self.attn_kind == "kda":
             self.attn = GlmKDA(
@@ -195,11 +199,17 @@ class FunctionalDecoder(LightweightModule):
             )
         else:
             num_experts = sd["mlp.gate.weight"].shape[0]
+            args = moe_args(tc, self.tp, num_experts, opt=moe_opt or FUNCTIONAL_MOE)
+            # a per-layer precision exception (MoEPrecision.from_args) keys its own weight-cache directory
+            from .moe import MoEPrecision
+
+            eff = MoEPrecision.from_args(args, layer_idx)
+            exc = None if eff == MoEPrecision.from_args(args) else {k: str(v) for k, v in vars(eff).items()}
             self.mlp = Qwen35MoEOptimized(
                 mesh_device,
-                moe_args(tc, self.tp, num_experts, opt=moe_opt or FUNCTIONAL_MOE),
+                args,
                 moe_state_dict(sd, num_experts),
-                tensor_cache_path=wc and wc("moe"),
+                tensor_cache_path=wc and wc("moe", exc),
                 tt_ccl=tt_ccl,
                 layer_num=layer_idx,
             )

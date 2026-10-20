@@ -26,6 +26,18 @@ the 42 MoE layers.
   - Effect: changing the mesh, the policy (name or any weight dtype) or the checkpoint selects a new directory, and
     editing a component's weight-building code selects a new subdirectory. A stale file is never loaded.
   - Caveat: old directories are left on disk; prune them by hand.
+- **Key gaps closed (stage-6 review #1 P2-6, rework 2026-10-18):**
+  - Per-layer precision exceptions. A layer whose effective routed-expert policy (`MoEPrecision.from_args(args, layer)`,
+    i.e. `args.precision_layer_exceptions`) differs from the policy of the key gets its own moe subdirectory
+    `moe-<digest>-p<digest of the effective MoEPrecision>` (`WeightCache.component(kind, policy)`,
+    `tt/functional_decoder.py`). Layers without an exception keep the old subdirectory, so the existing cache stays
+    valid. The stage-8 `GLM53_PRECISION` candidates already bypass the cache for layers with a MoE weight-dtype exception
+    (`PrecisionOverrides.layer_cache`); this covers the args path too.
+  - Checkpoint files. `manifest.json` now records `checkpoint_files` = {shard: [size, mtime_ns]} for every file the
+    tensor index names (plus `config.json` and `e192_mask.json`). An older manifest adopts the current fingerprint on
+    first use. If the shards later differ (same config / index, rewritten files), the build logs a warning and uses
+    a fresh directory `<key>-f<digest of the fingerprint>`.
+  - The top component digest now also covers `Glm53Model._build_lm_head_ds` (the `lm_ds` LM-head build).
 - **Writes** go to a temporary name followed by `os.replace`, so a killed build leaves no truncated file. A read-only
   or full disk logs a warning and the model is served uncached.
 - **Loads** (`load_file_tensor`) copy the file into an anonymous memfd with `sendfile`, then call

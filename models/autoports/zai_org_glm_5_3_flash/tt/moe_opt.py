@@ -1056,7 +1056,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         )  # compact [1,G,32,2Nl]
         ttnn.deallocate(x_disp)
         din = self._swiglu_clamped(fused, ttnn.DRAM_MEMORY_CONFIG)  # [1,G,32,Nl]
-        ttnn.deallocate(fused)
+        # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+        ttnn.deallocate(fused, force=False)
         # routing weight on the (narrower) expert intermediate; the down projection is linear
         din = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Nl)), m["weights"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(m["weights"])
@@ -1087,7 +1088,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
         y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
-        ttnn.deallocate(down)
+        # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+        ttnn.deallocate(down, force=False)
         for key in ("undispatch", "undispatch_rm"):
             if m.get(key) is not None:
                 ttnn.deallocate(m[key])

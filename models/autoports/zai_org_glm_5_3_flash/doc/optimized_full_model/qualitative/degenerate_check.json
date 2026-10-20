@@ -1,0 +1,54 @@
+{
+  "findings": [],
+  "measured": [
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[0] greedy_completion ('Write a haiku about machine learning.')",
+      "source": "words",
+      "num_tokens": 579,
+      "adjacent_duplication": 0.0242,
+      "trigram_loop_fraction": 0.0363
+    },
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[1] greedy_completion ('Explain the difference between supervised and unsupervised l')",
+      "source": "words",
+      "num_tokens": 833,
+      "adjacent_duplication": 0.0012,
+      "trigram_loop_fraction": 0.018
+    },
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[2] greedy_completion ('Complete this story: Once upon a time, in a faraway kingdom,')",
+      "source": "words",
+      "num_tokens": 1598,
+      "adjacent_duplication": 0.0,
+      "trigram_loop_fraction": 0.0094
+    },
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[3] greedy_completion ('What are the three laws of thermodynamics?')",
+      "source": "words",
+      "num_tokens": 896,
+      "adjacent_duplication": 0.0034,
+      "trigram_loop_fraction": 0.0234
+    },
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[4] greedy_completion ('Translate the following to French: \"Hello, how are you today')",
+      "source": "words",
+      "num_tokens": 266,
+      "adjacent_duplication": 0.0,
+      "trigram_loop_fraction": 0.203
+    },
+    {
+      "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/qualitative/qualitative_outputs.json",
+      "label": "prompt[5] greedy_completion ('Write a Python function to calculate the Fibonacci sequence.')",
+      "source": "words",
+      "num_tokens": 1125,
+      "adjacent_duplication": 0.024,
+      "trigram_loop_fraction": 0.0213
+    }
+  ],
+  "exit_code": 0
+}

@@ -7,12 +7,12 @@
       "source": "words",
       "num_tokens": 222,
       "adjacent_duplication": 0.0,
-      "trigram_loop_fraction": 0.0541
+      "trigram_loop_fraction": 0.1351
     },
     {
       "artifact": "models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/autoregressive/autoregressive_meta.json",
       "label": "hf/tt token agreement (informational)",
-      "matching_tokens": 5,
+      "matching_tokens": 1,
       "compared_tokens": 256
     }
   ],

@@ -1,0 +1,6 @@
+# stage-6/7 rework watcher runs on the final snapshot (HEAD 656c998e3df + rework files), TT_METAL_WATCHER=10,
+# TT_METAL_WATCHER_DISABLE_ETH=1, GLM53_WORKER_L1_SIZE=1444864. Earlier runs (2026-10-18 morning, earlier rework
+# snapshots) aborted with rc=134 and no watcher finding; they are superseded; logs in ~/glm53-flash-bringup/logs/s67r/.
+watcher shard_b1 rc=0 suspicious_lines=0 Sun Oct 18 09:22:11 PM UTC 2026
+watcher shard_batch32_dsa_moe rc=0 suspicious_lines=0 Sun Oct 18 09:24:40 PM UTC 2026
+watcher shard_lengths_dsa_moe_2051 rc=0 suspicious_lines=0 Sun Oct 18 09:26:43 PM UTC 2026

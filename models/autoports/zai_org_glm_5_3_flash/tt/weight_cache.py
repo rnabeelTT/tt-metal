@@ -14,7 +14,10 @@ Layout: $GLM53_CACHE_DIR/<key>/{top,layer_<i>}/<component>-<digest>/<name>.tenso
 precision policy name plus a digest of its weight dtypes, and a digest of the checkpoint (config + tensor index): a
 different mesh, policy or checkpoint gets a different directory, never a stale file; each component (top / kda / dsa /
 mlp / moe) is keyed by a digest of the source that builds its weights. Files are written to a temporary name and
-renamed, so a killed build leaves no truncated tensor. GLM53_CACHE_DIR=<dir> enables the cache (DEFAULT_DIR when unset;
+renamed, so a killed build leaves no truncated tensor. The checkpoint's shard files are fingerprinted (size + mtime) in
+the manifest: a rewritten checkpoint whose config / index are unchanged gets a fresh directory too (fingerprint suffix).
+A layer whose effective MoE precision differs from the policy's (MoEPrecision.from_args layer exceptions) gets its own
+moe component directory (component(..., policy=...)). GLM53_CACHE_DIR=<dir> enables the cache (DEFAULT_DIR when unset;
 off / none / 0 disable it). The ROW_MAJOR embedding table is not cached (its load_tensor stalled, tt/model.py).
 """
 
@@ -70,6 +73,17 @@ def checkpoint_digest(rd) -> str:
     )
 
 
+def checkpoint_file_stats(rd) -> dict:
+    """{shard file: [size, mtime_ns]} of every file the reader's tensor index points to (+ the mask)."""
+    out = {}
+    for f in sorted(set(rd._files.values())) + ["e192_mask.json", "config.json"]:
+        p = rd.path / f
+        if p.exists():
+            st = p.stat()
+            out[f] = [st.st_size, st.st_mtime_ns]
+    return out
+
+
 @lru_cache(maxsize=None)
 def component_digest(kind: str) -> str:
     """Digest of the source that turns checkpoint tensors into the cached device tensors of one component (the
@@ -80,7 +94,7 @@ def component_digest(kind: str) -> str:
     if kind == "top":
         from .model import Glm53Model
 
-        objs = (Glm53Model.__init__,)
+        objs = (Glm53Model.__init__, Glm53Model._build_lm_head_ds)
     elif kind == "kda":
         import models.demos.deepseek_v3_d_p.tt.kda.weights as kda_weights
 
@@ -201,10 +215,13 @@ class WeightCache:
     def sub(self, scope: str) -> "WeightCache":
         return WeightCache(self.root, self.mesh, scope, self.stats)
 
-    def component(self, kind: str) -> "WeightCache":
+    def component(self, kind: str, policy=None) -> "WeightCache":
         """Scope of one weight-building component (top / kda / dsa / mlp / moe), keyed by a digest of the source that
-        builds its weights: an edit of that code gets a fresh directory instead of a stale tensor."""
-        return WeightCache(self.root, self.mesh, f"{self.scope}/{kind}-{component_digest(kind)}", self.stats)
+        builds its weights: an edit of that code gets a fresh directory instead of a stale tensor. policy: a per-layer
+        precision that differs from the cache key's policy (e.g. a datatype-sweep layer exception): its own directory
+        (None = the policy of the key, no suffix: existing directories stay valid)."""
+        extra = "" if policy is None else f"-p{_digest(policy)[:8]}"
+        return WeightCache(self.root, self.mesh, f"{self.scope}/{kind}-{component_digest(kind)}{extra}", self.stats)
 
     def file(self, name: str) -> Path:
         return self.root / self.scope / f"{name}.tensorbin"
@@ -265,6 +282,25 @@ def weight_cache_from_env(mesh, rd, opt) -> WeightCache | None:
         logger.warning(f"weight cache disabled: cannot create {root} ({e})")
         return None
     manifest = root / "manifest.json"
+    files = checkpoint_file_stats(rd)
+    if manifest.exists():
+        try:
+            man = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            man = {}
+        rec = man.get("checkpoint_files")
+        if rec is None and os.access(root, os.W_OK):  # older manifest: adopt the current fingerprint
+            man["checkpoint_files"] = files
+            tmp = root / f".manifest.{os.getpid()}.tmp"
+            tmp.write_text(json.dumps(man, indent=1))
+            os.replace(tmp, manifest)
+        elif rec is not None and rec != files:  # same config / index, rewritten shards: never reuse those tensors
+            logger.warning(
+                f"weight cache {root}: checkpoint shard files changed (size / mtime); using a fresh directory"
+            )
+            root = Path(os.path.expanduser(base)) / f"{key}-f{_digest(files)[:8]}"
+            root.mkdir(parents=True, exist_ok=True)
+            manifest = root / "manifest.json"
     if not manifest.exists() and os.access(root, os.W_OK):
         tmp = root / f".manifest.{os.getpid()}.tmp"
         tmp.write_text(
@@ -276,6 +312,7 @@ def weight_cache_from_env(mesh, rd, opt) -> WeightCache | None:
                     "policy_weight_dtypes": dtypes,
                     "checkpoint": str(rd.path),
                     "checkpoint_digest": ckpt,
+                    "checkpoint_files": files,
                     "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 },
                 indent=1,

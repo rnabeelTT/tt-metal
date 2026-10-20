@@ -1,0 +1,7518 @@
+{
+  "source": "tools/hf_full_ref.py --mode score-trajectory",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --threads 12 --expert-cache-gb 48 --mode score-trajectory --trajectory /home/raahem/glm53-flash-bringup/artifacts/s67r/traj/s6_q5.json --score-out models/autoports/zai_org_glm_5_3_flash/doc/full_model/qualitative/hf_scores_tt_q5.json",
+  "note": "CPU HF reference (tools/hf_full_ref.py): unmodified HF Glm5NextTextModel, E192-masked routed experts FP8->bf16 dequantized lazily, non-expert weights bf16; greedy argmax of fp32 last-position logits with a DynamicCache (model.generate(do_sample=False) equivalent).",
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "threads": 12,
+  "expert_cache_gb": 48.0,
+  "trajectory": "/home/raahem/glm53-flash-bringup/artifacts/s67r/traj/s6_q5.json",
+  "side": "tt",
+  "num_tokens": 257,
+  "hf_top1_agreement": 0.980544747081712,
+  "hf_top5_agreement": 1.0,
+  "worst_ranks": [
+    [
+      2,
+      75
+    ],
+    [
+      1,
+      194
+    ],
+    [
+      1,
+      176
+    ],
+    [
+      1,
+      119
+    ],
+    [
+      1,
+      62
+    ],
+    [
+      0,
+      256
+    ],
+    [
+      0,
+      255
+    ],
+    [
+      0,
+      254
+    ],
+    [
+      0,
+      253
+    ],
+    [
+      0,
+      252
+    ]
+  ],
+  "hf_greedy_first_divergence": null,
+  "rows": [
+    {
+      "i": 0,
+      "emitted": 785,
+      "emitted_str": "The",
+      "hf_top5": [
+        785,
+        1986,
+        154842,
+        16360,
+        334
+      ],
+      "hf_top5_str": [
+        "The",
+        "This",
+        "</think>",
+        "Simple",
+        "**"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        17.625,
+        15.875,
+        14.25,
+        12.75
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 1,
+      "emitted": 1196,
+      "emitted_str": " user",
+      "hf_top5": [
+        1196,
+        3383,
+        1681,
+        14458,
+        3738
+      ],
+      "hf_top5_str": [
+        " user",
+        " task",
+        " request",
+        " translation",
+        " human"
+      ],
+      "hf_top5_logits": [
+        29.25,
+        21.625,
+        19.375,
+        19.0,
+        17.0
+      ],
+      "emitted_logit": 29.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 2,
+      "emitted": 6801,
+      "emitted_str": " wants",
+      "hf_top5": [
+        6801,
+        374,
+        17045,
+        4588,
+        4936
+      ],
+      "hf_top5_str": [
+        " wants",
+        " is",
+        " asks",
+        " asked",
+        " simply"
+      ],
+      "hf_top5_logits": [
+        29.0,
+        22.875,
+        19.75,
+        19.25,
+        17.25
+      ],
+      "emitted_logit": 29.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.125
+    },
+    {
+      "i": 3,
+      "emitted": 752,
+      "emitted_str": " me",
+      "hf_top5": [
+        752,
+        311,
+        264,
+        330,
+        279
+      ],
+      "hf_top5_str": [
+        " me",
+        " to",
+        " a",
+        " \"",
+        " the"
+      ],
+      "hf_top5_logits": [
+        27.5,
+        25.75,
+        25.125,
+        17.5,
+        16.875
+      ],
+      "emitted_logit": 27.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 4,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        14673,
+        65788,
+        24457,
+        198
+      ],
+      "hf_top5_str": [
+        " to",
+        " translate",
+        " translating",
+        " translated",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        33.75,
+        21.25,
+        16.25,
+        16.25,
+        15.625
+      ],
+      "emitted_logit": 33.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.5
+    },
+    {
+      "i": 5,
+      "emitted": 14673,
+      "emitted_str": " translate",
+      "hf_top5": [
+        14673,
+        14036,
+        330,
+        37544,
+        25828
+      ],
+      "hf_top5_str": [
+        " translate",
+        "translate",
+        " \"",
+        " Translate",
+        ".translate"
+      ],
+      "hf_top5_logits": [
+        35.0,
+        21.5,
+        20.375,
+        20.125,
+        19.75
+      ],
+      "emitted_logit": 35.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.5
+    },
+    {
+      "i": 6,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        458,
+        264,
+        279,
+        6364
+      ],
+      "hf_top5_str": [
+        " \"",
+        " an",
+        " a",
+        " the",
+        " English"
+      ],
+      "hf_top5_logits": [
+        31.0,
+        26.0,
+        25.375,
+        24.625,
+        17.625
+      ],
+      "emitted_logit": 31.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 7,
+      "emitted": 9703,
+      "emitted_str": "Hello",
+      "hf_top5": [
+        9703,
+        4340,
+        21873,
+        13041,
+        80917
+      ],
+      "hf_top5_str": [
+        "Hello",
+        "How",
+        " Hello",
+        "Hi",
+        "Bonjour"
+      ],
+      "hf_top5_logits": [
+        33.75,
+        19.875,
+        19.5,
+        17.25,
+        17.125
+      ],
+      "emitted_logit": 33.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.875
+    },
+    {
+      "i": 8,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        1246,
+        13,
+        0,
+        1
+      ],
+      "hf_top5_str": [
+        ",",
+        " how",
+        ".",
+        "!",
+        "\""
+      ],
+      "hf_top5_logits": [
+        31.0,
+        15.75,
+        14.125,
+        14.0,
+        13.25
+      ],
+      "emitted_logit": 31.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 15.25
+    },
+    {
+      "i": 9,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        23745,
+        5158,
+        99273,
+        54529
+      ],
+      "hf_top5_str": [
+        " how",
+        " hello",
+        "how",
+        "如何",
+        " cómo"
+      ],
+      "hf_top5_logits": [
+        30.375,
+        17.125,
+        15.125,
+        14.812,
+        13.562
+      ],
+      "emitted_logit": 30.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.25
+    },
+    {
+      "i": 10,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        498,
+        653,
+        546
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        " you",
+        " do",
+        "are"
+      ],
+      "hf_top5_logits": [
+        30.5,
+        17.625,
+        14.812,
+        14.75,
+        14.438
+      ],
+      "emitted_logit": 30.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.875
+    },
+    {
+      "i": 11,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        3351,
+        98406,
+        9327,
+        697
+      ],
+      "hf_top5_str": [
+        " you",
+        " today",
+        "你",
+        "you",
+        " your"
+      ],
+      "hf_top5_logits": [
+        32.0,
+        20.5,
+        16.875,
+        16.875,
+        16.75
+      ],
+      "emitted_logit": 32.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.5
+    },
+    {
+      "i": 12,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        99637,
+        7521,
+        29996,
+        1899
+      ],
+      "hf_top5_str": [
+        " today",
+        "今天",
+        "?\"",
+        "today",
+        " day"
+      ],
+      "hf_top5_logits": [
+        32.0,
+        18.25,
+        17.375,
+        17.375,
+        17.375
+      ],
+      "emitted_logit": 32.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.75
+    },
+    {
+      "i": 13,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        20183,
+        11968,
+        102803,
+        12384
+      ],
+      "hf_top5_str": [
+        "?\"",
+        "?'",
+        "?\"\n\n",
+        "？\"",
+        "?”"
+      ],
+      "hf_top5_logits": [
+        33.0,
+        18.625,
+        18.5,
+        17.875,
+        17.25
+      ],
+      "emitted_logit": 33.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 14.375
+    },
+    {
+      "i": 14,
+      "emitted": 1119,
+      "emitted_str": " into",
+      "hf_top5": [
+        1119,
+        311,
+        504,
+        8584,
+        304
+      ],
+      "hf_top5_str": [
+        " into",
+        " to",
+        " from",
+        " French",
+        " in"
+      ],
+      "hf_top5_logits": [
+        29.0,
+        28.375,
+        27.875,
+        17.5,
+        16.375
+      ],
+      "emitted_logit": 29.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 15,
+      "emitted": 8584,
+      "emitted_str": " French",
+      "hf_top5": [
+        8584,
+        42952,
+        6364,
+        15142,
+        4285
+      ],
+      "hf_top5_str": [
+        " French",
+        "French",
+        " English",
+        " Spanish",
+        " simple"
+      ],
+      "hf_top5_logits": [
+        34.75,
+        20.875,
+        20.125,
+        20.0,
+        17.25
+      ],
+      "emitted_logit": 34.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.875
+    },
+    {
+      "i": 16,
+      "emitted": 382,
+      "emitted_str": ".\n\n",
+      "hf_top5": [
+        382,
+        13,
+        11,
+        624,
+        320
+      ],
+      "hf_top5_str": [
+        ".\n\n",
+        ".",
+        ",",
+        ".\n",
+        " ("
+      ],
+      "hf_top5_logits": [
+        28.5,
+        24.75,
+        15.375,
+        15.125,
+        14.438
+      ],
+      "emitted_logit": 28.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 17,
+      "emitted": 785,
+      "emitted_str": "The",
+      "hf_top5": [
+        785,
+        1,
+        10056,
+        24339,
+        1986
+      ],
+      "hf_top5_str": [
+        "The",
+        "\"",
+        "Let",
+        "Translation",
+        "This"
+      ],
+      "hf_top5_logits": [
+        26.25,
+        24.625,
+        24.625,
+        22.125,
+        21.625
+      ],
+      "emitted_logit": 26.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 18,
+      "emitted": 14458,
+      "emitted_str": " translation",
+      "hf_top5": [
+        14458,
+        6364,
+        8584,
+        5810,
+        5297
+      ],
+      "hf_top5_str": [
+        " translation",
+        " English",
+        " French",
+        " natural",
+        " standard"
+      ],
+      "hf_top5_logits": [
+        26.75,
+        23.375,
+        20.875,
+        20.125,
+        19.125
+      ],
+      "emitted_logit": 26.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 19,
+      "emitted": 1035,
+      "emitted_str": " would",
+      "hf_top5": [
+        1035,
+        510,
+        374,
+        315,
+        1265
+      ],
+      "hf_top5_str": [
+        " would",
+        ":\n",
+        " is",
+        " of",
+        " should"
+      ],
+      "hf_top5_logits": [
+        29.375,
+        24.625,
+        21.5,
+        20.125,
+        18.375
+      ],
+      "emitted_logit": 29.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 20,
+      "emitted": 387,
+      "emitted_str": " be",
+      "hf_top5": [
+        387,
+        17687,
+        1371,
+        6761,
+        11131
+      ],
+      "hf_top5_str": [
+        " be",
+        " naturally",
+        "be",
+        " depend",
+        " typically"
+      ],
+      "hf_top5_logits": [
+        33.75,
+        16.0,
+        14.812,
+        14.75,
+        14.562
+      ],
+      "emitted_logit": 33.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 17.75
+    },
+    {
+      "i": 21,
+      "emitted": 510,
+      "emitted_str": ":\n",
+      "hf_top5": [
+        510,
+        25,
+        1447,
+        330,
+        2974
+      ],
+      "hf_top5_str": [
+        ":\n",
+        ":",
+        ":\n\n",
+        " \"",
+        ":\""
+      ],
+      "hf_top5_logits": [
+        28.75,
+        25.625,
+        24.0,
+        17.125,
+        16.875
+      ],
+      "emitted_logit": 28.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 22,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        12,
+        63137,
+        45270,
+        80917
+      ],
+      "hf_top5_str": [
+        "\"",
+        "-",
+        "\"B",
+        "\"H",
+        "Bonjour"
+      ],
+      "hf_top5_logits": [
+        28.25,
+        25.5,
+        19.625,
+        16.625,
+        15.25
+      ],
+      "emitted_logit": 28.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 23,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        17225,
+        39616,
+        46309
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Sal",
+        "¡",
+        "Bon"
+      ],
+      "hf_top5_logits": [
+        26.125,
+        24.25,
+        17.25,
+        17.125,
+        15.688
+      ],
+      "emitted_logit": 26.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 24,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        0,
+        320,
+        1,
+        14
+      ],
+      "hf_top5_str": [
+        ",",
+        "!",
+        " (",
+        "\"",
+        "/"
+      ],
+      "hf_top5_logits": [
+        24.625,
+        15.062,
+        14.0,
+        13.5,
+        12.625
+      ],
+      "emitted_logit": 24.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.562
+    },
+    {
+      "i": 25,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        54529,
+        3980,
+        21521,
+        28189
+      ],
+      "hf_top5_str": [
+        " how",
+        " cómo",
+        " comment",
+        " comme",
+        " ¿"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        18.125,
+        15.0,
+        14.938,
+        14.375
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 26,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        653,
+        594,
+        1035
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        " do",
+        "'s",
+        " would"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        16.75,
+        15.125,
+        14.938,
+        14.75
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 27,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        21167,
+        1112,
+        3351,
+        525
+      ],
+      "hf_top5_str": [
+        " you",
+        "...\"",
+        "...",
+        " today",
+        " are"
+      ],
+      "hf_top5_logits": [
+        25.125,
+        15.688,
+        14.875,
+        14.812,
+        14.062
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 28,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        7521,
+        3730,
+        11968,
+        1
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"",
+        " doing",
+        "?\"\n\n",
+        "\""
+      ],
+      "hf_top5_logits": [
+        22.875,
+        17.75,
+        16.875,
+        15.812,
+        15.188
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 29,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        11968,
+        47077,
+        1,
+        30
+      ],
+      "hf_top5_str": [
+        "?\"",
+        "?\"\n\n",
+        "?\"\n",
+        "\"",
+        "?"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        20.875,
+        18.125,
+        15.5,
+        15.062
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 30,
+      "emitted": 481,
+      "emitted_str": " -",
+      "hf_top5": [
+        481,
+        11392,
+        4710,
+        304,
+        1959
+      ],
+      "hf_top5_str": [
+        " -",
+        " →",
+        " \n\n",
+        " in",
+        " —"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        21.375,
+        20.25,
+        19.0,
+        18.375
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 31,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        714,
+        3783,
+        6771,
+        902
+      ],
+      "hf_top5_str": [
+        " \"",
+        " but",
+        " wait",
+        " Let",
+        " no"
+      ],
+      "hf_top5_logits": [
+        18.0,
+        17.75,
+        17.0,
+        16.875,
+        16.625
+      ],
+      "emitted_logit": 18.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 32,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        4340,
+        5158,
+        29996
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "How",
+        "how",
+        "today"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        20.0,
+        19.375,
+        17.75,
+        17.5
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 33,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        11,
+        1335,
+        8955,
+        0
+      ],
+      "hf_top5_str": [
+        "\"",
+        ",",
+        ",\"",
+        "!\"",
+        "!"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        19.5,
+        16.625,
+        14.812,
+        13.188
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 34,
+      "emitted": 374,
+      "emitted_str": " is",
+      "hf_top5": [
+        374,
+        3363,
+        476,
+        369,
+        320
+      ],
+      "hf_top5_str": [
+        " is",
+        " means",
+        " or",
+        " for",
+        " ("
+      ],
+      "hf_top5_logits": [
+        23.5,
+        20.875,
+        18.75,
+        18.0,
+        17.75
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 35,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        8584,
+        23745,
+        330,
+        264
+      ],
+      "hf_top5_str": [
+        " the",
+        " French",
+        " hello",
+        " \"",
+        " a"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        20.25,
+        20.0,
+        18.375,
+        17.5
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 36,
+      "emitted": 5297,
+      "emitted_str": " standard",
+      "hf_top5": [
+        5297,
+        8584,
+        15896,
+        4185,
+        14250
+      ],
+      "hf_top5_str": [
+        " standard",
+        " French",
+        " formal",
+        " common",
+        " typical"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        24.625,
+        21.0,
+        19.375,
+        18.75
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 37,
+      "emitted": 8584,
+      "emitted_str": " French",
+      "hf_top5": [
+        8584,
+        41875,
+        15896,
+        1616,
+        14458
+      ],
+      "hf_top5_str": [
+        " French",
+        " greeting",
+        " formal",
+        " way",
+        " translation"
+      ],
+      "hf_top5_logits": [
+        25.75,
+        22.125,
+        21.75,
+        19.5,
+        17.75
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.625
+    },
+    {
+      "i": 38,
+      "emitted": 41875,
+      "emitted_str": " greeting",
+      "hf_top5": [
+        41875,
+        23745,
+        369,
+        14458,
+        13569
+      ],
+      "hf_top5_str": [
+        " greeting",
+        " hello",
+        " for",
+        " translation",
+        " equivalent"
+      ],
+      "hf_top5_logits": [
+        28.875,
+        20.375,
+        20.375,
+        19.0,
+        18.375
+      ],
+      "emitted_logit": 28.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.5
+    },
+    {
+      "i": 39,
+      "emitted": 369,
+      "emitted_str": " for",
+      "hf_top5": [
+        369,
+        320,
+        382,
+        624,
+        198
+      ],
+      "hf_top5_str": [
+        " for",
+        " (",
+        ".\n\n",
+        ".\n",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        24.25,
+        22.125,
+        22.125,
+        20.875,
+        20.125
+      ],
+      "emitted_logit": 24.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 40,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        23745,
+        21873,
+        264,
+        9703
+      ],
+      "hf_top5_str": [
+        " \"",
+        " hello",
+        " Hello",
+        " a",
+        "Hello"
+      ],
+      "hf_top5_logits": [
+        27.125,
+        22.875,
+        19.5,
+        14.875,
+        14.688
+      ],
+      "emitted_logit": 27.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.25
+    },
+    {
+      "i": 41,
+      "emitted": 9703,
+      "emitted_str": "Hello",
+      "hf_top5": [
+        9703,
+        14978,
+        21873,
+        23745,
+        95913
+      ],
+      "hf_top5_str": [
+        "Hello",
+        "hello",
+        " Hello",
+        " hello",
+        "_hello"
+      ],
+      "hf_top5_logits": [
+        33.25,
+        27.5,
+        21.75,
+        20.125,
+        19.875
+      ],
+      "emitted_logit": 33.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 42,
+      "emitted": 1837,
+      "emitted_str": "\"\n\n",
+      "hf_top5": [
+        1837,
+        698,
+        1,
+        2217,
+        10035
+      ],
+      "hf_top5_str": [
+        "\"\n\n",
+        "\"\n",
+        "\"",
+        ".\"\n\n",
+        ".\"\n"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        24.5,
+        23.5,
+        23.375,
+        21.25
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 43,
+      "emitted": 70426,
+      "emitted_str": "\"How",
+      "hf_top5": [
+        70426,
+        2461,
+        1,
+        10056,
+        4340
+      ],
+      "hf_top5_str": [
+        "\"How",
+        "For",
+        "\"",
+        "Let",
+        "How"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        22.75,
+        22.0,
+        18.0,
+        17.875
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 44,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        1,
+        8712,
+        546
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        "\"",
+        " Are",
+        "are"
+      ],
+      "hf_top5_logits": [
+        30.75,
+        18.0,
+        17.625,
+        15.25,
+        15.0
+      ],
+      "emitted_logit": 30.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.75
+    },
+    {
+      "i": 45,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        3351,
+        697,
+        1446,
+        9327
+      ],
+      "hf_top5_str": [
+        " you",
+        " today",
+        " your",
+        " You",
+        "you"
+      ],
+      "hf_top5_logits": [
+        33.0,
+        18.375,
+        18.0,
+        17.875,
+        16.5
+      ],
+      "emitted_logit": 33.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 14.625
+    },
+    {
+      "i": 46,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        7521,
+        1,
+        30,
+        498
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"",
+        "\"",
+        "?",
+        " you"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        23.75,
+        21.125,
+        15.5,
+        15.375
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 47,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        1,
+        30,
+        102803,
+        20183
+      ],
+      "hf_top5_str": [
+        "?\"",
+        "\"",
+        "?",
+        "？\"",
+        "?'"
+      ],
+      "hf_top5_logits": [
+        29.875,
+        19.875,
+        17.0,
+        16.125,
+        15.438
+      ],
+      "emitted_logit": 29.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 48,
+      "emitted": 481,
+      "emitted_str": " -",
+      "hf_top5": [
+        481,
+        304,
+        284,
+        46630,
+        1410
+      ],
+      "hf_top5_str": [
+        " -",
+        " in",
+        " =",
+        " translates",
+        " could"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        24.25,
+        22.25,
+        21.25,
+        20.5
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 49,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        1096,
+        758,
+        2619,
+        576
+      ],
+      "hf_top5_str": [
+        " \"",
+        " This",
+        " In",
+        " There",
+        " The"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        20.375,
+        19.5,
+        16.625,
+        16.5
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 50,
+      "emitted": 4340,
+      "emitted_str": "How",
+      "hf_top5": [
+        4340,
+        10672,
+        30065,
+        95092,
+        64427
+      ],
+      "hf_top5_str": [
+        "How",
+        "Comment",
+        "¿",
+        "Cómo",
+        "Como"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        19.5,
+        18.25,
+        17.875,
+        16.75
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 51,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        1,
+        653,
+        374,
+        594
+      ],
+      "hf_top5_str": [
+        " are",
+        "\"",
+        " do",
+        " is",
+        "'s"
+      ],
+      "hf_top5_logits": [
+        26.125,
+        19.375,
+        18.125,
+        18.125,
+        16.125
+      ],
+      "emitted_logit": 26.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 52,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        1,
+        3351,
+        7521,
+        1446
+      ],
+      "hf_top5_str": [
+        " you",
+        "\"",
+        " today",
+        "?\"",
+        " You"
+      ],
+      "hf_top5_logits": [
+        28.25,
+        17.625,
+        17.0,
+        15.938,
+        15.75
+      ],
+      "emitted_logit": 28.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.625
+    },
+    {
+      "i": 53,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        3351,
+        1,
+        30,
+        3730
+      ],
+      "hf_top5_str": [
+        "?\"",
+        " today",
+        "\"",
+        "?",
+        " doing"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        23.375,
+        20.5,
+        16.375,
+        15.438
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 54,
+      "emitted": 304,
+      "emitted_str": " in",
+      "hf_top5": [
+        304,
+        284,
+        374,
+        46630,
+        1035
+      ],
+      "hf_top5_str": [
+        " in",
+        " =",
+        " is",
+        " translates",
+        " would"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        21.625,
+        21.25,
+        19.75,
+        19.25
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 55,
+      "emitted": 8584,
+      "emitted_str": " French",
+      "hf_top5": [
+        8584,
+        15896,
+        41551,
+        42952,
+        16320
+      ],
+      "hf_top5_str": [
+        " French",
+        " formal",
+        " informal",
+        "French",
+        " casual"
+      ],
+      "hf_top5_logits": [
+        29.75,
+        18.25,
+        18.125,
+        17.5,
+        17.375
+      ],
+      "emitted_logit": 29.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.5
+    },
+    {
+      "i": 56,
+      "emitted": 374,
+      "emitted_str": " is",
+      "hf_top5": [
+        374,
+        1035,
+        510,
+        25,
+        646
+      ],
+      "hf_top5_str": [
+        " is",
+        " would",
+        ":\n",
+        ":",
+        " can"
+      ],
+      "hf_top5_logits": [
+        26.0,
+        19.25,
+        17.625,
+        17.375,
+        17.125
+      ],
+      "emitted_logit": 26.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 57,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        11131,
+        16610,
+        2987,
+        510
+      ],
+      "hf_top5_str": [
+        " \"",
+        " typically",
+        " commonly",
+        " either",
+        ":\n"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        20.25,
+        17.125,
+        15.375,
+        14.875
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 58,
+      "emitted": 4340,
+      "emitted_str": "How",
+      "hf_top5": [
+        4340,
+        10672,
+        30065,
+        95092,
+        64427
+      ],
+      "hf_top5_str": [
+        "How",
+        "Comment",
+        "¿",
+        "Cómo",
+        "Como"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        21.625,
+        20.5,
+        19.875,
+        19.375
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 59,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        653,
+        374,
+        594,
+        8712
+      ],
+      "hf_top5_str": [
+        " are",
+        " do",
+        " is",
+        "'s",
+        " Are"
+      ],
+      "hf_top5_logits": [
+        25.875,
+        20.125,
+        18.125,
+        15.938,
+        15.375
+      ],
+      "emitted_logit": 25.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 60,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        1446,
+        7521,
+        45148,
+        9327
+      ],
+      "hf_top5_str": [
+        " you",
+        " You",
+        "?\"",
+        "-you",
+        "you"
+      ],
+      "hf_top5_logits": [
+        26.375,
+        15.75,
+        15.312,
+        14.312,
+        14.0
+      ],
+      "emitted_logit": 26.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.625
+    },
+    {
+      "i": 61,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        47077,
+        11968,
+        30885,
+        1
+      ],
+      "hf_top5_str": [
+        "?\"",
+        "?\"\n",
+        "?\"\n\n",
+        "?\",",
+        "\""
+      ],
+      "hf_top5_logits": [
+        23.375,
+        21.875,
+        21.625,
+        18.0,
+        17.75
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 62,
+      "emitted": 320,
+      "emitted_str": " (",
+      "hf_top5": [
+        323,
+        320,
+        892,
+        714,
+        481
+      ],
+      "hf_top5_str": [
+        " and",
+        " (",
+        " which",
+        " but",
+        " -"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        18.875,
+        18.25,
+        18.0,
+        17.875
+      ],
+      "emitted_logit": 18.875,
+      "emitted_rank": 1,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 63,
+      "emitted": 40218,
+      "emitted_str": "inform",
+      "hf_top5": [
+        40218,
+        4340,
+        970,
+        4197,
+        67596
+      ],
+      "hf_top5_str": [
+        "inform",
+        "How",
+        "using",
+        "with",
+        "liter"
+      ],
+      "hf_top5_logits": [
+        17.875,
+        17.0,
+        16.75,
+        16.5,
+        16.25
+      ],
+      "emitted_logit": 17.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 64,
+      "emitted": 278,
+      "emitted_str": "al",
+      "hf_top5": [
+        278,
+        745,
+        8,
+        33781,
+        20219
+      ],
+      "hf_top5_str": [
+        "al",
+        "ally",
+        ")",
+        " singular",
+        "/form"
+      ],
+      "hf_top5_logits": [
+        27.125,
+        19.375,
+        14.562,
+        13.438,
+        13.0
+      ],
+      "emitted_logit": 27.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.75
+    },
+    {
+      "i": 65,
+      "emitted": 8,
+      "emitted_str": ")",
+      "hf_top5": [
+        8,
+        11,
+        330,
+        2899,
+        340
+      ],
+      "hf_top5_str": [
+        ")",
+        ",",
+        " \"",
+        "/c",
+        ")\n"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        21.5,
+        18.0,
+        17.625,
+        17.625
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 66,
+      "emitted": 476,
+      "emitted_str": " or",
+      "hf_top5": [
+        476,
+        481,
+        892,
+        715,
+        323
+      ],
+      "hf_top5_str": [
+        " or",
+        " -",
+        " which",
+        " \n",
+        " and"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        18.75,
+        17.5,
+        17.5,
+        17.125
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 67,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        803,
+        320,
+        279,
+        15896
+      ],
+      "hf_top5_str": [
+        " \"",
+        " more",
+        " (",
+        " the",
+        " formal"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        15.188,
+        15.125,
+        14.875,
+        14.5
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.312
+    },
+    {
+      "i": 68,
+      "emitted": 4340,
+      "emitted_str": "How",
+      "hf_top5": [
+        4340,
+        5158,
+        11521,
+        3036,
+        5404
+      ],
+      "hf_top5_str": [
+        "How",
+        "how",
+        "Are",
+        "And",
+        "Do"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        19.375,
+        17.375,
+        16.75,
+        15.438
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 69,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        653,
+        374,
+        8712,
+        12
+      ],
+      "hf_top5_str": [
+        " are",
+        " do",
+        " is",
+        " Are",
+        "-"
+      ],
+      "hf_top5_logits": [
+        26.5,
+        21.25,
+        17.875,
+        16.75,
+        14.688
+      ],
+      "emitted_logit": 26.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 70,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        1446,
+        99526,
+        14973,
+        2513
+      ],
+      "hf_top5_str": [
+        " you",
+        " You",
+        "您",
+        " YOU",
+        " things"
+      ],
+      "hf_top5_logits": [
+        26.0,
+        17.125,
+        15.875,
+        15.75,
+        14.625
+      ],
+      "emitted_logit": 26.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 71,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        320,
+        30,
+        36118,
+        3351
+      ],
+      "hf_top5_str": [
+        "?\"",
+        " (",
+        "?",
+        " formally",
+        " today"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        18.125,
+        16.875,
+        16.125,
+        16.0
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 72,
+      "emitted": 320,
+      "emitted_str": " (",
+      "hf_top5": [
+        320,
+        448,
+        481,
+        4710,
+        715
+      ],
+      "hf_top5_str": [
+        " (",
+        " with",
+        " -",
+        " \n\n",
+        " \n"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        14.812,
+        14.75,
+        14.688,
+        14.688
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.812
+    },
+    {
+      "i": 73,
+      "emitted": 627,
+      "emitted_str": "form",
+      "hf_top5": [
+        627,
+        6384,
+        66062,
+        9891,
+        40218
+      ],
+      "hf_top5_str": [
+        "form",
+        "more",
+        "plural",
+        "pol",
+        "inform"
+      ],
+      "hf_top5_logits": [
+        26.75,
+        19.875,
+        18.625,
+        17.75,
+        16.75
+      ],
+      "emitted_logit": 26.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 74,
+      "emitted": 278,
+      "emitted_str": "al",
+      "hf_top5": [
+        278,
+        11250,
+        692,
+        568,
+        340
+      ],
+      "hf_top5_str": [
+        "al",
+        "/pl",
+        ")\n\n",
+        ").",
+        ")\n"
+      ],
+      "hf_top5_logits": [
+        33.0,
+        18.875,
+        16.5,
+        16.375,
+        15.25
+      ],
+      "emitted_logit": 33.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 14.125
+    },
+    {
+      "i": 75,
+      "emitted": 568,
+      "emitted_str": ").",
+      "hf_top5": [
+        11250,
+        692,
+        568,
+        340,
+        11
+      ],
+      "hf_top5_str": [
+        "/pl",
+        ")\n\n",
+        ").",
+        ")\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        22.25,
+        21.75,
+        21.625,
+        20.25,
+        19.25
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 76,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        1752,
+        4710,
+        576,
+        8703
+      ],
+      "hf_top5_str": [
+        " \"",
+        " For",
+        " \n\n",
+        " The",
+        " Since"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        20.125,
+        19.375,
+        19.375,
+        18.75
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 77,
+      "emitted": 15352,
+      "emitted_str": "Today",
+      "hf_top5": [
+        15352,
+        29996,
+        4340,
+        2610,
+        51
+      ],
+      "hf_top5_str": [
+        "Today",
+        "today",
+        "How",
+        "You",
+        "T"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        20.625,
+        19.75,
+        16.0,
+        16.0
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 78,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        374,
+        7521,
+        1035,
+        14
+      ],
+      "hf_top5_str": [
+        "\"",
+        " is",
+        "?\"",
+        " would",
+        "/"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        15.062,
+        15.0,
+        14.0,
+        13.75
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.188
+    },
+    {
+      "i": 79,
+      "emitted": 374,
+      "emitted_str": " is",
+      "hf_top5": [
+        374,
+        1035,
+        11362,
+        46630,
+        3363
+      ],
+      "hf_top5_str": [
+        " is",
+        " would",
+        " adds",
+        " translates",
+        " means"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        21.75,
+        19.75,
+        18.875,
+        18.625
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 80,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        3351,
+        4936,
+        279,
+        1591
+      ],
+      "hf_top5_str": [
+        " \"",
+        " today",
+        " simply",
+        " the",
+        " \"\""
+      ],
+      "hf_top5_logits": [
+        23.625,
+        16.375,
+        14.938,
+        14.375,
+        14.25
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 81,
+      "emitted": 29996,
+      "emitted_str": "today",
+      "hf_top5": [
+        29996,
+        15352,
+        574,
+        1986,
+        3351
+      ],
+      "hf_top5_str": [
+        "today",
+        "Today",
+        "this",
+        "This",
+        " today"
+      ],
+      "hf_top5_logits": [
+        25.625,
+        22.125,
+        21.0,
+        18.875,
+        15.75
+      ],
+      "emitted_logit": 25.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 82,
+      "emitted": 11431,
+      "emitted_str": "\".\n\n",
+      "hf_top5": [
+        11431,
+        1,
+        2217,
+        3263,
+        497
+      ],
+      "hf_top5_str": [
+        "\".\n\n",
+        "\"",
+        ".\"\n\n",
+        "\".",
+        "\","
+      ],
+      "hf_top5_logits": [
+        22.75,
+        20.125,
+        20.125,
+        18.625,
+        18.125
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 83,
+      "emitted": 4416,
+      "emitted_str": "So",
+      "hf_top5": [
+        4416,
+        2461,
+        1,
+        9109,
+        14181
+      ],
+      "hf_top5_str": [
+        "So",
+        "For",
+        "\"",
+        "Note",
+        "Wait"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        20.125,
+        19.625,
+        19.25,
+        18.75
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 84,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        25,
+        264,
+        330,
+        510
+      ],
+      "hf_top5_str": [
+        " the",
+        ":",
+        " a",
+        " \"",
+        ":\n"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        21.625,
+        21.0,
+        20.5,
+        19.875
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.875
+    },
+    {
+      "i": 85,
+      "emitted": 2480,
+      "emitted_str": " full",
+      "hf_top5": [
+        2480,
+        14458,
+        4583,
+        5810,
+        1429
+      ],
+      "hf_top5_str": [
+        " full",
+        " translation",
+        " complete",
+        " natural",
+        " most"
+      ],
+      "hf_top5_logits": [
+        26.0,
+        24.0,
+        19.75,
+        19.5,
+        19.5
+      ],
+      "emitted_logit": 26.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 86,
+      "emitted": 14458,
+      "emitted_str": " translation",
+      "hf_top5": [
+        14458,
+        11646,
+        36502,
+        41551,
+        3053
+      ],
+      "hf_top5_str": [
+        " translation",
+        " sentence",
+        " translations",
+        " informal",
+        "translation"
+      ],
+      "hf_top5_logits": [
+        29.5,
+        20.875,
+        19.625,
+        18.625,
+        17.25
+      ],
+      "emitted_logit": 29.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.625
+    },
+    {
+      "i": 87,
+      "emitted": 1035,
+      "emitted_str": " would",
+      "hf_top5": [
+        1035,
+        510,
+        25,
+        1410,
+        2606
+      ],
+      "hf_top5_str": [
+        " would",
+        ":\n",
+        ":",
+        " could",
+        " options"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        25.125,
+        23.375,
+        23.25,
+        20.875
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 88,
+      "emitted": 387,
+      "emitted_str": " be",
+      "hf_top5": [
+        387,
+        6761,
+        6051,
+        17687,
+        510
+      ],
+      "hf_top5_str": [
+        " be",
+        " depend",
+        " inform",
+        " naturally",
+        ":\n"
+      ],
+      "hf_top5_logits": [
+        31.25,
+        20.75,
+        16.75,
+        16.125,
+        15.812
+      ],
+      "emitted_logit": 31.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.5
+    },
+    {
+      "i": 89,
+      "emitted": 510,
+      "emitted_str": ":\n",
+      "hf_top5": [
+        510,
+        25,
+        1447,
+        2987,
+        2494
+      ],
+      "hf_top5_str": [
+        ":\n",
+        ":",
+        ":\n\n",
+        " either",
+        " something"
+      ],
+      "hf_top5_logits": [
+        28.75,
+        22.25,
+        21.75,
+        18.875,
+        16.625
+      ],
+      "emitted_logit": 28.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 90,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        12,
+        70426,
+        63137,
+        32454
+      ],
+      "hf_top5_str": [
+        "\"",
+        "-",
+        "\"How",
+        "\"B",
+        "\"In"
+      ],
+      "hf_top5_logits": [
+        25.75,
+        25.375,
+        22.625,
+        20.5,
+        18.625
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 91,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        46309,
+        15204,
+        13472
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Bon",
+        "Good",
+        " Bon"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        21.625,
+        16.875,
+        16.125,
+        14.875
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.625
+    },
+    {
+      "i": 92,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        0,
+        13,
+        1246,
+        2585
+      ],
+      "hf_top5_str": [
+        ",",
+        "!",
+        ".",
+        " how",
+        " How"
+      ],
+      "hf_top5_logits": [
+        24.75,
+        19.0,
+        15.062,
+        14.375,
+        14.188
+      ],
+      "emitted_logit": 24.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 93,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        2585,
+        3351,
+        438,
+        498
+      ],
+      "hf_top5_str": [
+        " how",
+        " How",
+        " today",
+        " as",
+        " you"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        19.0,
+        15.875,
+        15.375,
+        14.75
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.875
+    },
+    {
+      "i": 94,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        594,
+        1521,
+        653
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        "'s",
+        " did",
+        " do"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        18.375,
+        17.375,
+        16.875,
+        16.875
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 95,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        525,
+        697,
+        198,
+        1446
+      ],
+      "hf_top5_str": [
+        " you",
+        " are",
+        " your",
+        "\n",
+        " You"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        16.5,
+        15.375,
+        15.062,
+        14.438
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.25
+    },
+    {
+      "i": 96,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        7521,
+        3730,
+        11968,
+        320
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"",
+        " doing",
+        "?\"\n\n",
+        " ("
+      ],
+      "hf_top5_logits": [
+        24.0,
+        17.0,
+        16.875,
+        16.625,
+        14.812
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 97,
+      "emitted": 11968,
+      "emitted_str": "?\"\n\n",
+      "hf_top5": [
+        11968,
+        7521,
+        47077,
+        30,
+        937
+      ],
+      "hf_top5_str": [
+        "?\"\n\n",
+        "?\"",
+        "?\"\n",
+        "?",
+        " ?"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        21.875,
+        18.625,
+        15.5,
+        15.375
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 98,
+      "emitted": 2195,
+      "emitted_str": "Or",
+      "hf_top5": [
+        2195,
+        1986,
+        9109,
+        10056,
+        2679
+      ],
+      "hf_top5_str": [
+        "Or",
+        "This",
+        "Note",
+        "Let",
+        "If"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        21.375,
+        20.5,
+        20.0,
+        19.75
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 99,
+      "emitted": 448,
+      "emitted_str": " with",
+      "hf_top5": [
+        448,
+        803,
+        421,
+        67890,
+        10073
+      ],
+      "hf_top5_str": [
+        " with",
+        " more",
+        " if",
+        " alternatively",
+        " slightly"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        21.125,
+        19.75,
+        19.625,
+        18.75
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 100,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        15896,
+        264,
+        330,
+        803
+      ],
+      "hf_top5_str": [
+        " the",
+        " formal",
+        " a",
+        " \"",
+        " more"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        18.5,
+        18.0,
+        17.375,
+        16.5
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 101,
+      "emitted": 15896,
+      "emitted_str": " formal",
+      "hf_top5": [
+        15896,
+        41551,
+        803,
+        38291,
+        31550
+      ],
+      "hf_top5_str": [
+        " formal",
+        " informal",
+        " more",
+        " plural",
+        " comma"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        17.25,
+        17.0,
+        15.75,
+        15.75
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 102,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        2319,
+        510,
+        1352,
+        11250
+      ],
+      "hf_top5_str": [
+        " \"",
+        " version",
+        ":\n",
+        " form",
+        "/pl"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        21.25,
+        19.0,
+        18.25,
+        18.0
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 103,
+      "emitted": 9327,
+      "emitted_str": "you",
+      "hf_top5": [
+        9327,
+        4340,
+        57056,
+        5158,
+        21680
+      ],
+      "hf_top5_str": [
+        "you",
+        "How",
+        "vous",
+        "how",
+        "your"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        18.125,
+        17.75,
+        17.125,
+        16.75
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 104,
+      "emitted": 4660,
+      "emitted_str": "\":\n",
+      "hf_top5": [
+        4660,
+        788,
+        1,
+        525,
+        678
+      ],
+      "hf_top5_str": [
+        "\":\n",
+        "\":",
+        "\"",
+        " are",
+        " all"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        21.0,
+        18.25,
+        17.125,
+        16.25
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 105,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        70426,
+        12,
+        63137,
+        80917
+      ],
+      "hf_top5_str": [
+        "\"",
+        "\"How",
+        "-",
+        "\"B",
+        "Bonjour"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        20.0,
+        17.375,
+        16.75,
+        15.562
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.375
+    },
+    {
+      "i": 106,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        15204,
+        46309,
+        13041
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Good",
+        "Bon",
+        "Hi"
+      ],
+      "hf_top5_logits": [
+        27.875,
+        22.375,
+        21.0,
+        17.875,
+        15.062
+      ],
+      "emitted_logit": 27.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 107,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        1246,
+        497,
+        0,
+        1
+      ],
+      "hf_top5_str": [
+        ",",
+        " how",
+        "\",",
+        "!",
+        "\""
+      ],
+      "hf_top5_logits": [
+        25.125,
+        14.875,
+        14.625,
+        14.438,
+        13.812
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.25
+    },
+    {
+      "i": 108,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        2585,
+        3351,
+        525,
+        614
+      ],
+      "hf_top5_str": [
+        " how",
+        " How",
+        " today",
+        " are",
+        " have"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        18.5,
+        16.5,
+        14.875,
+        13.875
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.375
+    },
+    {
+      "i": 109,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        653,
+        374,
+        8712,
+        646
+      ],
+      "hf_top5_str": [
+        " are",
+        " do",
+        " is",
+        " Are",
+        " can"
+      ],
+      "hf_top5_logits": [
+        26.875,
+        18.0,
+        17.375,
+        14.688,
+        14.375
+      ],
+      "emitted_logit": 26.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 110,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        1446,
+        320,
+        14973,
+        697
+      ],
+      "hf_top5_str": [
+        " you",
+        " You",
+        " (",
+        " YOU",
+        " your"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        16.875,
+        14.812,
+        14.625,
+        14.562
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.375
+    },
+    {
+      "i": 111,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        11968,
+        419,
+        3730,
+        320
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"\n\n",
+        " this",
+        " doing",
+        " ("
+      ],
+      "hf_top5_logits": [
+        24.375,
+        17.0,
+        16.375,
+        16.25,
+        15.812
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 112,
+      "emitted": 11968,
+      "emitted_str": "?\"\n\n",
+      "hf_top5": [
+        11968,
+        7521,
+        30,
+        3351,
+        937
+      ],
+      "hf_top5_str": [
+        "?\"\n\n",
+        "?\"",
+        "?",
+        " today",
+        " ?"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        18.75,
+        16.25,
+        15.938,
+        14.688
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 113,
+      "emitted": 785,
+      "emitted_str": "The",
+      "hf_top5": [
+        785,
+        12543,
+        20586,
+        2461,
+        40
+      ],
+      "hf_top5_str": [
+        "The",
+        "Since",
+        "Both",
+        "For",
+        "I"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        22.5,
+        21.125,
+        19.75,
+        19.375
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 114,
+      "emitted": 41551,
+      "emitted_str": " informal",
+      "hf_top5": [
+        41551,
+        1429,
+        16320,
+        6364,
+        330
+      ],
+      "hf_top5_str": [
+        " informal",
+        " most",
+        " casual",
+        " English",
+        " \""
+      ],
+      "hf_top5_logits": [
+        22.25,
+        20.125,
+        17.5,
+        17.375,
+        17.125
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 115,
+      "emitted": 2319,
+      "emitted_str": " version",
+      "hf_top5": [
+        2319,
+        330,
+        1352,
+        374,
+        825
+      ],
+      "hf_top5_str": [
+        " version",
+        " \"",
+        " form",
+        " is",
+        " one"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        22.0,
+        17.125,
+        16.875,
+        16.75
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 116,
+      "emitted": 374,
+      "emitted_str": " is",
+      "hf_top5": [
+        374,
+        330,
+        320,
+        3489,
+        1035
+      ],
+      "hf_top5_str": [
+        " is",
+        " \"",
+        " (",
+        " (\"",
+        " would"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        22.0,
+        19.875,
+        18.375,
+        18.375
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 117,
+      "emitted": 803,
+      "emitted_str": " more",
+      "hf_top5": [
+        803,
+        1429,
+        279,
+        4658,
+        510
+      ],
+      "hf_top5_str": [
+        " more",
+        " most",
+        " the",
+        " probably",
+        ":\n"
+      ],
+      "hf_top5_logits": [
+        25.0,
+        23.625,
+        21.25,
+        20.875,
+        18.875
+      ],
+      "emitted_logit": 25.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 118,
+      "emitted": 4185,
+      "emitted_str": " common",
+      "hf_top5": [
+        4185,
+        16610,
+        5810,
+        4363,
+        8310
+      ],
+      "hf_top5_str": [
+        " common",
+        " commonly",
+        " natural",
+        " likely",
+        " appropriate"
+      ],
+      "hf_top5_logits": [
+        28.0,
+        23.375,
+        22.75,
+        20.375,
+        19.375
+      ],
+      "emitted_logit": 28.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.625
+    },
+    {
+      "i": 119,
+      "emitted": 369,
+      "emitted_str": " for",
+      "hf_top5": [
+        304,
+        369,
+        323,
+        25,
+        438
+      ],
+      "hf_top5_str": [
+        " in",
+        " for",
+        " and",
+        ":",
+        " as"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        23.375,
+        21.625,
+        18.75,
+        18.0
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 120,
+      "emitted": 17752,
+      "emitted_str": " everyday",
+      "hf_top5": [
+        17752,
+        16320,
+        264,
+        419,
+        4586
+      ],
+      "hf_top5_str": [
+        " everyday",
+        " casual",
+        " a",
+        " this",
+        " general"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        23.125,
+        22.0,
+        21.0,
+        19.25
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 121,
+      "emitted": 93295,
+      "emitted_str": " greetings",
+      "hf_top5": [
+        93295,
+        990,
+        8805,
+        10430,
+        41875
+      ],
+      "hf_top5_str": [
+        " greetings",
+        " use",
+        " speech",
+        " conversation",
+        " greeting"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        21.25,
+        20.75,
+        20.75,
+        20.375
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 122,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        11,
+        1075,
+        25,
+        1948
+      ],
+      "hf_top5_str": [
+        ".",
+        ",",
+        " like",
+        ":",
+        " between"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        22.625,
+        22.0,
+        20.875,
+        20.75
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 123,
+      "emitted": 6771,
+      "emitted_str": " Let",
+      "hf_top5": [
+        6771,
+        358,
+        8703,
+        330,
+        11727
+      ],
+      "hf_top5_str": [
+        " Let",
+        " I",
+        " Since",
+        " \"",
+        " Both"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        20.75,
+        19.375,
+        18.375,
+        18.0
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 124,
+      "emitted": 752,
+      "emitted_str": " me",
+      "hf_top5": [
+        752,
+        594,
+        2660,
+        3410,
+        2157
+      ],
+      "hf_top5_str": [
+        " me",
+        "'s",
+        "me",
+        " provide",
+        " Me"
+      ],
+      "hf_top5_logits": [
+        31.875,
+        15.188,
+        14.875,
+        14.75,
+        13.438
+      ],
+      "emitted_logit": 31.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 16.688
+    },
+    {
+      "i": 125,
+      "emitted": 3410,
+      "emitted_str": " provide",
+      "hf_top5": [
+        3410,
+        1744,
+        2968,
+        728,
+        1083
+      ],
+      "hf_top5_str": [
+        " provide",
+        " think",
+        " give",
+        " go",
+        " also"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        23.125,
+        22.75,
+        22.75,
+        21.5
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 126,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        2176,
+        510,
+        330,
+        1447
+      ],
+      "hf_top5_str": [
+        " the",
+        " both",
+        ":\n",
+        " \"",
+        ":\n\n"
+      ],
+      "hf_top5_logits": [
+        27.125,
+        22.375,
+        21.625,
+        21.0,
+        19.0
+      ],
+      "emitted_logit": 27.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 127,
+      "emitted": 14458,
+      "emitted_str": " translation",
+      "hf_top5": [
+        14458,
+        1429,
+        41551,
+        5297,
+        5810
+      ],
+      "hf_top5_str": [
+        " translation",
+        " most",
+        " informal",
+        " standard",
+        " natural"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        23.25,
+        22.5,
+        22.125,
+        20.625
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 128,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        9352,
+        11,
+        1447,
+        382
+      ],
+      "hf_top5_str": [
+        ".",
+        " clearly",
+        ",",
+        ":\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        21.625,
+        21.5,
+        21.0,
+        20.125
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 129,
+      "emitted": 358,
+      "emitted_str": " I",
+      "hf_top5": [
+        358,
+        154842,
+        576,
+        8703,
+        1096
+      ],
+      "hf_top5_str": [
+        " I",
+        "</think>",
+        " The",
+        " Since",
+        " This"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        20.0,
+        19.75,
+        19.375,
+        17.375
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 130,
+      "emitted": 1410,
+      "emitted_str": " could",
+      "hf_top5": [
+        1410,
+        1265,
+        2578,
+        3278,
+        646
+      ],
+      "hf_top5_str": [
+        " could",
+        " should",
+        " might",
+        "'ll",
+        " can"
+      ],
+      "hf_top5_logits": [
+        29.125,
+        22.375,
+        22.25,
+        20.625,
+        18.625
+      ],
+      "emitted_logit": 29.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 131,
+      "emitted": 6286,
+      "emitted_str": " mention",
+      "hf_top5": [
+        6286,
+        1083,
+        3010,
+        2968,
+        5185
+      ],
+      "hf_top5_str": [
+        " mention",
+        " also",
+        " offer",
+        " give",
+        " note"
+      ],
+      "hf_top5_logits": [
+        26.625,
+        25.75,
+        25.0,
+        23.625,
+        23.125
+      ],
+      "emitted_logit": 26.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 132,
+      "emitted": 2176,
+      "emitted_str": " both",
+      "hf_top5": [
+        2176,
+        279,
+        1052,
+        429,
+        26667
+      ],
+      "hf_top5_str": [
+        " both",
+        " the",
+        " there",
+        " that",
+        " briefly"
+      ],
+      "hf_top5_logits": [
+        28.375,
+        24.375,
+        21.0,
+        20.0,
+        16.125
+      ],
+      "emitted_logit": 28.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 133,
+      "emitted": 2606,
+      "emitted_str": " options",
+      "hf_top5": [
+        2606,
+        15896,
+        7586,
+        279,
+        41551
+      ],
+      "hf_top5_str": [
+        " options",
+        " formal",
+        " forms",
+        " the",
+        " informal"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        22.5,
+        22.25,
+        21.875,
+        20.875
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 134,
+      "emitted": 26667,
+      "emitted_str": " briefly",
+      "hf_top5": [
+        26667,
+        2474,
+        320,
+        476,
+        714
+      ],
+      "hf_top5_str": [
+        " briefly",
+        " since",
+        " (",
+        " or",
+        " but"
+      ],
+      "hf_top5_logits": [
+        25.625,
+        22.625,
+        22.25,
+        22.125,
+        21.875
+      ],
+      "emitted_logit": 25.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 135,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        2474,
+        13,
+        382,
+        714
+      ],
+      "hf_top5_str": [
+        ",",
+        " since",
+        ".",
+        ".\n\n",
+        " but"
+      ],
+      "hf_top5_logits": [
+        26.25,
+        24.0,
+        23.375,
+        22.75,
+        22.5
+      ],
+      "emitted_logit": 26.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 136,
+      "emitted": 714,
+      "emitted_str": " but",
+      "hf_top5": [
+        714,
+        476,
+        2474,
+        10277,
+        892
+      ],
+      "hf_top5_str": [
+        " but",
+        " or",
+        " since",
+        " keeping",
+        " which"
+      ],
+      "hf_top5_logits": [
+        28.125,
+        24.125,
+        20.75,
+        19.375,
+        16.625
+      ],
+      "emitted_logit": 28.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 137,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        10277,
+        2474,
+        264,
+        369
+      ],
+      "hf_top5_str": [
+        " the",
+        " keeping",
+        " since",
+        " a",
+        " for"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        22.875,
+        22.0,
+        21.25,
+        21.0
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 138,
+      "emitted": 1429,
+      "emitted_str": " most",
+      "hf_top5": [
+        1429,
+        1196,
+        44290,
+        1681,
+        1887
+      ],
+      "hf_top5_str": [
+        " most",
+        " user",
+        " simplest",
+        " request",
+        " main"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        22.125,
+        21.0,
+        20.625,
+        20.125
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 139,
+      "emitted": 5810,
+      "emitted_str": " natural",
+      "hf_top5": [
+        5810,
+        5297,
+        4185,
+        2118,
+        30222
+      ],
+      "hf_top5_str": [
+        " natural",
+        " standard",
+        " common",
+        " direct",
+        " straightforward"
+      ],
+      "hf_top5_logits": [
+        30.0,
+        25.75,
+        25.5,
+        24.125,
+        23.375
+      ],
+      "emitted_logit": 30.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.25
+    },
+    {
+      "i": 140,
+      "emitted": 14458,
+      "emitted_str": " translation",
+      "hf_top5": [
+        14458,
+        17752,
+        323,
+        11351,
+        1638
+      ],
+      "hf_top5_str": [
+        " translation",
+        " everyday",
+        " and",
+        "/common",
+        " default"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        21.0,
+        19.25,
+        19.125,
+        18.75
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 141,
+      "emitted": 1035,
+      "emitted_str": " would",
+      "hf_top5": [
+        1035,
+        374,
+        315,
+        369,
+        5711
+      ],
+      "hf_top5_str": [
+        " would",
+        " is",
+        " of",
+        " for",
+        " uses"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        22.75,
+        21.5,
+        19.375,
+        16.875
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.125
+    },
+    {
+      "i": 142,
+      "emitted": 387,
+      "emitted_str": " be",
+      "hf_top5": [
+        387,
+        990,
+        4658,
+        11131,
+        4363
+      ],
+      "hf_top5_str": [
+        " be",
+        " use",
+        " probably",
+        " typically",
+        " likely"
+      ],
+      "hf_top5_logits": [
+        28.875,
+        26.375,
+        20.25,
+        19.875,
+        19.375
+      ],
+      "emitted_logit": 28.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 143,
+      "emitted": 1447,
+      "emitted_str": ":\n\n",
+      "hf_top5": [
+        1447,
+        279,
+        448,
+        330,
+        1667
+      ],
+      "hf_top5_str": [
+        ":\n\n",
+        " the",
+        " with",
+        " \"",
+        " using"
+      ],
+      "hf_top5_logits": [
+        26.625,
+        25.125,
+        22.875,
+        19.5,
+        18.75
+      ],
+      "emitted_logit": 26.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 144,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        70426,
+        63137,
+        80917,
+        334
+      ],
+      "hf_top5_str": [
+        "\"",
+        "\"How",
+        "\"B",
+        "Bonjour",
+        "**"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        20.125,
+        20.0,
+        19.25,
+        19.125
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 145,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        46309,
+        13041,
+        15204
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Bon",
+        "Hi",
+        "Good"
+      ],
+      "hf_top5_logits": [
+        29.625,
+        23.25,
+        19.0,
+        17.5,
+        17.125
+      ],
+      "emitted_logit": 29.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.375
+    },
+    {
+      "i": 146,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        0,
+        1246,
+        13,
+        753
+      ],
+      "hf_top5_str": [
+        ",",
+        "!",
+        " how",
+        ".",
+        " !"
+      ],
+      "hf_top5_logits": [
+        25.625,
+        17.875,
+        14.688,
+        13.062,
+        13.0
+      ],
+      "emitted_logit": 25.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.75
+    },
+    {
+      "i": 147,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        2585,
+        3351,
+        498,
+        54529
+      ],
+      "hf_top5_str": [
+        " how",
+        " How",
+        " today",
+        " you",
+        " cómo"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        18.125,
+        14.812,
+        14.562,
+        13.688
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.375
+    },
+    {
+      "i": 148,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        594,
+        653,
+        1246
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        "'s",
+        " do",
+        " how"
+      ],
+      "hf_top5_logits": [
+        26.5,
+        17.0,
+        15.312,
+        14.75,
+        14.25
+      ],
+      "emitted_logit": 26.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 149,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        1446,
+        3351,
+        525,
+        353
+      ],
+      "hf_top5_str": [
+        " you",
+        " You",
+        " today",
+        " are",
+        " *"
+      ],
+      "hf_top5_logits": [
+        27.125,
+        14.938,
+        14.875,
+        14.875,
+        14.125
+      ],
+      "emitted_logit": 27.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.188
+    },
+    {
+      "i": 150,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        11968,
+        7521,
+        30,
+        937
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"\n\n",
+        "?\"",
+        "?",
+        " ?"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        19.75,
+        18.0,
+        16.125,
+        15.188
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 151,
+      "emitted": 11968,
+      "emitted_str": "?\"\n\n",
+      "hf_top5": [
+        11968,
+        7521,
+        30,
+        937,
+        47077
+      ],
+      "hf_top5_str": [
+        "?\"\n\n",
+        "?\"",
+        "?",
+        " ?",
+        "?\"\n"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        21.375,
+        16.5,
+        15.5,
+        15.438
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 152,
+      "emitted": 1986,
+      "emitted_str": "This",
+      "hf_top5": [
+        1986,
+        40,
+        52246,
+        12543,
+        9109
+      ],
+      "hf_top5_str": [
+        "This",
+        "I",
+        "Actually",
+        "Since",
+        "Note"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        22.5,
+        21.5,
+        20.125,
+        19.875
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 153,
+      "emitted": 374,
+      "emitted_str": " is",
+      "hf_top5": [
+        374,
+        1265,
+        5711,
+        4977,
+        39934
+      ],
+      "hf_top5_str": [
+        " is",
+        " should",
+        " uses",
+        " seems",
+        " captures"
+      ],
+      "hf_top5_logits": [
+        25.125,
+        21.875,
+        18.625,
+        17.25,
+        17.0
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.25
+    },
+    {
+      "i": 154,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        4285,
+        30222,
+        2805,
+        41551
+      ],
+      "hf_top5_str": [
+        " a",
+        " simple",
+        " straightforward",
+        " short",
+        " informal"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        20.75,
+        17.875,
+        17.625,
+        17.375
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 155,
+      "emitted": 4285,
+      "emitted_str": " simple",
+      "hf_top5": [
+        4285,
+        2805,
+        16320,
+        30222,
+        1602
+      ],
+      "hf_top5_str": [
+        " simple",
+        " short",
+        " casual",
+        " straightforward",
+        " very"
+      ],
+      "hf_top5_logits": [
+        25.75,
+        20.25,
+        17.625,
+        17.5,
+        16.25
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 156,
+      "emitted": 14458,
+      "emitted_str": " translation",
+      "hf_top5": [
+        14458,
+        1681,
+        11,
+        3383,
+        59485
+      ],
+      "hf_top5_str": [
+        " translation",
+        " request",
+        ",",
+        " task",
+        " factual"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        22.75,
+        22.25,
+        19.625,
+        16.125
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 157,
+      "emitted": 1681,
+      "emitted_str": " request",
+      "hf_top5": [
+        1681,
+        3383,
+        3405,
+        103424,
+        11
+      ],
+      "hf_top5_str": [
+        " request",
+        " task",
+        " question",
+        "请求",
+        ","
+      ],
+      "hf_top5_logits": [
+        33.0,
+        31.25,
+        20.375,
+        19.5,
+        18.875
+      ],
+      "emitted_logit": 33.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 158,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        481,
+        773,
+        448
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        " -",
+        " so",
+        " with"
+      ],
+      "hf_top5_logits": [
+        27.0,
+        22.875,
+        19.0,
+        16.875,
+        15.625
+      ],
+      "emitted_logit": 27.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 159,
+      "emitted": 773,
+      "emitted_str": " so",
+      "hf_top5": [
+        773,
+        358,
+        847,
+        323,
+        902
+      ],
+      "hf_top5_str": [
+        " so",
+        " I",
+        " my",
+        " and",
+        " no"
+      ],
+      "hf_top5_logits": [
+        30.375,
+        16.875,
+        16.625,
+        16.375,
+        15.562
+      ],
+      "emitted_logit": 30.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.5
+    },
+    {
+      "i": 160,
+      "emitted": 358,
+      "emitted_str": " I",
+      "hf_top5": [
+        358,
+        847,
+        264,
+        279,
+        10277
+      ],
+      "hf_top5_str": [
+        " I",
+        " my",
+        " a",
+        " the",
+        " keeping"
+      ],
+      "hf_top5_logits": [
+        28.5,
+        27.0,
+        26.25,
+        22.625,
+        19.625
+      ],
+      "emitted_logit": 28.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 161,
+      "emitted": 1265,
+      "emitted_str": " should",
+      "hf_top5": [
+        1265,
+        3278,
+        646,
+        13125,
+        2506
+      ],
+      "hf_top5_str": [
+        " should",
+        "'ll",
+        " can",
+        " shouldn",
+        " keep"
+      ],
+      "hf_top5_logits": [
+        31.25,
+        23.625,
+        20.625,
+        19.25,
+        18.875
+      ],
+      "emitted_logit": 31.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 162,
+      "emitted": 2506,
+      "emitted_str": " keep",
+      "hf_top5": [
+        2506,
+        2968,
+        1101,
+        387,
+        3410
+      ],
+      "hf_top5_str": [
+        " keep",
+        " give",
+        " just",
+        " be",
+        " provide"
+      ],
+      "hf_top5_logits": [
+        32.25,
+        26.25,
+        26.0,
+        25.0,
+        23.625
+      ],
+      "emitted_logit": 32.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 163,
+      "emitted": 847,
+      "emitted_str": " my",
+      "hf_top5": [
+        847,
+        279,
+        432,
+        419,
+        99198
+      ],
+      "hf_top5_str": [
+        " my",
+        " the",
+        " it",
+        " this",
+        "我的"
+      ],
+      "hf_top5_logits": [
+        29.5,
+        25.625,
+        24.75,
+        17.0,
+        14.562
+      ],
+      "emitted_logit": 29.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 164,
+      "emitted": 2033,
+      "emitted_str": " response",
+      "hf_top5": [
+        2033,
+        4226,
+        88668,
+        91868,
+        2322
+      ],
+      "hf_top5_str": [
+        " response",
+        " answer",
+        " réponse",
+        " ответ",
+        "response"
+      ],
+      "hf_top5_logits": [
+        31.25,
+        30.375,
+        18.5,
+        17.75,
+        17.75
+      ],
+      "emitted_logit": 31.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 165,
+      "emitted": 63141,
+      "emitted_str": " concise",
+      "hf_top5": [
+        63141,
+        9809,
+        2805,
+        14129,
+        10730
+      ],
+      "hf_top5_str": [
+        " concise",
+        " brief",
+        " short",
+        " fairly",
+        " focused"
+      ],
+      "hf_top5_logits": [
+        30.875,
+        26.0,
+        24.125,
+        20.5,
+        19.125
+      ],
+      "emitted_logit": 30.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.875
+    },
+    {
+      "i": 166,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        323,
+        714,
+        481,
+        11
+      ],
+      "hf_top5_str": [
+        ".",
+        " and",
+        " but",
+        " -",
+        ","
+      ],
+      "hf_top5_logits": [
+        26.75,
+        24.0,
+        20.0,
+        18.625,
+        15.812
+      ],
+      "emitted_logit": 26.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 167,
+      "emitted": 358,
+      "emitted_str": " I",
+      "hf_top5": [
+        358,
+        154842,
+        576,
+        10691,
+        4599
+      ],
+      "hf_top5_str": [
+        " I",
+        "</think>",
+        " The",
+        " Maybe",
+        " Just"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        21.125,
+        17.75,
+        17.5,
+        15.812
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 168,
+      "emitted": 2578,
+      "emitted_str": " might",
+      "hf_top5": [
+        2578,
+        3278,
+        1410,
+        646,
+        2776
+      ],
+      "hf_top5_str": [
+        " might",
+        "'ll",
+        " could",
+        " can",
+        "'m"
+      ],
+      "hf_top5_logits": [
+        26.125,
+        25.875,
+        25.625,
+        24.0,
+        15.688
+      ],
+      "emitted_logit": 26.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 169,
+      "emitted": 26667,
+      "emitted_str": " briefly",
+      "hf_top5": [
+        26667,
+        5185,
+        912,
+        3010,
+        1101
+      ],
+      "hf_top5_str": [
+        " briefly",
+        " note",
+        " add",
+        " offer",
+        " just"
+      ],
+      "hf_top5_logits": [
+        26.75,
+        24.875,
+        24.625,
+        23.875,
+        23.25
+      ],
+      "emitted_logit": 26.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 170,
+      "emitted": 5185,
+      "emitted_str": " note",
+      "hf_top5": [
+        5185,
+        6286,
+        3010,
+        10334,
+        9969
+      ],
+      "hf_top5_str": [
+        " note",
+        " mention",
+        " offer",
+        " explain",
+        "note"
+      ],
+      "hf_top5_logits": [
+        31.375,
+        22.875,
+        19.875,
+        19.25,
+        18.5
+      ],
+      "emitted_logit": 31.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.5
+    },
+    {
+      "i": 171,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        429,
+        1052,
+        41551,
+        15896
+      ],
+      "hf_top5_str": [
+        " the",
+        " that",
+        " there",
+        " informal",
+        " formal"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        20.5,
+        19.875,
+        16.0,
+        15.5
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 172,
+      "emitted": 15896,
+      "emitted_str": " formal",
+      "hf_top5": [
+        15896,
+        41551,
+        9760,
+        88478,
+        1352
+      ],
+      "hf_top5_str": [
+        " formal",
+        " informal",
+        " tu",
+        " tú",
+        " form"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        23.0,
+        20.125,
+        17.375,
+        16.625
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 173,
+      "emitted": 10550,
+      "emitted_str": " alternative",
+      "hf_top5": [
+        10550,
+        17968,
+        6165,
+        2999,
+        11419
+      ],
+      "hf_top5_str": [
+        " alternative",
+        "/in",
+        " vs",
+        " option",
+        " variant"
+      ],
+      "hf_top5_logits": [
+        25.375,
+        24.75,
+        21.125,
+        20.25,
+        20.125
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 174,
+      "emitted": 2474,
+      "emitted_str": " since",
+      "hf_top5": [
+        2474,
+        421,
+        11,
+        714,
+        13
+      ],
+      "hf_top5_str": [
+        " since",
+        " if",
+        ",",
+        " but",
+        "."
+      ],
+      "hf_top5_logits": [
+        23.125,
+        21.75,
+        20.75,
+        19.625,
+        19.625
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 175,
+      "emitted": 8584,
+      "emitted_str": " French",
+      "hf_top5": [
+        8584,
+        432,
+        330,
+        429,
+        6364
+      ],
+      "hf_top5_str": [
+        " French",
+        " it",
+        " \"",
+        " that",
+        " English"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        19.375,
+        18.5,
+        18.375,
+        16.5
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 176,
+      "emitted": 18940,
+      "emitted_str": " distingu",
+      "hf_top5": [
+        702,
+        18940,
+        3643,
+        7460,
+        31896
+      ],
+      "hf_top5_str": [
+        " has",
+        " distingu",
+        " makes",
+        " requires",
+        " distinguish"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        21.375,
+        16.5,
+        14.812,
+        14.375
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 177,
+      "emitted": 20484,
+      "emitted_str": "ishes",
+      "hf_top5": [
+        20484,
+        4909,
+        1948,
+        4756,
+        1886
+      ],
+      "hf_top5_str": [
+        "ishes",
+        "ises",
+        " between",
+        "izes",
+        "ives"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        18.875,
+        18.0,
+        17.75,
+        17.625
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 178,
+      "emitted": 1948,
+      "emitted_str": " between",
+      "hf_top5": [
+        1948,
+        15896,
+        41551,
+        9760,
+        128209
+      ],
+      "hf_top5_str": [
+        " between",
+        " formal",
+        " informal",
+        " tu",
+        " между"
+      ],
+      "hf_top5_logits": [
+        27.125,
+        21.25,
+        19.375,
+        18.75,
+        17.0
+      ],
+      "emitted_logit": 27.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.875
+    },
+    {
+      "i": 179,
+      "emitted": 41551,
+      "emitted_str": " informal",
+      "hf_top5": [
+        41551,
+        15896,
+        9760,
+        330,
+        11280
+      ],
+      "hf_top5_str": [
+        " informal",
+        " formal",
+        " tu",
+        " \"",
+        " familiar"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        20.5,
+        20.0,
+        18.875,
+        18.25
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 180,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        320,
+        20219,
+        330,
+        3489
+      ],
+      "hf_top5_str": [
+        " and",
+        " (",
+        "/form",
+        " \"",
+        " (\""
+      ],
+      "hf_top5_logits": [
+        23.0,
+        21.5,
+        20.875,
+        20.0,
+        17.875
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 181,
+      "emitted": 15896,
+      "emitted_str": " formal",
+      "hf_top5": [
+        15896,
+        41551,
+        78729,
+        2086,
+        47490
+      ],
+      "hf_top5_str": [
+        " formal",
+        " informal",
+        " Formal",
+        " second",
+        " polite"
+      ],
+      "hf_top5_logits": [
+        29.375,
+        18.875,
+        17.125,
+        16.5,
+        16.25
+      ],
+      "emitted_logit": 29.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.5
+    },
+    {
+      "i": 182,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        2621,
+        7586,
+        2086,
+        498
+      ],
+      "hf_top5_str": [
+        " \"",
+        " address",
+        " forms",
+        " second",
+        " you"
+      ],
+      "hf_top5_logits": [
+        27.5,
+        20.5,
+        19.625,
+        18.75,
+        18.25
+      ],
+      "emitted_logit": 27.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 183,
+      "emitted": 9327,
+      "emitted_str": "you",
+      "hf_top5": [
+        9327,
+        5158,
+        21680,
+        498,
+        1782
+      ],
+      "hf_top5_str": [
+        "you",
+        "how",
+        "your",
+        " you",
+        "the"
+      ],
+      "hf_top5_logits": [
+        29.375,
+        17.125,
+        16.0,
+        16.0,
+        15.625
+      ],
+      "emitted_logit": 29.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.25
+    },
+    {
+      "i": 184,
+      "emitted": 497,
+      "emitted_str": "\",",
+      "hf_top5": [
+        497,
+        1,
+        1335,
+        3263,
+        1189
+      ],
+      "hf_top5_str": [
+        "\",",
+        "\"",
+        ",\"",
+        "\".",
+        ".\""
+      ],
+      "hf_top5_logits": [
+        22.75,
+        22.75,
+        22.75,
+        22.375,
+        22.0
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 185,
+      "emitted": 714,
+      "emitted_str": " but",
+      "hf_top5": [
+        714,
+        892,
+        323,
+        476,
+        438
+      ],
+      "hf_top5_str": [
+        " but",
+        " which",
+        " and",
+        " or",
+        " as"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        26.625,
+        17.875,
+        14.562,
+        14.312
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 186,
+      "emitted": 358,
+      "emitted_str": " I",
+      "hf_top5": [
+        358,
+        279,
+        10277,
+        2506,
+        419
+      ],
+      "hf_top5_str": [
+        " I",
+        " the",
+        " keeping",
+        " keep",
+        " this"
+      ],
+      "hf_top5_logits": [
+        26.625,
+        22.75,
+        20.5,
+        20.375,
+        19.25
+      ],
+      "emitted_logit": 26.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 187,
+      "emitted": 13125,
+      "emitted_str": " shouldn",
+      "hf_top5": [
+        13125,
+        1513,
+        1265,
+        3278,
+        1410
+      ],
+      "hf_top5_str": [
+        " shouldn",
+        " don",
+        " should",
+        "'ll",
+        " could"
+      ],
+      "hf_top5_logits": [
+        28.875,
+        22.25,
+        21.375,
+        19.625,
+        16.5
+      ],
+      "emitted_logit": 28.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 188,
+      "emitted": 916,
+      "emitted_str": " over",
+      "hf_top5": [
+        916,
+        41945,
+        1281,
+        387,
+        1656
+      ],
+      "hf_top5_str": [
+        " over",
+        " overload",
+        " make",
+        " be",
+        " bel"
+      ],
+      "hf_top5_logits": [
+        28.25,
+        25.5,
+        23.375,
+        21.125,
+        19.625
+      ],
+      "emitted_logit": 28.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 189,
+      "emitted": 10182,
+      "emitted_str": "-ex",
+      "hf_top5": [
+        10182,
+        2982,
+        93551,
+        5689,
+        82460
+      ],
+      "hf_top5_str": [
+        "-ex",
+        "do",
+        "explain",
+        "comp",
+        "-el"
+      ],
+      "hf_top5_logits": [
+        25.875,
+        23.625,
+        21.5,
+        21.5,
+        20.25
+      ],
+      "emitted_logit": 25.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 190,
+      "emitted": 20726,
+      "emitted_str": "plain",
+      "hf_top5": [
+        20726,
+        90133,
+        70214,
+        35711,
+        500
+      ],
+      "hf_top5_str": [
+        "plain",
+        "PLAIN",
+        "plode",
+        "planation",
+        "pl"
+      ],
+      "hf_top5_logits": [
+        30.125,
+        18.875,
+        18.125,
+        17.875,
+        16.75
+      ],
+      "emitted_logit": 30.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.25
+    },
+    {
+      "i": 191,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        369,
+        264,
+        382,
+        7241
+      ],
+      "hf_top5_str": [
+        ".",
+        " for",
+        " a",
+        ".\n\n",
+        " unless"
+      ],
+      "hf_top5_logits": [
+        26.25,
+        24.125,
+        21.75,
+        19.625,
+        17.875
+      ],
+      "emitted_logit": 26.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 192,
+      "emitted": 154842,
+      "emitted_str": "</think>",
+      "hf_top5": [
+        154842,
+        362,
+        33601,
+        6771,
+        13646
+      ],
+      "hf_top5_str": [
+        "</think>",
+        " A",
+        " Actually",
+        " Let",
+        " Keep"
+      ],
+      "hf_top5_logits": [
+        24.25,
+        21.25,
+        20.0,
+        16.0,
+        15.938
+      ],
+      "emitted_logit": 24.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 193,
+      "emitted": 334,
+      "emitted_str": "**",
+      "hf_top5": [
+        334,
+        1,
+        80917,
+        8419,
+        785
+      ],
+      "hf_top5_str": [
+        "**",
+        "\"",
+        "Bonjour",
+        "Here",
+        "The"
+      ],
+      "hf_top5_logits": [
+        25.875,
+        24.75,
+        22.125,
+        21.25,
+        19.875
+      ],
+      "emitted_logit": 25.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 194,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        80917,
+        1,
+        42952,
+        24339,
+        46309
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "\"",
+        "French",
+        "Translation",
+        "Bon"
+      ],
+      "hf_top5_logits": [
+        26.5,
+        25.125,
+        25.0,
+        19.875,
+        18.75
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 1,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 195,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        67518,
+        46309,
+        13041
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Hola",
+        "Bon",
+        "Hi"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        22.5,
+        18.375,
+        17.375,
+        16.375
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 196,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        0,
+        13,
+        1,
+        1246
+      ],
+      "hf_top5_str": [
+        ",",
+        "!",
+        ".",
+        "\"",
+        " how"
+      ],
+      "hf_top5_logits": [
+        25.0,
+        14.75,
+        12.312,
+        11.938,
+        11.75
+      ],
+      "emitted_logit": 25.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.25
+    },
+    {
+      "i": 197,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        54529,
+        21521,
+        3980,
+        28189
+      ],
+      "hf_top5_str": [
+        " how",
+        " cómo",
+        " comme",
+        " comment",
+        " ¿"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        15.812,
+        15.75,
+        14.688,
+        13.75
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.562
+    },
+    {
+      "i": 198,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        374,
+        653,
+        594,
+        614
+      ],
+      "hf_top5_str": [
+        " are",
+        " is",
+        " do",
+        "'s",
+        " have"
+      ],
+      "hf_top5_logits": [
+        27.625,
+        17.625,
+        16.5,
+        15.812,
+        15.812
+      ],
+      "emitted_logit": 27.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 199,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        697,
+        1446,
+        525,
+        3351
+      ],
+      "hf_top5_str": [
+        " you",
+        " your",
+        " You",
+        " are",
+        " today"
+      ],
+      "hf_top5_logits": [
+        28.75,
+        16.625,
+        14.875,
+        14.562,
+        14.25
+      ],
+      "emitted_logit": 28.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.125
+    },
+    {
+      "i": 200,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        7521,
+        30,
+        937,
+        1
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"",
+        "?",
+        " ?",
+        "\""
+      ],
+      "hf_top5_logits": [
+        25.375,
+        20.0,
+        14.75,
+        14.625,
+        13.75
+      ],
+      "emitted_logit": 25.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.375
+    },
+    {
+      "i": 201,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        937,
+        20183,
+        11968,
+        3351
+      ],
+      "hf_top5_str": [
+        "?\"",
+        " ?",
+        "?'",
+        "?\"\n\n",
+        " today"
+      ],
+      "hf_top5_logits": [
+        26.0,
+        16.0,
+        14.438,
+        14.062,
+        14.062
+      ],
+      "emitted_logit": 26.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 202,
+      "emitted": 55798,
+      "emitted_str": "**\n\n",
+      "hf_top5": [
+        55798,
+        334,
+        320,
+        96403,
+        1019
+      ],
+      "hf_top5_str": [
+        "**\n\n",
+        "**",
+        " (",
+        "**,",
+        "**\n"
+      ],
+      "hf_top5_logits": [
+        24.625,
+        18.625,
+        14.312,
+        12.5,
+        11.938
+      ],
+      "emitted_logit": 24.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 203,
+      "emitted": 9109,
+      "emitted_str": "Note",
+      "hf_top5": [
+        9109,
+        32,
+        9,
+        2679,
+        334
+      ],
+      "hf_top5_str": [
+        "Note",
+        "A",
+        "*",
+        "If",
+        "**"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        22.25,
+        18.375,
+        17.875,
+        16.625
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 204,
+      "emitted": 25,
+      "emitted_str": ":",
+      "hf_top5": [
+        25,
+        429,
+        8584,
+        66475,
+        549
+      ],
+      "hf_top5_str": [
+        ":",
+        " that",
+        " French",
+        ":**",
+        " :"
+      ],
+      "hf_top5_logits": [
+        28.5,
+        22.75,
+        17.875,
+        15.812,
+        15.562
+      ],
+      "emitted_logit": 28.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 205,
+      "emitted": 8584,
+      "emitted_str": " French",
+      "hf_top5": [
+        8584,
+        1416,
+        330,
+        758,
+        1096
+      ],
+      "hf_top5_str": [
+        " French",
+        " If",
+        " \"",
+        " In",
+        " This"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        21.0,
+        19.875,
+        18.25,
+        17.375
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.875
+    },
+    {
+      "i": 206,
+      "emitted": 18940,
+      "emitted_str": " distingu",
+      "hf_top5": [
+        18940,
+        702,
+        5711,
+        3643,
+        11
+      ],
+      "hf_top5_str": [
+        " distingu",
+        " has",
+        " uses",
+        " makes",
+        ","
+      ],
+      "hf_top5_logits": [
+        25.25,
+        23.5,
+        20.5,
+        18.25,
+        17.625
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 207,
+      "emitted": 20484,
+      "emitted_str": "ishes",
+      "hf_top5": [
+        20484,
+        3304,
+        4909,
+        4756,
+        10971
+      ],
+      "hf_top5_str": [
+        "ishes",
+        "ished",
+        "ises",
+        "izes",
+        "ishing"
+      ],
+      "hf_top5_logits": [
+        36.25,
+        21.0,
+        20.875,
+        20.125,
+        19.75
+      ],
+      "emitted_logit": 36.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 15.25
+    },
+    {
+      "i": 208,
+      "emitted": 1948,
+      "emitted_str": " between",
+      "hf_top5": [
+        1948,
+        15896,
+        41551,
+        128209,
+        279
+      ],
+      "hf_top5_str": [
+        " between",
+        " formal",
+        " informal",
+        " между",
+        " the"
+      ],
+      "hf_top5_logits": [
+        31.5,
+        21.5,
+        21.375,
+        18.5,
+        16.625
+      ],
+      "emitted_logit": 31.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 209,
+      "emitted": 41551,
+      "emitted_str": " informal",
+      "hf_top5": [
+        41551,
+        15896,
+        279,
+        458,
+        11280
+      ],
+      "hf_top5_str": [
+        " informal",
+        " formal",
+        " the",
+        " an",
+        " familiar"
+      ],
+      "hf_top5_logits": [
+        28.125,
+        25.0,
+        21.875,
+        20.5,
+        20.25
+      ],
+      "emitted_logit": 28.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 210,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        3489,
+        4609,
+        320,
+        330
+      ],
+      "hf_top5_str": [
+        " and",
+        " (\"",
+        " (*",
+        " (",
+        " \""
+      ],
+      "hf_top5_logits": [
+        27.5,
+        21.5,
+        20.375,
+        18.5,
+        18.25
+      ],
+      "emitted_logit": 27.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 211,
+      "emitted": 15896,
+      "emitted_str": " formal",
+      "hf_top5": [
+        15896,
+        41551,
+        78729,
+        7586,
+        47490
+      ],
+      "hf_top5_str": [
+        " formal",
+        " informal",
+        " Formal",
+        " forms",
+        " polite"
+      ],
+      "hf_top5_logits": [
+        29.75,
+        19.0,
+        17.75,
+        17.625,
+        16.625
+      ],
+      "emitted_logit": 29.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.75
+    },
+    {
+      "i": 212,
+      "emitted": 330,
+      "emitted_str": " \"",
+      "hf_top5": [
+        330,
+        7586,
+        2621,
+        5510,
+        24664
+      ],
+      "hf_top5_str": [
+        " \"",
+        " forms",
+        " address",
+        " ways",
+        " registers"
+      ],
+      "hf_top5_logits": [
+        25.75,
+        22.0,
+        20.625,
+        19.625,
+        17.875
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 213,
+      "emitted": 9327,
+      "emitted_str": "you",
+      "hf_top5": [
+        9327,
+        498,
+        21680,
+        57056,
+        5158
+      ],
+      "hf_top5_str": [
+        "you",
+        " you",
+        "your",
+        "vous",
+        "how"
+      ],
+      "hf_top5_logits": [
+        32.75,
+        18.625,
+        17.625,
+        17.5,
+        17.375
+      ],
+      "emitted_logit": 32.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 14.125
+    },
+    {
+      "i": 214,
+      "emitted": 1189,
+      "emitted_str": ".\"",
+      "hf_top5": [
+        1189,
+        4660,
+        1335,
+        1,
+        3263
+      ],
+      "hf_top5_str": [
+        ".\"",
+        "\":\n",
+        ",\"",
+        "\"",
+        "\"."
+      ],
+      "hf_top5_logits": [
+        25.875,
+        23.625,
+        22.375,
+        22.0,
+        20.0
+      ],
+      "emitted_logit": 25.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 215,
+      "emitted": 576,
+      "emitted_str": " The",
+      "hf_top5": [
+        576,
+        1416,
+        1752,
+        5443,
+        1446
+      ],
+      "hf_top5_str": [
+        " The",
+        " If",
+        " For",
+        " Use",
+        " You"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        21.5,
+        19.875,
+        19.75,
+        18.625
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 216,
+      "emitted": 2319,
+      "emitted_str": " version",
+      "hf_top5": [
+        2319,
+        41551,
+        14458,
+        3403,
+        3110
+      ],
+      "hf_top5_str": [
+        " version",
+        " informal",
+        " translation",
+        " above",
+        " example"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        21.875,
+        21.625,
+        21.25,
+        18.5
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 217,
+      "emitted": 3403,
+      "emitted_str": " above",
+      "hf_top5": [
+        3403,
+        5711,
+        448,
+        3685,
+        1667
+      ],
+      "hf_top5_str": [
+        " above",
+        " uses",
+        " with",
+        " below",
+        " using"
+      ],
+      "hf_top5_logits": [
+        29.75,
+        18.875,
+        18.25,
+        18.0,
+        15.938
+      ],
+      "emitted_logit": 29.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.875
+    },
+    {
+      "i": 218,
+      "emitted": 5711,
+      "emitted_str": " uses",
+      "hf_top5": [
+        5711,
+        320,
+        374,
+        4609,
+        3489
+      ],
+      "hf_top5_str": [
+        " uses",
+        " (",
+        " is",
+        " (*",
+        " (\""
+      ],
+      "hf_top5_logits": [
+        25.75,
+        21.0,
+        20.75,
+        20.625,
+        20.5
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 219,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        353,
+        330,
+        90444,
+        3070
+      ],
+      "hf_top5_str": [
+        " the",
+        " *",
+        " \"",
+        " *\"",
+        " **"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        22.375,
+        21.5,
+        19.25,
+        18.75
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 220,
+      "emitted": 41551,
+      "emitted_str": " informal",
+      "hf_top5": [
+        41551,
+        353,
+        11280,
+        15896,
+        16320
+      ],
+      "hf_top5_str": [
+        " informal",
+        " *",
+        " familiar",
+        " formal",
+        " casual"
+      ],
+      "hf_top5_logits": [
+        26.375,
+        18.75,
+        17.5,
+        17.0,
+        16.75
+      ],
+      "emitted_logit": 26.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 221,
+      "emitted": 353,
+      "emitted_str": " *",
+      "hf_top5": [
+        353,
+        330,
+        3070,
+        90444,
+        12480
+      ],
+      "hf_top5_str": [
+        " *",
+        " \"",
+        " **",
+        " *\"",
+        " «"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        21.25,
+        19.875,
+        18.75,
+        17.75
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 222,
+      "emitted": 9327,
+      "emitted_str": "you",
+      "hf_top5": [
+        9327,
+        24420,
+        5158,
+        665,
+        4340
+      ],
+      "hf_top5_str": [
+        "you",
+        "tu",
+        "how",
+        "te",
+        "How"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        18.375,
+        17.75,
+        16.625,
+        16.125
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 223,
+      "emitted": 19884,
+      "emitted_str": "*.",
+      "hf_top5": [
+        19884,
+        12308,
+        9,
+        2299,
+        320
+      ],
+      "hf_top5_str": [
+        "*.",
+        "*,",
+        "*",
+        "'re",
+        " ("
+      ],
+      "hf_top5_logits": [
+        20.75,
+        20.125,
+        18.125,
+        17.125,
+        15.75
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 224,
+      "emitted": 1752,
+      "emitted_str": " For",
+      "hf_top5": [
+        1752,
+        758,
+        1416,
+        576,
+        2014
+      ],
+      "hf_top5_str": [
+        " For",
+        " In",
+        " If",
+        " The",
+        " To"
+      ],
+      "hf_top5_logits": [
+        25.75,
+        22.625,
+        22.0,
+        18.25,
+        16.5
+      ],
+      "emitted_logit": 25.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 225,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        15896,
+        4325,
+        803,
+        279
+      ],
+      "hf_top5_str": [
+        " a",
+        " formal",
+        " someone",
+        " more",
+        " the"
+      ],
+      "hf_top5_logits": [
+        28.375,
+        21.625,
+        19.25,
+        17.25,
+        16.875
+      ],
+      "emitted_logit": 28.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.75
+    },
+    {
+      "i": 226,
+      "emitted": 15896,
+      "emitted_str": " formal",
+      "hf_top5": [
+        15896,
+        803,
+        47490,
+        78729,
+        6534
+      ],
+      "hf_top5_str": [
+        " formal",
+        " more",
+        " polite",
+        " Formal",
+        " situation"
+      ],
+      "hf_top5_logits": [
+        29.0,
+        26.5,
+        20.25,
+        18.0,
+        14.688
+      ],
+      "emitted_logit": 29.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 227,
+      "emitted": 2266,
+      "emitted_str": " context",
+      "hf_top5": [
+        2266,
+        6243,
+        6534,
+        476,
+        41875
+      ],
+      "hf_top5_str": [
+        " context",
+        " setting",
+        " situation",
+        " or",
+        " greeting"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        22.875,
+        21.5,
+        20.25,
+        17.5
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 228,
+      "emitted": 320,
+      "emitted_str": " (",
+      "hf_top5": [
+        320,
+        11,
+        498,
+        476,
+        1447
+      ],
+      "hf_top5_str": [
+        " (",
+        ",",
+        " you",
+        " or",
+        ":\n\n"
+      ],
+      "hf_top5_logits": [
+        27.5,
+        25.375,
+        17.125,
+        16.5,
+        14.875
+      ],
+      "emitted_logit": 27.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 229,
+      "emitted": 68,
+      "emitted_str": "e",
+      "hf_top5": [
+        68,
+        4803,
+        88738,
+        33214,
+        269
+      ],
+      "hf_top5_str": [
+        "e",
+        "like",
+        "someone",
+        "spe",
+        "or"
+      ],
+      "hf_top5_logits": [
+        27.5,
+        19.75,
+        19.25,
+        18.875,
+        17.625
+      ],
+      "emitted_logit": 27.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.75
+    },
+    {
+      "i": 230,
+      "emitted": 1302,
+      "emitted_str": ".g",
+      "hf_top5": [
+        1302,
+        2572,
+        12088,
+        58396,
+        21592
+      ],
+      "hf_top5_str": [
+        ".g",
+        ".,",
+        " speaking",
+        "legant",
+        ",g"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        15.625,
+        12.75,
+        12.125,
+        12.0
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.125
+    },
+    {
+      "i": 231,
+      "emitted": 2572,
+      "emitted_str": ".,",
+      "hf_top5": [
+        2572,
+        12088,
+        10626,
+        37888,
+        24316
+      ],
+      "hf_top5_str": [
+        ".,",
+        " speaking",
+        ",,",
+        ".,\n",
+        ".),"
+      ],
+      "hf_top5_logits": [
+        31.5,
+        16.875,
+        15.75,
+        15.375,
+        15.375
+      ],
+      "emitted_logit": 31.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 14.625
+    },
+    {
+      "i": 232,
+      "emitted": 12088,
+      "emitted_str": " speaking",
+      "hf_top5": [
+        12088,
+        26932,
+        448,
+        4325,
+        264
+      ],
+      "hf_top5_str": [
+        " speaking",
+        " addressing",
+        " with",
+        " someone",
+        " a"
+      ],
+      "hf_top5_logits": [
+        23.625,
+        23.375,
+        19.5,
+        18.375,
+        16.875
+      ],
+      "emitted_logit": 23.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 233,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        448,
+        80113,
+        91569,
+        36118
+      ],
+      "hf_top5_str": [
+        " to",
+        " with",
+        " politely",
+        " respectfully",
+        " formally"
+      ],
+      "hf_top5_logits": [
+        26.875,
+        22.375,
+        21.25,
+        20.25,
+        13.438
+      ],
+      "emitted_logit": 26.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 234,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        4325,
+        458,
+        39406,
+        33794
+      ],
+      "hf_top5_str": [
+        " a",
+        " someone",
+        " an",
+        " strangers",
+        " stranger"
+      ],
+      "hf_top5_logits": [
+        27.875,
+        24.125,
+        21.875,
+        19.125,
+        17.625
+      ],
+      "emitted_logit": 27.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 235,
+      "emitted": 33794,
+      "emitted_str": " stranger",
+      "hf_top5": [
+        33794,
+        16339,
+        2943,
+        36160,
+        13383
+      ],
+      "hf_top5_str": [
+        " stranger",
+        " superior",
+        " client",
+        " colleague",
+        " boss"
+      ],
+      "hf_top5_logits": [
+        29.125,
+        20.875,
+        20.5,
+        18.75,
+        18.75
+      ],
+      "emitted_logit": 29.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 236,
+      "emitted": 476,
+      "emitted_str": " or",
+      "hf_top5": [
+        476,
+        11,
+        91569,
+        80113,
+        304
+      ],
+      "hf_top5_str": [
+        " or",
+        ",",
+        " respectfully",
+        " politely",
+        " in"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        22.5,
+        18.125,
+        16.5,
+        16.5
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 237,
+      "emitted": 304,
+      "emitted_str": " in",
+      "hf_top5": [
+        304,
+        4325,
+        22075,
+        16339,
+        28717
+      ],
+      "hf_top5_str": [
+        " in",
+        " someone",
+        " elder",
+        " superior",
+        " elderly"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        20.75,
+        18.75,
+        17.375,
+        16.125
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 238,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        6584,
+        2562,
+        458,
+        47490
+      ],
+      "hf_top5_str": [
+        " a",
+        " professional",
+        " business",
+        " an",
+        " polite"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        19.5,
+        18.125,
+        18.125,
+        13.75
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.625
+    },
+    {
+      "i": 239,
+      "emitted": 6584,
+      "emitted_str": " professional",
+      "hf_top5": [
+        6584,
+        2562,
+        65306,
+        15896,
+        21189
+      ],
+      "hf_top5_str": [
+        " professional",
+        " business",
+        "professional",
+        " formal",
+        " Professional"
+      ],
+      "hf_top5_logits": [
+        30.875,
+        25.25,
+        21.5,
+        20.125,
+        19.25
+      ],
+      "emitted_logit": 30.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.625
+    },
+    {
+      "i": 240,
+      "emitted": 6243,
+      "emitted_str": " setting",
+      "hf_top5": [
+        6243,
+        19998,
+        15308,
+        15388,
+        5003
+      ],
+      "hf_top5_str": [
+        " setting",
+        " Setting",
+        "setting",
+        "Setting",
+        " settings"
+      ],
+      "hf_top5_logits": [
+        34.25,
+        21.375,
+        20.875,
+        20.25,
+        19.875
+      ],
+      "emitted_logit": 34.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.875
+    },
+    {
+      "i": 241,
+      "emitted": 701,
+      "emitted_str": "),",
+      "hf_top5": [
+        701,
+        8,
+        11,
+        7731,
+        982
+      ],
+      "hf_top5_str": [
+        "),",
+        ")",
+        ",",
+        "):\n\n",
+        "):\n"
+      ],
+      "hf_top5_logits": [
+        30.125,
+        16.875,
+        16.5,
+        16.375,
+        14.812
+      ],
+      "emitted_logit": 30.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.25
+    },
+    {
+      "i": 242,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        432,
+        990,
+        279,
+        1977
+      ],
+      "hf_top5_str": [
+        " you",
+        " it",
+        " use",
+        " the",
+        " say"
+      ],
+      "hf_top5_logits": [
+        32.5,
+        23.0,
+        22.25,
+        18.125,
+        16.75
+      ],
+      "emitted_logit": 32.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 243,
+      "emitted": 1035,
+      "emitted_str": " would",
+      "hf_top5": [
+        1035,
+        1410,
+        4172,
+        2578,
+        646
+      ],
+      "hf_top5_str": [
+        " would",
+        " could",
+        "'d",
+        " might",
+        " can"
+      ],
+      "hf_top5_logits": [
+        31.375,
+        28.0,
+        27.625,
+        21.125,
+        20.625
+      ],
+      "emitted_logit": 31.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 244,
+      "emitted": 1977,
+      "emitted_str": " say",
+      "hf_top5": [
+        1977,
+        990,
+        4518,
+        2548,
+        36599
+      ],
+      "hf_top5_str": [
+        " say",
+        " use",
+        " instead",
+        " ask",
+        "say"
+      ],
+      "hf_top5_logits": [
+        31.375,
+        28.125,
+        24.375,
+        18.625,
+        17.75
+      ],
+      "emitted_logit": 31.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.25
+    },
+    {
+      "i": 245,
+      "emitted": 1447,
+      "emitted_str": ":\n\n",
+      "hf_top5": [
+        1447,
+        25,
+        3070,
+        353,
+        90444
+      ],
+      "hf_top5_str": [
+        ":\n\n",
+        ":",
+        " **",
+        " *",
+        " *\""
+      ],
+      "hf_top5_logits": [
+        26.625,
+        26.125,
+        20.75,
+        18.625,
+        18.5
+      ],
+      "emitted_logit": 26.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 246,
+      "emitted": 334,
+      "emitted_str": "**",
+      "hf_top5": [
+        334,
+        63651,
+        1,
+        12,
+        9
+      ],
+      "hf_top5_str": [
+        "**",
+        "*\"",
+        "\"",
+        "-",
+        "*"
+      ],
+      "hf_top5_logits": [
+        28.0,
+        27.25,
+        24.75,
+        23.75,
+        22.875
+      ],
+      "emitted_logit": 28.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 247,
+      "emitted": 1,
+      "emitted_str": "\"",
+      "hf_top5": [
+        1,
+        80917,
+        2073,
+        23637,
+        54694
+      ],
+      "hf_top5_str": [
+        "\"",
+        "Bonjour",
+        "“",
+        "«",
+        "„"
+      ],
+      "hf_top5_logits": [
+        30.625,
+        19.125,
+        18.125,
+        17.625,
+        16.75
+      ],
+      "emitted_logit": 30.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.5
+    },
+    {
+      "i": 248,
+      "emitted": 80917,
+      "emitted_str": "Bonjour",
+      "hf_top5": [
+        80917,
+        9703,
+        15204,
+        46309,
+        4340
+      ],
+      "hf_top5_str": [
+        "Bonjour",
+        "Hello",
+        "Good",
+        "Bon",
+        "How"
+      ],
+      "hf_top5_logits": [
+        30.125,
+        20.75,
+        20.375,
+        19.75,
+        16.625
+      ],
+      "emitted_logit": 30.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.375
+    },
+    {
+      "i": 249,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        0,
+        13,
+        320,
+        1246
+      ],
+      "hf_top5_str": [
+        ",",
+        "!",
+        ".",
+        " (",
+        " how"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        15.438,
+        14.625,
+        14.5,
+        13.75
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 250,
+      "emitted": 1246,
+      "emitted_str": " how",
+      "hf_top5": [
+        1246,
+        2585,
+        3351,
+        525,
+        353
+      ],
+      "hf_top5_str": [
+        " how",
+        " How",
+        " today",
+        " are",
+        " *"
+      ],
+      "hf_top5_logits": [
+        26.125,
+        17.75,
+        16.875,
+        15.375,
+        14.688
+      ],
+      "emitted_logit": 26.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 251,
+      "emitted": 525,
+      "emitted_str": " are",
+      "hf_top5": [
+        525,
+        653,
+        374,
+        8712,
+        2299
+      ],
+      "hf_top5_str": [
+        " are",
+        " do",
+        " is",
+        " Are",
+        "'re"
+      ],
+      "hf_top5_logits": [
+        27.75,
+        16.5,
+        16.5,
+        15.75,
+        15.375
+      ],
+      "emitted_logit": 27.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.25
+    },
+    {
+      "i": 252,
+      "emitted": 498,
+      "emitted_str": " you",
+      "hf_top5": [
+        498,
+        353,
+        1446,
+        3070,
+        3351
+      ],
+      "hf_top5_str": [
+        " you",
+        " *",
+        " You",
+        " **",
+        " today"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        16.75,
+        16.125,
+        15.75,
+        15.125
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.5
+    },
+    {
+      "i": 253,
+      "emitted": 3351,
+      "emitted_str": " today",
+      "hf_top5": [
+        3351,
+        7521,
+        3730,
+        419,
+        320
+      ],
+      "hf_top5_str": [
+        " today",
+        "?\"",
+        " doing",
+        " this",
+        " ("
+      ],
+      "hf_top5_logits": [
+        25.0,
+        17.875,
+        17.5,
+        16.5,
+        15.5
+      ],
+      "emitted_logit": 25.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.125
+    },
+    {
+      "i": 254,
+      "emitted": 7521,
+      "emitted_str": "?\"",
+      "hf_top5": [
+        7521,
+        30,
+        937,
+        3351,
+        1
+      ],
+      "hf_top5_str": [
+        "?\"",
+        "?",
+        " ?",
+        " today",
+        "\""
+      ],
+      "hf_top5_logits": [
+        25.5,
+        18.375,
+        16.875,
+        15.812,
+        15.375
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.125
+    },
+    {
+      "i": 255,
+      "emitted": 334,
+      "emitted_str": "**",
+      "hf_top5": [
+        334,
+        55798,
+        9,
+        320,
+        1019
+      ],
+      "hf_top5_str": [
+        "**",
+        "**\n\n",
+        "*",
+        " (",
+        "**\n"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        16.5,
+        14.062,
+        13.812,
+        12.375
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 256,
+      "emitted": 154827,
+      "emitted_str": "<|user|>",
+      "hf_top5": [
+        154827,
+        320,
+        1959,
+        4609,
+        448
+      ],
+      "hf_top5_str": [
+        "<|user|>",
+        " (",
+        " —",
+        " (*",
+        " with"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        16.875,
+        13.438,
+        13.375,
+        13.125
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    }
+  ]
+}

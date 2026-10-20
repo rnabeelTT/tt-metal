@@ -30,6 +30,13 @@ TTFT = warm `Glm53Model.prefill` of the prompt to last-row logits on the device,
 TTFT (host logits) adds ~12 ms (one logits row to the host, see "TTFT"). Decode numbers are host wall per step over
 30 back-to-back steps after a warm step.
 
+Attribution (stage-7 review #1): the decode before/after above (57.36 -> 54.18 ms) comes almost entirely from the
+stage-5 round-6 decoder options that landed between the two builds; stage 7's own decode change is the sharded final
+RMSNorm (65 -> 7 us, ~0.06 ms per step). The "before" 8-slot build ran with the persistent all-gather that was later
+found to break decode (ag_persistent=1), so its 112.8 ms is not a valid baseline for correctness, only for time. Stage 7's
+own wins are TTFT: the 512-row bucket and the cost chunk plan (161 tokens 1182 -> 376 ms), the MoE split rule and the
+one-row host logits read. The 2026-10-18 rework section below re-measures everything on the rework snapshot.
+
 ## What changed (stage-7 defaults)
 
 | Change | Where | Default | Effect (measured) |
@@ -76,7 +83,7 @@ exact: identical greedy continuations with the skip on and off and over four rep
 `s7_skip_reduced_agp0.log` vs `s7_det_reduced_s8_noagp.log`; full model `s7_final_s8.log`). The remaining per-row
 cost at 1 active (83.9 vs 53.7 ms for a 1-slot build) is the pairs glue (row repeat, SwiGLU, k-sum on all 8 x 8 groups),
 the router and the 8-row attention; the 8-active step pays 4 small ops per MoE layer for the skip; its 114.2 vs 112.8 ms is not separated from
-the stage-5 default change between the two builds (not A/B'd on one build). The 32-slot sorted path is unchanged (stage 5).
+the stage-5 default change between the two builds (not A/B'd on one build). The 32-slot sorted path is unchanged (stage 5); the 2026-10-18 rework measured it on the full model (`j4_s32`, below).
 
 Single-user serving should build with `GLM53_MAX_BATCH=1` (1-slot build: 53.6 ms token-out = 18.6 t/s/u). The 1-slot
 path pads the KDA batch to 2 internally (stage 5) and the sampler rows to 32; it passed the readiness gates below.
@@ -105,7 +112,7 @@ Full model, 1 slot, warm (`cand_s1`, ms):
   take one 512-row chunk (375 ms).
 - MoE row split (stage-6 memory fix, `GLM53_MOE_SORTED_ROWS=1024`): +120 ms per 2048-row chunk (1153 vs 1033 ms) and
   +485 ms at 8192 tokens. It only lowers the prefill peak (417 -> 297 MiB above the layer entry). `choose_moe_split`
-  runs the whole chunk when the largest free DRAM block per die is >= 1 GiB at warm-up (1-slot, 16K build: 1.50 GB free,
+  runs the whole chunk when the largest free DRAM block per die is >= 1 GiB at warm-up (1-slot, 16K build: 1.70 GB free,
   no split); a build that fills DRAM with KV blocks (vLLM, long contexts) keeps the split. Bit-identical either way.
 
 ## MTP (goal 4): rejected
@@ -167,7 +174,95 @@ pool / ape rows, MoE dispatch constants) and the decode trace is unchanged (no p
 32,410 MB (stage-6 paths, same day) -> 32,425 MB per die: +14.2 MB. The 1-slot capacity probe of stage 6 (104,448 tokens) left 183 MB free per die at the prefill peak, so
 the supported context stays 104,448; at that fill the free-DRAM rule keeps the MoE row split (peak unchanged). Trace
 region use 47.6 -> 40.4 MB (stage-5 changes; 64 MiB region unchanged).
-`doc/context_contract.json`: unchanged by this stage.
+`doc/context_contract.json`: unchanged by this stage. Superseded: see "2026-10-18 rework" (stage-8 default, 280,576 / 311,296 tokens).
+
+## 2026-10-18 rework (stage-6 review #1 / stage-7 review #1)
+
+All numbers in this section come from one snapshot: HEAD 656c998e3df plus the rework's files. The defaults are the
+current ones: stage-8 precision `combo_a_kv` and `Glm53Generator(mesh)` sizing (see `doc/full_model/README.md`).
+Records are in `runs/s67r/` and logs in `~/glm53-flash-bringup/logs/s67r/`. Each job logged git HEAD and the md5 of
+`tt/*.py` at start and end; none changed.
+
+The decode corruption fixed in this rework (a `ttnn.deallocate` on a view of the trace's logits output,
+`doc/full_model/work_log.md`) gives teacher forcing 14 / 32 / 90 %. That is the same signature this stage attributed
+to `ag_persistent=1`. Turning on the persistent all-gather changes the allocation order, which is how that bug shows.
+The `ag_persistent` attribution above is therefore suspect. It was not re-tested on the fixed code.
+
+### Chunk plan vs the legacy plan (1 slot, `j2_s1_default`, 24 greedy tokens after each prefill)
+
+| Prompt | Cost plan | Legacy plan | Prefill cost / legacy (ms) | Last-row logits cost vs legacy | Greedy tokens |
+|---|---|---|---|---|---|
+| 513 | 512 + 128 (1 row) | 2048 (513 rows) | 566 / 1,034 | PCC 0.674, top-1 equal, top-5 overlap 3 / 5 | equal (24 / 24) |
+| 600 | 512 + 128 (88) | 2048 | 620 / 1,033 | PCC 0.991, top-1 equal, top-5 4 / 5 | diverge at token 10 |
+| 1,000 | 512 + 512 (488) | 2048 | 768 / 1,032 | PCC 0.998, top-1 equal, top-5 5 / 5 | diverge at token 5 |
+| 1,153 | 2048 | 2048 | 1,031 / 1,032 | bit-identical | equal |
+| 2,049 | 2048 + 128 (1) | same | 1,190 / 1,190 | bit-identical | equal |
+| 2,600 | 2048 + 512 + 128 (40) | 2048 + 2048 (552) | 1,875 / 2,835 | PCC 0.997, top-1 equal, top-5 5 / 5 | equal |
+| 10,001 | 5 x 2048 | same | 8,243 / 8,246 | bit-identical | equal |
+
+Where the plans differ, they are different chunkings of the same computation in bfp4 / fp8. At 513 the cost plan
+ends with a 1-row chunk. Its last row is computed alone, in a 128-row chunk whose other 127 rows are padding.
+An HF CPU control is pending. It compares each plan's last-row logits with HF at 513 / 600 / 1,000 / 2,600 tokens
+(`~/glm53-flash-bringup/scripts/s67r_hf_lastrow.py`, output `~/glm53-flash-bringup/artifacts/s67r/j2_hf_lastrow.json`).
+
+### Long context on the final defaults (1 slot, `max_seq_len` 280,576)
+
+| Prompt | TTFT | Chunks | Traced token-out decode at the deep position | Copy accuracy |
+|---|---|---|---|---|
+| 32,768 | 28.0 s | 16 | 59.78 ms | 32 / 32 |
+| 100,000 | 87.3 s | 49 | 59.86 ms | 32 / 32 |
+
+Block-sharded DSA layout, bf16 latent (`j6_s1_shard`: `GLM53_PRECISION=none`, 1 slot, `max_seq_len` 131,072,
+selected by the planner above the replicated 59,392). This is a non-default configuration.
+
+- Teacher forcing: 92 / 100 / 100 %. Prefill check: 91 / 100 / 100 %.
+- Token-out decode: 56.90 ms.
+
+| Prompt | TTFT | Traced decode at the deep position | Copy accuracy | Sink-weight headroom (min over 11 DSA layers) |
+|---|---|---|---|---|
+| 32,768 | 28.8 s | 62.58 ms | 32 / 32 | 65.7 nats, no zero weights |
+| 100,000 | 89.8 s | 62.74 ms | 32 / 32 | 65.7 nats, no zero weights |
+
+Chunk plans on this layout:
+- 2,600 tokens: PCC 0.997, top-1 equal; greedy tokens diverge at token 10. Cost plan 1,981 ms, legacy 2,766 ms.
+- 10,001 tokens: bit-identical, as expected, since both plans are the same chunking. The timing (11,787 vs 7,697 ms)
+  is a cold first run of the deep-chunk programs, not a plan difference. In j2 the two plans measured within 3 ms.
+
+The run's end-of-job md5 differs from its start in `tt/generator.py`, `tt/moe.py`, `tt/moe_opt.py` and
+`tt/weight_cache.py`. These are comment and black-formatting edits made in the snapshot during the run. Each file's
+AST is identical, and the modules were already imported.
+
+### Context size vs speed (1 slot, same code)
+
+| `max_seq_len` | Token-out decode | TTFT 128 / 161 / 2,048 / 8,192 tokens | Run |
+|---|---|---|---|
+| 16,384 | 51.10 ms (19.6 t/s/u) | 225 / 373 / 1,025 / 4,408 ms | `j2b_s1_16k` |
+| 280,576 (default) | 56.24 ms (17.8 t/s/u) | 228 / 377 / 1,026 / 6,444 ms | `j2_s1_default` |
+
+The sparse DSA indexer, in both decode and prefill chunks past 2,048 tokens, scores every pool slot allocated to the
+user. That is `P_alloc`, sized by `max_seq_len`, not the filled prefix. The default buys 17x the context for +10 %
+decode time and +46 % TTFT at 8K. At 16,384 the numbers equal stage 8's (51.14 ms).
+
+### Multi-slot decode (token-out, model + sampler trace, ms per step)
+
+| Build | 1 active | 4 active | 8 active | 32 active | Correctness |
+|---|---|---|---|---|---|
+| 8 slots, 4,096, inactive-row skip on (`j3_s8`) | 81.65 | 93.50 | 112.24 | - | joint == solo, bit-identical |
+| 8 slots, skip off (`j3b_s8_noskip`) | 111.01 | 111.00 | 110.97 | - | all logits bit-identical to skip on |
+| 32 slots, 2,048 (`j4_s32`) | 115.29 | - | 117.16 (8) | 114.24 | joint == solo, bit-identical |
+
+Stage 7 measured 83.9 / 95.7 / 114.2 ms on the 8-slot build. At 32 slots the time is flat over 1 / 8 / 32 active slots
+(114 to 117 ms). The inactive-row skip targets the S < 32 per-row MoE path (`_install_inactive_skip`).
+
+### Readiness on the final defaults
+
+`j2_s1_default`: teacher forcing 91 / 100 / 100 %, prefill check 91 / 100 / 100 % (`runs/teacher_forcing.json`,
+`runs/prefill_check.json`). Teacher-forcing runner: TTFT 407 ms, decode 17.78 t/s/u.
+
+The autoregressive check (`autoregressive/`) ran on the same build:
+- two runs are bit-identical;
+- `check_degenerate_output.py` exits 0 (adjacent duplication 0.0, trigram loops 0.135);
+- the HF trajectory score is in `autoregressive/VERDICT.md`.
 
 ## Persistent all-gather finding (for stage 5)
 
@@ -182,7 +277,10 @@ reproducibility with persistent all-gather outputs too.
 ## Tracy
 
 `tracy/{before,after}_s{1,8}_l0/`: one decode step (model + sampler replay) and one 128-row prefill of a 1-layer model
-(layer 0 + embedding, head, sampler), `perf_{decode,prefill}_report.{txt,csv}` with advice. The device-profiler
+(layer 0 + embedding, head, sampler), `perf_{decode,prefill}_report.{txt,csv}` with advice. Note (stage-7 review #1):
+`after_*` was taken with `GLM53_HEAD=norm_sharded,lm_ds`, i.e. the rejected DRAM-sharded LM head (10 x 66 us split rows);
+the shipped interleaved LM head row (471 us) appears only in `before_*`. The terminal-path numbers in "Decode breakdown"
+use the shipped head. The device-profiler
 buffers drop ops in these windows (`TT_TRACY_SKIP_MISSING_DEVICE_DATA=1`): each op appears on at least one device, not
 on all four, so per-op times are valid and per-device sums are not.
 

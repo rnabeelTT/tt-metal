@@ -1,0 +1,232 @@
+{
+ "args": {
+  "slots": 1,
+  "seq_len": 16384,
+  "layout": null,
+  "do": "ttft,decode",
+  "batch_slots": null,
+  "batch_lengths": "161,300,517",
+  "steps": 32,
+  "save_pt": null,
+  "chunk_lengths": "513,600,1000,1153,2049,2600,10001",
+  "chunk_gen": 24,
+  "deep": "32768,100000",
+  "deep_steps": 32,
+  "active": "1",
+  "prompts": "128,161,512,2048,8192",
+  "reference": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+  "report_dir": null,
+  "ar_dir": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model",
+  "trace_region": 67108864,
+  "out": "/home/raahem/glm53-flash-bringup/artifacts/s67r/j2b_s1_16k.json"
+ },
+ "layers": "all",
+ "provenance_start": {
+  "git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "1bc253814eb609f52ca45595a98d2af0",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "9615f14a971ad17162fed80a217879e8",
+   "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506",
+   "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b",
+   "optimized_decoder.py": "b4ddebb46852522958e811191890bba2",
+   "precision.py": "109284f45b66d9f3f6ef9f7f10cad699",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "db46e9628661b44411f7e8def26559e1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8"
+  }
+ },
+ "build_s": 135.7,
+ "plan": {
+  "layout": "replicated",
+  "dsa_shard": false,
+  "max_seq_len": 16384,
+  "slots": 1,
+  "blocks_needed": 129,
+  "pool_blocks_budget": 2206,
+  "max_seq_len_per_layout": {
+   "replicated": 280576,
+   "sharded": 0
+  }
+ },
+ "skip_inactive": false,
+ "moe_split": {
+  "mode": "auto",
+  "rows": "0",
+  "largest_free_bytes_per_die": 2857158656,
+  "need_bytes": 1073741824
+ },
+ "lockstep": "1",
+ "dram_free_after_build_per_die": 2836720640,
+ "ttft": {
+  "eager": {
+   "128": {
+    "plan": [
+     [
+      128,
+      128
+     ]
+    ],
+    "cold": {
+     "dispatch_ms": 205.90014499612153,
+     "total_ms": 226.41683695837855
+    },
+    "warm": {
+     "dispatch_ms": 204.4236888177693,
+     "total_ms": 224.9330768827349
+    },
+    "host_logits_ms": 236.36651108972728,
+    "first_token": 53389
+   },
+   "161": {
+    "plan": [
+     [
+      512,
+      161
+     ]
+    ],
+    "cold": {
+     "dispatch_ms": 343.2499368209392,
+     "total_ms": 373.54987394064665
+    },
+    "warm": {
+     "dispatch_ms": 343.1719879154116,
+     "total_ms": 373.36645484901965
+    },
+    "host_logits_ms": 386.0894679091871,
+    "first_token": 291
+   },
+   "512": {
+    "plan": [
+     [
+      512,
+      512
+     ]
+    ],
+    "cold": {
+     "dispatch_ms": 344.148671021685,
+     "total_ms": 375.5878219380975
+    },
+    "warm": {
+     "dispatch_ms": 343.94850907847285,
+     "total_ms": 375.3623419906944
+    },
+    "host_logits_ms": 387.4487408902496,
+    "first_token": 94910
+   },
+   "2048": {
+    "plan": [
+     [
+      2048,
+      2048
+     ]
+    ],
+    "cold": {
+     "dispatch_ms": 949.3378771003336,
+     "total_ms": 1025.8888041134924
+    },
+    "warm": {
+     "dispatch_ms": 948.0160858947784,
+     "total_ms": 1024.6445909142494
+    },
+    "host_logits_ms": 1038.9241429511458,
+    "first_token": 87
+   },
+   "8192": {
+    "plan": [
+     [
+      2048,
+      2048
+     ],
+     [
+      2048,
+      2048
+     ],
+     [
+      2048,
+      2048
+     ],
+     [
+      2048,
+      2048
+     ]
+    ],
+    "cold": {
+     "dispatch_ms": 4324.951668968424,
+     "total_ms": 4408.23669382371
+    },
+    "warm": {
+     "dispatch_ms": 4325.264296960086,
+     "total_ms": 4408.438330050558
+    },
+    "host_logits_ms": 4423.678707098588,
+    "first_token": 198
+   }
+  }
+ },
+ "decode": {
+  "1": {
+   "model_ms": 50.710827857255936,
+   "model_enqueue_ms": 0.0017313053831458092,
+   "sampler_ms": 0.3908245940692723,
+   "tokenout_ms": 51.10086449421942,
+   "generate_ms": 51.263638550881296,
+   "generate_tsu": 19.50700395578551
+  }
+ },
+ "provenance_end": {
+  "git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "1bc253814eb609f52ca45595a98d2af0",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "9615f14a971ad17162fed80a217879e8",
+   "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506",
+   "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b",
+   "optimized_decoder.py": "b4ddebb46852522958e811191890bba2",
+   "precision.py": "109284f45b66d9f3f6ef9f7f10cad699",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "db46e9628661b44411f7e8def26559e1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+   "GLM53_MOE_SORTED_ROWS": "0"
+  }
+ },
+ "provenance_unchanged": true
+}

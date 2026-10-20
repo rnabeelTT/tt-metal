@@ -1,0 +1,245 @@
+{
+ "args": {
+  "slots": 32,
+  "seq_len": null,
+  "layout": null,
+  "do": "batch,decode",
+  "batch_slots": "0,17,31",
+  "batch_lengths": "161,300,517",
+  "steps": 32,
+  "save_pt": null,
+  "chunk_lengths": "513,600,1000,1153,2049,2600,10001",
+  "chunk_gen": 24,
+  "deep": "32768,100000",
+  "deep_steps": 32,
+  "active": "1,8,32",
+  "prompts": "128,161,512,2048,8192",
+  "reference": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+  "report_dir": null,
+  "ar_dir": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model",
+  "trace_region": 67108864,
+  "out": "/home/raahem/glm53-flash-bringup/artifacts/s67r/j4_s32.json"
+ },
+ "layers": "all",
+ "provenance_start": {
+  "git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "1bc253814eb609f52ca45595a98d2af0",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "9615f14a971ad17162fed80a217879e8",
+   "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506",
+   "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b",
+   "optimized_decoder.py": "b4ddebb46852522958e811191890bba2",
+   "precision.py": "109284f45b66d9f3f6ef9f7f10cad699",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "db46e9628661b44411f7e8def26559e1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8"
+  }
+ },
+ "build_s": 101.3,
+ "plan": {
+  "layout": "replicated",
+  "dsa_shard": false,
+  "max_seq_len": 2048,
+  "slots": 32,
+  "blocks_needed": 513,
+  "pool_blocks_budget": 887,
+  "max_seq_len_per_layout": {
+   "replicated": 2048,
+   "sharded": 0
+  }
+ },
+ "skip_inactive": true,
+ "moe_split": {
+  "mode": "auto",
+  "rows": "0",
+  "largest_free_bytes_per_die": 1479334912,
+  "need_bytes": 1073741824
+ },
+ "lockstep": "1",
+ "dram_free_after_build_per_die": 1457867776,
+ "batch": {
+  "slots": [
+   0,
+   17,
+   31
+  ],
+  "lengths": [
+   161,
+   300,
+   517
+  ],
+  "steps": 32,
+  "joint_vs_solo": {
+   "0": {
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "steps_compared": 32,
+    "bit_identical_steps": 32,
+    "min_pcc": 1.0,
+    "max_abs_diff": 0.0,
+    "top1_equal_steps": 32
+   },
+   "17": {
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "steps_compared": 32,
+    "bit_identical_steps": 32,
+    "min_pcc": 1.0,
+    "max_abs_diff": 0.0,
+    "top1_equal_steps": 32
+   },
+   "31": {
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "steps_compared": 32,
+    "bit_identical_steps": 32,
+    "min_pcc": 1.0,
+    "max_abs_diff": 0.0,
+    "top1_equal_steps": 32
+   }
+  },
+  "same_prompt_two_slots": {
+   "slots": [
+    0,
+    31
+   ],
+   "tokens_equal": true,
+   "first_token_divergence": null,
+   "steps_compared": 32,
+   "bit_identical_steps": 32,
+   "min_pcc": 1.0,
+   "max_abs_diff": 0.0,
+   "top1_equal_steps": 32
+  },
+  "same_prompt_vs_solo": {
+   "tokens_equal": true,
+   "first_token_divergence": null,
+   "steps_compared": 32,
+   "bit_identical_steps": 32,
+   "min_pcc": 1.0,
+   "max_abs_diff": 0.0,
+   "top1_equal_steps": 32
+  },
+  "mid_prefill": {
+   "step": 10,
+   "slot": 31
+  },
+  "mid_prefill_others_vs_solo": {
+   "0": {
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "steps_compared": 32,
+    "bit_identical_steps": 32,
+    "min_pcc": 1.0,
+    "max_abs_diff": 0.0,
+    "top1_equal_steps": 32
+   },
+   "17": {
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "steps_compared": 32,
+    "bit_identical_steps": 32,
+    "min_pcc": 1.0,
+    "max_abs_diff": 0.0,
+    "top1_equal_steps": 32
+   }
+  },
+  "mid_prefill_late_slot_vs_solo": {
+   "tokens_equal": true,
+   "first_token_divergence": null,
+   "steps_compared": 22,
+   "bit_identical_steps": 22,
+   "min_pcc": 1.0,
+   "max_abs_diff": 0.0,
+   "top1_equal_steps": 22
+  },
+  "texts": {
+   "0": "    - [2.5 Feed Forward Network](#25-feed-forward-network)\n    - [2.6 Decoder](#26-decoder)\n    - [2",
+   "17": "-common-pitfalls)\n- [Llama 3.1 8B](#llama-31-8b)\n- [Llama 3.",
+   "31": ", the rotary embeddings are applied to the query and key vectors before the kv-cache. The rotary embeddings are computed in the Attention module and applied to the query and key"
+  },
+  "pass_tokens": true
+ },
+ "decode": {
+  "1": {
+   "model_ms": 114.06423444859684,
+   "model_enqueue_ms": 0.0021987012587487698,
+   "sampler_ms": 0.39068685146048665,
+   "tokenout_ms": 115.28706945246086,
+   "generate_ms": 115.38847995689139,
+   "generate_tsu": 8.6663764040708
+  },
+  "8": {
+   "model_ms": 115.28425560100004,
+   "model_enqueue_ms": 0.002074951771646738,
+   "sampler_ms": 0.3921502036973834,
+   "tokenout_ms": 117.15995670529082,
+   "generate_ms": 117.92547923978418,
+   "generate_tsu": 8.479931618226852
+  },
+  "32": {
+   "model_ms": 113.9576411456801,
+   "model_enqueue_ms": 0.0016541569493710995,
+   "sampler_ms": 0.3923330456018448,
+   "tokenout_ms": 114.24356665229425,
+   "generate_ms": 114.88855219213292,
+   "generate_tsu": 8.704087404005739
+  }
+ },
+ "provenance_end": {
+  "git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "1bc253814eb609f52ca45595a98d2af0",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "9615f14a971ad17162fed80a217879e8",
+   "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506",
+   "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b",
+   "optimized_decoder.py": "b4ddebb46852522958e811191890bba2",
+   "precision.py": "109284f45b66d9f3f6ef9f7f10cad699",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "db46e9628661b44411f7e8def26559e1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+   "GLM53_MOE_SORTED_ROWS": "0"
+  }
+ },
+ "provenance_unchanged": true
+}

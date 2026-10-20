@@ -497,7 +497,8 @@ class Qwen35MoE:
             ttnn.deallocate(sel)
         else:
             w = ttnn.gather(sig, dim=-1, index=ids, memory_config=r_mc)  # [1,1,T,k] fp32
-        ttnn.deallocate(sig)
+        # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+        ttnn.deallocate(sig, force=False)
         if getattr(self.args, "norm_topk_prob", True):
             denom = ttnn.sum(w, dim=-1, keepdim=True, memory_config=r_mc)
             if self.routed_scaling != 1.0:
@@ -635,7 +636,8 @@ class Qwen35MoE:
         if self.swiglu_limit is None:
             return fused
         c = ttnn.minimum(fused, float(self.swiglu_limit))
-        ttnn.deallocate(fused)
+        # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+        ttnn.deallocate(fused, force=False)
         out = ttnn.maximum(c, self._clamp_lo)
         ttnn.deallocate(c)
         return out
@@ -739,7 +741,8 @@ class Qwen35MoE:
             sc_u = ttnn.reshape(sc_u, (1, k, 1, 1))
             down_rows = ttnn.reshape(down, (1, k, 1, H)) if plain_tail else self._rows_view(down, (1, k, 1, H))
             weighted = ttnn.multiply(down_rows, sc_u)
-            ttnn.deallocate(down_rows)
+            # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+            ttnn.deallocate(down_rows, force=False)
             if getattr(self.args, "moe_gather_tail", False) and not plain_tail:
                 # sum over the k expert rows with the plain NC reduction: ttnn.sum(dim=1) adds a fill_pad of the
                 # tile padding around the same kernel; row 0 (the only logical row) is identical. The reduction

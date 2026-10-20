@@ -17,9 +17,9 @@
  "decode_ms_per_token_e2e": 54.18,
  "decode_ms_per_token_token_out": 54.08,
  "decode_ms_per_token_model_trace": 53.69,
- "decode_ms_per_token_device": null,
+ "decode_ms_per_token_device": 51.3,
  "decode_ms_per_token_layer_stack_lower_bound": 52.3,
- "roofline_ms_per_token_estimate": null,
+ "roofline_ms_per_token_estimate": 8.06,
  "eight_slot_build_ms_per_step": {
   "1": 83.9,
   "4": 95.7,
@@ -32,5 +32,16 @@
   "DEFAULT_MC.ag_persistent=True breaks multi-step decode (TF top-5 32 %); stage-7 numbers use ag_persistent=0",
   "device time of the full step not profiled (full-stack Tracy forbidden); 1-layer Tracy windows drop ops per device"
  ],
- "records": "~/glm53-flash-bringup/artifacts/s7/final_s1.json, final_s8.json"
+ "records": "~/glm53-flash-bringup/artifacts/s7/final_s1.json, final_s8.json",
+ "roofline_note": "DRAM roofline per decoder layer from stage 5 (doc/optimized_multichip_decoder): kda_dense 175, kda_moe 169, dsa_moe 179 us per layer per die (weight + cache bytes / DRAM bandwidth) x (3, 31, 11) layers + LM head 168 MB / 512 GB/s ~ 0.33 ms = 8.1 ms per token",
+ "device_time_note": "estimate, not a full-stack profile (full-stack Tracy is not allowed): stage-5 per-kind traced decode device time 865 / 1070 / 1332 us x (3, 31, 11) = 50.4 ms + LM head 0.47 ms + sampler 0.38 ms = 51.3 ms, against 53.69 ms model-trace and 54.08 ms token-out end to end (stage-7 final)",
+ "roofline_gap": {
+  "ratio_e2e_over_roofline": 6.7,
+  "owners": [
+   "Sinkhorn on one core: ~7.7 ms per token (stage 5)",
+   "element-wise / mHC glue between the matmuls (stage 5)",
+   "matmuls at 41-64 % of DRAM bandwidth (stage 5)",
+   "8-slot builds: MoE pairs glue on all 64 (row, expert) groups (stage 5)"
+  ]
+ }
 }

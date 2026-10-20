@@ -1,0 +1,337 @@
+=== PROVENANCE start 2026-10-18T10:10:31Z head=cdab692b0ec8adfc1b9e74f24692f684319d142d snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 58ec505f2caea4b0ecde0615833c3b4f  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 588398cfc6f93122982aa0439c7ef5b3  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 11:25:33 AM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard env GLM53_LAYERS=0,3,4 GLM53_DSA_SHARD=1 timeout -k 60 5400 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m models.autoports.zai_org_glm_5_3_flash.tools.s67r_checks --slots 8 --seq-len 4096 --do batch,chunkplan --batch-slots 0,3,6 --batch-lengths 161,600,300 --steps 8 --chunk-lengths 600,2600 --chunk-gen 4 --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/result.json
+2026-10-18 11:25:35.275 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+S67R PROVENANCE {"git_head": "cdab692b0ec8adfc1b9e74f24692f684319d142d", "tt_dirty": [], "tt_md5": {"__init__.py": "53fbca0cafb2411040165520a35a3537", "ckpt.py": "daa701ea8bbd25979f06737bb11dc173", "decode_inputs.py": "d9786f26f27b09ba15db649e7ef3621c", "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4", "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c", "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7", "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923", "generator.py": "85325ca1fcf4449abcb020e3f41aeede", "generator_vllm.py": "48c406fb59e1ed7f184b90a7e42236be", "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b", "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6", "mlp.py": "952a9a2ad222304455d797cae94a5b50", "model.py": "e2757d7b7df9362b7dc3b94af0a94041", "moe.py": "6f6667949b4d20d28f24780b734f8ca0", "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0", "moe_opt.py": "56a26881d001580c2532e535e98b8e12", "multichip_decoder.py": "73dd4fd3918beea0fcf9f5b7855f9b82", "optimized_decoder.py": "3413548afa4b729ddf116617a5322b6b", "precision.py": "f561a6e9081ce0db4d8e1261004a615d", "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab", "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f", "weight_cache.py": "db46e9628661b44411f7e8def26559e1"}, "env": {"GLM53_TP": "4", "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash", "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8", "GLM53_WORKER_L1_SIZE": "1444864", "GLM53_LAYERS": "0,3,4", "GLM53_DSA_SHARD": "1"}}
+2026-10-18 11:25:35.327 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 11:25:35.327 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 11:25:35.327 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 11:25:35.327 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 11:25:35.334 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 11:25:35.334 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 11:25:35.414 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 11:25:35.414 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 11:25:35.414 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 11:25:35.414 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 11:25:35.415 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 11:25:35.656 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 11:25:35.789 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 11:25:35.789 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 11:25:35.789 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 11:25:35.789 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 11:25:35.789 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 11:25:35.874 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 11:25:35.874 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 11:25:35.874 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:35.881 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 11:25:35.882 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:35.892 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:35.899 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:35.933 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 11:25:35.933 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 11:25:36.741 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:__init__:186 - generator plan: {'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True}
+2026-10-18 11:25:36.786 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:320 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-18 11:25:38.159 | info     |           Metal | Pinned source memory start address 0x7c5cbbd2f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.159 | info     |           Metal | Pinned source memory start address 0x7c5ccfe97268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.159 | info     |           Metal | Pinned source memory start address 0x7c5cc5de3268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.159 | info     |           Metal | Pinned source memory start address 0x7c5cd9f4b268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.491 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 11:25:38.521 | info     |           Metal | Pinned source memory start address 0x7c5cd333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.521 | info     |           Metal | Pinned source memory start address 0x7c5cd267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.521 | info     |           Metal | Pinned source memory start address 0x7c5cd19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.521 | info     |           Metal | Pinned source memory start address 0x7c5cd0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.558 | info     |           Metal | Pinned source memory start address 0x7c5cd19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.558 | info     |           Metal | Pinned source memory start address 0x7c5cd0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.558 | info     |           Metal | Pinned source memory start address 0x7c5cd267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.558 | info     |           Metal | Pinned source memory start address 0x7c5cd333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.594 | info     |           Metal | Pinned source memory start address 0x7c5cd0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.594 | info     |           Metal | Pinned source memory start address 0x7c5cd267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.594 | info     |           Metal | Pinned source memory start address 0x7c5cd333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.596 | info     |           Metal | Pinned source memory start address 0x7c5cd19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.635 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:209 - layer 0 (kda/dense) loaded in 0.3s
+2026-10-18 11:25:38.685 | info     |           Metal | Pinned source memory start address 0x7c5cbaeff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.685 | info     |           Metal | Pinned source memory start address 0x7c5cb7bff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.685 | info     |           Metal | Pinned source memory start address 0x7c5cb8cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:38.685 | info     |           Metal | Pinned source memory start address 0x7c5cb9dff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 11:25:41.161 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 11:25:42.267 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:209 - layer 3 (dsa/moe) loaded in 3.6s
+2026-10-18 11:25:42.408 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 11:25:44.810 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 11:25:44.820 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:209 - layer 4 (kda/moe) loaded in 2.6s
+2026-10-18 11:25:44.832 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:_install_inactive_skip:317 - inactive-row MoE skip: True
+2026-10-18 11:25:44.893 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.serving_state:install_lockstep_sampling:80 - sampler lockstep installed on 4 dies (fresh identical seeds every draw, die-0 token broadcast)
+2026-10-18 11:25:44.893 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:234 - model weights loaded in 8.2s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 48 hits, 0 stored)
+2026-10-18 11:25:46.028 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:46.035 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:46.042 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:46.049 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-18 11:25:46.939 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:622 - MoE prefill row split: {'mode': 'auto', 'rows': '0', 'largest_free_bytes_per_die': 31952104448, 'need_bytes': 1073741824}
+2026-10-18 11:25:56.062 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:56.069 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:56.076 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:25:56.082 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:06.095 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:06.102 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:06.109 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:06.116 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:13.245 | warning  |              Op | Fabric packet size 4352 B is suboptimal for transporting 2048 B pages. Configure 8192 B packet size to maximize throughput. (ccl_common.cpp:79)
+2026-10-18 11:26:13.340 | warning  |              Op | Fabric packet size 4352 B is suboptimal for transporting 128 B pages. Configure 512 B packet size to maximize throughput. (ccl_common.cpp:79)
+2026-10-18 11:26:13.444 | warning  |           Metal | Allocating device buffers is potentially unsafe due to the existence of an active trace. These buffers may be corrupted once a trace is executed if they are not released before then. Use the trace allocation tracker to verify. (allocator.cpp:134)
+2026-10-18 11:26:13.455 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:332 - decode traces captured (model + sampler variants); prefill traces []
+S67R built S=8 plan={'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True} in 36.7 s
+2026-10-18 11:26:16.129 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:16.136 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:16.143 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 11:26:16.150 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+S67R BATCH {"slots": [0, 3, 6], "lengths": [161, 600, 300], "steps": 8, "joint_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "6": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "same_prompt_two_slots": {"slots": [0, 6], "tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "same_prompt_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "mid_prefill": {"step": 2, "slot": 6}, "mid_prefill_others_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "mid_prefill_late_slot_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 6, "bit_identical_steps": 6, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 6}, "texts": {"0": "_dimensionAliasesAliasesAliasesAliasesAliasesAliasesAliasesAliases", "3": "SURE haul dynamicshaulhaulhaulhaulhaulhaul", "6": " Shuffle Authorities Shuffle dynamics Authorities\u0430\u0440\u0435Aliases unload Shuffle"}, "pass_tokens": true}
+S67R CHUNKPLAN L=600: {"plan_cost": [[512, 512], [128, 88]], "plan_legacy": [[2048, 600]], "prefill_ms_cost": 194.2, "prefill_ms_legacy": 257.0, "max_abs_diff": 0.109375, "pcc": 0.999901, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [42911, 94411, 29088, 29088], "tokens_legacy": [42911, 94411, 29088, 29088]}
+S67R CHUNKPLAN L=2600: {"plan_cost": [[2048, 2048], [512, 512], [128, 40]], "plan_legacy": [[2048, 2048], [2048, 552]], "prefill_ms_cost": 496.9, "prefill_ms_legacy": 668.4, "max_abs_diff": 0.109375, "pcc": 0.999921, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [89489, 94411, 94411, 94411], "tokens_legacy": [89489, 94411, 94411, 94411]}
+S67R_RESULT {"args": {"slots": 8, "seq_len": 4096, "layout": null, "do": "batch,chunkplan", "batch_slots": "0,3,6", "batch_lengths": "161,600,300", "steps": 8, "save_pt": null, "chunk_lengths": "600,2600", "chunk_gen": 4, "deep": "32768,100000", "deep_steps": 32, "active": "1", "prompts": "128,161,512,2048,8192", "reference": "/home/raahem/glm53-flash-bringup/s67r_snap/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt", "report_dir": null, "ar_dir": "/home/raahem/glm53-flash-bringup/s67r_snap/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model", "trace_region": 67108864, "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/result.json"}, "layers": "0,3,4", "build_s": 36.7, "plan": {"layout": "sharded", "max_seq_len": 4096, "dsa_shard": true}, "skip_inactive": true, "moe_split": {"mode": "auto", "rows": "0", "largest_free_bytes_per_die": 31952104448, "need_bytes": 1073741824}, "lockstep": "1", "dram_free_after_build_per_die": 31928859648, "batch": {"slots": [0, 3, 6], "lengths": [161, 600, 300], "steps": 8, "joint_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "6": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "same_prompt_two_slots": {"slots": [0, 6], "tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "same_prompt_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "mid_prefill": {"step": 2, "slot": 6}, "mid_prefill_others_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "mid_prefill_late_slot_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 6, "bit_identical_steps": 6, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 6}, "texts": {"0": "_dimensionAliasesAliasesAliasesAliasesAliasesAliasesAliasesAliases", "3": "SURE haul dynamicshaulhaulhaulhaulhaulhaul", "6": " Shuffle Authorities Shuffle dynamics Authorities\u0430\u0440\u0435Aliases unload Shuffle"}, "pass_tokens": true}, "chunkplan": {"600": {"plan_cost": [[512, 512], [128, 88]], "plan_legacy": [[2048, 600]], "prefill_ms_cost": 194.2, "prefill_ms_legacy": 257.0, "max_abs_diff": 0.109375, "pcc": 0.999901, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [42911, 94411, 29088, 29088], "tokens_legacy": [42911, 94411, 29088, 29088]}, "2600": {"plan_cost": [[2048, 2048], [512, 512], [128, 40]], "plan_legacy": [[2048, 2048], [2048, 552]], "prefill_ms_cost": 496.9, "prefill_ms_legacy": 668.4, "max_abs_diff": 0.109375, "pcc": 0.999921, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [89489, 94411, 94411, 94411], "tokens_legacy": [89489, 94411, 94411, 94411]}}, "provenance_end": {"git_head": "cdab692b0ec8adfc1b9e74f24692f684319d142d", "tt_dirty": [], "tt_md5": {"__init__.py": "53fbca0cafb2411040165520a35a3537", "ckpt.py": "daa701ea8bbd25979f06737bb11dc173", "decode_inputs.py": "d9786f26f27b09ba15db649e7ef3621c", "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4", "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c", "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7", "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923", "generator.py": "85325ca1fcf4449abcb020e3f41aeede", "generator_vllm.py": "48c406fb59e1ed7f184b90a7e42236be", "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b", "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6", "mlp.py": "952a9a2ad222304455d797cae94a5b50", "model.py": "e2757d7b7df9362b7dc3b94af0a94041", "moe.py": "6f6667949b4d20d28f24780b734f8ca0", "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0", "moe_opt.py": "56a26881d001580c2532e535e98b8e12", "multichip_decoder.py": "73dd4fd3918beea0fcf9f5b7855f9b82", "optimized_decoder.py": "3413548afa4b729ddf116617a5322b6b", "precision.py": "f561a6e9081ce0db4d8e1261004a615d", "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab", "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f", "weight_cache.py": "db46e9628661b44411f7e8def26559e1"}, "env": {"GLM53_TP": "4", "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash", "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8", "GLM53_WORKER_L1_SIZE": "1444864", "GLM53_LAYERS": "0,3,4", "GLM53_DSA_SHARD": "1", "GLM53_MOE_SORTED_ROWS": "0"}}, "provenance_unchanged": true}
+2026-10-18 11:26:25.094 | info     |    BuildKernels | JIT cache stats: 2044/2240 hits (91.2%) [2044 cached, 2158 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 11:26:25.094 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 11:26:25.099 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 11:26:45.102 | critical |           Metal | Device 0: Virtual core 29-25, Port status: 0x1, Retrain count: 0x0, Rx link up: 0x1, Train status: 0x2, PCS status: 0x1, SerDes reset status: 0x1, Postcode: 0xc0dea000, ERISC0 reset PC: 0x3650, ERISC1 reset PC: 0x9330, RISC soft reset: 0x0, Heartbeat start: 0xdcba8200, Heartbeat end: 0xdcba8200, Heartbeat changed: false (llrt.cpp:358)
+2026-10-18 11:26:45.102 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/llrt/llrt.cpp:618: tt::exception
+info:
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0xcbd4c8) [0x7c7f078bd4c8]
+ --- tt::llrt::internal_::return_to_base_firmware_and_wait_for_heartbeat(tt::tt_metal::MetalEnvImpl&, int, tt::xy_pair const&, int)
+ --- tt::tt_metal::RiscFirmwareInitializer::assert_active_ethernet_cores_to_reset(int)
+ --- tt::tt_metal::RiscFirmwareInitializer::teardown(std::unordered_set<tt::tt_metal::InitializerKey, std::hash<tt::tt_metal::InitializerKey>, std::equal_to<tt::tt_metal::InitializerKey>, std::allocator<tt::tt_metal::InitializerKey> >&)
+ --- tt::tt_metal::MetalContext::teardown()
+ --- tt::tt_metal::MetalContext::~MetalContext()
+ --- tt::tt_metal::MetalContext::destroy_instance(bool, ttsl::StrongType<int, tt::tt_metal::ContextIdTag>)
+ --- tt::tt_metal::MetalContext::destroy_all_instances(bool)
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x47a76) [0x7c7f4f647a76]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x47bbe) [0x7c7f4f647bbe]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1d1) [0x7c7f4f62a1d1]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7c7f4f62a28b]
+ --- python(_start+0x29) [0x19a78a9]
+
+[qb2-120-p11t05:2337166] *** Process received signal ***
+[qb2-120-p11t05:2337166] Signal: Aborted (6)
+[qb2-120-p11t05:2337166] Signal code:  (-6)
+[qb2-120-p11t05:2337166] [ 0] /lib/x86_64-linux-gnu/libc.so.6(+0x45330)[0x7c7f4f645330]
+[qb2-120-p11t05:2337166] [ 1] /lib/x86_64-linux-gnu/libc.so.6(pthread_kill+0x11c)[0x7c7f4f69ec0c]
+[qb2-120-p11t05:2337166] [ 2] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x1e)[0x7c7f4f64527e]
+[qb2-120-p11t05:2337166] [ 3] /lib/x86_64-linux-gnu/libc.so.6(abort+0xdf)[0x7c7f4f6288ff]
+[qb2-120-p11t05:2337166] [ 4] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xac2b5)[0x7c7f378ac2b5]
+[qb2-120-p11t05:2337166] [ 5] /lib/x86_64-linux-gnu/libstdc++.so.6(+0xc31ea)[0x7c7f378c31ea]
+[qb2-120-p11t05:2337166] [ 6] /lib/x86_64-linux-gnu/libstdc++.so.6(_ZSt10unexpectedv+0x0)[0x7c7f378abcac]
+[qb2-120-p11t05:2337166] [ 7] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x6da8ee)[0x7c7f072da8ee]
+[qb2-120-p11t05:2337166] [ 8] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0xbcb861)[0x7c7f077cb861]
+[qb2-120-p11t05:2337166] [ 9] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal12MetalContext16destroy_instanceEbN4ttsl10StrongTypeIiNS0_12ContextIdTagEEE+0x90)[0x7c7f077cae50]
+[qb2-120-p11t05:2337166] [10] /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(_ZN2tt8tt_metal12MetalContext21destroy_all_instancesEb+0xf)[0x7c7f077caf2f]
+[qb2-120-p11t05:2337166] [11] /lib/x86_64-linux-gnu/libc.so.6(+0x47a76)[0x7c7f4f647a76]
+[qb2-120-p11t05:2337166] [12] /lib/x86_64-linux-gnu/libc.so.6(+0x47bbe)[0x7c7f4f647bbe]
+[qb2-120-p11t05:2337166] [13] /lib/x86_64-linux-gnu/libc.so.6(+0x2a1d1)[0x7c7f4f62a1d1]
+[qb2-120-p11t05:2337166] [14] /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b)[0x7c7f4f62a28b]
+[qb2-120-p11t05:2337166] [15] python(_start+0x29)[0x19a78a9]
+[qb2-120-p11t05:2337166] *** End of error message ***
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 11:26:46 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T11:27:31Z head=cdab692b0ec8adfc1b9e74f24692f684319d142d snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 85325ca1fcf4449abcb020e3f41aeede  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 73dd4fd3918beea0fcf9f5b7855f9b82  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== PROVENANCE start 2026-10-18T21:16:52Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 09:17:36 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_WATCHER_DISABLE_ETH=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard env GLM53_LAYERS=0,3,4 GLM53_DSA_SHARD=1 timeout -k 60 5400 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m models.autoports.zai_org_glm_5_3_flash.tools.s67r_checks --slots 8 --seq-len 4096 --do batch,chunkplan --batch-slots 0,3,6 --batch-lengths 161,600,300 --steps 8 --chunk-lengths 600,2600 --chunk-gen 4 --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/result.json
+2026-10-18 21:17:38.509 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-18 21:17:38.559 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:178 - precision policy: stage-8 selected 'combo_a_kv' (/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+S67R PROVENANCE {"git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c", "tt_dirty": [], "tt_md5": {"__init__.py": "53fbca0cafb2411040165520a35a3537", "ckpt.py": "daa701ea8bbd25979f06737bb11dc173", "decode_inputs.py": "b6d033397b4ba991bae572324d19b882", "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4", "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c", "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7", "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923", "generator.py": "1bc253814eb609f52ca45595a98d2af0", "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945", "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b", "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6", "mlp.py": "952a9a2ad222304455d797cae94a5b50", "model.py": "9615f14a971ad17162fed80a217879e8", "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001", "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0", "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506", "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b", "optimized_decoder.py": "b4ddebb46852522958e811191890bba2", "precision.py": "109284f45b66d9f3f6ef9f7f10cad699", "serving_profiles.py": "efc886f9706685daec5e75049791ea15", "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab", "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f", "weight_cache.py": "db46e9628661b44411f7e8def26559e1"}, "env": {"GLM53_TP": "4", "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash", "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8", "GLM53_WORKER_L1_SIZE": "1444864", "GLM53_LAYERS": "0,3,4", "GLM53_DSA_SHARD": "1"}}
+2026-10-18 21:17:38.563 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 21:17:38.563 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 21:17:38.563 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 21:17:38.563 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 21:17:38.569 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 21:17:38.570 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 21:17:38.648 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 21:17:38.648 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 21:17:38.648 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 21:17:38.648 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 21:17:38.649 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 21:17:38.813 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 21:17:38.948 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 21:17:38.948 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 21:17:38.948 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 21:17:38.948 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 21:17:38.948 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 21:17:39.029 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 21:17:39.029 | info     |       LLRuntime | Watcher server initialized, disabled features: ETH (watcher_server.cpp:568)
+2026-10-18 21:17:39.030 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:39.036 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 21:17:39.037 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:39.047 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:39.053 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:39.076 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 21:17:39.076 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 21:17:39.876 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:__init__:266 - generator plan: {'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True}
+2026-10-18 21:17:39.922 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:320 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-18 21:17:41.265 | info     |           Metal | Pinned source memory start address 0x7221ddf4b268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.265 | info     |           Metal | Pinned source memory start address 0x7221bfd2f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.265 | info     |           Metal | Pinned source memory start address 0x7221c9de3268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.265 | info     |           Metal | Pinned source memory start address 0x7221d3e97268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.915 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 21:17:41.943 | info     |           Metal | Pinned source memory start address 0x7221d19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.943 | info     |           Metal | Pinned source memory start address 0x7221d267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.943 | info     |           Metal | Pinned source memory start address 0x7221d0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.943 | info     |           Metal | Pinned source memory start address 0x7221d333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.979 | info     |           Metal | Pinned source memory start address 0x7221d19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.979 | info     |           Metal | Pinned source memory start address 0x7221d333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.979 | info     |           Metal | Pinned source memory start address 0x7221d267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:41.979 | info     |           Metal | Pinned source memory start address 0x7221d0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.014 | info     |           Metal | Pinned source memory start address 0x7221d267f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.014 | info     |           Metal | Pinned source memory start address 0x7221d19bf268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.014 | info     |           Metal | Pinned source memory start address 0x7221d0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.014 | info     |           Metal | Pinned source memory start address 0x7221d333f268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.050 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 0 (kda/dense) loaded in 0.3s
+2026-10-18 21:17:42.102 | info     |           Metal | Pinned source memory start address 0x7221cfbff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.102 | info     |           Metal | Pinned source memory start address 0x7221d0cff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.102 | info     |           Metal | Pinned source memory start address 0x7221d2eff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:42.102 | info     |           Metal | Pinned source memory start address 0x7221d1dff268 must be aligned 64 B (dispatch.cpp:1202)
+2026-10-18 21:17:44.458 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 21:17:44.470 | WARNING  | models.autoports.zai_org_glm_5_3_flash.tt.precision:_apply_dsa:340 - layer 3: kv_latent_dtype fp8_e4m3 ignored with the block-sharded DSA cache
+2026-10-18 21:17:45.571 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 3 (dsa/moe) loaded in 3.5s
+2026-10-18 21:17:45.700 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-18 21:17:47.986 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 21:17:48.079 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 4 (kda/moe) loaded in 2.5s
+2026-10-18 21:17:48.086 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:_install_inactive_skip:318 - inactive-row MoE skip: True
+2026-10-18 21:17:48.144 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.serving_state:install_lockstep_sampling:80 - sampler lockstep installed on 4 dies (fresh identical seeds every draw, die-0 token broadcast)
+2026-10-18 21:17:48.144 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:235 - model weights loaded in 8.3s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 58 hits, 0 stored)
+2026-10-18 21:17:49.164 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:49.171 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:49.178 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:49.185 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-18 21:17:50.155 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:623 - MoE prefill row split: {'mode': 'auto', 'rows': '0', 'largest_free_bytes_per_die': 32067693568, 'need_bytes': 1073741824}
+2026-10-18 21:17:59.197 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:59.205 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:59.212 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:17:59.220 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:09.232 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:09.239 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:09.246 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:09.253 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:16.464 | warning  |              Op | Fabric packet size 4352 B is suboptimal for transporting 2048 B pages. Configure 8192 B packet size to maximize throughput. (ccl_common.cpp:79)
+2026-10-18 21:18:16.529 | warning  |              Op | Fabric packet size 4352 B is suboptimal for transporting 128 B pages. Configure 512 B packet size to maximize throughput. (ccl_common.cpp:79)
+2026-10-18 21:18:16.630 | warning  |           Metal | Allocating device buffers is potentially unsafe due to the existence of an active trace. These buffers may be corrupted once a trace is executed if they are not released before then. Use the trace allocation tracker to verify. (allocator.cpp:134)
+2026-10-18 21:18:16.640 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:414 - decode traces captured (model + sampler variants); prefill traces []
+S67R built S=8 plan={'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True} in 36.8 s
+2026-10-18 21:18:19.265 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:19.273 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:19.280 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:18:19.287 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+S67R BATCH {"slots": [0, 3, 6], "lengths": [161, 600, 300], "steps": 8, "joint_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "6": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "same_prompt_two_slots": {"slots": [0, 6], "tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "same_prompt_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "mid_prefill": {"step": 2, "slot": 6}, "mid_prefill_others_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "mid_prefill_late_slot_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 6, "bit_identical_steps": 6, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 6}, "texts": {"0": "_dimensioninezbreak Authoritiesbreakbreakbreakbreakbreak", "3": " haul complaintshaulhaulhaulhaulhaulhaulhaul", "6": " dynamicsAliasesAliasesAliasesAliasesAliasesAliasesAliasesAliases"}, "pass_tokens": true}
+S67R CHUNKPLAN L=600: {"plan_cost": [[512, 512], [128, 88]], "plan_legacy": [[2048, 600]], "prefill_ms_cost": 194.8, "prefill_ms_legacy": 255.2, "max_abs_diff": 0.1171875, "pcc": 0.999909, "top1_equal": false, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": false, "greedy_first_divergence": 0, "tokens_cost": [37672, 94411, 37672, 8957], "tokens_legacy": [42911, 42911, 42911, 42911]}
+S67R CHUNKPLAN L=2600: {"plan_cost": [[2048, 2048], [512, 512], [128, 40]], "plan_legacy": [[2048, 2048], [2048, 552]], "prefill_ms_cost": 496.2, "prefill_ms_legacy": 668.2, "max_abs_diff": 0.11328125, "pcc": 0.999909, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [62638, 62273, 62638, 62638], "tokens_legacy": [62638, 62273, 62638, 62638]}
+S67R_RESULT {"args": {"slots": 8, "seq_len": 4096, "layout": null, "do": "batch,chunkplan", "batch_slots": "0,3,6", "batch_lengths": "161,600,300", "steps": 8, "save_pt": null, "chunk_lengths": "600,2600", "chunk_gen": 4, "deep": "32768,100000", "deep_steps": 32, "active": "1", "prompts": "128,161,512,2048,8192", "reference": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt", "report_dir": null, "ar_dir": "/home/raahem/glm53-flash-bringup/s67r_final/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model", "trace_region": 67108864, "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/optimized_full_model/watcher/w_full_s8_shard/result.json"}, "layers": "0,3,4", "build_s": 36.8, "plan": {"layout": "sharded", "max_seq_len": 4096, "dsa_shard": true}, "skip_inactive": true, "moe_split": {"mode": "auto", "rows": "0", "largest_free_bytes_per_die": 32067693568, "need_bytes": 1073741824}, "lockstep": "1", "dram_free_after_build_per_die": 32048659456, "batch": {"slots": [0, 3, 6], "lengths": [161, 600, 300], "steps": 8, "joint_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "6": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "same_prompt_two_slots": {"slots": [0, 6], "tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "same_prompt_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "mid_prefill": {"step": 2, "slot": 6}, "mid_prefill_others_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "3": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "mid_prefill_late_slot_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 6, "bit_identical_steps": 6, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 6}, "texts": {"0": "_dimensioninezbreak Authoritiesbreakbreakbreakbreakbreak", "3": " haul complaintshaulhaulhaulhaulhaulhaulhaul", "6": " dynamicsAliasesAliasesAliasesAliasesAliasesAliasesAliasesAliases"}, "pass_tokens": true}, "chunkplan": {"600": {"plan_cost": [[512, 512], [128, 88]], "plan_legacy": [[2048, 600]], "prefill_ms_cost": 194.8, "prefill_ms_legacy": 255.2, "max_abs_diff": 0.1171875, "pcc": 0.999909, "top1_equal": false, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": false, "greedy_first_divergence": 0, "tokens_cost": [37672, 94411, 37672, 8957], "tokens_legacy": [42911, 42911, 42911, 42911]}, "2600": {"plan_cost": [[2048, 2048], [512, 512], [128, 40]], "plan_legacy": [[2048, 2048], [2048, 552]], "prefill_ms_cost": 496.2, "prefill_ms_legacy": 668.2, "max_abs_diff": 0.11328125, "pcc": 0.999909, "top1_equal": true, "top5_overlap": 1.0, "bit_identical": false, "greedy_tokens_equal": true, "greedy_first_divergence": null, "tokens_cost": [62638, 62273, 62638, 62638], "tokens_legacy": [62638, 62273, 62638, 62638]}}, "provenance_end": {"git_head": "656c998e3df19d3e6fc42c0a5921eb8963f74a7c", "tt_dirty": [], "tt_md5": {"__init__.py": "53fbca0cafb2411040165520a35a3537", "ckpt.py": "daa701ea8bbd25979f06737bb11dc173", "decode_inputs.py": "b6d033397b4ba991bae572324d19b882", "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4", "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c", "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7", "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923", "generator.py": "1bc253814eb609f52ca45595a98d2af0", "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945", "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b", "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6", "mlp.py": "952a9a2ad222304455d797cae94a5b50", "model.py": "9615f14a971ad17162fed80a217879e8", "moe.py": "16cc6532a00ef1f7b4b7b0a1dd43d001", "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0", "moe_opt.py": "6e63d1290690b61f90b6bbff89d19506", "multichip_decoder.py": "16b9673568d127faf8f7d8af14149b0b", "optimized_decoder.py": "b4ddebb46852522958e811191890bba2", "precision.py": "109284f45b66d9f3f6ef9f7f10cad699", "serving_profiles.py": "efc886f9706685daec5e75049791ea15", "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab", "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f", "weight_cache.py": "db46e9628661b44411f7e8def26559e1"}, "env": {"GLM53_TP": "4", "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash", "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8", "GLM53_WORKER_L1_SIZE": "1444864", "GLM53_LAYERS": "0,3,4", "GLM53_DSA_SHARD": "1", "GLM53_MOE_SORTED_ROWS": "0"}}, "provenance_unchanged": true}
+2026-10-18 21:18:28.208 | info     |    BuildKernels | JIT cache stats: 2112/2310 hits (91.4%) [2112 cached, 2148 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 21:18:28.208 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 21:18:28.213 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 21:18:28.232 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 21:18:28.232 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 21:18:28.841 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 21:18:28.841 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 21:18:28.841 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 0 Sun Oct 18 09:18:28 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T21:19:13Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py

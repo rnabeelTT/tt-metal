@@ -195,6 +195,8 @@ class GlmDSA(LightweightModule):
             self.dummy_block = self.NB - 1
         if self.latent is None:
             if getattr(self, "latent_dtype", ttnn.bfloat16) == ttnn.fp8_e4m3:
+                # stage-8 KV-cache candidate (tt/precision.py kv_latent_dtype): fp8 e4m3 rows, sparse_sdpa kv_format
+                # FP8_E4M3. ttnn.zeros has no fp8 path: the zero pool is written from the host
                 self.latent = ttnn.from_torch(
                     torch.zeros(1, 1, self.NB * BLOCK, self.R),
                     dtype=ttnn.fp8_e4m3,
@@ -505,7 +507,7 @@ class GlmDSA(LightweightModule):
         """c [1,1,rows,512] bf16 TILE -> latent pool rows row_idx (uint32 [1, rows]; 0xFFFFFFFF = skip). The block-sharded
         cache (tt/dsa_shard.py) overrides it."""
         c_rm = ttnn.to_layout(c, ttnn.ROW_MAJOR_LAYOUT)
-        if self.latent.dtype != c_rm.dtype:
+        if self.latent.dtype != c_rm.dtype:  # fp8 pool: row-major cast (the TILE -> fp8 cast is not supported)
             c8 = ttnn.typecast(c_rm, self.latent.dtype)
             ttnn.deallocate(c_rm)
             c_rm = c8
@@ -528,7 +530,9 @@ class GlmDSA(LightweightModule):
             self.latent,
             idx,
             self.R,
-            kv_format=ttnn.SparseKVFormat.FP8_E4M3 if self.latent.dtype == ttnn.fp8_e4m3 else ttnn.SparseKVFormat.BF16,
+            kv_format=(
+                ttnn.SparseKVFormat.FP8_E4M3 if self.latent.dtype == ttnn.fp8_e4m3 else ttnn.SparseKVFormat.BF16
+            ),
             scale=self.scale,
             k_chunk_size=32,
             compute_kernel_config=self.sdpa_ckc,
@@ -641,6 +645,47 @@ class GlmDSA(LightweightModule):
         finally:
             del self._dev
 
+    def _set_open_pool(self, slot: int, p_last: int, pairs):
+        """Open-pool hand-off of a prefill chunk ending inside a pool: row p_last of each chunk state (den, num, m
+        [1,1,n/4,128] fp32) -> row `slot` of the decode accumulators. Request-independent programs: a one-hot row
+        select (multiply + sum over the pools; exact: one nonzero term) and a slot-mask select, driven by host-built
+        input tensors. The former form (ttnn.slice at p_last, slice / concat at the slot) compiled a new program for
+        every (prompt length, slot) AFTER the decode capture; its program-cache buffers were allocated while the trace
+        was live and, under DRAM pressure, landed in the trace's freed intermediates (full model: teacher forcing
+        14/32/90 at max_seq_len 102400; tt-metal TT_METAL_TRACE_ALLOC_TRACKING named the slice). GLM53_OPEN_POOL_HOST=1:
+        the same hand-off through the host (diagnostic)."""
+        rep = ttnn.ReplicateTensorToMesh(self.mesh)
+        if os.environ.get("GLM53_OPEN_POOL_HOST") == "1":
+            for buf, src in pairs:
+                row = ttnn.to_torch(ttnn.get_device_tensors(src)[0]).float().reshape(-1, self.ID)[p_last]
+                acc = ttnn.to_torch(ttnn.get_device_tensors(buf)[0]).float().reshape(1, 1, -1, self.ID).clone()
+                acc[0, 0, slot] = row
+                ttnn.copy_host_to_device_tensor(
+                    ttnn.from_torch(acc, dtype=buf.dtype, layout=buf.layout, mesh_mapper=rep), buf
+                )
+            return
+        P = int(pairs[0][1].shape[-2])
+        S = int(pairs[0][0].shape[-2])
+        oh = torch.zeros(1, 1, P, 1)
+        oh[0, 0, p_last, 0] = 1.0
+        sm = torch.zeros(1, 1, S, 1)
+        sm[0, 0, slot, 0] = 1.0
+        oh_d = ttnn.from_torch(oh, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=rep)
+        sm_d = ttnn.from_torch(sm, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=rep)
+        for buf, src in pairs:
+            sel = ttnn.multiply(src, oh_d, memory_config=DRAM)  # [1,1,P,128], one nonzero row
+            row = ttnn.sum(sel, dim=-2, keepdim=True, memory_config=DRAM)  # [1,1,1,128]
+            ttnn.deallocate(sel)
+            rows = ttnn.repeat(row, ttnn.Shape((1, 1, S, 1)), memory_config=DRAM) if S > 1 else row
+            if rows is not row:
+                ttnn.deallocate(row)
+            new = ttnn.where(sm_d, rows, buf, memory_config=DRAM)
+            ttnn.deallocate(rows)
+            ttnn.copy(new, buf)
+            ttnn.deallocate(new)
+        ttnn.deallocate(oh_d)
+        ttnn.deallocate(sm_d)
+
     def write_prefill_tail(self, length: int, slot: int):
         """Deferred open-pool hand-off of a traced chunk (inputs["defer_tail"]): the chunk's pool state rows at
         length // 4 -> decode slot `slot` (eager, after the trace replay; the tensors are the trace's outputs)."""
@@ -674,12 +719,7 @@ class GlmDSA(LightweightModule):
             for t in (poolK, k, gl):
                 ttnn.deallocate(t)
         elif length % KPOOL:  # this chunk ends inside a pool: hand its partial state to the decode slot
-            p_last = length // KPOOL
-            d_row = ttnn.slice(den, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
-            n_row = ttnn.slice(num, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
-            m_row = ttnn.slice(m, (0, 0, p_last, 0), (1, 1, p_last + 1, self.ID))
-            for buf, src in ((self.acc_den, d_row), (self.acc_num, n_row), (self.acc_m, m_row)):
-                _write_row(buf, src, slot)
+            self._set_open_pool(slot, length // KPOOL, ((self.acc_den, den), (self.acc_num, num), (self.acc_m, m)))
         if not inputs.get("defer_tail"):
             for t in (poolK, den, num, m, k, gl):
                 ttnn.deallocate(t)

@@ -497,8 +497,14 @@ def run_capacity(a):
     try:
         t0 = time.time()
         g = Glm53Generator(
-            mesh, max_batch_size=a.slots, max_seq_len=a.max_context, defer_caches=True, weight_cache=None
+            mesh,
+            max_batch_size=a.slots,
+            max_seq_len=a.max_context,
+            defer_caches=True,
+            budget_check=False,  # this probe sizes the pool from the measured free DRAM
+            weight_cache="env" if a.weight_cache else None,
         )
+        report["plan"] = g.plan
         m = g.model
         report["load_seconds"] = round(time.time() - t0, 1)
         report["after_load"] = dram.snapshot()
@@ -535,21 +541,12 @@ def run_capacity(a):
         ttnn.synchronize_device(mesh)
         dram.start()
         t1 = time.time()
-        # warm_programs + the model trace + the GREEDY sampler trace only (Glm53Generator._warm's capture). The serving
-        # capture_traces also records the penalties / force-argmax sampler variants; capturing the penalties variant
-        # after precompile hit "Cannot load new binaries during trace capture" in the reduced probe (2026-10-17), so
-        # this probe does not risk the full-model run on it (variant bytes: reduced.json sampler trace x 4).
+        # the serving warm-up: warm_programs + capture_traces (model trace + every sampler variant, the penalties one
+        # included since the stage-6/7 rework compiles its token-count programs first, Glm53Generator._warm_sampler)
         g.warm_programs()
         ttnn.synchronize_device(mesh)
-        g.trace_id = ttnn.begin_trace_capture(mesh, cq_id=0)
-        try:
-            g.logits_out = m.decode_step(g._tok_view())
-        finally:
-            ttnn.end_trace_capture(mesh, g.trace_id, cq_id=0)
-        report["model_trace_bytes"] = dram.trace()
-        if m.sampling is not None:
-            m.sampling.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True, skip_precompile=True)
-            report["sampler_trace_bytes"] = dram.trace() - report["model_trace_bytes"]
+        g.capture_traces()
+        report["model_plus_sampler_variants_trace_bytes"] = dram.trace()
         ttnn.synchronize_device(mesh)
         report["warm_and_capture_peak_bytes"] = dram.stop()
         report["warm_and_capture_peak_op"] = dram.peak_op
@@ -581,9 +578,18 @@ def run_capacity(a):
         report["passage_tokens"] = len(pas)
         save()
         ttnn.synchronize_device(mesh)
+        sink_prefill = None
+        if report.get("dsa_shard") and a.sink_stats:
+            from models.autoports.zai_org_glm_5_3_flash.tools.s67r_checks import _dsa_stats, _read_stats
+
+            _dsa_stats(m, True)
         t2 = time.time()
         logits = g.prefill_forward(ids.reshape(1, -1), page_table=pt, prompt_lens=[L])
         report["prefill_seconds"] = round(time.time() - t2, 1)
+        if report.get("dsa_shard") and a.sink_stats:
+            _dsa_stats(m, False)
+            sink_prefill = _read_stats(m)
+            report["sink_stats_prefill"] = sink_prefill
         report["prefill_tracked_rows"] = rows
         report["prefill_peaks"] = summarize_peaks(rows)
         report["after_prefill"] = dram.snapshot()
@@ -623,6 +629,23 @@ def run_capacity(a):
             }
         )
         report["after_decode"] = dram.snapshot()
+        if report.get("dsa_shard"):  # sink-weight headroom per DSA layer (tt/dsa_shard.py): eager steps after the copy
+            from models.autoports.zai_org_glm_5_3_flash.tools.s67r_checks import _dsa_stats, _read_stats
+
+            report["sink_stats_prefill"] = sink_prefill
+            _dsa_stats(m, True)
+            for i in range(2):
+                o = g.decode_forward(
+                    torch.tensor([[tok]] + [[0]] * (a.slots - 1)),
+                    torch.tensor([pos] + [-1] * (a.slots - 1)),
+                    page_table=pt,
+                    enable_trace=False,
+                    on_device_sampling=False,
+                    reload_inputs=True,
+                )
+                tok, pos = int(torch.argmax(o[0, : m.vocab])), pos + 1
+            _dsa_stats(m, False)
+            report["sink_stats_decode_eager"] = _read_stats(m)
         report["hook_samples"] = dram.samples
         print(
             json.dumps(
@@ -653,6 +676,8 @@ def main():
     ap.add_argument("--workspace-mib", type=float, default=1024.0, help="capacity: DRAM kept free besides the pool")
     ap.add_argument("--decode-steps", type=int, default=24)
     ap.add_argument("--tail-gap", type=int, default=37, help="capacity: tokens left unused below the pool top")
+    ap.add_argument("--weight-cache", type=int, default=1, help="capacity: 1 = GLM53_CACHE_DIR weight cache, 0 = none")
+    ap.add_argument("--sink-stats", type=int, default=1, help="capacity, sharded: sink-weight stats in the prefill")
     a = ap.parse_args()
     if a.mode == "reduced":
         a.slots = a.slots or 32

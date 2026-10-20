@@ -39,11 +39,15 @@ def _open_mesh(trace_region):
         1,
     ):  # one die runs no CCLs; a fabric on a single die of a multi-chip host never finishes its handshake
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    kw = {}
+    if os.environ.get("GLM53_WORKER_L1_SIZE"):  # watcher runs: a smaller worker L1 grows the kernel-config ring
+        kw["worker_l1_size"] = int(os.environ["GLM53_WORKER_L1_SIZE"])
     return ttnn.open_mesh_device(
         mesh_shape=ttnn.MeshShape(*shape),
         l1_small_size=L1_SMALL_SIZE,
         trace_region_size=trace_region,
         num_command_queues=1,
+        **kw,
     )
 
 

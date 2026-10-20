@@ -1,0 +1,200 @@
+diff --git a/reference_config/evals/eval_config.py b/reference_config/evals/eval_config.py
+index 04d3a7d..2c00cda 100644
+--- a/reference_config/evals/eval_config.py
++++ b/reference_config/evals/eval_config.py
+@@ -474,6 +474,13 @@ class EvalConfig:
+ # Note: reasoning models (QwQ-32B, DeepSeek-R1-Distill-Llama-70B) need evals allowing more tokens generated
+ 
+ 
++def _glm53_flash_tasks(names):
++    """GLM-5.3-Flash E192 autoport eval rows (models/autoports/zai_org_glm_5_3_flash). GLM53_EVAL_TASKS (comma list)
++    restricts a run to the named tasks."""
++    keep = os.environ.get("GLM53_EVAL_TASKS")
++    return [t for t in names if not keep or t.task_name in keep.split(",")]
++
++
+ _eval_config_list = [
+     EvalConfig(
+         hf_model_repo="zai-org/GLM-5.2",
+@@ -3235,6 +3242,77 @@ _eval_config_list = [
+             ),
+         ],
+     ),
++    EvalConfig(
++        # GLM-5.3-Flash with the E192 expert subset (192 of 288 routed experts per MoE layer), agentic autoport
++        # models/autoports/zai_org_glm_5_3_flash, served externally (tt-metal readiness runner / 09-serve.sh). Standard
++        # lm-eval tasks through the chat API (GLM chat template; thinking is always on, reasoning_effort = template
++        # default). Sampling = the checkpoint generation_config (temperature 1.0, top_p 0.95). NO same-model reference:
++        # the published scores of the 288-expert model do not apply to E192 and no GPU / HF reference of E192 exists.
++        # TODO(stage 11): fill mode_reference_scores (ci-nightly subset) or record every accuracy row as informational
++        # with the reason in doc/tti_release/RUN_NOTES.md. model_kwargs.timeout 7200 s: thinking generations at ~10-18
++        # tokens/s per user run 10-30+ min.
++        hf_model_repo="zai-org/GLM-5.3-Flash",
++        tasks=_glm53_flash_tasks(
++            [
++                EvalTask(
++                    task_name="ifeval",
++                    use_chat_api=True,
++                    max_concurrent=16,
++                    model_kwargs={"timeout": 7200},
++                    gen_kwargs={
++                        "max_gen_toks": os.environ.get("GLM53_EVAL_MAX_GEN_TOKS_IFEVAL", "16384"),
++                        "until": ["<|endoftext|>"],
++                        "do_sample": "true",
++                        "temperature": 1.0,
++                        "top_p": 0.95,
++                        "stream": "false",
++                    },
++                    score=EvalTaskScore(
++                        published_score=None,
++                        published_score_ref="no published IFEval score for GLM-5.3-Flash E192",
++                        gpu_reference_score=None,
++                        gpu_reference_score_ref="no reference of the E192 model (TODO stage 11)",
++                        score_func=score_task_single_key,
++                        score_func_kwargs={
++                            "result_keys": ["prompt_level_strict_acc,none", "inst_level_strict_acc,none"],
++                            "unit": "percent",
++                        },
++                    ),
++                    limit_samples_map={
++                        EvalLimitMode.CI_NIGHTLY: 0.2,
++                        EvalLimitMode.SMOKE_TEST: 0.01,
++                    },
++                ),
++                EvalTask(
++                    task_name="gpqa_diamond_cot_zeroshot",
++                    num_fewshot=0,
++                    use_chat_api=True,
++                    max_concurrent=16,
++                    model_kwargs={"timeout": 7200},
++                    gen_kwargs={
++                        "max_gen_toks": os.environ.get("GLM53_EVAL_MAX_GEN_TOKS_GPQA", "32768"),
++                        "until": ["<|endoftext|>"],
++                        "do_sample": "true",
++                        "temperature": 1.0,
++                        "top_p": 0.95,
++                        "stream": "false",
++                    },
++                    score=EvalTaskScore(
++                        published_score=None,
++                        published_score_ref="no published GPQA score for GLM-5.3-Flash E192",
++                        gpu_reference_score=None,
++                        gpu_reference_score_ref="no reference of the E192 model (TODO stage 11)",
++                        score_func=score_task_single_key,
++                        score_func_kwargs={"result_keys": ["exact_match,flexible-extract"], "unit": "percent"},
++                    ),
++                    limit_samples_map={
++                        EvalLimitMode.CI_NIGHTLY: 0.2,
++                        EvalLimitMode.SMOKE_TEST: 0.01,
++                    },
++                ),
++            ]
++        ),
++    ),
+     EvalConfig(
+         hf_model_repo="mistralai/Mistral-7B-Instruct-v0.3",
+         tasks=[
+diff --git a/test_module/server_tests_config.json b/test_module/server_tests_config.json
+index cf40056..1b799c8 100644
+--- a/test_module/server_tests_config.json
++++ b/test_module/server_tests_config.json
+@@ -391,6 +391,17 @@
+                 "galaxy"
+             ]
+         },
++        "glm_5_3_flash_e192": {
++            "id_name": "glm-5-3-flash-e192",
++            "weights": [
++                "zai-org/GLM-5.3-Flash"
++            ],
++            "category": "LLM",
++            "compatible_devices": [
++                "p300x2",
++                "p150x4"
++            ]
++        },
+         "qwen3_32b": {
+             "id_name": "qwen3-32b",
+             "weights": [
+diff --git a/test_module/test_suites/llm.json b/test_module/test_suites/llm.json
+index 7177e4f..a680d38 100644
+--- a/test_module/test_suites/llm.json
++++ b/test_module/test_suites/llm.json
+@@ -8,7 +8,8 @@
+                 "llama_3_1_8b",
+                 "llama_3_2_1b",
+                 "llama_70b_family",
+-                "gpt_oss_20b"
++                "gpt_oss_20b",
++                "glm_5_3_flash_e192"
+             ],
+             "devices": [
+                 "n150",
+diff --git a/workflows/model_spec.py b/workflows/model_spec.py
+index c68ad26..889b0da 100644
+--- a/workflows/model_spec.py
++++ b/workflows/model_spec.py
+@@ -390,7 +390,16 @@ quetzal_impl = ImplSpec(
+     code_path="serving",
+ )
+ 
++# GLM-5.3-Flash E192 agentic autoport (tt-model-bringup skills): generated code under models/autoports.
++glm53_flash_autoport_impl = ImplSpec(
++    impl_id="glm53_flash_autoport",
++    impl_name="glm53-flash-autoport",
++    repo_url="https://github.com/tenstorrent/tt-metal",
++    code_path="models/autoports/zai_org_glm_5_3_flash",
++)
++
+ _IMPL_REGISTRY: Dict[str, ImplSpec] = {
++    "glm53_flash_autoport": glm53_flash_autoport_impl,
+     "quetzal": quetzal_impl,
+     "tt_transformers": tt_transformers_impl,
+     "llama3_70b_galaxy": llama3_70b_galaxy_impl,
+diff --git a/workflows/model_specs/dev/llm.yaml b/workflows/model_specs/dev/llm.yaml
+index d885932..63bb1c2 100644
+--- a/workflows/model_specs/dev/llm.yaml
++++ b/workflows/model_specs/dev/llm.yaml
+@@ -2687,3 +2687,42 @@ templates:
+     Qwen/Qwen3.5-27B:
+       reasoning_parser_name: qwen3
+       tool_call_parser_name: qwen3_coder
++
++# GLM-5.3-Flash E192 agentic autoport (models/autoports/zai_org_glm_5_3_flash), text-only, 4 Blackhole dies (P300x2).
++# Served externally by the tt-metal checkout (docker_server / local_server false). The numbers below must equal the
++# autoport's serving_profiles.json default profile (max_num_seqs, max_model_len, trace_region_bytes); TODO(stage 11):
++# re-check them after the G9 capacity probes.
++- weights:
++  - zai-org/GLM-5.3-Flash
++  impl: glm53_flash_autoport
++  inference_engine: VLLM
++  model_type: LLM
++  supported_modalities:
++  - text
++  device_model_specs:
++  - device: P300X2
++    max_concurrency: 16
++    max_context: 282624
++    default_impl: true
++    env_vars:
++      HF_MODEL: zai-org/GLM-5.3-Flash
++      MESH_DEVICE: P300x2
++      ARCH_NAME: blackhole
++      EXTRA_MODELS_DIR: models/autoports/zai_org_glm_5_3_flash/vllm_bundle
++      GLM53_TRACE_REGION: '67108864'
++    vllm_args:
++      enable_auto_tool_choice: true
++      reasoning_parser: glm45
++      tool_call_parser: glm47
++    override_tt_config:
++      fabric_config: FABRIC_1D
++      trace_region_size: 67108864
++      l1_small_size: 24576
++      sample_on_device_mode: all
++  # FUNCTIONAL (not EXPERIMENTAL): eval failures must block acceptance for this model's reports
++  status: FUNCTIONAL
++  has_builtin_warmup: true
++  metadata:
++    zai-org/GLM-5.3-Flash:
++      reasoning_parser_name: glm45
++      tool_call_parser_name: glm47

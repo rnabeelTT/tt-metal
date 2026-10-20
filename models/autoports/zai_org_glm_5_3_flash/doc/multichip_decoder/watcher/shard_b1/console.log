@@ -1,0 +1,303 @@
+=== PROVENANCE start 2026-10-18T11:27:31Z head=cdab692b0ec8adfc1b9e74f24692f684319d142d snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 85325ca1fcf4449abcb020e3f41aeede  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 73dd4fd3918beea0fcf9f5b7855f9b82  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 01:08:38 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_b1 timeout -k 60 3600 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s67r_snap
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 13:08:40.775 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1] 2026-10-18 13:08:40.999 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 13:08:40.999 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 13:08:40.999 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 13:08:40.999 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 13:08:41.005 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 13:08:41.006 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 13:08:41.084 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 13:08:41.084 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 13:08:41.084 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 13:08:41.084 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 13:08:41.086 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 13:08:41.273 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 13:08:41.411 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 13:08:41.411 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 13:08:41.411 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 13:08:41.412 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 13:08:41.412 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 13:08:41.509 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_b1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 13:08:41.509 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 13:08:41.509 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:41.515 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 13:08:41.517 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:41.526 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:41.533 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:41.577 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 13:08:41.577 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 13:08:51.682 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:51.692 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:51.701 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:08:51.711 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:01.730 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:01.746 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:01.760 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:01.776 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:11.720 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 13:09:11.803 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:11.810 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:11.817 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:11.824 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:21.836 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:21.843 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:21.850 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:21.857 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:31.871 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:31.878 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:31.885 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:31.892 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:41.908 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:41.926 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:41.944 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:41.958 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:51.491 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 13:09:51.981 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:51.988 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:51.995 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 13:09:52.002 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+b1: slot 0 syn:80 prefill 6001
+b1 ('attn prefill', 0): PCC sharded vs replicated 0.999951 rms ratio 1.00138
+b1 ('attn decode', 0, 0): PCC sharded vs replicated 0.999927 rms ratio 1.00195
+b1 ('attn decode', 0, 1): PCC sharded vs replicated 0.999927 rms ratio 1.00248
+b1 ('attn decode', 0, 2): PCC sharded vs replicated 0.999924 rms ratio 1.00136
+b1 ('prefill', 0): PCC sharded vs replicated 0.998538 rms ratio 0.99957
+b1 ('decode', 0, 0): PCC sharded vs replicated 0.999928 rms ratio 0.99943
+b1 ('decode', 0, 1): PCC sharded vs replicated 0.983629 rms ratio 0.99560
+b1 ('decode', 0, 2): PCC sharded vs replicated 0.999915 rms ratio 0.99891
+b1: attention output worst PCC 0.999924, worst |rms ratio - 1| 0.00248
+b1: layer updates outside the bars with a matching attention output (MoE near-tie): [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.983628578286602, 0.9956039786338806)]
+b1 ('prefill', 0, 6001): replicated 5.774 sharded 2.724
+b1 decode_replay_us: replicated 1.555e+04 sharded 1.886e+04
+b1 latent_bytes_per_die: replicated 8.52e+06 sharded 2.507e+06
+PASSED2026-10-18 13:10:02.014 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 13:10:02.020 | warning  |           Metal | Watcher stopped the device due to tripped assert, see watcher log for more details (watcher_device_reader.cpp:860)
+2026-10-18 13:10:02.020 | warning  |           Metal | Device 0 acteth core(x= 0,y= 9) virtual(x=29,y=25): subordinate_erisc detected invalid NOC command buffer state before starting the next kernel (write-capable NOC packet tags must be zero so implicit transaction ID users start with transaction ID 0). Current kernel: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp. (watcher_device_reader.cpp:861)
+2026-10-18 13:10:02.020 | info     |           Metal | Last waypoint:  SEW,NKFW,   X,   X,   X (watcher_device_reader.cpp:1155)
+2026-10-18 13:10:02.020 | info     |           Metal | While running kernels: (watcher_device_reader.cpp:1397)
+2026-10-18 13:10:02.020 | info     |           Metal |  erisc: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 13:10:02.020 | info     |           Metal |  subordinate_erisc: tt_metal/fabric/impl/kernels/edm_fabric/fabric_erisc_router.cpp (watcher_device_reader.cpp:1399)
+2026-10-18 13:10:02.020 | critical |          Always | TT_THROW: Watcher detected tripped assert and stopped device. (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/impl/debug/watcher_device_reader.cpp:866: tt::exception
+info:
+Watcher detected tripped assert and stopped device.
+backtrace:
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x7a77a5) [0x7bd853fa77a5]
+ --- tt::tt_metal::WatcherDeviceReader::Core::DumpAssertStatus() const
+ --- tt::tt_metal::WatcherDeviceReader::Core::Dump() const
+ --- tt::tt_metal::WatcherDeviceReader::Dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::dump(_IO_FILE*)
+ --- tt::tt_metal::WatcherServer::Impl::poll_watcher_data()
+ --- /lib/x86_64-linux-gnu/libstdc++.so.6(+0xf5c79) [0x7bd897af5c79]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x9cb84) [0x7bd89aa9cb84]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x129ecc) [0x7bd89ab29ecc]
+
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 01:10:03 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T13:10:48Z head=cdab692b0ec8adfc1b9e74f24692f684319d142d snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 b0fb56a03e7a8daadb0abf3f85e60020  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 73dd4fd3918beea0fcf9f5b7855f9b82  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== PROVENANCE start 2026-10-18T21:19:13Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 09:19:58 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_WATCHER_DISABLE_ETH=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_b1 timeout -k 60 3600 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s67r_final
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 21:20:00.013 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1] 2026-10-18 21:20:00.191 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 21:20:00.191 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 21:20:00.191 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 21:20:00.191 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 21:20:00.198 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 21:20:00.198 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 21:20:00.277 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 21:20:00.277 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 21:20:00.277 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 21:20:00.277 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 21:20:00.278 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 21:20:00.447 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 21:20:00.581 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 21:20:00.582 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 21:20:00.582 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 21:20:00.582 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 21:20:00.582 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 21:20:00.663 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_b1/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 21:20:00.663 | info     |       LLRuntime | Watcher server initialized, disabled features: ETH (watcher_server.cpp:568)
+2026-10-18 21:20:00.663 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:00.669 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 21:20:00.671 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:00.680 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:00.687 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:00.709 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 21:20:00.709 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 21:20:10.797 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:10.806 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:10.817 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:10.826 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:20.846 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:20.853 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:20.860 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:20.867 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:30.293 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 21:20:30.883 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:30.890 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:30.897 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:30.904 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:40.916 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:40.923 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:40.930 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:40.937 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:50.951 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:50.964 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:50.977 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:20:50.989 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:01.007 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:01.024 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:01.038 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:01.053 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:11.080 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:11.088 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:11.094 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:11.101 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:15.261 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 21:21:21.116 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:21.123 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:21.130 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:21:21.137 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+b1: slot 0 syn:80 prefill 6001
+b1 ('attn prefill', 0): PCC sharded vs replicated 0.999951 rms ratio 1.00138
+b1 ('attn decode', 0, 0): PCC sharded vs replicated 0.999927 rms ratio 1.00195
+b1 ('attn decode', 0, 1): PCC sharded vs replicated 0.999927 rms ratio 1.00248
+b1 ('attn decode', 0, 2): PCC sharded vs replicated 0.999924 rms ratio 1.00136
+b1 ('prefill', 0): PCC sharded vs replicated 0.998538 rms ratio 0.99957
+b1 ('decode', 0, 0): PCC sharded vs replicated 0.999928 rms ratio 0.99943
+b1 ('decode', 0, 1): PCC sharded vs replicated 0.983629 rms ratio 0.99560
+b1 ('decode', 0, 2): PCC sharded vs replicated 0.999915 rms ratio 0.99891
+b1: attention output worst PCC 0.999924, worst |rms ratio - 1| 0.00248
+b1: layer updates outside the bars with a matching attention output (MoE near-tie): [(('prefill', 0), 0.9985379038747886, 0.9995728731155396), (('decode', 0, 1), 0.983628578286602, 0.9956039786338806)]
+b1 ('prefill', 0, 6001): replicated 5.212 sharded 2.659
+b1 decode_replay_us: replicated 1.543e+04 sharded 1.88e+04
+b1 latent_bytes_per_die: replicated 8.52e+06 sharded 2.507e+06
+PASSED
+
+========================= 1 passed in 85.80s (0:01:25) =========================
+2026-10-18 21:21:25.407 | info     |    BuildKernels | JIT cache stats: 1093/1245 hits (87.8%) [1093 cached, 824 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 21:21:25.407 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 21:21:25.417 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 21:21:25.494 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 21:21:25.494 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 21:21:26.080 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 21:21:26.080 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 21:21:26.080 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 0 Sun Oct 18 09:21:26 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T21:22:11Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py

@@ -10,8 +10,12 @@ position tensor `pos` [1,1,S,1] fp32 (-1 = inactive slot) and the device copy of
 every active slot one position forward after the step. The host writes `pos` and the page table only when slots
 start, stop or get new blocks (outside the trace).
 
-The fields match tt/dsa.GlmDSA._decode_host_inputs exactly (tests/test_decode_inputs.py compares them):
+The fields match tt/dsa.GlmDSA._decode_host_inputs exactly (tests/test_model_probe.py::test_decode_inputs_match_host
+compares them; the block-sharded layout's per-die row_idx against ShardedDSAMixin._decode_local_rows on every die):
   row_idx    physical latent row page_table[s, p // 128] * 128 + p % 128 (uint32 [1,S]; 0xFFFFFFFF = inactive)
+A slot whose position reaches max_context (T) is treated as inactive (decode-overrun guard: column T/128 of the page
+table is the shared dummy block and later columns resolve to block 0, another slot's cache; the generator refuses such
+positions on the host, and a device-advanced position past T never writes a cache row).
   pool_pos   p // 4 (int32 [S]; -1 = inactive)
   active, reset (p % 4 == 0), ape_sel (ape[p % 4]), pos, limit ((p + 1) // 4, 0 inactive) + its uint32 copy,
   dense (p <= DENSE_MAX_POSITION), dense_idx (col if col <= p else sentinel).
@@ -19,6 +23,8 @@ Positions and block ids stay below 2**24, so fp32 holds them exactly.
 """
 
 from __future__ import annotations
+
+import os
 
 import torch
 
@@ -78,33 +84,38 @@ class DeviceDecodeInputs:
 
     # ------------------------------------------------------------------ device side (inside the decode trace)
     def _into(self, src, key, dtype, layout, shape=None):
+        """src -> the fixed buffer dsa_bufs[key] (dtype / layout / shape converted). Only the typecast / to_layout
+        outputs are freed here: a reshape is a VIEW of its input, and ttnn.deallocate (force=True) of a view frees the
+        storage of `src`, which the caller still owns (and frees itself)."""
         dst = self.dsa_bufs[key]
+        owned = []
         t = src
         if shape is not None:
             t = ttnn.reshape(t, shape)
         if t.dtype != dtype:
-            t2 = ttnn.typecast(t, dtype)
-            if t is not src:
-                ttnn.deallocate(t)
-            t = t2
+            t = ttnn.typecast(t, dtype)
+            owned.append(t)
         if t.layout != layout:
-            t2 = ttnn.to_layout(t, layout)
-            if t is not src:
-                ttnn.deallocate(t)
-            t = t2
+            t = ttnn.to_layout(t, layout)
+            owned.append(t)
         if tuple(t.shape) != tuple(dst.shape):
-            t2 = ttnn.reshape(t, tuple(dst.shape))
-            t = t2
+            t = ttnn.reshape(t, tuple(dst.shape))
         ttnn.copy(t, dst)
-        if t is not src:
-            ttnn.deallocate(t)
+        del t  # drop a reshape view of an owned tensor before freeing it (its storage is the owned tensor's)
+        for o in owned:
+            ttnn.deallocate(o)
 
     def refresh(self):
         """Recompute the DSA per-step inputs from `pos` and the page table (in place)."""
         if self.dsa is None:
             return
         S = self.S
-        act = ttnn.ge(self.pos, 0.0, memory_config=DRAM)  # 1.0 / 0.0
+        if os.environ.get("GLM53_DECODE_GUARD", "1") == "1":
+            act = ttnn.multiply(
+                ttnn.ge(self.pos, 0.0, memory_config=DRAM), ttnn.lt(self.pos, float(self.dsa.T)), memory_config=DRAM
+            )  # 1.0 / 0.0: 0 <= pos < max_context
+        else:
+            act = ttnn.ge(self.pos, 0.0, memory_config=DRAM)
         p = ttnn.relu(self.pos, memory_config=DRAM)
         pool = ttnn.floor(ttnn.multiply(p, 1.0 / KPOOL, memory_config=DRAM), memory_config=DRAM)  # p // 4
         j = ttnn.subtract(p, ttnn.multiply(pool, float(KPOOL)), memory_config=DRAM)  # p % 4

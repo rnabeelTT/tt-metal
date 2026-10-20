@@ -1,0 +1,194 @@
+# tt-model container (v5.1) manifest for GLM-5.3-Flash (E192 expert subset) on Blackhole: 4 dies (p300x2 / p150x4).
+# Authoring interface of `tt-model package --container models/autoports/zai_org_glm_5_3_flash/tt-model.yaml`.
+#
+# The profile numbers (max_num_seqs, max_model_len, trace region, weights revision) come from serving_profiles.json.
+# Do not edit lines marked "# @profiles:<key>" or the generated block by hand; run
+#   python -m models.autoports.zai_org_glm_5_3_flash.tools.serving_profiles render-yaml -w
+# and check with `... serving_profiles check` (also a host test). Release steps: doc/tti_release/RELEASE_CHECKLIST.md.
+schema: "5.1"
+
+repo: raahemnabeel/glm-5.3-flash-e192-blackhole
+name: glm-5.3-flash-e192-blackhole
+# Decision 2026-10-17: the weights are the parent FP8 snapshot (the 212 GB E192 build is not re-hosted). The adapter
+# overlays tt/e192_mask.json on the snapshot (generator_vllm.resolve_checkpoint); CheckpointReader reads the 192 kept
+# experts of every MoE layer through the mask. Revision = the parent commit every stage ran against.
+weights: {repo: zai-org/GLM-5.3-Flash, revision: 91b69215804f2d2036a8867f6ce44848e278dcda}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/tt-metal   # hermetic: packages the working tree, incl. the new kda / dsa / mhc C++ ops
+  code:  # the autoport's import closure; runtime files only (not the per-stage doc/ evidence, not tests/)
+    - models/autoports/zai_org_glm_5_3_flash/__init__.py
+    - models/autoports/zai_org_glm_5_3_flash/tt
+    - models/autoports/zai_org_glm_5_3_flash/vllm_metadata.json
+    - models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+    - models/autoports/zai_org_glm_5_3_flash/serving_profiles.json                             # read by generator_vllm
+    - models/autoports/zai_org_glm_5_3_flash/doc/context_contract.json                         # read by generator_vllm
+    - models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json # combo_a_kv policy
+    - models/autoports/zai_org_glm_5_3_flash/tools/__init__.py
+    - models/autoports/zai_org_glm_5_3_flash/tools/serving_profiles.py
+    - models/autoports/zai_org_glm_4_5_air/__init__.py   # tt/moe_opt.py imports sparse_matmul_program_config
+    - models/autoports/zai_org_glm_4_5_air/tt/__init__.py
+    - models/autoports/zai_org_glm_4_5_air/tt/moe.py
+    - models/demos/deepseek_v3_d_p   # KDA (tt/kda, reference/kda) and mHC (tt/mhc)
+    - models/demos/blackhole/qwen36/tt/tp_common.py
+    - models/demos/blackhole/qwen36/tt/__init__.py
+    - models/demos/blackhole/qwen36/__init__.py   # namespace packages above (no __init__.py in models/demos, models/autoports)
+    - models/tt_transformers
+    - models/common
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin}
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json (TTGlm5NextForConditionalGeneration)
+  extra_models_dir: models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+  # glm5_next needs transformers >= 5.16 (the tt-metal python_env has 5.12.1: "Transformers does not recognize this
+  # architecture"); 5.19.0 parses the config and passes vLLM's ModelConfig (host check, doc/vllm/DESIGN.md 2)
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.19.0", "tokenizers==0.23.3", "huggingface_hub==2.2.0"]
+
+serve:
+  port: 8000
+  block_size: 128          # DSA page block: 32 pool keys = one tile row (tt/dsa.py BLOCK); any other value is refused
+  max_num_seqs: 16         # @profiles:default.max_num_seqs
+  max_model_len: 229376    # @profiles:default.max_model_len
+  capabilities:
+    tool_parser: glm47       # <tool_call>name<arg_key>..</arg_key><arg_value>..</arg_value></tool_call> (chat_template.jinja)
+    reasoning_parser: glm45  # always-thinking template: <|assistant|><think>
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 67108864   # @profiles:trace_region_bytes
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: zai-org/GLM-5.3-Flash
+    GLM53_WEIGHTS_REVISION: 91b69215804f2d2036a8867f6ce44848e278dcda
+    # converted-weight cache on tt-model's persistent /weight-cache mount: the first boot converts the FP8 parent
+    # (~25 min, ~124 GB written); every later boot loads the cache (~110 s)
+    GLM53_CACHE_DIR: /weight-cache/glm53_flash
+    # parent snapshot + tt/e192_mask.json overlay (symlinks + the mask; a few KB)
+    GLM53_CKPT_OVERLAY_DIR: /weight-cache/glm53_ckpt_overlay
+    GLM53_TRACE_REGION: "67108864"   # @profiles:trace_region_env
+    GLM53_PROGRAM_GUARD: "1"
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"   # cold first boot: weight conversion + kernel compile + warm-up
+  # the architecture is unknown to vLLM 0.26: name the TT class directly (doc/vllm/DESIGN.md 3.1); --revision keeps
+  # vLLM's config / tokenizer on the pinned snapshot
+  args: ["--hf-overrides", '{"architectures": ["TTGlm5NextForConditionalGeneration"]}', "--revision", "91b69215804f2d2036a8867f6ce44848e278dcda"]  # --enable-auto-tool-choice comes from capabilities.tool_parser
+
+# BEGIN generated from serving_profiles.json
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, tensor parallel 4), 16 sequences sharing one DSA pool. 16 x 229376 tokens (ESTIMATE, pending the G9 capacity probe).
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p300x2-long
+    description: Two p300 boards, one sequence, the largest context the device DRAM allows. 1 x 309248 tokens (ESTIMATE, pending the G9 capacity probe).
+    hardware: p300x2
+    mesh_device: P300x2
+    max_num_seqs: 1
+    max_model_len: 309248
+  - name: p300x2-wide
+    description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 137216 tokens (ESTIMATE, pending the G9 capacity probe).
+    hardware: p300x2
+    mesh_device: P300x2
+    max_num_seqs: 32
+    max_model_len: 137216
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 hardware (the identical (1, 4) mesh). 16 x 229376 tokens (ESTIMATE, pending the G9 capacity probe).
+    hardware: p150x4
+    mesh_device: P150x4
+    max_num_seqs: 16
+    max_model_len: 229376
+default_profile: p300x2
+# END generated from serving_profiles.json
+
+verify:
+  - "import models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm as g; assert g.Glm5NextForConditionalGeneration.decode_input_update_contract == 1"
+  - "from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles as sp; d = sp.load(); assert not sp.validate(d), sp.validate(d)"
+  - "import json; from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles as sp; d = sp.load(); assert json.load(open(sp.MODEL_DIR / d['precision']['config']))['id'] == d['precision']['id']"
+  - "import json; from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles as sp; m = json.load(open(sp.MODEL_DIR / 'tt' / 'e192_mask.json'))['mask']; assert len(m) and all(len(v) == 192 for v in m.values())"
+  - "import transformers; assert 'glm5_next' in transformers.models.auto.configuration_auto.CONFIG_MAPPING_NAMES"
+
+card:
+  description: >
+    GLM-5.3-Flash with the E192 expert subset (192 of the 288 routed experts of every MoE layer kept; NAS mask of
+    autotrust/GLM5.3-Flash-E192-DGX-Spark applied to the zai-org FP8 parent) served on Blackhole through vLLM and the
+    Tenstorrent plugin on four dies (tensor parallel 4): 34 Kimi delta attention layers with per-sequence recurrent
+    state, 11 DeepSeek sparse attention layers (MLA latent cache in fp8 + lightning indexer, 128-token pages),
+    manifold hyper-connections, bfp4 routed experts, on-device sampling, tool calling and reasoning.
+  quickstart: |
+    ### What this is
+    `zai-org/GLM-5.3-Flash` with an **expert-pruned** MoE (E192: 192 of 288 routed experts per MoE layer; the router
+    rows of the kept experts are the parent's own rows), served through the Blackhole autoport
+    `models/autoports/zai_org_glm_5_3_flash`. Text only. This is NOT the full 288-expert model: the full model does not
+    fit in the DRAM of four Blackhole dies at bfp4 (171 GB of experts alone). The weights are the parent's pinned FP8
+    snapshot; the bundle ships the expert mask and applies it at load.
+
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `zai-org/GLM-5.3-Flash`. Thinking is always on (the chat template opens `<think>`): the reasoning is in the
+    message's `reasoning` field, the answer in `content`. Set `"chat_template_kwargs": {"reasoning_effort": "low"}` for
+    short reasoning, and give requests a large `max_tokens`. Tool calls use the `glm47` parser.
+
+    ### First start, disk and time
+    - Disk on the host: the parent FP8 snapshot (about 330 GB in your HF cache, all 288 experts) plus the converted
+      weight cache (about 124 GB under `~/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights`). Plan for 460 GB free.
+    - The first start converts the weights (about 25 minutes) and compiles the kernels; later starts load the cache
+      (about 2 minutes) and warm up.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole --profile <name>`. The context is limited by device
+    DRAM: the weights fill about 28.9 of the 31.8 GiB of each die; the 11 DSA layers need 6,336 B per token per die
+    (replicated on every die) and every decode slot holds 34 MiB of KDA state per die.
+    <!-- BEGIN profiles: serving_profiles.json -->
+    - `p300x2` (default): 16 sequences, 229,376-token context, DSA pool 232,576 tokens shared by all sequences [estimate, pending measurement].
+    - `p300x2-long`: 1 sequence, 309,248-token context, DSA pool 311,296 tokens shared by all sequences [estimate, pending measurement].
+    - `p300x2-wide`: 32 sequences, 137,216-token context, DSA pool 142,464 tokens shared by all sequences [estimate, pending measurement].
+    - `p150x4`: 16 sequences, 229,376-token context, DSA pool 232,576 tokens shared by all sequences [estimate, pending measurement].
+    <!-- END profiles: serving_profiles.json -->
+    The advertised context of the checkpoint is 1,048,576 tokens; no profile reaches it on four dies.
+
+    ### Precision
+    Selected by a datatype sweep of the full model (policy `combo_a_kv`):
+    - routed experts: bfp4 (LoFi), all MoE layers;
+    - KDA input / output projections, DSA projections, shared expert: bfp4 (LoFi) on layers 1-43, bfp8 on the first
+      and last layer; dense MLP (layers 0-2): bfp8;
+    - LM head: bfp4 (LoFi); router: bf16 (HiFi4); DSA W_UK / W_UV: bfp8; indexer: bf16;
+    - DSA latent cache: fp8 e4m3; indexer keys: bf16; KDA recurrent state: fp32; residual and collectives: bf16.
+
+    ### Accuracy
+    Teacher forcing of the full TT model against a CPU reference of the same E192 model (bf16 dequantization of the
+    FP8 checkpoint), 100 greedy tokens of three AIME24 chat prompts (top-1 / top-5 / top-100 agreement):
+
+    | prompt | teacher forcing | prefill check |
+    | --- | --- | --- |
+    | AIME24 #0 | 0.91 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
+    | AIME24 #1 | 0.96 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
+    | AIME24 #2 | 0.91 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
+
+    TODO(stage 8): long-context TT-vs-TT gate. TODO(stage 9): vLLM sampling-parameter conformance (vllm-tt-plugin
+    suite). TODO(stage 11): TTI release evals (meta_ifeval, meta_gpqa_cot, ...). The accuracy of E192 against the full
+    288-expert GLM-5.3-Flash was not measured here.
+
+    ### Performance
+    TODO(stages 9-10): served numbers (vLLM 0.26, this bundle). Measured so far outside vLLM, one slot: 53.2 ms per
+    decode token (18.8 tokens/s, model + sampler trace replays with device token feedback); time to first token
+    0.23 s / 0.37 s / 1.03 s at 128 / 161 / 2048 prompt tokens (warm).
+
+    ### Limitations
+    - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
+    - Context is DRAM-limited (see Profiles); the advertised 1,048,576 tokens do not fit on four dies.
+    - One decode trace width for all slots: a profile with more sequences decodes slower per user, also with one
+      active request.
+    - The device sampler supports `top_k` up to 32; requests with logprobs, `min_p`, `logit_bias` or structured output
+      sample on the host (slower).
+    - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
+    - No multi-token prediction (the MTP layer is not served).
+    - The p150x4 profile runs the same (1, 4) mesh as p300x2 but was not run on p150 boards.

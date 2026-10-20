@@ -33,6 +33,13 @@ Decode / prefill attention per DSA layer (rows = query rows):
   3. reduce-scatter (sum, fp32) of T and of M over the head groups -> the die's 16 heads: o_lat = sum T / sum M.
 That is the flash-decode LSE merge without an LSE output from the kernel. Prefill rows run in blocks of
 GLM53_DSA_SHARD_ROWS (default 256) to bound the gathered q / partial buffers.
+
+Validity condition (sink underflow): sparse_sdpa's exp has no input clamp and flushes exp(x) to 0 below x ~ -88.7, so
+the merge is exact only while, on every die, the query's own-key logit sigma is within ~88 nats of that die's largest
+attended scaled logit (sigma - max > -88.7). Since w = exp(sigma - max) / D with D >= 1, -ln(w) >= max - sigma: the
+measured min w of a run bounds the headroom from below, headroom >= 88.7 + ln(min w). `stats_on` (set by
+tools/memory_probe.py / tools/s67r_checks.py around EAGER passes only; it reads w to the host) records per layer
+min w and the count of w == 0 (underflow) in `wstats`.
 """
 
 from __future__ import annotations
@@ -72,6 +79,8 @@ class ShardedDSAMixin:
         self.shard_rs_dtype = ttnn.bfloat16 if os.environ.get("GLM53_DSA_SHARD_RS", "fp32") == "bf16" else ttnn.float32
         self.lpt = None
         self._dies_map = ttnn.ShardTensorToMesh(self.mesh, dim=0)
+        self.stats_on = False  # eager-only sink-weight statistics (module docstring)
+        self.wstats = {"min_w": float("inf"), "zeros": 0, "count": 0, "calls": 0}
 
     # ------------------------------------------------------------------------------------------- helpers
     def _dies(self, t, dtype, layout, host=False):
@@ -312,6 +321,8 @@ class ShardedDSAMixin:
         ttnn.deallocate(o)
         u = ttnn.typecast(ttnn.slice(ot, (0, 0, 0, C_ONE), (1, tp, n, C_ONE + 1), memory_config=DRAM), ttnn.float32)
         w0 = ttnn.typecast(ttnn.slice(ot, (0, 0, 0, C_SINK), (1, tp, n, C_SINK + 1), memory_config=DRAM), ttnn.float32)
+        if self.stats_on:  # eager passes only: a host read
+            self._record_w(w0)
         w = ttnn.maximum(w0, TINY)
         small = ttnn.lt(w, 0.5, memory_config=DRAM)
         one_m_w = ttnn.rsub(w, 1.0, memory_config=DRAM)
@@ -335,6 +346,14 @@ class ShardedDSAMixin:
         for t in (num, z):
             ttnn.deallocate(t)
         return ttnn.reshape(o_lat, (1, H, rows, R))
+
+    def _record_w(self, w0):
+        ws = torch.cat([ttnn.to_torch(t).float().reshape(-1) for t in ttnn.get_device_tensors(w0)])
+        st = self.wstats
+        st["min_w"] = min(st["min_w"], float(ws.min()))
+        st["zeros"] += int((ws == 0).sum())
+        st["count"] += int(ws.numel())
+        st["calls"] += 1
 
     def _reduce_scatter_heads(self, t):
         ccl = self.sccl

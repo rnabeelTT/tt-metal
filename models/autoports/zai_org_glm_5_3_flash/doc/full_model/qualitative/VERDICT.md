@@ -41,6 +41,27 @@ matches the teacher-forcing top-1 of 93 % and top-5 of 100 %.
 No wrong language, prompt echo, doubled subwords, control-token leakage or gibberish appears in any TT output. The final
 answers end with `<|user|>` (154827), which is one of the generation_config eos ids.
 
+## Anomalies past the 128-token HF window (stage-6 review #1 P2-2, rework 2026-10-18)
+
+The HF control stops at 128 tokens, so two TT oddities had no control. `tools/hf_full_ref.py --mode score-trajectory`
+(CPU, unmodified HF `Glm5NextTextModel` on the same E192 checkpoint) teacher-forces HF over the TT token ids and ranks
+each emitted token (`hf_scores_tt_q1.json`, `hf_scores_tt_q5.json`; logs `~/glm53-flash-bringup/logs/s67r/hfscore_s6_q{1,5}.log`):
+
+| Prompt | Tokens scored | HF top-1 agreement | HF top-5 agreement | Window |
+|---|---|---|---|---|
+| q1 haiku | 1170 | 94.5 % | **100 %** | the "Wisdom" spiral, tokens 456-705: top-1 94 %, top-5 100 %; the 15 non-top-1 picks are rank 1-2 near-ties (HF top-1 margin 0.125-0.625 logits, two at 1.5 and 2.1) |
+| q5 French | 257 | 98.0 % | **100 %** | "I shouldn over-explain" (token 187): `' shouldn'` is a single tokenizer token and HF's own top-1 there (28.9 vs 22.3 for `' don'`); the next token `' over'` is HF top-1 too (28.3 vs 25.5) |
+
+- q1 spiral ("\"Wisdom\" isn't a word ... W-I-S-D-O-M is \"wisdom\" which is not a word"): every token of the window
+  is in HF's top-5 and 94 % are HF's top-1. Given the same context, the HF model writes the same spiral. It is a
+  model behaviour of the E192 checkpoint under "Reasoning Effort: Max" (a self-doubt loop over a word it has just
+  written), not a TT logit or vocab-slice defect. The stage-7 rerun of q1 takes another path at a near-tie and ends on
+  EOS with a correct haiku.
+- q5 "shouldn over-explain": the missing `'t` is HF's choice too (`' shouldn'` then `' over'`, both HF top-1 with
+  margins of 6.6 and 2.8 logits). Model behaviour, not a dropped token.
+
+Both are classified **controlled (model behaviour)**.
+
 **Verdict: pass.** TT chat-format output is coherent and correct, and matches the HF control in content. The one quality
 defect (q5 untranslated) reproduces in HF. q3 and q6 hit the 2048-token budget while still in "Reasoning Effort: Max"
 thinking. That is a property of the effort setting, not repetition. The vLLM stage's 256-token qualitative budget will

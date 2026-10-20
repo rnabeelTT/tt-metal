@@ -1,0 +1,735 @@
+=== PROVENANCE start 2026-10-18T13:10:48Z head=cdab692b0ec8adfc1b9e74f24692f684319d142d snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 b0fb56a03e7a8daadb0abf3f85e60020  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 73dd4fd3918beea0fcf9f5b7855f9b82  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 02:35:31 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_batch32_dsa_moe env GLM53_DSA_SHARD=1 timeout -k 60 3600 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s67r_snap
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 14:35:32.709 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] 2026-10-18 14:35:33.478 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 14:35:33.478 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 14:35:33.478 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 14:35:33.478 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 14:35:33.484 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 14:35:33.485 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 14:35:33.563 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 14:35:33.563 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 14:35:33.563 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 14:35:33.563 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 14:35:33.565 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 14:35:33.767 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 14:35:33.905 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 14:35:33.905 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 14:35:33.905 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 14:35:33.905 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 14:35:33.905 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 14:35:33.998 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_batch32_dsa_moe/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 14:35:33.998 | info     |       LLRuntime | Watcher server initialized, disabled features: None (watcher_server.cpp:568)
+2026-10-18 14:35:33.998 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:34.005 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 14:35:34.006 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:34.016 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:34.023 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:34.064 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 14:35:34.065 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 14:35:44.170 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:44.177 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:44.184 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:44.192 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:54.206 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:54.222 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:54.249 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:35:54.263 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:03.617 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 14:36:04.286 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:04.293 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:04.300 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:04.307 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:14.319 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:14.326 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:14.333 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:14.340 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:24.353 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:24.360 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:24.367 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 14:36:24.381 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+L3 32-slot decode slot 0 pos 37: delta PCC 0.999921 full PCC 0.999967 update rms ratio 0.9973 (HF router margin 2.7e-03)
+L3 32-slot decode slot 0 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996971 update rms ratio 0.9961
+L3 32-slot decode slot 1 pos 37: delta PCC 0.999827 full PCC 0.999948 update rms ratio 0.9931 (HF router margin 2.0e-05)
+L3 32-slot decode slot 1 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993841 update rms ratio 0.9927
+L3 32-slot decode slot 2 pos 37: delta PCC 0.999971 full PCC 0.999977 update rms ratio 0.9950 (HF router margin 1.8e-03)
+L3 32-slot decode slot 2 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.994657 update rms ratio 1.0070
+L3 32-slot decode slot 3 pos 37: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9933 (HF router margin 1.6e-03)
+L3 32-slot decode slot 3 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996344 update rms ratio 0.9998
+L3 32-slot decode slot 4 pos 37: delta PCC 0.999913 full PCC 0.999955 update rms ratio 0.9996 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993013 update rms ratio 1.0013
+L3 32-slot decode slot 5 pos 37: delta PCC 0.999949 full PCC 0.999971 update rms ratio 0.9994 (HF router margin 3.1e-03)
+L3 32-slot decode slot 5 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992963 update rms ratio 1.0233
+L3 32-slot decode slot 6 pos 37: delta PCC 0.999944 full PCC 0.999962 update rms ratio 0.9978 (HF router margin 6.2e-03)
+L3 32-slot decode slot 6 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993271 update rms ratio 1.0256
+L3 32-slot decode slot 7 pos 37: delta PCC 0.999914 full PCC 0.999961 update rms ratio 0.9940 (HF router margin 2.0e-02)
+L3 32-slot decode slot 7 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992665 update rms ratio 1.0075
+L3 32-slot decode slot 8 pos 300: delta PCC 0.999948 full PCC 0.999977 update rms ratio 1.0015 (HF router margin 3.1e-04)
+L3 32-slot decode slot 8 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995930 update rms ratio 0.9994
+L3 32-slot decode slot 9 pos 300: delta PCC 0.999952 full PCC 0.999973 update rms ratio 0.9930 (HF router margin 8.2e-04)
+L3 32-slot decode slot 9 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.993664 update rms ratio 0.9989
+L3 32-slot decode slot 10 pos 300: delta PCC 0.999946 full PCC 0.999979 update rms ratio 0.9949 (HF router margin 1.5e-02)
+L3 32-slot decode slot 10 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995844 update rms ratio 1.0035
+L3 32-slot decode slot 11 pos 300: delta PCC 0.999950 full PCC 0.999975 update rms ratio 0.9986 (HF router margin 4.7e-03)
+L3 32-slot decode slot 11 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994797 update rms ratio 0.9968
+L3 32-slot decode slot 12 pos 300: delta PCC 0.999960 full PCC 0.999983 update rms ratio 1.0034 (HF router margin 2.0e-02)
+L3 32-slot decode slot 12 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.997006 update rms ratio 1.0147
+L3 32-slot decode slot 13 pos 300: delta PCC 0.999929 full PCC 0.999985 update rms ratio 0.9957 (HF router margin 7.1e-03)
+L3 32-slot decode slot 13 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.996986 update rms ratio 1.0030
+L3 32-slot decode slot 14 pos 300: delta PCC 0.999176 full PCC 0.999675 update rms ratio 0.9951 (HF router margin 7.5e-04)
+L3 32-slot decode slot 14 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994516 update rms ratio 0.9882
+L3 32-slot decode slot 15 pos 300: delta PCC 0.999940 full PCC 0.999962 update rms ratio 0.9928 (HF router margin 9.0e-03)
+L3 32-slot decode slot 15 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.992434 update rms ratio 0.9917
+L3 32-slot decode slot 16 pos 2100: delta PCC 0.999946 full PCC 0.999971 update rms ratio 0.9906 (HF router margin 1.6e-03)
+L3 32-slot decode slot 16 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994204 update rms ratio 0.9989
+L3 32-slot decode slot 17 pos 2100: delta PCC 0.999910 full PCC 0.999971 update rms ratio 0.9927 (HF router margin 1.1e-03)
+L3 32-slot decode slot 17 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.992551 update rms ratio 1.0252
+L3 32-slot decode slot 18 pos 2100: delta PCC 0.999946 full PCC 0.999962 update rms ratio 0.9847 (HF router margin 8.6e-03)
+L3 32-slot decode slot 18 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995890 update rms ratio 1.0061
+L3 32-slot decode slot 19 pos 2100: delta PCC 0.999948 full PCC 0.999975 update rms ratio 0.9944 (HF router margin 1.0e-02)
+L3 32-slot decode slot 19 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.996210 update rms ratio 1.0012
+L3 32-slot decode slot 20 pos 2100: delta PCC 0.999945 full PCC 0.999972 update rms ratio 0.9869 (HF router margin 1.2e-03)
+L3 32-slot decode slot 20 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994480 update rms ratio 1.0108
+L3 32-slot decode slot 21 pos 2100: delta PCC 0.999946 full PCC 0.999980 update rms ratio 1.0001 (HF router margin 3.1e-03)
+L3 32-slot decode slot 21 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.993994 update rms ratio 1.0080
+L3 32-slot decode slot 22 pos 2100: delta PCC 0.999873 full PCC 0.999956 update rms ratio 0.9945 (HF router margin 4.4e-04)
+L3 32-slot decode slot 22 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995123 update rms ratio 1.0015
+L3 32-slot decode slot 23 pos 2100: delta PCC 0.999932 full PCC 0.999964 update rms ratio 0.9919 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.990625 update rms ratio 1.0077
+L3 32-slot decode slot 24 pos 2300: delta PCC 0.999958 full PCC 0.999982 update rms ratio 0.9964 (HF router margin 1.4e-02)
+L3 32-slot decode slot 24 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995769 update rms ratio 0.9981
+L3 32-slot decode slot 25 pos 2300: delta PCC 0.999906 full PCC 0.999987 update rms ratio 0.9913 (HF router margin 2.0e-03)
+L3 32-slot decode slot 25 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996100 update rms ratio 0.9971
+L3 32-slot decode slot 26 pos 2300: delta PCC 0.999900 full PCC 0.999982 update rms ratio 0.9987 (HF router margin 8.6e-03)
+L3 32-slot decode slot 26 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995380 update rms ratio 1.0038
+L3 32-slot decode slot 27 pos 2300: delta PCC 0.999948 full PCC 0.999971 update rms ratio 0.9956 (HF router margin 2.6e-03)
+L3 32-slot decode slot 27 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.993735 update rms ratio 1.0102
+L3 32-slot decode slot 28 pos 2300: delta PCC 0.999965 full PCC 0.999981 update rms ratio 0.9952 (HF router margin 2.9e-03)
+L3 32-slot decode slot 28 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995818 update rms ratio 0.9791
+L3 32-slot decode slot 29 pos 2300: delta PCC 0.995632 full PCC 0.998738 update rms ratio 0.9765 (HF router margin 3.0e-05)
+L3 32-slot decode slot 29 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.990760 update rms ratio 0.9769
+L3 32-slot decode slot 30 pos 2300: delta PCC 0.999961 full PCC 0.999980 update rms ratio 0.9966 (HF router margin 4.4e-03)
+L3 32-slot decode slot 30 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996517 update rms ratio 0.9995
+L3 32-slot decode slot 31 pos 2300: delta PCC 0.999949 full PCC 0.999971 update rms ratio 0.9892 (HF router margin 2.9e-03)
+L3 32-slot decode slot 31 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995720 update rms ratio 1.0194
+L3 32-slot decode slot 0 pos 38: delta PCC 0.999943 full PCC 0.999974 update rms ratio 0.9920 (HF router margin 3.7e-03)
+L3 32-slot decode slot 0 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996264 update rms ratio 1.0065
+L3 32-slot decode slot 1 pos 38: delta PCC 0.999942 full PCC 0.999969 update rms ratio 0.9951 (HF router margin 4.2e-03)
+L3 32-slot decode slot 1 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996437 update rms ratio 1.0084
+L3 32-slot decode slot 2 pos 38: delta PCC 0.982133 full PCC 0.997353 update rms ratio 0.9864 (HF router margin 8.0e-04)
+L3 32-slot decode slot 2 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.977863 update rms ratio 0.9910
+L3 32-slot decode slot 2 pos 38: vs y_swap (8th expert -> 9th): delta PCC 0.999889 full PCC 0.999985 update rms ratio 0.9936
+L3 32-slot decode slot 2 pos 38: matched y_swap (router near-tie)
+L3 32-slot decode slot 3 pos 38: delta PCC 0.999877 full PCC 0.999945 update rms ratio 0.9981 (HF router margin 1.9e-03)
+L3 32-slot decode slot 3 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.991238 update rms ratio 1.0011
+L3 32-slot decode slot 4 pos 38: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9939 (HF router margin 6.4e-03)
+L3 32-slot decode slot 4 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.994881 update rms ratio 1.0036
+L3 32-slot decode slot 5 pos 38: delta PCC 0.999929 full PCC 0.999965 update rms ratio 0.9993 (HF router margin 1.0e-02)
+L3 32-slot decode slot 5 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.993713 update rms ratio 0.9988
+L3 32-slot decode slot 6 pos 38: delta PCC 0.999917 full PCC 0.999953 update rms ratio 0.9990 (HF router margin 9.5e-03)
+L3 32-slot decode slot 6 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.992358 update rms ratio 1.0086
+L3 32-slot decode slot 7 pos 38: delta PCC 0.999932 full PCC 0.999979 update rms ratio 0.9944 (HF router margin 1.9e-02)
+L3 32-slot decode slot 7 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.998742 update rms ratio 0.9974
+L3 32-slot decode slot 8 pos 301: delta PCC 0.999947 full PCC 0.999967 update rms ratio 0.9956 (HF router margin 6.2e-03)
+L3 32-slot decode slot 8 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.995670 update rms ratio 1.0023
+L3 32-slot decode slot 9 pos 301: delta PCC 0.999955 full PCC 0.999976 update rms ratio 0.9919 (HF router margin 2.0e-03)
+L3 32-slot decode slot 9 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.996351 update rms ratio 0.9981
+L3 32-slot decode slot 10 pos 301: delta PCC 0.999954 full PCC 0.999979 update rms ratio 0.9968 (HF router margin 4.1e-03)
+L3 32-slot decode slot 10 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994457 update rms ratio 0.9951
+L3 32-slot decode slot 11 pos 301: delta PCC 0.999948 full PCC 0.999970 update rms ratio 0.9993 (HF router margin 3.7e-03)
+L3 32-slot decode slot 11 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.993033 update rms ratio 1.0014
+L3 32-slot decode slot 12 pos 301: delta PCC 0.999924 full PCC 0.999980 update rms ratio 0.9965 (HF router margin 9.5e-03)
+L3 32-slot decode slot 12 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.991356 update rms ratio 1.0047
+L3 32-slot decode slot 13 pos 301: delta PCC 0.999941 full PCC 0.999965 update rms ratio 0.9966 (HF router margin 6.1e-03)
+L3 32-slot decode slot 13 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992906 update rms ratio 0.9979
+L3 32-slot decode slot 14 pos 301: delta PCC 0.999959 full PCC 0.999972 update rms ratio 0.9938 (HF router margin 3.6e-03)
+L3 32-slot decode slot 14 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992736 update rms ratio 0.9762
+L3 32-slot decode slot 15 pos 301: delta PCC 0.999943 full PCC 0.999963 update rms ratio 0.9938 (HF router margin 2.4e-03)
+L3 32-slot decode slot 15 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994462 update rms ratio 1.0046
+L3 32-slot decode slot 16 pos 2101: delta PCC 0.999628 full PCC 0.999789 update rms ratio 0.9977 (HF router margin 1.9e-04)
+L3 32-slot decode slot 16 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994806 update rms ratio 1.0020
+L3 32-slot decode slot 17 pos 2101: delta PCC 0.999943 full PCC 0.999961 update rms ratio 0.9866 (HF router margin 4.5e-03)
+L3 32-slot decode slot 17 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994497 update rms ratio 1.0213
+L3 32-slot decode slot 18 pos 2101: delta PCC 0.999943 full PCC 0.999966 update rms ratio 0.9946 (HF router margin 7.7e-03)
+L3 32-slot decode slot 18 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992971 update rms ratio 0.9974
+L3 32-slot decode slot 19 pos 2101: delta PCC 0.999946 full PCC 0.999971 update rms ratio 0.9922 (HF router margin 1.8e-03)
+L3 32-slot decode slot 19 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994925 update rms ratio 0.9984
+L3 32-slot decode slot 20 pos 2101: delta PCC 0.999961 full PCC 0.999982 update rms ratio 0.9953 (HF router margin 6.9e-04)
+L3 32-slot decode slot 20 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.996606 update rms ratio 1.0144
+L3 32-slot decode slot 21 pos 2101: delta PCC 0.999941 full PCC 0.999974 update rms ratio 0.9977 (HF router margin 2.8e-02)
+L3 32-slot decode slot 21 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992981 update rms ratio 1.0129
+L3 32-slot decode slot 22 pos 2101: delta PCC 0.999934 full PCC 0.999971 update rms ratio 0.9987 (HF router margin 7.0e-03)
+L3 32-slot decode slot 22 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992641 update rms ratio 0.9934
+L3 32-slot decode slot 23 pos 2101: delta PCC 0.999927 full PCC 0.999965 update rms ratio 0.9971 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.991047 update rms ratio 1.0166
+L3 32-slot decode slot 24 pos 2301: delta PCC 0.999964 full PCC 0.999977 update rms ratio 0.9934 (HF router margin 5.3e-03)
+L3 32-slot decode slot 24 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995265 update rms ratio 1.0119
+L3 32-slot decode slot 25 pos 2301: delta PCC 0.999960 full PCC 0.999973 update rms ratio 0.9889 (HF router margin 1.3e-03)
+L3 32-slot decode slot 25 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996227 update rms ratio 0.9931
+L3 32-slot decode slot 26 pos 2301: delta PCC 0.999941 full PCC 0.999977 update rms ratio 0.9973 (HF router margin 5.2e-03)
+L3 32-slot decode slot 26 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.994811 update rms ratio 1.0331
+L3 32-slot decode slot 27 pos 2301: delta PCC 0.999963 full PCC 0.999978 update rms ratio 0.9953 (HF router margin 6.2e-03)
+L3 32-slot decode slot 27 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.997028 update rms ratio 1.0074
+L3 32-slot decode slot 28 pos 2301: delta PCC 0.999956 full PCC 0.999977 update rms ratio 0.9964 (HF router margin 3.1e-03)
+L3 32-slot decode slot 28 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995700 update rms ratio 1.0060
+L3 32-slot decode slot 29 pos 2301: delta PCC 0.999926 full PCC 0.999965 update rms ratio 0.9878 (HF router margin 4.7e-03)
+L3 32-slot decode slot 29 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992845 update rms ratio 1.0134
+L3 32-slot decode slot 30 pos 2301: delta PCC 0.999926 full PCC 0.999963 update rms ratio 0.9971 (HF router margin 4.8e-03)
+L3 32-slot decode slot 30 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992177 update rms ratio 1.0135
+L3 32-slot decode slot 31 pos 2301: delta PCC 0.999944 full PCC 0.999982 update rms ratio 0.9975 (HF router margin 5.1e-04)
+L3 32-slot decode slot 31 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996525 update rms ratio 1.0021
+L3 32-slot decode slot 0 pos 39: delta PCC 0.999958 full PCC 0.999967 update rms ratio 0.9901 (HF router margin 2.0e-03)
+L3 32-slot decode slot 0 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994650 update rms ratio 1.0115
+L3 32-slot decode slot 1 pos 39: delta PCC 0.999954 full PCC 0.999968 update rms ratio 1.0000 (HF router margin 7.3e-03)
+L3 32-slot decode slot 1 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993932 update rms ratio 1.0085
+L3 32-slot decode slot 2 pos 39: delta PCC 0.998776 full PCC 0.999369 update rms ratio 1.0355 (HF router margin 1.9e-04)
+L3 32-slot decode slot 2 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993810 update rms ratio 1.0575
+L3 32-slot decode slot 3 pos 39: delta PCC 0.999904 full PCC 0.999975 update rms ratio 0.9989 (HF router margin 1.3e-03)
+L3 32-slot decode slot 3 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.996279 update rms ratio 1.0052
+L3 32-slot decode slot 4 pos 39: delta PCC 0.999868 full PCC 0.999930 update rms ratio 0.9975 (HF router margin 6.9e-03)
+L3 32-slot decode slot 4 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.989409 update rms ratio 1.0039
+L3 32-slot decode slot 5 pos 39: delta PCC 0.999906 full PCC 0.999968 update rms ratio 0.9970 (HF router margin 1.2e-02)
+L3 32-slot decode slot 5 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.988115 update rms ratio 1.0136
+L3 32-slot decode slot 6 pos 39: delta PCC 0.999957 full PCC 0.999973 update rms ratio 0.9935 (HF router margin 5.8e-03)
+L3 32-slot decode slot 6 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994844 update rms ratio 0.9892
+L3 32-slot decode slot 7 pos 39: delta PCC 0.999947 full PCC 0.999969 update rms ratio 0.9990 (HF router margin 1.2e-02)
+L3 32-slot decode slot 7 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.995400 update rms ratio 1.0183
+L3 32-slot decode slot 8 pos 302: delta PCC 0.999950 full PCC 0.999979 update rms ratio 0.9958 (HF router margin 1.3e-03)
+L3 32-slot decode slot 8 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994714 update rms ratio 1.0065
+L3 32-slot decode slot 9 pos 302: delta PCC 0.999965 full PCC 0.999984 update rms ratio 0.9961 (HF router margin 6.5e-03)
+L3 32-slot decode slot 9 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995381 update rms ratio 1.0245
+L3 32-slot decode slot 10 pos 302: delta PCC 0.999959 full PCC 0.999972 update rms ratio 0.9936 (HF router margin 7.7e-05)
+L3 32-slot decode slot 10 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994233 update rms ratio 1.0122
+L3 32-slot decode slot 11 pos 302: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9954 (HF router margin 3.3e-03)
+L3 32-slot decode slot 11 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995775 update rms ratio 0.9951
+L3 32-slot decode slot 12 pos 302: delta PCC 0.999968 full PCC 0.999979 update rms ratio 0.9991 (HF router margin 1.0e-03)
+L3 32-slot decode slot 12 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993843 update rms ratio 1.0221
+L3 32-slot decode slot 13 pos 302: delta PCC 0.999927 full PCC 0.999974 update rms ratio 0.9966 (HF router margin 8.8e-03)
+L3 32-slot decode slot 13 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993950 update rms ratio 0.9993
+L3 32-slot decode slot 14 pos 302: delta PCC 0.999941 full PCC 0.999968 update rms ratio 1.0002 (HF router margin 1.8e-02)
+L3 32-slot decode slot 14 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993796 update rms ratio 0.9967
+L3 32-slot decode slot 15 pos 302: delta PCC 0.999899 full PCC 0.999982 update rms ratio 0.9996 (HF router margin 3.1e-03)
+L3 32-slot decode slot 15 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994319 update rms ratio 1.0046
+L3 32-slot decode slot 16 pos 2102: delta PCC 0.999931 full PCC 0.999974 update rms ratio 0.9939 (HF router margin 9.3e-05)
+L3 32-slot decode slot 16 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.993014 update rms ratio 1.0095
+L3 32-slot decode slot 17 pos 2102: delta PCC 0.999952 full PCC 0.999978 update rms ratio 0.9945 (HF router margin 5.0e-03)
+L3 32-slot decode slot 17 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995216 update rms ratio 1.0080
+L3 32-slot decode slot 18 pos 2102: delta PCC 0.999933 full PCC 0.999953 update rms ratio 0.9879 (HF router margin 2.2e-04)
+L3 32-slot decode slot 18 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992787 update rms ratio 1.0156
+L3 32-slot decode slot 19 pos 2102: delta PCC 0.999957 full PCC 0.999969 update rms ratio 0.9882 (HF router margin 3.1e-03)
+L3 32-slot decode slot 19 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995879 update rms ratio 1.0043
+L3 32-slot decode slot 20 pos 2102: delta PCC 0.999957 full PCC 0.999980 update rms ratio 0.9878 (HF router margin 8.5e-03)
+L3 32-slot decode slot 20 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.997744 update rms ratio 0.9933
+L3 32-slot decode slot 21 pos 2102: delta PCC 0.999940 full PCC 0.999971 update rms ratio 0.9971 (HF router margin 8.8e-03)
+L3 32-slot decode slot 21 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.993874 update rms ratio 1.0163
+L3 32-slot decode slot 22 pos 2102: delta PCC 0.999188 full PCC 0.999541 update rms ratio 0.9958 (HF router margin 4.6e-04)
+L3 32-slot decode slot 22 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992042 update rms ratio 1.0093
+L3 32-slot decode slot 23 pos 2102: delta PCC 0.999936 full PCC 0.999959 update rms ratio 0.9925 (HF router margin 1.1e-02)
+L3 32-slot decode slot 23 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992191 update rms ratio 1.0114
+L3 32-slot decode slot 24 pos 2302: delta PCC 0.999955 full PCC 0.999973 update rms ratio 0.9920 (HF router margin 6.5e-03)
+L3 32-slot decode slot 24 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995052 update rms ratio 0.9907
+L3 32-slot decode slot 25 pos 2302: delta PCC 0.999919 full PCC 0.999982 update rms ratio 0.9941 (HF router margin 1.7e-03)
+L3 32-slot decode slot 25 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995675 update rms ratio 1.0023
+L3 32-slot decode slot 26 pos 2302: delta PCC 0.999943 full PCC 0.999983 update rms ratio 1.0043 (HF router margin 1.4e-03)
+L3 32-slot decode slot 26 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994717 update rms ratio 1.0159
+L3 32-slot decode slot 27 pos 2302: delta PCC 0.999954 full PCC 0.999976 update rms ratio 0.9865 (HF router margin 5.2e-03)
+L3 32-slot decode slot 27 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995721 update rms ratio 1.0002
+L3 32-slot decode slot 28 pos 2302: delta PCC 0.999974 full PCC 0.999985 update rms ratio 0.9964 (HF router margin 9.3e-03)
+L3 32-slot decode slot 28 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995790 update rms ratio 1.0072
+L3 32-slot decode slot 29 pos 2302: delta PCC 0.999926 full PCC 0.999962 update rms ratio 0.9980 (HF router margin 5.5e-04)
+L3 32-slot decode slot 29 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.996961 update rms ratio 1.0192
+L3 32-slot decode slot 30 pos 2302: delta PCC 0.999916 full PCC 0.999989 update rms ratio 1.0003 (HF router margin 1.3e-03)
+L3 32-slot decode slot 30 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.997391 update rms ratio 1.0007
+L3 32-slot decode slot 31 pos 2302: delta PCC 0.999928 full PCC 0.999972 update rms ratio 0.9926 (HF router margin 1.4e-03)
+L3 32-slot decode slot 31 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994061 update rms ratio 0.9994
+L3 32 active slots: min decode delta PCC 0.995632
+PASSEDrouter near-tie y_swap matches: 1 of 96 MoE decode tokens (cap 4); module total 1 of 96 (cap 2)
+decode update rms ratio mean 0.9953 over 96 tokens
+quantization delta (port vs the checkpoint reference, 96 checks): min delta PCC 0.977863, update rms ratio 0.9762 .. 1.0575
+module y_swap matches 1 of 96 MoE decode tokens (cap 2)
+
+
+========================= 1 passed in 61.79s (0:01:01) =========================
+nanobind: leaked 12 instances!
+ - leaked instance 0x7bd1b94ddb18 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7bd24ff2b088 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7bd1b9304cd8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x1c3588d0 of type "ttnn._ttnn.multi_device.MeshDevice"
+ - leaked instance 0x7bd1b94df078 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7bd1b932e148 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7bd1b93043d8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7bd1b96dece8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7bd1d2bfca08 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7bd1b94deef8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7bd24ff2ba88 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7bd1ba6d3828 of type "ttnn._ttnn.tensor.Tensor"
+nanobind: leaked 2 keep_alive records!
+nanobind: leaked 24 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 270 functions!
+ - leaked function ""
+ - leaked function "remove_sub_device_manager"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "create_matmul_attributes"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "matmul_select_program_factory"
+ - leaked function "item"
+ - leaked function "subtract"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-18 14:36:34.362 | info     |    BuildKernels | JIT cache stats: 1384/1412 hits (98.0%) [1384 cached, 1170 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 14:36:34.362 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 14:36:34.365 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 14:36:54.367 | critical |           Metal | Device 0: Virtual core 29-25, Port status: 0x1, Retrain count: 0x0, Rx link up: 0x1, Train status: 0x2, PCS status: 0x1, SerDes reset status: 0x1, Postcode: 0xc0dea000, ERISC0 reset PC: 0x3650, ERISC1 reset PC: 0x9330, RISC soft reset: 0x0, Heartbeat start: 0xdcbab2c0, Heartbeat end: 0xdcbab2c0, Heartbeat changed: false (llrt.cpp:358)
+2026-10-18 14:36:54.367 | critical |          Always | TT_THROW: Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0 (assert.hpp:104)
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  TT_THROW @ /home/raahem/tt-metal/tt_metal/llrt/llrt.cpp:618: tt::exception
+info:
+Device 0: Timed out while waiting for active ethernet core 29-25 to become active again. Try resetting the board. Minimum tt-firmware version is 18.10.0
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0xcbd4c8) [0x7bd24bcbd4c8]
+ --- tt::llrt::internal_::return_to_base_firmware_and_wait_for_heartbeat(tt::tt_metal::MetalEnvImpl&, int, tt::xy_pair const&, int)
+ --- tt::tt_metal::RiscFirmwareInitializer::assert_active_ethernet_cores_to_reset(int)
+ --- tt::tt_metal::RiscFirmwareInitializer::teardown(std::unordered_set<tt::tt_metal::InitializerKey, std::hash<tt::tt_metal::InitializerKey>, std::equal_to<tt::tt_metal::InitializerKey>, std::allocator<tt::tt_metal::InitializerKey> >&)
+ --- tt::tt_metal::MetalContext::teardown()
+ --- tt::tt_metal::MetalContext::~MetalContext()
+ --- tt::tt_metal::MetalContext::destroy_instance(bool, ttsl::StrongType<int, tt::tt_metal::ContextIdTag>)
+ --- tt::tt_metal::MetalContext::destroy_all_instances(bool)
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x47a76) [0x7bd253a47a76]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x47bbe) [0x7bd253a47bbe]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1d1) [0x7bd253a2a1d1]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7bd253a2a28b]
+ --- python(_start+0x29) [0x19a78a9]
+
+timeout: the monitored command dumped core
+=== exit code: 134 Sun Oct 18 02:36:56 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T14:37:40Z head=b8198430147f0c8c7959c2fcefee71d241fe8f8b snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=cdab692b0ec8adfc1b9e74f24692f684319d142d
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 d9786f26f27b09ba15db649e7ef3621c  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 b0fb56a03e7a8daadb0abf3f85e60020  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 48c406fb59e1ed7f184b90a7e42236be  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 e2757d7b7df9362b7dc3b94af0a94041  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 56a26881d001580c2532e535e98b8e12  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 6f6667949b4d20d28f24780b734f8ca0  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 73dd4fd3918beea0fcf9f5b7855f9b82  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 3413548afa4b729ddf116617a5322b6b  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 f561a6e9081ce0db4d8e1261004a615d  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 1318f0c78ee2147b96d4a1cf1e265bed  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== PROVENANCE start 2026-10-18T21:22:11Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
+=== start Sun Oct 18 09:22:55 PM UTC 2026 : env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_WATCHER_DISABLE_ETH=1 TT_METAL_LOGGER_LEVEL=Warning TT_METAL_LOGS_PATH=/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_batch32_dsa_moe env GLM53_DSA_SHARD=1 timeout -k 60 3600 env -C /home/raahem/glm53-flash-bringup/s67r_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s67r_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s67r_final
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+collecting ... 2026-10-18 21:22:56.997 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] 2026-10-18 21:22:57.705 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:224)
+2026-10-18 21:22:57.705 | info     |             UMD | Cluster constructor started. (cluster.cpp:406)
+2026-10-18 21:22:57.705 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-18 21:22:57.705 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-18 21:22:57.711 | info     |             UMD | Established firmware bundle version: 19.13.1 (topology_discovery.cpp:576)
+2026-10-18 21:22:57.711 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-18 21:22:57.790 | info     |             UMD | Opening local chip ids/PCIe ids: {0, 1, 2, 3}/[0, 1, 2, 3] and remote chip ids {} (cluster.cpp:173)
+2026-10-18 21:22:57.790 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-18 21:22:57.790 | info     |             UMD | KMD version: 2.10.0 (cluster.cpp:150)
+2026-10-18 21:22:57.790 | info     |             UMD | Cluster constructor completed. (cluster.cpp:665)
+2026-10-18 21:22:57.792 | info     |             UMD | Starting devices in cluster (cluster.cpp:1205)
+2026-10-18 21:22:58.004 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1213)
+2026-10-18 21:22:58.144 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:422)
+2026-10-18 21:22:58.144 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:484)
+2026-10-18 21:22:58.145 | warning  |          Always | Unknown motherboard 'B850M-C' for chip_id=2 (bus_id=0x3) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-10-18 21:22:58.145 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3368)
+2026-10-18 21:22:58.145 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {2:4} (topology_mapper_utils.cpp:3376)
+2026-10-18 21:22:58.226 | info     |       LLRuntime | Watcher log file: /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/watcher/shard_batch32_dsa_moe/generated/watcher/watcher.log (watcher_server.cpp:296)
+2026-10-18 21:22:58.226 | info     |       LLRuntime | Watcher server initialized, disabled features: ETH (watcher_server.cpp:568)
+2026-10-18 21:22:58.226 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:22:58.232 | info     |           Metal | Initializing Fabric (fabric_firmware_initializer.cpp:308)
+2026-10-18 21:22:58.234 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:22:58.243 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:22:58.250 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:22:58.274 | info     |           Metal | Fabric initialized on 4 devices (fabric_firmware_initializer.cpp:455)
+2026-10-18 21:22:58.274 | info     |           Metal | Fabric Initialized with config FabricConfig::FABRIC_1D (fabric_firmware_initializer.cpp:325)
+2026-10-18 21:23:08.363 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:08.371 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:08.378 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:08.385 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:18.401 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:18.418 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:18.432 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:18.449 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:25.677 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-18 21:23:28.473 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:28.481 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:28.488 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:28.494 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:38.507 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:38.514 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:38.521 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:38.528 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:48.541 | info     |           Metal | Watcher checking device 0 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:48.549 | info     |           Metal | Watcher checking device 1 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:48.556 | info     |           Metal | Watcher checking device 2 (watcher_device_reader.cpp:410)
+2026-10-18 21:23:48.563 | info     |           Metal | Watcher checking device 3 (watcher_device_reader.cpp:410)
+L3 32-slot decode slot 0 pos 37: delta PCC 0.999921 full PCC 0.999967 update rms ratio 0.9973 (HF router margin 2.7e-03)
+L3 32-slot decode slot 0 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996971 update rms ratio 0.9961
+L3 32-slot decode slot 1 pos 37: delta PCC 0.999827 full PCC 0.999948 update rms ratio 0.9931 (HF router margin 2.0e-05)
+L3 32-slot decode slot 1 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993841 update rms ratio 0.9927
+L3 32-slot decode slot 2 pos 37: delta PCC 0.999971 full PCC 0.999977 update rms ratio 0.9950 (HF router margin 1.8e-03)
+L3 32-slot decode slot 2 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.994657 update rms ratio 1.0070
+L3 32-slot decode slot 3 pos 37: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9933 (HF router margin 1.6e-03)
+L3 32-slot decode slot 3 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.996344 update rms ratio 0.9998
+L3 32-slot decode slot 4 pos 37: delta PCC 0.999913 full PCC 0.999955 update rms ratio 0.9996 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993013 update rms ratio 1.0013
+L3 32-slot decode slot 5 pos 37: delta PCC 0.999949 full PCC 0.999971 update rms ratio 0.9994 (HF router margin 3.1e-03)
+L3 32-slot decode slot 5 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992963 update rms ratio 1.0233
+L3 32-slot decode slot 6 pos 37: delta PCC 0.999944 full PCC 0.999962 update rms ratio 0.9978 (HF router margin 6.2e-03)
+L3 32-slot decode slot 6 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993271 update rms ratio 1.0256
+L3 32-slot decode slot 7 pos 37: delta PCC 0.999914 full PCC 0.999961 update rms ratio 0.9940 (HF router margin 2.0e-02)
+L3 32-slot decode slot 7 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992665 update rms ratio 1.0075
+L3 32-slot decode slot 8 pos 300: delta PCC 0.999948 full PCC 0.999977 update rms ratio 1.0015 (HF router margin 3.1e-04)
+L3 32-slot decode slot 8 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995930 update rms ratio 0.9994
+L3 32-slot decode slot 9 pos 300: delta PCC 0.999952 full PCC 0.999973 update rms ratio 0.9930 (HF router margin 8.2e-04)
+L3 32-slot decode slot 9 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.993664 update rms ratio 0.9989
+L3 32-slot decode slot 10 pos 300: delta PCC 0.999946 full PCC 0.999979 update rms ratio 0.9949 (HF router margin 1.5e-02)
+L3 32-slot decode slot 10 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995844 update rms ratio 1.0035
+L3 32-slot decode slot 11 pos 300: delta PCC 0.999950 full PCC 0.999975 update rms ratio 0.9986 (HF router margin 4.7e-03)
+L3 32-slot decode slot 11 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994797 update rms ratio 0.9968
+L3 32-slot decode slot 12 pos 300: delta PCC 0.999960 full PCC 0.999983 update rms ratio 1.0034 (HF router margin 2.0e-02)
+L3 32-slot decode slot 12 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.997006 update rms ratio 1.0147
+L3 32-slot decode slot 13 pos 300: delta PCC 0.999929 full PCC 0.999985 update rms ratio 0.9957 (HF router margin 7.1e-03)
+L3 32-slot decode slot 13 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.996986 update rms ratio 1.0030
+L3 32-slot decode slot 14 pos 300: delta PCC 0.999176 full PCC 0.999675 update rms ratio 0.9951 (HF router margin 7.5e-04)
+L3 32-slot decode slot 14 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.994516 update rms ratio 0.9882
+L3 32-slot decode slot 15 pos 300: delta PCC 0.999940 full PCC 0.999962 update rms ratio 0.9928 (HF router margin 9.0e-03)
+L3 32-slot decode slot 15 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.992434 update rms ratio 0.9917
+L3 32-slot decode slot 16 pos 2100: delta PCC 0.999946 full PCC 0.999971 update rms ratio 0.9906 (HF router margin 1.6e-03)
+L3 32-slot decode slot 16 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994204 update rms ratio 0.9989
+L3 32-slot decode slot 17 pos 2100: delta PCC 0.999910 full PCC 0.999971 update rms ratio 0.9927 (HF router margin 1.1e-03)
+L3 32-slot decode slot 17 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.992551 update rms ratio 1.0252
+L3 32-slot decode slot 18 pos 2100: delta PCC 0.999946 full PCC 0.999962 update rms ratio 0.9847 (HF router margin 8.6e-03)
+L3 32-slot decode slot 18 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995890 update rms ratio 1.0061
+L3 32-slot decode slot 19 pos 2100: delta PCC 0.999948 full PCC 0.999975 update rms ratio 0.9944 (HF router margin 1.0e-02)
+L3 32-slot decode slot 19 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.996210 update rms ratio 1.0012
+L3 32-slot decode slot 20 pos 2100: delta PCC 0.999945 full PCC 0.999972 update rms ratio 0.9869 (HF router margin 1.2e-03)
+L3 32-slot decode slot 20 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.994480 update rms ratio 1.0108
+L3 32-slot decode slot 21 pos 2100: delta PCC 0.999946 full PCC 0.999980 update rms ratio 1.0001 (HF router margin 3.1e-03)
+L3 32-slot decode slot 21 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.993994 update rms ratio 1.0080
+L3 32-slot decode slot 22 pos 2100: delta PCC 0.999873 full PCC 0.999956 update rms ratio 0.9945 (HF router margin 4.4e-04)
+L3 32-slot decode slot 22 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.995123 update rms ratio 1.0015
+L3 32-slot decode slot 23 pos 2100: delta PCC 0.999932 full PCC 0.999964 update rms ratio 0.9919 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2100: vs checkpoint ref (quantization delta): delta PCC 0.990625 update rms ratio 1.0077
+L3 32-slot decode slot 24 pos 2300: delta PCC 0.999958 full PCC 0.999982 update rms ratio 0.9964 (HF router margin 1.4e-02)
+L3 32-slot decode slot 24 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995769 update rms ratio 0.9981
+L3 32-slot decode slot 25 pos 2300: delta PCC 0.999906 full PCC 0.999987 update rms ratio 0.9913 (HF router margin 2.0e-03)
+L3 32-slot decode slot 25 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996100 update rms ratio 0.9971
+L3 32-slot decode slot 26 pos 2300: delta PCC 0.999900 full PCC 0.999982 update rms ratio 0.9987 (HF router margin 8.6e-03)
+L3 32-slot decode slot 26 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995380 update rms ratio 1.0038
+L3 32-slot decode slot 27 pos 2300: delta PCC 0.999948 full PCC 0.999971 update rms ratio 0.9956 (HF router margin 2.6e-03)
+L3 32-slot decode slot 27 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.993735 update rms ratio 1.0102
+L3 32-slot decode slot 28 pos 2300: delta PCC 0.999965 full PCC 0.999981 update rms ratio 0.9952 (HF router margin 2.9e-03)
+L3 32-slot decode slot 28 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995818 update rms ratio 0.9791
+L3 32-slot decode slot 29 pos 2300: delta PCC 0.995632 full PCC 0.998738 update rms ratio 0.9765 (HF router margin 3.0e-05)
+L3 32-slot decode slot 29 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.990760 update rms ratio 0.9769
+L3 32-slot decode slot 30 pos 2300: delta PCC 0.999961 full PCC 0.999980 update rms ratio 0.9966 (HF router margin 4.4e-03)
+L3 32-slot decode slot 30 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.996517 update rms ratio 0.9995
+L3 32-slot decode slot 31 pos 2300: delta PCC 0.999949 full PCC 0.999971 update rms ratio 0.9892 (HF router margin 2.9e-03)
+L3 32-slot decode slot 31 pos 2300: vs checkpoint ref (quantization delta): delta PCC 0.995720 update rms ratio 1.0194
+L3 32-slot decode slot 0 pos 38: delta PCC 0.999943 full PCC 0.999974 update rms ratio 0.9920 (HF router margin 3.7e-03)
+L3 32-slot decode slot 0 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996264 update rms ratio 1.0065
+L3 32-slot decode slot 1 pos 38: delta PCC 0.999942 full PCC 0.999969 update rms ratio 0.9951 (HF router margin 4.2e-03)
+L3 32-slot decode slot 1 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.996437 update rms ratio 1.0084
+L3 32-slot decode slot 2 pos 38: delta PCC 0.982133 full PCC 0.997353 update rms ratio 0.9864 (HF router margin 8.0e-04)
+L3 32-slot decode slot 2 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.977863 update rms ratio 0.9910
+L3 32-slot decode slot 2 pos 38: vs y_swap (8th expert -> 9th): delta PCC 0.999889 full PCC 0.999985 update rms ratio 0.9936
+L3 32-slot decode slot 2 pos 38: matched y_swap (router near-tie)
+L3 32-slot decode slot 3 pos 38: delta PCC 0.999877 full PCC 0.999945 update rms ratio 0.9981 (HF router margin 1.9e-03)
+L3 32-slot decode slot 3 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.991238 update rms ratio 1.0011
+L3 32-slot decode slot 4 pos 38: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9939 (HF router margin 6.4e-03)
+L3 32-slot decode slot 4 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.994881 update rms ratio 1.0036
+L3 32-slot decode slot 5 pos 38: delta PCC 0.999929 full PCC 0.999965 update rms ratio 0.9993 (HF router margin 1.0e-02)
+L3 32-slot decode slot 5 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.993713 update rms ratio 0.9988
+L3 32-slot decode slot 6 pos 38: delta PCC 0.999917 full PCC 0.999953 update rms ratio 0.9990 (HF router margin 9.5e-03)
+L3 32-slot decode slot 6 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.992358 update rms ratio 1.0086
+L3 32-slot decode slot 7 pos 38: delta PCC 0.999932 full PCC 0.999979 update rms ratio 0.9944 (HF router margin 1.9e-02)
+L3 32-slot decode slot 7 pos 38: vs checkpoint ref (quantization delta): delta PCC 0.998742 update rms ratio 0.9974
+L3 32-slot decode slot 8 pos 301: delta PCC 0.999947 full PCC 0.999967 update rms ratio 0.9956 (HF router margin 6.2e-03)
+L3 32-slot decode slot 8 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.995670 update rms ratio 1.0023
+L3 32-slot decode slot 9 pos 301: delta PCC 0.999955 full PCC 0.999976 update rms ratio 0.9919 (HF router margin 2.0e-03)
+L3 32-slot decode slot 9 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.996351 update rms ratio 0.9981
+L3 32-slot decode slot 10 pos 301: delta PCC 0.999954 full PCC 0.999979 update rms ratio 0.9968 (HF router margin 4.1e-03)
+L3 32-slot decode slot 10 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994457 update rms ratio 0.9951
+L3 32-slot decode slot 11 pos 301: delta PCC 0.999948 full PCC 0.999970 update rms ratio 0.9993 (HF router margin 3.7e-03)
+L3 32-slot decode slot 11 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.993033 update rms ratio 1.0014
+L3 32-slot decode slot 12 pos 301: delta PCC 0.999924 full PCC 0.999980 update rms ratio 0.9965 (HF router margin 9.5e-03)
+L3 32-slot decode slot 12 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.991356 update rms ratio 1.0047
+L3 32-slot decode slot 13 pos 301: delta PCC 0.999941 full PCC 0.999965 update rms ratio 0.9966 (HF router margin 6.1e-03)
+L3 32-slot decode slot 13 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992906 update rms ratio 0.9979
+L3 32-slot decode slot 14 pos 301: delta PCC 0.999959 full PCC 0.999972 update rms ratio 0.9938 (HF router margin 3.6e-03)
+L3 32-slot decode slot 14 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.992736 update rms ratio 0.9762
+L3 32-slot decode slot 15 pos 301: delta PCC 0.999943 full PCC 0.999963 update rms ratio 0.9938 (HF router margin 2.4e-03)
+L3 32-slot decode slot 15 pos 301: vs checkpoint ref (quantization delta): delta PCC 0.994462 update rms ratio 1.0046
+L3 32-slot decode slot 16 pos 2101: delta PCC 0.999628 full PCC 0.999789 update rms ratio 0.9977 (HF router margin 1.9e-04)
+L3 32-slot decode slot 16 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994806 update rms ratio 1.0020
+L3 32-slot decode slot 17 pos 2101: delta PCC 0.999943 full PCC 0.999961 update rms ratio 0.9866 (HF router margin 4.5e-03)
+L3 32-slot decode slot 17 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994497 update rms ratio 1.0213
+L3 32-slot decode slot 18 pos 2101: delta PCC 0.999943 full PCC 0.999966 update rms ratio 0.9946 (HF router margin 7.7e-03)
+L3 32-slot decode slot 18 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992971 update rms ratio 0.9974
+L3 32-slot decode slot 19 pos 2101: delta PCC 0.999946 full PCC 0.999971 update rms ratio 0.9922 (HF router margin 1.8e-03)
+L3 32-slot decode slot 19 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.994925 update rms ratio 0.9984
+L3 32-slot decode slot 20 pos 2101: delta PCC 0.999961 full PCC 0.999982 update rms ratio 0.9953 (HF router margin 6.9e-04)
+L3 32-slot decode slot 20 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.996606 update rms ratio 1.0144
+L3 32-slot decode slot 21 pos 2101: delta PCC 0.999941 full PCC 0.999974 update rms ratio 0.9977 (HF router margin 2.8e-02)
+L3 32-slot decode slot 21 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992981 update rms ratio 1.0129
+L3 32-slot decode slot 22 pos 2101: delta PCC 0.999934 full PCC 0.999971 update rms ratio 0.9987 (HF router margin 7.0e-03)
+L3 32-slot decode slot 22 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.992641 update rms ratio 0.9934
+L3 32-slot decode slot 23 pos 2101: delta PCC 0.999927 full PCC 0.999965 update rms ratio 0.9971 (HF router margin 1.2e-02)
+L3 32-slot decode slot 23 pos 2101: vs checkpoint ref (quantization delta): delta PCC 0.991047 update rms ratio 1.0166
+L3 32-slot decode slot 24 pos 2301: delta PCC 0.999964 full PCC 0.999977 update rms ratio 0.9934 (HF router margin 5.3e-03)
+L3 32-slot decode slot 24 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995265 update rms ratio 1.0119
+L3 32-slot decode slot 25 pos 2301: delta PCC 0.999960 full PCC 0.999973 update rms ratio 0.9889 (HF router margin 1.3e-03)
+L3 32-slot decode slot 25 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996227 update rms ratio 0.9931
+L3 32-slot decode slot 26 pos 2301: delta PCC 0.999941 full PCC 0.999977 update rms ratio 0.9973 (HF router margin 5.2e-03)
+L3 32-slot decode slot 26 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.994811 update rms ratio 1.0331
+L3 32-slot decode slot 27 pos 2301: delta PCC 0.999963 full PCC 0.999978 update rms ratio 0.9953 (HF router margin 6.2e-03)
+L3 32-slot decode slot 27 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.997028 update rms ratio 1.0074
+L3 32-slot decode slot 28 pos 2301: delta PCC 0.999956 full PCC 0.999977 update rms ratio 0.9964 (HF router margin 3.1e-03)
+L3 32-slot decode slot 28 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.995700 update rms ratio 1.0060
+L3 32-slot decode slot 29 pos 2301: delta PCC 0.999926 full PCC 0.999965 update rms ratio 0.9878 (HF router margin 4.7e-03)
+L3 32-slot decode slot 29 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992845 update rms ratio 1.0134
+L3 32-slot decode slot 30 pos 2301: delta PCC 0.999926 full PCC 0.999963 update rms ratio 0.9971 (HF router margin 4.8e-03)
+L3 32-slot decode slot 30 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.992177 update rms ratio 1.0135
+L3 32-slot decode slot 31 pos 2301: delta PCC 0.999944 full PCC 0.999982 update rms ratio 0.9975 (HF router margin 5.1e-04)
+L3 32-slot decode slot 31 pos 2301: vs checkpoint ref (quantization delta): delta PCC 0.996525 update rms ratio 1.0021
+L3 32-slot decode slot 0 pos 39: delta PCC 0.999958 full PCC 0.999967 update rms ratio 0.9901 (HF router margin 2.0e-03)
+L3 32-slot decode slot 0 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994650 update rms ratio 1.0115
+L3 32-slot decode slot 1 pos 39: delta PCC 0.999954 full PCC 0.999968 update rms ratio 1.0000 (HF router margin 7.3e-03)
+L3 32-slot decode slot 1 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993932 update rms ratio 1.0085
+L3 32-slot decode slot 2 pos 39: delta PCC 0.998776 full PCC 0.999369 update rms ratio 1.0355 (HF router margin 1.9e-04)
+L3 32-slot decode slot 2 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.993810 update rms ratio 1.0575
+L3 32-slot decode slot 3 pos 39: delta PCC 0.999904 full PCC 0.999975 update rms ratio 0.9989 (HF router margin 1.3e-03)
+L3 32-slot decode slot 3 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.996279 update rms ratio 1.0052
+L3 32-slot decode slot 4 pos 39: delta PCC 0.999868 full PCC 0.999930 update rms ratio 0.9975 (HF router margin 6.9e-03)
+L3 32-slot decode slot 4 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.989409 update rms ratio 1.0039
+L3 32-slot decode slot 5 pos 39: delta PCC 0.999906 full PCC 0.999968 update rms ratio 0.9970 (HF router margin 1.2e-02)
+L3 32-slot decode slot 5 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.988115 update rms ratio 1.0136
+L3 32-slot decode slot 6 pos 39: delta PCC 0.999957 full PCC 0.999973 update rms ratio 0.9935 (HF router margin 5.8e-03)
+L3 32-slot decode slot 6 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.994844 update rms ratio 0.9892
+L3 32-slot decode slot 7 pos 39: delta PCC 0.999947 full PCC 0.999969 update rms ratio 0.9990 (HF router margin 1.2e-02)
+L3 32-slot decode slot 7 pos 39: vs checkpoint ref (quantization delta): delta PCC 0.995400 update rms ratio 1.0183
+L3 32-slot decode slot 8 pos 302: delta PCC 0.999950 full PCC 0.999979 update rms ratio 0.9958 (HF router margin 1.3e-03)
+L3 32-slot decode slot 8 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994714 update rms ratio 1.0065
+L3 32-slot decode slot 9 pos 302: delta PCC 0.999965 full PCC 0.999984 update rms ratio 0.9961 (HF router margin 6.5e-03)
+L3 32-slot decode slot 9 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995381 update rms ratio 1.0245
+L3 32-slot decode slot 10 pos 302: delta PCC 0.999959 full PCC 0.999972 update rms ratio 0.9936 (HF router margin 7.7e-05)
+L3 32-slot decode slot 10 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994233 update rms ratio 1.0122
+L3 32-slot decode slot 11 pos 302: delta PCC 0.999954 full PCC 0.999973 update rms ratio 0.9954 (HF router margin 3.3e-03)
+L3 32-slot decode slot 11 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.995775 update rms ratio 0.9951
+L3 32-slot decode slot 12 pos 302: delta PCC 0.999968 full PCC 0.999979 update rms ratio 0.9991 (HF router margin 1.0e-03)
+L3 32-slot decode slot 12 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993843 update rms ratio 1.0221
+L3 32-slot decode slot 13 pos 302: delta PCC 0.999927 full PCC 0.999974 update rms ratio 0.9966 (HF router margin 8.8e-03)
+L3 32-slot decode slot 13 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993950 update rms ratio 0.9993
+L3 32-slot decode slot 14 pos 302: delta PCC 0.999941 full PCC 0.999968 update rms ratio 1.0002 (HF router margin 1.8e-02)
+L3 32-slot decode slot 14 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.993796 update rms ratio 0.9967
+L3 32-slot decode slot 15 pos 302: delta PCC 0.999899 full PCC 0.999982 update rms ratio 0.9996 (HF router margin 3.1e-03)
+L3 32-slot decode slot 15 pos 302: vs checkpoint ref (quantization delta): delta PCC 0.994319 update rms ratio 1.0046
+L3 32-slot decode slot 16 pos 2102: delta PCC 0.999931 full PCC 0.999974 update rms ratio 0.9939 (HF router margin 9.3e-05)
+L3 32-slot decode slot 16 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.993014 update rms ratio 1.0095
+L3 32-slot decode slot 17 pos 2102: delta PCC 0.999952 full PCC 0.999978 update rms ratio 0.9945 (HF router margin 5.0e-03)
+L3 32-slot decode slot 17 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995216 update rms ratio 1.0080
+L3 32-slot decode slot 18 pos 2102: delta PCC 0.999933 full PCC 0.999953 update rms ratio 0.9879 (HF router margin 2.2e-04)
+L3 32-slot decode slot 18 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992787 update rms ratio 1.0156
+L3 32-slot decode slot 19 pos 2102: delta PCC 0.999957 full PCC 0.999969 update rms ratio 0.9882 (HF router margin 3.1e-03)
+L3 32-slot decode slot 19 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.995879 update rms ratio 1.0043
+L3 32-slot decode slot 20 pos 2102: delta PCC 0.999957 full PCC 0.999980 update rms ratio 0.9878 (HF router margin 8.5e-03)
+L3 32-slot decode slot 20 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.997744 update rms ratio 0.9933
+L3 32-slot decode slot 21 pos 2102: delta PCC 0.999940 full PCC 0.999971 update rms ratio 0.9971 (HF router margin 8.8e-03)
+L3 32-slot decode slot 21 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.993874 update rms ratio 1.0163
+L3 32-slot decode slot 22 pos 2102: delta PCC 0.999188 full PCC 0.999541 update rms ratio 0.9958 (HF router margin 4.6e-04)
+L3 32-slot decode slot 22 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992042 update rms ratio 1.0093
+L3 32-slot decode slot 23 pos 2102: delta PCC 0.999936 full PCC 0.999959 update rms ratio 0.9925 (HF router margin 1.1e-02)
+L3 32-slot decode slot 23 pos 2102: vs checkpoint ref (quantization delta): delta PCC 0.992191 update rms ratio 1.0114
+L3 32-slot decode slot 24 pos 2302: delta PCC 0.999955 full PCC 0.999973 update rms ratio 0.9920 (HF router margin 6.5e-03)
+L3 32-slot decode slot 24 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995052 update rms ratio 0.9907
+L3 32-slot decode slot 25 pos 2302: delta PCC 0.999919 full PCC 0.999982 update rms ratio 0.9941 (HF router margin 1.7e-03)
+L3 32-slot decode slot 25 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995675 update rms ratio 1.0023
+L3 32-slot decode slot 26 pos 2302: delta PCC 0.999943 full PCC 0.999983 update rms ratio 1.0043 (HF router margin 1.4e-03)
+L3 32-slot decode slot 26 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994717 update rms ratio 1.0159
+L3 32-slot decode slot 27 pos 2302: delta PCC 0.999954 full PCC 0.999976 update rms ratio 0.9865 (HF router margin 5.2e-03)
+L3 32-slot decode slot 27 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995721 update rms ratio 1.0002
+L3 32-slot decode slot 28 pos 2302: delta PCC 0.999974 full PCC 0.999985 update rms ratio 0.9964 (HF router margin 9.3e-03)
+L3 32-slot decode slot 28 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.995790 update rms ratio 1.0072
+L3 32-slot decode slot 29 pos 2302: delta PCC 0.999926 full PCC 0.999962 update rms ratio 0.9980 (HF router margin 5.5e-04)
+L3 32-slot decode slot 29 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.996961 update rms ratio 1.0192
+L3 32-slot decode slot 30 pos 2302: delta PCC 0.999916 full PCC 0.999989 update rms ratio 1.0003 (HF router margin 1.3e-03)
+L3 32-slot decode slot 30 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.997391 update rms ratio 1.0007
+L3 32-slot decode slot 31 pos 2302: delta PCC 0.999928 full PCC 0.999972 update rms ratio 0.9926 (HF router margin 1.4e-03)
+L3 32-slot decode slot 31 pos 2302: vs checkpoint ref (quantization delta): delta PCC 0.994061 update rms ratio 0.9994
+L3 32 active slots: min decode delta PCC 0.995632
+PASSEDrouter near-tie y_swap matches: 1 of 96 MoE decode tokens (cap 4); module total 1 of 96 (cap 2)
+decode update rms ratio mean 0.9953 over 96 tokens
+quantization delta (port vs the checkpoint reference, 96 checks): min delta PCC 0.977863, update rms ratio 0.9762 .. 1.0575
+module y_swap matches 1 of 96 MoE decode tokens (cap 2)
+
+
+============================== 1 passed in 57.74s ==============================
+nanobind: leaked 12 instances!
+ - leaked instance 0x7452c81a93c8 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7452aeb1e8e8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7452af2ae658 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7452aea2f6d8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7452ae96f108 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x74534544f108 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x1578dfe0 of type "ttnn._ttnn.multi_device.MeshDevice"
+ - leaked instance 0x7452af22ae38 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7452ae9340d8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7452ae94a448 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7452ae937f18 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x74534544fa88 of type "ttnn._ttnn.tensor.MemoryConfig"
+nanobind: leaked 2 keep_alive records!
+nanobind: leaked 24 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 270 functions!
+ - leaked function "element_size"
+ - leaked function "is_allocated"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "get_device_id"
+ - leaked function ""
+ - leaked function "sfpu_inf"
+ - leaked function ""
+ - leaked function "create_matmul_attributes"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html2026-10-18 21:23:54.752 | info     |    BuildKernels | JIT cache stats: 1384/1412 hits (98.0%) [1384 cached, 1170 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:207)
+2026-10-18 21:23:54.752 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-18 21:23:54.755 | info     |       LLRuntime | Watcher thread stopped watching... (watcher_server.cpp:616)
+2026-10-18 21:23:54.774 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:550)
+2026-10-18 21:23:54.774 | info     |             UMD | Closing devices in cluster (cluster.cpp:1218)
+2026-10-18 21:23:55.335 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1227)
+2026-10-18 21:23:55.335 | info     |             UMD | Cluster destructor started. (cluster.cpp:933)
+2026-10-18 21:23:55.335 | info     |             UMD | Cluster destructor completed. (cluster.cpp:936)
+=== exit code: 0 Sun Oct 18 09:23:55 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
+=== PROVENANCE end 2026-10-18T21:24:40Z head=656c998e3df19d3e6fc42c0a5921eb8963f74a7c snapshot=/home/raahem/glm53-flash-bringup/s67r_snap snapshot_base=656c998e3df19d3e6fc42c0a5921eb8963f74a7c
+=== md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+=== md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+=== md5 b721bd51cf2a1f9544e8e7aef8c9a3e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+=== md5 a24a4337c9c160b8987a846b7637c23c  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+=== md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+=== md5 1bc253814eb609f52ca45595a98d2af0  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+=== md5 6714e98bd0cacf5cb4e554e4e8efd945  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+=== md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+=== md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+=== md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+=== md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+=== md5 9615f14a971ad17162fed80a217879e8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+=== md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+=== md5 6e63d1290690b61f90b6bbff89d19506  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+=== md5 16cc6532a00ef1f7b4b7b0a1dd43d001  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+=== md5 16b9673568d127faf8f7d8af14149b0b  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+=== md5 b4ddebb46852522958e811191890bba2  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+=== md5 109284f45b66d9f3f6ef9f7f10cad699  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+=== md5 efc886f9706685daec5e75049791ea15  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+=== md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+=== md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+=== md5 db46e9628661b44411f7e8def26559e1  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== md5 718cdf49050b6a3508d8762ac9d550a4  models/autoports/zai_org_glm_5_3_flash/tools/s67r_checks.py
