@@ -213,12 +213,6 @@ class Glm53Model:
         dsa = next((d.attn for d in self.layers if d.attn_kind == "dsa"), None)
         kda = next((d.attn for d in self.layers if d.attn_kind == "kda"), None)
         self.dsa_shard = bool(getattr(dsa, "dsa_shard", False))
-        if self.dsa_shard and any(
-            getattr(d.attn, "latent_dtype", ttnn.bfloat16) != ttnn.bfloat16 for d in self.layers if d.attn_kind == "dsa"
-        ):
-            raise ValueError(
-                "the block-sharded DSA cache supports the bf16 latent only (GLM53_PRECISION kv_latent_dtype)"
-            )
         early = allocate_dsa == "early"  # diagnostic (GLM53_DEFER_POOL=2): the deferred API, before the sampler
         self.inputs = (
             DeviceDecodeInputs(mesh, dsa=dsa, kda=kda, batch=max_batch) if allocate_dsa and not early else None

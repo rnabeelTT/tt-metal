@@ -214,6 +214,59 @@ I/O, first-use compiles on both sides): 9001 tokens 3.25 -> 2.93 s, 6001 tokens 
 lengths (not separately profiled with Tracy). Memory: the latent pool of the 8-slot test layer
 134.3 MB -> 35.9 MB per die (3.74x, the 544 / 512 row widening included).
 
+### fp8 rows (stage-6 review #2 P1-1, 2026-10-20)
+
+The block-sharded layout now takes the stage-8 fp8 e4m3 latent (`GLM53_PRECISION` `kv_latent_dtype fp8_e4m3`, the
+default policy). Set `GLM53_DSA_SHARD=1` to select it. Evidence is in `dsa_shard/fp8/` and
+`dsa_shard/capacity/fp8_s1_1048576/`.
+
+Row format:
+
+- The rows are 576 columns wide: 512 latent + 64 control columns, 576 B. `sparse_sdpa` needs K rows of a multiple of
+  64 B on Blackhole (`sparse_sdpa_device_operation.cpp:208-214`). A 544-column fp8 row (544 B) is not aligned. Thus
+  (b) costs 11 x (576 / 4 + 64) = 2,288 B per token per die, not the 2,200 B of the review.
+- ONE and SINK are 1.0. This value is exact in e4m3 and in the kernel's bfp8_b tile format.
+- KILL is split between the key and the query. The key holds -256 (exact in e4m3). The bf16 query column holds 40.
+  The null logit is -10,240 (bf16 rows: -9,984). Each factor has 3 or fewer significant bits. Thus the product is
+  exact at every math fidelity, and the null key weight is exactly 0, as before.
+- The query stays bf16, and the attention output (`v_dim`) stays 544 columns. The merge is unchanged.
+- The pool-key iota constant (`[1, 1, 1, P_alloc]` fp32, 33.6 MB per layer at 1M tokens) is one tensor for all
+  block-sharded layers.
+- At the context cap, a vLLM pool has `T/128 + 1` blocks plus the dummy block. The pool-key view
+  `[KB, 1, P_alloc, 128]` then rounds to `KB = 2`, which adds 67 MB per layer at 1M tokens. In that case the dummy
+  block's pool-key tile aliases vLLM's null block 0. The latent tables keep the dummy block. `tt/dsa.py` (the
+  replicated layout) has the same rounding.
+
+| Check | Result |
+|---|---|
+| `tests/test_dsa_shard.py`, fp8 in both layouts (`GLM53_PRECISION` = selected config) | **2 passed**. Attention output worst PCC 0.999909 (8 slots) / 0.999913 (1 slot), worst \|rms ratio - 1\| 0.0042. 3 layer-update keys are outside the bar with a matching attention output (MoE near-ties, as in the bf16 run). Latent pool of the test layer: 67.2 MB -> 19.0 MB per die |
+| Full model, teacher forcing on 3 references (`tools/dtype_sweep.py`, `GLM53_DSA_SHARD=1`, combo_a_kv_dense4_g4, `max_seq_len` 16,384) | top-1 91 / 95 / 91, top-5 100 / 100 / 100, prefill check 92. Replicated control on HEAD with the same command (`doc/datatype_sweep/runs/final_default_h9`): 92 / 95 / 92, top-5 100, prefill check 92 |
+| Capacity, 1 slot (`tools/memory_probe.py capacity --workspace-mib 600 --max-context 1048576`, `GLM53_MOE_SORTED_ROWS=512`, `GLM53_DSA_INDEX_BLOCK_MB=32`) | **1,048,576 tokens**. Pool 8,193 blocks (2,399,434,752 B + 180,549,632 B of DSA constants). 3,139,928,064 B free after load, 194 MB free at the warm-up peak. A 1,048,515-token non-aligned copy prompt: prefill 2,665.7 s, then 24 traced decode steps copied the passage 24 / 24. Sink headroom >= 73.6 nats in all 11 layers (bound 88.7), no underflow |
+| First capacity attempt | out of DRAM in `bind_kv_cache` because of the doubled pool-key view (above). Fixed in `tt/dsa_shard.py` |
+
+Cost against the replicated fp8 layout, same harness:
+
+| Measure | Replicated | Block-sharded |
+|---|---|---|
+| Token-out decode, 1 slot, `max_seq_len` 16,384 | 49.94 ms | 52.82 ms (+2.88 ms) |
+| TTFT at 128 / 161 / 2,048 tokens | 226 / 378 / 1,024 ms | 226 / 374 / 1,024 ms |
+| One DSA layer, traced decode replay (1 / 8 slots) | 1,673 / 3,119 µs | 2,125 / 3,532 µs |
+
+TTFT and token-out at depths above 16K tokens were not measured on the same build. The shared device queue was kept
+to the decisive jobs.
+
+Decision: the default stays replicated because it is faster. The block-sharded fp8 layout is the long-context
+layout. Recommended long serving profile: 1 slot, `max_model_len` 1,048,576, `GLM53_DSA_SHARD=1`, 600 MiB workspace
+(`GLM53_DRAM_RESERVE_MIB=600` for the standalone generator), `GLM53_MOE_SORTED_ROWS=512`,
+`GLM53_DSA_INDEX_BLOCK_MB=32`. `serving_profiles.json` and the vLLM adapter do not yet select a DSA layout per profile
+(stage 9 / 10).
+
+Pool-key sharding (option (a), 11 x (576 / 4 + 16) = 1,760 B per token) is not implemented. `indexer_score_dsa` scores
+the full key length of its view (`indexer_score_device_operation.cpp:95-99`). Thus every die must hold a
+`P_alloc`-key view, whichever die owns the keys. To shard the pool keys, the model needs a compact per-die pool
+numbering, with per-die limits and id maps in the prefill inputs and in the decode trace, and a merge top-k. This is
+not necessary for 1,048,576 tokens at 1 slot. It would increase the multi-slot capacity.
+
 ## Results
 
 **Correctness, stage-4 options on the final kernels** (`s4r_suite_s4opts.log`, 2026-10-17 17:53, review #1 rework;

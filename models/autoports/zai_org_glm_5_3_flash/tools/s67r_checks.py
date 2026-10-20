@@ -530,7 +530,12 @@ def run_deep(g, lengths, steps: int, stats: bool) -> dict:
             _dsa_stats(m, False)
             r["sink_stats"] = _read_stats(m)
             g.reset()
+            # TTFT of the stats-free prefill (the stats pass reads w to the host in every sharded attention call)
+            r["ttft_stats_pass_s"] = r["ttft_s"]
+            ttnn.synchronize_device(g.mesh)
+            t0 = time.perf_counter()
             lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[L])
+            r["ttft_s"] = round(time.perf_counter() - t0, 2)
             first = int(torch.argmax(lg[0, -1, : m.vocab]))
         toks = [first]
         out1 = g.decode_forward(torch.tensor([[first]]), torch.tensor([L]), reload_inputs=True)

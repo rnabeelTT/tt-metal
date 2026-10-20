@@ -392,17 +392,15 @@ class PrecisionOverrides:
             self.applied.append((i, "kda_out", f"decode fidelity {f_out}"))
 
     def _apply_dsa(self, attn, mesh, i, first, last):
-        if self.kv_latent_dtype != "bf16" and getattr(attn, "dsa_shard", False):
-            # tt/dsa_shard.py has no fp8 pool: the block-sharded cache keeps its bf16 latent
-            logger.warning(
-                f"layer {i}: kv_latent_dtype {self.kv_latent_dtype} ignored with the block-sharded DSA cache"
-            )
-            self.applied.append((i, "kv_latent", "bf16 (dsa_shard)"))
-        elif self.kv_latent_dtype != "bf16":
+        if self.kv_latent_dtype != "bf16":
             assert self.kv_latent_dtype == "fp8_e4m3", self.kv_latent_dtype
             assert attn.latent is None, "the latent pool dtype must be set before allocate_decode_state"
-            attn.latent_dtype = ttnn.fp8_e4m3  # tt/dsa.py: ROW_MAJOR fp8 pool, sparse_sdpa kv_format FP8_E4M3
-            self.applied.append((i, "kv_latent", "fp8_e4m3"))
+            # tt/dsa.py: ROW_MAJOR fp8 pool, sparse_sdpa kv_format FP8_E4M3; the block-sharded cache (tt/dsa_shard.py)
+            # takes the same dtype in its 576-wide fp8 row format
+            attn.latent_dtype = ttnn.fp8_e4m3
+            self.applied.append(
+                (i, "kv_latent", "fp8_e4m3 (dsa_shard)" if getattr(attn, "dsa_shard", False) else "fp8_e4m3")
+            )
         dt = self.requant_dtype("dsa_proj", i, first, last)
         if dt is not None:
             A, B = attn._pack  # q_a | kv_a pack (serves prefill and decode: ds_shared), indexer pack (bf16, kept)

@@ -131,12 +131,14 @@ def test_exception_layer_not_cached(monkeypatch, tmp_path):
     assert o._cache is not None
 
 
-def test_dsa_shard_keeps_bf16_latent():
+def test_dsa_shard_takes_fp8_latent():
+    """The block-sharded cache (tt/dsa_shard.py) takes the fp8 latent too (576-wide fp8 rows), as the replicated one."""
     o = P.PrecisionOverrides(id="kv", kv_latent_dtype="fp8_e4m3")
     attn = SimpleNamespace(dsa_shard=True, latent=None)
     o._apply_dsa(attn, None, 3, 0, 44)
-    assert not hasattr(attn, "latent_dtype")
-    assert o.applied[-1] == (3, "kv_latent", "bf16 (dsa_shard)")
+    assert attn.latent_dtype == ttnn.fp8_e4m3
+    assert o.applied[-1] == (3, "kv_latent", "fp8_e4m3 (dsa_shard)")
     attn2 = SimpleNamespace(latent=None)
     o._apply_dsa(attn2, None, 7, 0, 44)
     assert attn2.latent_dtype == ttnn.fp8_e4m3
+    assert o.applied[-1] == (7, "kv_latent", "fp8_e4m3")

@@ -5,8 +5,11 @@ spread over the tp dies instead of replicated, so the long-context capacity is n
 
 Layout (the paged-pool API is unchanged: page tables / vLLM block tables hold GLOBAL block ids):
   * global block b (b < NB - 1; NB - 1 is GlmDSA's dummy block) lives on die b % tp, at local block b // tp of the die's
-    pool [1, 1, (NBL + 2) * 128, 544] bf16 ROW_MAJOR, NBL = ceil((NB - 1) / tp). The per-die rows are 544 wide: the
-    512-column latent and 32 control columns (below). Local block NBL is the NULL block, NBL + 1 the SINK block.
+    pool [1, 1, (NBL + 2) * 128, KC] ROW_MAJOR, NBL = ceil((NB - 1) / tp). A row is the 512-column latent and KC - 512
+    control columns (below). Local block NBL is the NULL block, NBL + 1 the SINK block. Two row formats:
+      bf16 latent:  KC = 544 (32 control columns), 1,088 B per row;
+      fp8 e4m3 latent (GlmDSA.latent_dtype, tt/precision.py kv_latent_dtype): KC = 576 (64 control columns), 576 B per
+      row. sparse_sdpa needs 64 B aligned K rows on Blackhole (544 B is not), so the fp8 row takes 64 control columns.
   * the pooled index keys, the indexer, the top-512 pool selection and the open-pool accumulators stay REPLICATED (pool
     keys are 64 B / token / layer against 1024 B of latent): the selected index list is identical on every die and
     to the replicated layout. A token's latent row is written only on its owner die (per-die scatter row index).
@@ -14,19 +17,24 @@ Layout (the paged-pool API is unchanged: page tables / vLLM block tables hold GL
     its local block, any other block -> NULL; column MB - 1 (the indexer overrun column, never a real position) ->
     SINK, column MB -> NULL. Every index list gets a 32-entry prefix [sink, 31 x null].
 
-Control columns of a cache row / of the query (q_abs extended to 544):
+Control columns of a cache row / of the query (q_abs extended to KC):
             col 512 (ONE)   col 513 (SINK)   col 514 (KILL)
   real row      1               0                0           latent of a written token
   sink row      0               1                0           the whole row is otherwise zero
-  null row      0               0             -1e4           (and a zero latent)
-  query         0           q.c_self            1           c_self = the query token's own latent row
-so a real key scores q.k as before, the sink scores q.c_self (the query's own-key logit: the same value on every die,
-inside the attended logit range), a null key scores -1e4 (weight exactly 0 after exp), and the output columns are
+  null row      0               0             -K_k           (and a zero latent)
+  query         0           q.c_self           K_q           c_self = the query token's own latent row
+  bf16 rows: K_k = 1e4 (bf16 9984), K_q = 1        -> null logit -9,984
+  fp8 rows:  K_k = 256 (exact in e4m3, max 448), K_q = 40 (exact in bf16) -> null logit -10,240
+The KILL product has at most 3 significant bits on both sides, so it is exact at every math fidelity and after the
+kernel's fp8 -> bfp8_b tilize of K (each 16-column exponent block of a control row holds one non-zero value). 1.0 is
+exact in e4m3 and bfp8_b. The query stays bf16 (sparse_sdpa keeps a bf16 Q in bf16).
+So a real key scores q.k as before, the sink scores q.c_self (the query's own-key logit: the same value on every die,
+inside the attended logit range), a null key scores <= -9,984 (weight exactly 0 after exp), and the output columns are
   o[:512] = sum_local p v / D,  o[512] = u = sum_local p / D,  o[513] = w = p_sink / D   (D: the die's softmax sum).
 
 Decode / prefill attention per DSA layer (rows = query rows):
-  1. q_ext [1, 16, rows, 544] (the die's heads) -> all-gather -> [1, 64, rows, 544]: every die attends every head over
-     its own keys (sparse_sdpa, H = 64, v_dim 544, the die's pool and page table).
+  1. q_ext [1, 16, rows, KC] (the die's heads) -> all-gather -> [1, 64, rows, KC]: every die attends every head over
+     its own keys (sparse_sdpa, H = 64, v_dim 544 in both formats, the die's pool and page table).
   2. per die, in the common unit p_sink = exp(sigma - max) (sigma identical on every die): the unnormalized numerator
      T = o / w (columns :512 = sum_local p v / p_sink) and the softmax mass M = m / w (sum_local p / p_sink), with
      m = 1 - w for w < 0.5 (u + w = 1 up to rounding: no bf16 cancellation) and m = u otherwise.
@@ -50,12 +58,14 @@ import torch
 
 import ttnn
 
-from .dsa import BLOCK, IDX_WIDTH, SENTINEL_F
+from .dsa import BLOCK, IDX_WIDTH, KPOOL, SENTINEL_F
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
-KCOL = 544  # per-die cache row: 512 latent + 32 control columns
+KCOL = 544  # per-die bf16 cache row: 512 latent + 32 control columns; also the attention output width (v_dim)
+KCOL_FP8 = 576  # per-die fp8 cache row: 512 latent + 64 control columns (576 B: 64 B aligned)
 C_ONE, C_SINK, C_KILL = 512, 513, 514
-KILL = 1.0e4
+KILL = 1.0e4  # bf16 rows: key -KILL, query 1
+KILL_K8, KILL_Q8 = 256.0, 40.0  # fp8 rows: key -256 (e4m3), query 40 (bf16): null logit -10,240
 PREFIX = 32  # [sink, 31 x null] in front of every index list
 TINY = 1.0e-30
 
@@ -78,9 +88,17 @@ class ShardedDSAMixin:
         # numerator reduce-scatter payload: fp32 (default) or bf16 (GLM53_DSA_SHARD_RS=bf16: half the prefill CCL bytes)
         self.shard_rs_dtype = ttnn.bfloat16 if os.environ.get("GLM53_DSA_SHARD_RS", "fp32") == "bf16" else ttnn.float32
         self.lpt = None
+        self.pool_alias = False  # set by allocate_decode_state
+        self._layout_from_dtype()
         self._dies_map = ttnn.ShardTensorToMesh(self.mesh, dim=0)
         self.stats_on = False  # eager-only sink-weight statistics (module docstring)
         self.wstats = {"min_w": float("inf"), "zeros": 0, "count": 0, "calls": 0}
+
+    def _layout_from_dtype(self):
+        """Row format from GlmDSA.latent_dtype (set by tt/precision.py before allocate_decode_state)."""
+        self.kv_fp8 = getattr(self, "latent_dtype", ttnn.bfloat16) == ttnn.fp8_e4m3
+        self.kcol = KCOL_FP8 if self.kv_fp8 else KCOL
+        self.kill_k, self.kill_q = (KILL_K8, KILL_Q8) if self.kv_fp8 else (KILL, 1.0)
 
     # ------------------------------------------------------------------------------------------- helpers
     def _dies(self, t, dtype, layout, host=False):
@@ -90,7 +108,8 @@ class ShardedDSAMixin:
 
     def dsa_bytes_per_block(self) -> float:
         """DRAM per die per 128-token global block of this layer (the latent amortized over the dies + pool keys)."""
-        return BLOCK * KCOL * 2 / self.tp + 32 * self.ID * 2
+        self._layout_from_dtype()
+        return BLOCK * self.kcol * (1 if self.kv_fp8 else 2) / self.tp + 32 * self.ID * 2
 
     def _local_rows(self, phys: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
         """Global physical latent rows [n] -> per-die local rows [tp, n] (0xFFFFFFFF where the die does not own it)."""
@@ -121,29 +140,55 @@ class ShardedDSAMixin:
             self.dummy_block = self.NB - 1
         if self.latent is None:
             S = self.S
+            self._layout_from_dtype()
+            KC = self.kcol
             self.NBL = -(-(self.NB - 1) // self.tp)
             self.null_block, self.sink_block = self.NBL, self.NBL + 1
-            self.latent = ttnn.zeros(
-                (1, 1, (self.NBL + 2) * BLOCK, KCOL),
-                dtype=ttnn.bfloat16,
-                layout=ttnn.ROW_MAJOR_LAYOUT,
-                device=self.mesh,
-                memory_config=DRAM,
-            )
             # NULL block rows (kill column) and the SINK row
-            special = torch.zeros(BLOCK + 1, KCOL)
-            special[:BLOCK, C_KILL] = -KILL
+            special = torch.zeros(BLOCK + 1, KC)
+            special[:BLOCK, C_KILL] = -self.kill_k
             special[BLOCK, C_SINK] = 1.0
-            src = ttnn.from_torch(
-                special, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, mesh_mapper=self._rep
-            )
-            rows = torch.cat([self.null_block * BLOCK + torch.arange(BLOCK), torch.tensor([self.sink_block * BLOCK])])
-            idx = self._dev(rows.reshape(1, -1).to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
-            ttnn.scatter_rows(self.latent, src, idx)
-            ttnn.deallocate(src)
-            ttnn.deallocate(idx)
-            # replicated pool keys, global page table and open-pool state: as GlmDSA
-            self.KB = -(-self.NB * 32 // self.P_alloc)
+            if self.kv_fp8:
+                # ttnn.zeros has no fp8 path (as GlmDSA): the whole pool, special blocks included, from the host
+                full = torch.zeros(1, 1, (self.NBL + 2) * BLOCK, KC)
+                full[0, 0, self.null_block * BLOCK : self.null_block * BLOCK + BLOCK + 1] = special
+                self.latent = ttnn.from_torch(
+                    full,
+                    dtype=ttnn.fp8_e4m3,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh,
+                    memory_config=DRAM,
+                    mesh_mapper=self._rep,
+                )
+                del full
+            else:
+                self.latent = ttnn.zeros(
+                    (1, 1, (self.NBL + 2) * BLOCK, KC),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh,
+                    memory_config=DRAM,
+                )
+                src = ttnn.from_torch(
+                    special, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, mesh_mapper=self._rep
+                )
+                rows = torch.cat(
+                    [self.null_block * BLOCK + torch.arange(BLOCK), torch.tensor([self.sink_block * BLOCK])]
+                )
+                idx = self._dev(rows.reshape(1, -1).to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+                ttnn.scatter_rows(self.latent, src, idx)
+                ttnn.deallocate(src)
+                ttnn.deallocate(idx)
+            # replicated pool keys, global page table and open-pool state: as GlmDSA, except the pool-key size rule.
+            # The indexer views the pool keys as [KB, 1, P_alloc, 128], so KB = ceil(NB * 32 / P_alloc). A vLLM pool at
+            # the context cap has NB - 1 = k * MB blocks (vLLM's null block 0 included) plus the dummy block: that one
+            # extra block makes KB = k + 1, a whole extra P_alloc of pool keys (67 MB per layer at 1,048,576 tokens).
+            # Then the dummy block's POOL-KEY tile aliases vLLM's null block 0 (never a real block of a request; the
+            # dummy only absorbs padding writes and overrun reads, both masked by the indexer limit). The latent page
+            # tables (lpt) keep the dummy. Standalone pools (NB - 1 == S * T/128) never alias: block 0 is real there.
+            kb_alias = -(-(self.NB - 1) * 32 // self.P_alloc)
+            self.pool_alias = kb_alias < -(-self.NB * 32 // self.P_alloc) and self.NB - 1 > S * (self.T // BLOCK)
+            self.KB = kb_alias if self.pool_alias else -(-self.NB * 32 // self.P_alloc)
             self.pooled = ttnn.zeros(
                 (self.KB * self.P_alloc // 32, 1, 32, self.ID),
                 dtype=ttnn.bfloat16,
@@ -157,7 +202,7 @@ class ShardedDSAMixin:
                 if fits
                 else self.complete_page_table(torch.zeros(self.S, 0, dtype=torch.int32))
             )
-            self.page_table = self._dev(pt0, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
+            self.page_table = self._dev(self._pool_pt(pt0), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
             self.page_table_host = pt0
             self.lpt = self._dies(self._local_pt(pt0), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
             z = lambda: ttnn.zeros(
@@ -166,8 +211,25 @@ class ShardedDSAMixin:
             self.acc_m, self.acc_den, self.acc_num = z(), z(), z()
         return self.latent
 
+    def _pool_pt(self, full: torch.Tensor) -> torch.Tensor:
+        """The pool-key page table (device self.page_table, prefill chunk_pt): the dummy block -> block 0 when
+        pool_alias (see allocate_decode_state)."""
+        if not getattr(self, "pool_alias", False):
+            return full
+        return torch.where(full == self.dummy_block, torch.zeros_like(full), full)
+
     def set_page_table(self, pt: torch.Tensor):
         super().set_page_table(pt)
+        if self.pool_alias:
+            ttnn.copy_host_to_device_tensor(
+                ttnn.from_torch(
+                    self._pool_pt(self.page_table_host),
+                    dtype=ttnn.int32,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    mesh_mapper=self._rep,
+                ),
+                self.page_table,
+            )
         ttnn.copy_host_to_device_tensor(
             self._dies(self._local_pt(self.page_table_host), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, host=True), self.lpt
         )
@@ -180,15 +242,34 @@ class ShardedDSAMixin:
         return rb
 
     def prepare_constants(self, prefill_lengths):
+        # the indexer's pool iota [1,1,1,P_alloc] fp32 TILE (32 padded rows: 128 B per pool, 33.6 MB per layer at
+        # 1,048,576 tokens) is the same tensor in every DSA layer: one copy per mesh for all block-sharded layers
+        key = ("iota", self.P_alloc)
+        if key not in self._const_cache:
+            mesh, shared = _SHARED_CONSTS.get((id(self.mesh), key), (None, None))
+            if mesh is not self.mesh:
+                shared = self._dev(torch.arange(self.P_alloc).float().reshape(1, 1, 1, self.P_alloc))
+                _SHARED_CONSTS[(id(self.mesh), key)] = (self.mesh, shared)
+            self._const_cache[key] = shared
         super().prepare_constants(prefill_lengths)
         rank = torch.arange(self.tp, dtype=torch.float32).reshape(self.tp, 1, 1, 1)
         self._const("shard_rank", lambda: self._dies(rank, ttnn.float32, ttnn.TILE_LAYOUT))
         e = lambda col, width, dt: self._dev(
             torch.nn.functional.one_hot(torch.tensor(col), width).float().reshape(1, 1, 1, width), dt
         )
-        self._const("shard_e_one", lambda: e(C_ONE, KCOL, ttnn.bfloat16))  # cache rows: + the ONE column
-        self._const("shard_e_sink", lambda: e(C_SINK - 512, 32, ttnn.bfloat16))  # query control columns
-        self._const("shard_e_kill", lambda: e(C_KILL - 512, 32, ttnn.bfloat16))
+        self._layout_from_dtype()
+        ctl = self.kcol - self.R
+        self._const("shard_e_one", lambda: e(C_ONE, self.kcol, ttnn.bfloat16))  # cache rows: + the ONE column
+        self._const("shard_e_sink", lambda: e(C_SINK - 512, ctl, ttnn.bfloat16))  # query control columns
+        self._const(
+            "shard_e_kill",
+            lambda: self._dev(
+                (self.kill_q * torch.nn.functional.one_hot(torch.tensor(C_KILL - 512), ctl).float()).reshape(
+                    1, 1, 1, ctl
+                ),
+                ttnn.bfloat16,
+            ),
+        )
         self._const("shard_e0", lambda: e(0, 32, ttnn.float32))
         for rows in {self.S} | {self._shard_block_rows(n) for n in prefill_lengths}:
             pre = torch.empty(1, 1, rows, PREFIX)
@@ -211,6 +292,16 @@ class ShardedDSAMixin:
             inp["row_idx"] = self._dies(
                 self._local_rows(phys, valid), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, host=host or self._host_mode()
             )
+            if self.pool_alias:  # the chunk's pool-key blocks through the aliased pool-key table
+                b0, nb = start // KPOOL // 32, n // KPOOL // 32
+                cpt = self._pool_pt(self.page_table_host[slot : slot + 1, b0 : b0 + nb].contiguous())
+                if host or self._host_mode():
+                    inp["chunk_pt"] = ttnn.from_torch(
+                        cpt, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self._rep
+                    )
+                else:
+                    ttnn.deallocate(inp["chunk_pt"])
+                    inp["chunk_pt"] = self._dev(cpt, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
         return inp
 
     def _decode_local_rows(self, positions) -> torch.Tensor:
@@ -247,13 +338,17 @@ class ShardedDSAMixin:
 
     # ------------------------------------------------------------------------------------------ writes
     def _write_latent(self, c, rows: int, row_idx):
-        """c [1,1,rows,512] bf16 TILE -> [rows, 544] (ONE column set) -> the owner die's rows (others skip)."""
-        cp = ttnn.pad(c, [(0, 0), (0, 0), (0, 0), (0, KCOL - self.R)], 0.0)
+        """c [1,1,rows,512] bf16 TILE -> [rows, KC] (ONE column set) -> the owner die's rows (others skip)."""
+        cp = ttnn.pad(c, [(0, 0), (0, 0), (0, 0), (0, self.kcol - self.R)], 0.0)
         cx = ttnn.add(cp, self._const("shard_e_one"), memory_config=DRAM)
         ttnn.deallocate(cp)
         c_rm = ttnn.to_layout(cx, ttnn.ROW_MAJOR_LAYOUT)
         ttnn.deallocate(cx)
-        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (rows, KCOL)), row_idx)
+        if self.latent.dtype != c_rm.dtype:  # fp8 pool: row-major cast (as GlmDSA._write_latent)
+            c8 = ttnn.typecast(c_rm, self.latent.dtype)
+            ttnn.deallocate(c_rm)
+            c_rm = c8
+        ttnn.scatter_rows(self.latent, ttnn.reshape(c_rm, (rows, self.kcol)), row_idx)
         ttnn.deallocate(c_rm)
 
     # --------------------------------------------------------------------------------------- attention
@@ -278,23 +373,23 @@ class ShardedDSAMixin:
         return out
 
     def _shard_attend(self, q_abs, index_f32, cache_batch_idx, c, rows: int):
-        H, tp, R = int(q_abs.shape[1]), self.tp, self.R
-        # 1. query control columns [0, q.c_self, 1, 0 ...] and the all-gather of every head
+        H, tp, R, KC = int(q_abs.shape[1]), self.tp, self.R, self.kcol
+        # 1. query control columns [0, q.c_self, K_q, 0 ...] and the all-gather of every head
         prod = ttnn.multiply(q_abs, c, memory_config=DRAM)  # c broadcast over the heads
         sd = ttnn.sum(prod, dim=-1, keepdim=True, memory_config=DRAM)  # [1,H,rows,1] raw own-key logit
         ttnn.deallocate(prod)
-        ts = ttnn.multiply(sd, self._const("shard_e_sink"), memory_config=DRAM)  # [1,H,rows,32]
+        ts = ttnn.multiply(sd, self._const("shard_e_sink"), memory_config=DRAM)  # [1,H,rows,KC-512]
         ttnn.deallocate(sd)
         tail = ttnn.add(ts, self._const("shard_e_kill"), memory_config=DRAM)
         ttnn.deallocate(ts)
-        qx = ttnn.concat([q_abs, tail], dim=-1, memory_config=DRAM)  # [1,H,rows,544]
+        qx = ttnn.concat([q_abs, tail], dim=-1, memory_config=DRAM)  # [1,H,rows,KC]
         ttnn.deallocate(tail)
-        qx2 = ttnn.reshape(qx, (1, 1, H * rows, KCOL))
-        qg = self.sccl.all_gather(qx2, dim=1, dtype=ttnn.bfloat16, decode=False)  # [1,tp,H*rows,544]
+        qx2 = ttnn.reshape(qx, (1, 1, H * rows, KC))
+        qg = self.sccl.all_gather(qx2, dim=1, dtype=ttnn.bfloat16, decode=False)  # [1,tp,H*rows,KC]
         ttnn.deallocate(qx)  # (qx2 is a view of it or a temporary)
         q_rm0 = ttnn.to_layout(qg, ttnn.ROW_MAJOR_LAYOUT, memory_config=DRAM)
         self.sccl.release(qg)
-        q_rm = ttnn.reshape(q_rm0, (1, tp * H, rows, KCOL))
+        q_rm = ttnn.reshape(q_rm0, (1, tp * H, rows, KC))
         # 2. index list with the [sink, null...] prefix; attention over this die's keys
         ix = ttnn.concat([self._const(("shard_prefix", rows)), index_f32], dim=-1, memory_config=DRAM)
         idx = ttnn.to_layout(ttnn.typecast(ix, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT)
@@ -303,8 +398,8 @@ class ShardedDSAMixin:
             q_rm,
             self.latent,
             idx,
-            KCOL,
-            kv_format=ttnn.SparseKVFormat.BF16,
+            KCOL,  # v_dim: latent + ONE / SINK (+ KILL) columns, both row formats
+            kv_format=ttnn.SparseKVFormat.FP8_E4M3 if self.kv_fp8 else ttnn.SparseKVFormat.BF16,
             scale=self.scale,
             k_chunk_size=32,
             compute_kernel_config=self.sdpa_ckc,
@@ -376,6 +471,7 @@ class ShardedDSAMixin:
 
 
 _CLASSES = {}
+_SHARED_CONSTS = {}  # (id(mesh), key) -> (mesh, device constant shared by every block-sharded DSA layer of the mesh)
 
 
 def install_dsa_shard(dsa, ccl):

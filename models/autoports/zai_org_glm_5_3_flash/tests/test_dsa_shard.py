@@ -13,6 +13,9 @@ token / sequence whose attention output passes and whose layer update does not i
 (a ~1e-4 relative change of the FFN input flips the 8th expert of a near-tie token: tests/test_functional_decoder.py
 NEAR_TIE; doc/multichip_decoder/README.md, diagnosis of the first A/B run), at most max(2, 10 %) of the compared keys.
 Also printed: wall time of the prefill per user and of a traced decode replay (one layer; host sync per step).
+The latent dtype follows GLM53_PRECISION (default "none": bf16). With an fp8 kv_latent_dtype policy (stage 8 combo_a_kv,
+doc/datatype_sweep/selected_precision_config.json) both builds use the fp8 e4m3 latent: replicated 512-wide fp8 rows vs
+the block-sharded 576-wide fp8 rows (tt/dsa_shard.py).
 """
 
 from __future__ import annotations
@@ -206,7 +209,9 @@ def _run(mesh, rd, shard, batch, max_context, users, perm_seed):
     times["decode_replay_us"] = (time.time() - t0) / TIMED_REPLAYS * 1e6
     runner.release()
     a = dec.attn
-    times["latent_bytes_per_die"] = int(a.latent.shape[-2]) * int(a.latent.shape[-1]) * 2
+    times["latent_bytes_per_die"] = (
+        int(a.latent.shape[-2]) * int(a.latent.shape[-1]) * (1 if a.latent.dtype == ttnn.fp8_e4m3 else 2)
+    )
     del runner, dec, tap
     return out, times
 

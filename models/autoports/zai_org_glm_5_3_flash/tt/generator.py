@@ -72,7 +72,8 @@ def _budget() -> dict:
     lat = _latent_dtype()
     lat_bytes = 1 if lat == "fp8_e4m3" else 2
     blk_rep = DSA_LAYERS * BLOCK_TOKENS * (LATENT * lat_bytes + POOL_KEY * 2 // 4)
-    blk_shard = DSA_LAYERS * (BLOCK_TOKENS * 544 * 2 // 4 + 32 * POOL_KEY * 2)  # tt/dsa_shard.py (bf16 latent only)
+    # tt/dsa_shard.py: bf16 rows 544 x 2 B, fp8 rows 576 x 1 B, over the 4 dies; pool keys replicated
+    blk_shard = DSA_LAYERS * (BLOCK_TOKENS * (576 if lat_bytes == 1 else 544 * 2) // 4 + 32 * POOL_KEY * 2)
     data = _profiles_budget()
     if data is not None:
         b = data["budget"]
@@ -88,7 +89,7 @@ def _budget() -> dict:
         "free_after_load_bytes": int(os.environ.get("GLM53_BUDGET_FREE_BYTES", free)),
         "kda_bytes_per_slot": kda,
         "reserve_bytes": reserve,
-        "block_bytes": {"replicated": blk_rep, **({"sharded": blk_shard} if lat_bytes == 2 else {})},
+        "block_bytes": {"replicated": blk_rep, "sharded": blk_shard},
         "latent_dtype": lat,
         "source": src,
     }
@@ -150,7 +151,9 @@ def plan_context(S: int, T: int | None = None, layout: str | None = None, servin
         if layout is not None:
             T = caps[layout]
         else:
-            T = caps["replicated"] if caps["replicated"] >= 8192 else max(caps.values())
+            # fp8 latent: the replicated layout whenever it fits (the default set before the fp8 sharded layout)
+            fp8_rep = BUDGET["latent_dtype"] == "fp8_e4m3" and caps["replicated"] > 0
+            T = caps["replicated"] if caps["replicated"] >= 8192 or fp8_rep else max(caps.values())
         if T <= 0:
             raise ValueError(f"{S} slots do not fit in device DRAM in any DSA layout (budget {BUDGET})")
     T = int(T)

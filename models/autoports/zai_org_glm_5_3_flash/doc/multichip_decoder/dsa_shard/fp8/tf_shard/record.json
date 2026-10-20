@@ -1,0 +1,2631 @@
+{
+  "id": "dsa1m_shard_fp8",
+  "args": {
+    "id": "dsa1m_shard_fp8",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,extra,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/dsa1m_snap2/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/dsa_shard/fp8/tf_shard",
+    "extra_refs": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "checks_dir": null,
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/dsa_shard/fp8/tf_shard/record.json"
+  },
+  "precision_env": "",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-20T20:07:47Z",
+  "argv": [
+    "/home/raahem/glm53-flash-bringup/dsa1m_snap2/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py",
+    "--id",
+    "dsa1m_shard_fp8",
+    "--seq-len",
+    "16384",
+    "--do",
+    "policy,ready,extra,ttft,decode",
+    "--prompts",
+    "128,161,2048",
+    "--steps",
+    "30",
+    "--extra-refs",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "--report-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/dsa_shard/fp8/tf_shard",
+    "--out",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/multichip_decoder/dsa_shard/fp8/tf_shard/record.json"
+  ],
+  "env": {
+    "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+    "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+    "GLM53_DSA_SHARD": "1",
+    "GLM53_TP": "4",
+    "MESH_DEVICE": "P300x2"
+  },
+  "script": "",
+  "cwd": "/home/raahem/glm53-flash-bringup/dsa1m_snap2",
+  "base_commit": "eb92932986b9135d1ac820055a9ec59f7265d1f4",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/dsa1m_snap2/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "b6d033397b4b",
+      "dsa.py": "b721bd51cf2a",
+      "dsa_shard.py": "5cee41a7a1cf",
+      "functional_decoder.py": "e6b204abc327",
+      "fused_decoder.py": "9950ff43360f",
+      "generator.py": "0538ee28968a",
+      "generator_vllm.py": "6714e98bd0ca",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "ee8d91a079d0",
+      "moe.py": "6e6482118b1b",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "cb2026a5d2e7",
+      "multichip_decoder.py": "6a83d8937bce",
+      "optimized_decoder.py": "3bda6fd3efee",
+      "precision.py": "0681dd4cf6b4",
+      "serving_profiles.py": "efc886f97066",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "07b7a1bed270"
+    },
+    "md5_map_digest": "4e96cd66e52d"
+  },
+  "build_s": 121.13235902786255,
+  "precision": {
+    "id": "combo_a_kv_dense4_g4",
+    "requant": {
+      "kda_in": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "kda_out": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "dsa_proj": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "shared_expert": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "lm_head": {
+        "dtype": "bfp4"
+      },
+      "dense_mlp": {
+        "dtype": "bfp4",
+        "layers": [
+          1,
+          2
+        ]
+      }
+    },
+    "fidelity": {
+      "kda_in": "LoFi",
+      "kda_out": "LoFi",
+      "dsa_proj": "LoFi",
+      "dense_mlp": "LoFi",
+      "shared_expert": "LoFi",
+      "lm_head": "LoFi"
+    },
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "fp8_e4m3",
+    "decode_specs": {
+      "kda_in": {
+        "spec": "1d:c29:ib4",
+        "layers": "inner"
+      },
+      "kda_out": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "dsa_o": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "dsa_qb": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "pack_a_spec": {
+        "spec": "1d:c16:ib32",
+        "layers": "inner"
+      },
+      "shared_gu": {
+        "spec": "1d:c16:ib64",
+        "layers": "inner"
+      },
+      "shared_dn": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "lm_head": {
+        "spec": "1d:c110:ib4"
+      },
+      "mlp_gu": {
+        "spec": "1d:c16:ib8",
+        "layers": [
+          1,
+          2
+        ]
+      },
+      "mlp_dn": {
+        "spec": "1d:c16:ib16",
+        "layers": [
+          1,
+          2
+        ]
+      }
+    },
+    "source": "/home/raahem/glm53-flash-bringup/dsa1m_snap2/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json",
+    "applied": [
+      [
+        "model",
+        "lm_head",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "model",
+        "lm_head",
+        "fidelity MathFidelity.LoFi"
+      ],
+      [
+        "model",
+        "lm_head",
+        "decode spec 1d:c110:ib4"
+      ],
+      [
+        "0",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "dense_mlp",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "1",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "1",
+        "spec:mlp_gu",
+        "1d:c16:ib8"
+      ],
+      [
+        "1",
+        "spec:mlp_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "2",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "dense_mlp",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "2",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "2",
+        "spec:mlp_gu",
+        "1d:c16:ib8"
+      ],
+      [
+        "2",
+        "spec:mlp_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "3",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "3",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "3",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "4",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "4",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "5",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "5",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "5",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "5",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "6",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "6",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "6",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "6",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "7",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "7",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "7",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "7",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "7",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "7",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "8",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "8",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "8",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "8",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "9",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "9",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "9",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "9",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "10",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "10",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "10",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "10",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "11",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "11",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "11",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "11",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "11",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "11",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "12",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "12",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "12",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "12",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "13",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "13",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "13",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "13",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "14",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "14",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "14",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "14",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "15",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "15",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "15",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "15",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "15",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "15",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "16",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "16",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "16",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "16",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "17",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "17",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "17",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "17",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "18",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "18",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "18",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "18",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "19",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "19",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "19",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "19",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "19",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "19",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "20",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "20",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "20",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "20",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "21",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "21",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "21",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "21",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "22",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "22",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "22",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "22",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "23",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "23",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "23",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "23",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "23",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "23",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "24",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "24",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "24",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "24",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "25",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "25",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "25",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "25",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "26",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "26",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "26",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "26",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "27",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "27",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "27",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "27",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "27",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "27",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "28",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "28",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "28",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "28",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "29",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "29",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "29",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "29",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "30",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "30",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "30",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "30",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "31",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "31",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "31",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "31",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "31",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "31",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "32",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "32",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "32",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "32",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "33",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "33",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "33",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "33",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "34",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "34",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "34",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "34",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "35",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "35",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "35",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "35",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "35",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "35",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "36",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "36",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "36",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "36",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "37",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "37",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "37",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "37",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "38",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "38",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "38",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "38",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "39",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "39",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "39",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "39",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "39",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "39",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "40",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "40",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "40",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "40",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "41",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "41",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "41",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "41",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "42",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "42",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "42",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "42",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "43",
+        "kv_latent",
+        "fp8_e4m3 (dsa_shard)"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "43",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "43",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "43",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "43",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "43",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "44",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "44",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 916,
+    "stored": 2
+  },
+  "dram_alloc_per_bank": 3896306880,
+  "dram_free_per_bank": 367645888,
+  "dram_largest_free_block_per_bank": 367080192,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT4_B",
+      "fidelity": "MathFidelity.LoFi"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 1,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT4_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT4_B",
+        "dsa_q_b": "DataType.BFLOAT4_B",
+        "dsa_o": "DataType.BFLOAT4_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.FP8_E4M3 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT4_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 44,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.628566935192794,
+      "e2e_t/s/u": 17.766511645219463,
+      "ttft_ms": 407.84719912335277,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.220691792899743,
+      "decode_t/s/u": 18.963004124212468
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.92,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 92,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "readiness_trace_replays_expected": 198,
+  "trace_verified": true,
+  "extra_refs": {
+    "readiness_aime24_chat_p1": {
+      "teacher_forcing": [
+        {
+          "top1": 0.95,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 95,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.627605866175145,
+          "e2e_t/s/u": 17.76954576741991,
+          "ttft_ms": 410.43243114836514,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.217148978030309,
+          "decode_t/s/u": 18.97588135146116
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.95,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 95,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    },
+    "readiness_aime24_chat_p2": {
+      "teacher_forcing": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.613443263107911,
+          "e2e_t/s/u": 17.814377969616192,
+          "ttft_ms": 403.702185023576,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.209711322095245,
+          "decode_t/s/u": 19.00297231060091
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 2963052544,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 207.96200796030462,
+          "total_ms": 227.97320480458438
+        },
+        "warm": {
+          "dispatch_ms": 206.1839448288083,
+          "total_ms": 226.29833896644413
+        },
+        "host_logits_ms": 237.12864611297846,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 344.07369582913816,
+          "total_ms": 374.1297509986907
+        },
+        "warm": {
+          "dispatch_ms": 344.025423983112,
+          "total_ms": 374.0638350136578
+        },
+        "host_logits_ms": 388.26713897287846,
+        "first_token": 291
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 946.3119490537792,
+          "total_ms": 1022.8672870434821
+        },
+        "warm": {
+          "dispatch_ms": 947.5539589766413,
+          "total_ms": 1023.8360660150647
+        },
+        "host_logits_ms": 1037.0626549702138,
+        "first_token": 64
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 52.42548290019234,
+      "model_enqueue_ms": 0.002009499197204908,
+      "sampler_ms": 0.3908712339277069,
+      "tokenout_ms": 52.82085133561244,
+      "generate_ms": 52.95697333446393,
+      "generate_tsu": 18.88325440512305
+    }
+  }
+}
