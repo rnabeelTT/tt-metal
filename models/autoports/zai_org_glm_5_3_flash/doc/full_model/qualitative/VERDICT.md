@@ -45,7 +45,7 @@ answers end with `<|user|>` (154827), which is one of the generation_config eos 
 
 The HF control stops at 128 tokens, so two TT oddities had no control. `tools/hf_full_ref.py --mode score-trajectory`
 (CPU, unmodified HF `Glm5NextTextModel` on the same E192 checkpoint) teacher-forces HF over the TT token ids and ranks
-each emitted token (`hf_scores_tt_q1.json`, `hf_scores_tt_q5.json`; logs `~/glm53-flash-bringup/logs/s67r/hfscore_s6_q{1,5}.log`):
+each emitted token (`hf_scores_tt_q1.json.gz`, `hf_scores_tt_q5.json`; logs `~/glm53-flash-bringup/logs/s67r/hfscore_s6_q{1,5}.log`):
 
 | Prompt | Tokens scored | HF top-1 agreement | HF top-5 agreement | Window |
 |---|---|---|---|---|
