@@ -56,9 +56,29 @@ def _extra_reserve_bytes() -> int:
     return int(float(os.environ.get("GLM53_VLLM_EXTRA_RESERVE_MIB", "0")) * 2**20)
 
 
+def serving_layout(data: dict | None = None) -> str:
+    """DSA layout of this server process (serving_profiles.layout_from_env: GLM53_DSA_SHARD=1 -> the sharded layout of
+    the p300x2-1m profile, else the default replicated layout)."""
+    return serving_profiles.layout_from_env(data if data is not None else _profiles())
+
+
+def apply_layout_env(data: dict, layout: str) -> dict:
+    """Set the process settings the layout was measured with (serving_profiles.json layouts.<name>.env) where the
+    launcher did not set them; warn on a different explicit value (the measured budget may not hold then)."""
+    env = serving_profiles.layout_env(data, layout)
+    for k, v in env.items():
+        cur = os.environ.get(k)
+        if cur is None:
+            os.environ[k] = str(v)
+        elif str(cur) != str(v):
+            logger.warning(f"{k}={cur} differs from the {layout} layout's measured setting {v} (serving_profiles.json)")
+    return env
+
+
 def max_model_len_for(max_num_seqs: int) -> int:
-    """Largest max_model_len the DSA pool allows at this max_num_seqs (serving_profiles.json)."""
-    return serving_profiles.max_model_len_for(_profiles(), int(max_num_seqs), _extra_reserve_bytes())
+    """Largest max_model_len the DSA pool of this process's layout allows at this max_num_seqs."""
+    data = _profiles()
+    return serving_profiles.max_model_len_for(data, int(max_num_seqs), _extra_reserve_bytes(), serving_layout(data))
 
 
 def _contract() -> dict:
@@ -314,15 +334,16 @@ class Glm5NextForConditionalGeneration:
                 f"GLM-5.3-Flash serves one (1,{TP}) mesh; got {num_devices} devices, DP {tt_data_parallel}"
             )
         data = _profiles()
+        lay = serving_layout(data)
         extra = _extra_reserve_bytes()
         if max_model_len is not None:
-            serving_profiles.check_fit(data, B, int(max_model_len), extra)
-        nb = serving_profiles.pool_blocks(data, B, extra)
-        tokens = serving_profiles.max_tokens_all_users(data, B, extra)
-        b = data["budget"]
+            serving_profiles.check_fit(data, B, int(max_model_len), extra, lay)
+        nb = serving_profiles.pool_blocks(data, B, extra, lay)
+        tokens = serving_profiles.max_tokens_all_users(data, B, extra, lay)
+        b = serving_profiles.layout_budget(data, lay)
         logger.info(
-            f"GLM53 KV pool: {B} slots -> {nb} blocks = {nb * BLOCK_SIZE} tokens per die incl. the dummy block "
-            f"({serving_profiles.pool_source(data, B)}; {b['dsa_bytes_per_block']} B per block, "
+            f"GLM53 KV pool ({lay} DSA layout): {B} slots -> {nb} blocks = {nb * BLOCK_SIZE} tokens per die incl. the "
+            f"dummy block ({serving_profiles.pool_source(data, B, lay)}; {b['dsa_bytes_per_block']} B per block, "
             f"{b['kda_bytes_per_slot'] / 2**20:.1f} MiB KDA state per slot); max_tokens_all_users {tokens}"
         )
         return max(tokens, BLOCK_SIZE)
@@ -339,12 +360,14 @@ class Glm5NextForConditionalGeneration:
         if tuple(mesh_device.shape) != (1, TP):
             raise ValueError(f"{cls.__name__} needs a (1,{TP}) mesh (P300x2 / P150x4); got {tuple(mesh_device.shape)}")
         data = _profiles()
+        layout = serving_layout(data)
+        apply_layout_env(data, layout)
         B = int(max_batch_size)
         max_seq_len = int(max_seq_len or max_model_len_for(B))
         _check_context(max_seq_len, data)
         reduced = bool(os.environ.get("GLM53_LAYERS"))  # inner-loop target: the full-model budget does not apply
         if not reduced:
-            serving_profiles.check_fit(data, B, max_seq_len, _extra_reserve_bytes())
+            serving_profiles.check_fit(data, B, max_seq_len, _extra_reserve_bytes(), layout)
         tr = os.environ.get("GLM53_TRACE_REGION")
         if tr and int(tr) != int(data["trace_region_bytes"]):
             logger.warning(
@@ -361,13 +384,13 @@ class Glm5NextForConditionalGeneration:
         self.max_model_len = max_seq_len
         # the model's max_context: a multiple of 128 and of the largest prefill chunk that fits it (functional_decoder)
         self.T = serving_profiles.model_context(max_seq_len)
-        self.layout = data["dsa_layout"]
+        self.layout = layout
         t0 = time.time()
         # defer_caches: weights + KDA slot state now; DSA pools in allocate_kv_cache (vLLM's num_blocks), warm-up and
         # trace capture in the plugin's warm-up phases. The DRAM check is serving_profiles.check_fit above (measured
         # data per slot count); budget_check=False skips the generator's own budget (tt/generator._budget: the same
         # data file, but with the standalone GLM53_DRAM_RESERVE_MIB floor of 1,200 MiB instead of the measured
-        # 1,024 MiB serving workspace). The layout is the one the profiles were measured with.
+        # serving workspace). The layout is the one of this process (GLM53_DSA_SHARD, serving_layout).
         self._gen = Glm53Generator(
             mesh_device,
             max_batch_size=B,
@@ -403,7 +426,7 @@ class Glm5NextForConditionalGeneration:
         num_blocks, _, block, _ = (int(d) for d in kv_cache_shape)
         assert block == BLOCK_SIZE, f"--block-size must be {BLOCK_SIZE} (DSA page block); got {block}"
         if not os.environ.get("GLM53_LAYERS"):
-            nb = serving_profiles.pool_blocks(_profiles(), self.B, _extra_reserve_bytes())
+            nb = serving_profiles.pool_blocks(_profiles(), self.B, _extra_reserve_bytes(), self.layout)
             if num_blocks + 1 > nb:
                 logger.warning(
                     f"vLLM asks for {num_blocks} + 1 blocks, serving_profiles.json allows {nb} at {self.B} slots"

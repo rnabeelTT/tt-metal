@@ -94,6 +94,13 @@ serve_profiles:
     mesh_device: P300x2
     max_num_seqs: 1
     max_model_len: 325632
+  - name: p300x2-1m
+    description: Two p300 boards, one sequence, the advertised 1,048,576-token context with the block-sharded fp8 DSA cache (slower decode than p300x2-long). 1 x 1048576 tokens (ESTIMATE, pending the G9 capacity probe).
+    hardware: p300x2
+    mesh_device: P300x2
+    max_num_seqs: 1
+    max_model_len: 1048576
+    env: {GLM53_DSA_SHARD: "1", GLM53_MOE_SORTED_ROWS: "512", GLM53_DSA_INDEX_BLOCK_MB: "32"}
   - name: p300x2-wide
     description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 151552 tokens (ESTIMATE, pending the G9 capacity probe).
     hardware: p300x2
@@ -150,6 +157,7 @@ card:
     <!-- BEGIN profiles: serving_profiles.json -->
     - `p300x2` (default): 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
     - `p300x2-long`: 1 sequence, 325,632-token context, DSA pool 325,760 tokens shared by all sequences.
+    - `p300x2-1m`: 1 sequence, 1,048,576-token context, DSA pool 1,097,216 tokens shared by all sequences (sharded DSA cache) [estimate, pending measurement].
     - `p300x2-wide`: 32 sequences, 151,552-token context, DSA pool 157,056 tokens shared by all sequences [estimate, pending measurement].
     - `p150x4`: 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
     <!-- END profiles: serving_profiles.json -->

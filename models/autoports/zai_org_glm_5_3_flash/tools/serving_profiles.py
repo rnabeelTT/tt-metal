@@ -4,13 +4,14 @@
 
   show                         profiles, pool blocks per die, largest max_model_len, number source
   ingest CAPACITY_JSON [-w]    record a COMPLETED capacity probe (tools/memory_probe.py capacity --slots S) as
-                               measured[S]; a 1-slot probe also updates budget.free_after_load_bytes / dsa_bytes_per_block
+                               measured[S] of its DSA layout (dsa_shard -> layouts.sharded); a 1-slot probe also
+                               updates that layout's budget free_after_load_bytes / dsa_bytes_per_block
   refresh [-w]                 every profile's max_model_len = the largest that fits (max_model_len_cap limits it),
                                status = measured when its slot count is measured
   render-yaml [-w]             write the profile numbers into tt-model.yaml (marked lines + the generated blocks)
   check                        data file consistent, tt-model.yaml in sync (exit 1 otherwise)
   get KEY [PROFILE]            one value for shell scripts: max_num_seqs, max_model_len, trace_region_bytes,
-                               weights_revision, supported_context
+                               weights_revision, supported_context, dsa_layout, reserve_mib, env (K=V per line)
 
 Without -w / --write the commands print what they would change. Rule and readers: tt/serving_profiles.py.
 """
@@ -41,15 +42,16 @@ def _rel(p: Path) -> str:
 # ------------------------------------------------------------------------------------------------ commands
 def cmd_show(data, _a):
     print(
-        f"{sp.path()}  default {data['default_profile']}  layout {data['dsa_layout']}  precision {data['precision']['id']}"
+        f"{sp.path()}  default {data['default_profile']}  layouts {sp.layouts(data)}  precision {data['precision']['id']}"
     )
     print(f"budget: {data['budget']['status'][:110]}")
     print(f"{'profile':14} {'seqs':>4} {'max_model_len':>13} {'largest':>9} {'pool blk':>8} {'status':9} source")
     for p in sp.profiles(data):
-        S = int(p["max_num_seqs"])
+        S, lay = int(p["max_num_seqs"]), sp.profile_layout(data, p)
         print(
-            f"{p['name']:14} {S:4d} {int(p['max_model_len']):13,d} {sp.max_model_len_for(data, S):9,d} "
-            f"{sp.pool_blocks(data, S):8d} {p.get('status', '?'):9} {sp.pool_source(data, S)[:60]}"
+            f"{p['name']:14} {S:4d} {int(p['max_model_len']):13,d} {sp.max_model_len_for(data, S, layout=lay):9,d} "
+            f"{sp.pool_blocks(data, S, layout=lay):8d} {p.get('status', '?'):9} {lay[:4]} "
+            f"{sp.pool_source(data, S, lay)[:56]}"
         )
     print(f"supported context (1 slot): {sp.supported_context(data):,d}")
     for e in sp.validate(data):
@@ -70,6 +72,13 @@ def cmd_ingest(data, a):
             f"probe trace region {c['trace_region_bytes']} != serving trace_region_bytes {data['trace_region_bytes']}"
         )
     S = int(c["S"])
+    lay = "sharded" if c.get("dsa_shard") else sp.default_layout(data)
+    if lay not in sp.layouts(data):
+        sys.exit(f"{a.capacity_json}: DSA layout {lay!r} has no entry in serving_profiles.json layouts")
+    ws = c.get("workspace_mib")
+    reserve_mib = int(sp.layout_budget(data, lay)["reserve_bytes"]) / 2**20
+    if ws is not None and abs(float(ws) - reserve_mib) > 0.5:
+        print(f"WARNING: probe workspace {ws} MiB != {lay} layout reserve {reserve_mib:.0f} MiB")
     peaks = [int(v.get("peak_over_entry_bytes", 0)) for v in (c.get("prefill_peaks") or {}).values()]
     free_peak = int(c["after_capture"]["free"]) - (max(peaks) if peaks else 0)
     rec = {
@@ -82,13 +91,20 @@ def cmd_ingest(data, a):
         "free_at_prefill_peak_bytes": free_peak,
         "trace_allocated_bytes": int(c["after_capture"].get("trace_allocated", 0)),
         "free_after_load_bytes": int(c["free_after_load_bytes"]),
+        "workspace_mib": float(ws) if ws is not None else None,
         "evidence": _rel(Path(a.capacity_json)),
         "date": a.date or datetime.date.today().isoformat(),
     }
-    print(f"measured[{S}] = {json.dumps(rec)}")
-    data.setdefault("measured", {})[str(S)] = rec
-    if S == 1:
+    print(f"{lay} measured[{S}] = {json.dumps(rec)}")
+    if lay == sp.default_layout(data):
+        data.setdefault("measured", {})[str(S)] = rec
         b = data["budget"]
+    else:
+        ent = data["layouts"][lay]
+        ent.setdefault("measured", {})[str(S)] = rec
+        b = ent.setdefault("budget", {})
+        b.setdefault("evidence", {})
+    if S == 1:
         b["free_after_load_bytes"] = int(c["free_after_load_bytes"])
         b["dsa_bytes_per_block"] = int(c["dsa_bytes_per_block_all_layers"])
         b["evidence"]["free_after_load_bytes"] = f"{rec['evidence']} after_load"
@@ -103,11 +119,11 @@ def cmd_ingest(data, a):
 
 def cmd_refresh(data, a):
     for p in sp.profiles(data):
-        S = int(p["max_num_seqs"])
-        L = sp.max_model_len_for(data, S)
+        S, lay = int(p["max_num_seqs"]), sp.profile_layout(data, p)
+        L = sp.max_model_len_for(data, S, layout=lay)
         if p.get("max_model_len_cap"):
             L = min(L, int(p["max_model_len_cap"]))
-        st = "measured" if sp._measured(data, S) else "estimate"
+        st = "measured" if sp._measured(data, S, lay) else "estimate"
         if (int(p["max_model_len"]), p.get("status")) != (L, st):
             print(f"{p['name']}: max_model_len {p['max_model_len']} -> {L}, status {p.get('status')} -> {st}")
         p["max_model_len"], p["status"] = L, st
@@ -126,6 +142,9 @@ def _profile_yaml(p: dict, default: dict, data: dict) -> list[str]:
     if p is not default:
         out.append(f"    max_num_seqs: {p['max_num_seqs']}")
         out.append(f"    max_model_len: {p['max_model_len']}")
+    env = sp.layout_env(data, sp.profile_layout(data, p))
+    if env:  # deep-merged over serve.env by tt-model (dicts merge)
+        out.append("    env: {" + ", ".join(f'{k}: "{v}"' for k, v in env.items()) + "}")
     return out
 
 
@@ -133,11 +152,13 @@ def _card_lines(data: dict) -> list[str]:
     out = []
     for p in sp.profiles(data):
         S, L = int(p["max_num_seqs"]), int(p["max_model_len"])
+        lay = sp.profile_layout(data, p)
         tag = " (default)" if p["name"] == data["default_profile"] else ""
         est = "" if p.get("status") == "measured" else " [estimate, pending measurement]"
+        lay_txt = "" if lay == sp.default_layout(data) else f" ({lay} DSA cache)"
         out.append(
             f"- `{p['name']}`{tag}: {S} sequence{'s' if S > 1 else ''}, {L:,d}-token context, DSA pool "
-            f"{(sp.pool_blocks(data, S) - 1) * sp.BLOCK:,d} tokens shared by all sequences{est}."
+            f"{(sp.pool_blocks(data, S, layout=lay) - 1) * sp.BLOCK:,d} tokens shared by all sequences{lay_txt}{est}."
         )
     return out
 
@@ -214,6 +235,15 @@ def cmd_get(data, a):
         print(data["weights_revision"])
     elif a.key == "supported_context":
         print(sp.supported_context(data))
+    elif a.key in ("dsa_layout", "reserve_mib", "env"):
+        lay = sp.profile_layout(data, sp.profile(data, a.profile))
+        if a.key == "dsa_layout":
+            print(lay)
+        elif a.key == "reserve_mib":
+            print(int(sp.layout_budget(data, lay)["reserve_bytes"]) // 2**20)
+        else:
+            for k, v in sp.layout_env(data, lay).items():
+                print(f"{k}={v}")
     else:
         print(sp.profile(data, a.profile)[a.key])
 
@@ -249,6 +279,9 @@ def main(argv=None):
             "weights_revision",
             "supported_context",
             "mesh_device",
+            "dsa_layout",
+            "reserve_mib",
+            "env",
         ],
     )
     p.add_argument("profile", nargs="?")

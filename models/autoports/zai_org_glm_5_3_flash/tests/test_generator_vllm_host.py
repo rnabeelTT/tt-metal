@@ -100,7 +100,9 @@ def test_serving_profiles_rule(expect_error):
         # the plugin: num_blocks = ceil((max_tokens_all_users + block * S) / block); the model adds the dummy block
         nb = -(-(sp.max_tokens_all_users(d, S) + 128 * S) // 128)
         assert nb + 1 == sp.pool_blocks(d, S)
-    assert sp.supported_context(d) == sp.max_model_len_for(d, 1) == 364544
+    assert sp.max_model_len_for(d, 1) == 364544
+    d["layouts"] = {}  # one layout: the supported context is its 1-slot limit
+    assert sp.supported_context(d) == 364544
     with expect_error(ValueError, "largest max_model_len"):
         sp.check_fit(d, 32, sp.max_model_len_for(d, 32) + 2048)
 
@@ -199,6 +201,89 @@ def test_tool_ingest_refresh(monkeypatch, tmp_path, expect_error):
         tool.main(["ingest", str(cp)])
 
 
+def test_dsa_layouts_rule_and_env(monkeypatch, expect_error):
+    """Per-layout budget (merged over the top-level one), the advertised-context cap, the process layout from
+    GLM53_DSA_SHARD, the layout env in the yaml render, and the adapter applying the layout env."""
+    from models.autoports.zai_org_glm_5_3_flash.tools import serving_profiles as tool
+
+    d = sp.load()
+    d["measured"], d["layouts"]["sharded"]["measured"] = {}, {}
+    b, sb = d["budget"], d["layouts"]["sharded"]["budget"]
+    # sharded pool by hand: same free DRAM after load, its own bytes per block and reserve
+    nb = (int(b["free_after_load_bytes"]) - int(sb["reserve_bytes"])) // int(sb["dsa_bytes_per_block"])
+    assert sp.pool_blocks(d, 1, layout="sharded") == nb > sp.pool_blocks(d, 1)
+    raw = sp.floor_to_granularity((nb - 2) * 128)
+    adv = sp.advertised_context(d)
+    assert adv == 1048576 and sp.max_model_len_for(d, 1, layout="sharded") == min(raw, adv)
+    assert sp.supported_context(d) == max(sp.max_model_len_for(d, 1), sp.max_model_len_for(d, 1, layout="sharded"))
+    # process layout
+    assert sp.layout_from_env(d, {}) == "replicated" and sp.layout_from_env(d, {"GLM53_DSA_SHARD": "0"}) == "replicated"
+    assert sp.layout_from_env(d, {"GLM53_DSA_SHARD": "1"}) == "sharded"
+    with expect_error(KeyError, "no DSA layout"):
+        sp.pool_blocks(d, 1, layout="nope")
+    # every profile of a non-default layout carries the layout env in tt-model.yaml (deep-merged over serve.env)
+    import yaml
+
+    m = yaml.safe_load(tool.render_yaml(d, tool.YAML.read_text()))
+    by_name = {p["name"]: p for p in m["serve_profiles"]}
+    for p in sp.profiles(d):
+        assert by_name[p["name"]].get("env", {}) == sp.layout_env(d, sp.profile_layout(d, p)), p["name"]
+    # validate: a profile above the advertised context, an unknown layout
+    bad = sp.load()
+    bad["profiles"][0] = {**bad["profiles"][0], "dsa_layout": "nope"}
+    assert any("unknown dsa_layout" in e for e in sp.validate(bad))
+    # the adapter: GLM53_DSA_SHARD=1 -> sharded layout, the measured settings fill in what the launcher did not set
+    for k in sp.layout_env(d, "sharded"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GLM53_DSA_SHARD", "1")
+    monkeypatch.setenv("GLM53_MOE_SORTED_ROWS", "1024")  # explicit: kept (warned)
+    assert gv.serving_layout(d) == "sharded"
+    gv.apply_layout_env(d, "sharded")
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "1024"
+    assert os.environ["GLM53_DSA_INDEX_BLOCK_MB"] == sp.layout_env(d, "sharded")["GLM53_DSA_INDEX_BLOCK_MB"]
+
+
+def test_tool_ingest_sharded_probe(monkeypatch, tmp_path):
+    """A capacity probe with dsa_shard=True is recorded under layouts.sharded (its budget too), not measured[S]."""
+    import json
+
+    from models.autoports.zai_org_glm_5_3_flash.tools import serving_profiles as tool
+
+    base = json.loads(sp.path().read_text())
+    base["measured"], base["layouts"]["sharded"]["measured"] = {}, {}
+    data_p = tmp_path / "serving_profiles.json"
+    data_p.write_text(json.dumps(base))
+    monkeypatch.setenv("GLM53_SERVING_PROFILES", str(data_p))
+    probe = {
+        "mode": "capacity",
+        "S": 1,
+        "max_seq_len": 1048576,
+        "workspace_mib": 600.0,
+        "dsa_shard": True,
+        "num_blocks": 8193,
+        "capped_by_max_seq_len": True,
+        "trace_region_bytes": base["trace_region_bytes"],
+        "free_after_load_bytes": 3_100_000_000,
+        "dsa_bytes_per_block_all_layers": 292_864,
+        "prompt_len": 1_048_515,
+        "copy_accuracy": 1.0,
+        "after_capture": {"free": 500_000_000, "trace_allocated": 42_000_000},
+        "after_prefill": {"free": 490_000_000},
+        "prefill_peaks": {},
+    }
+    cp = tmp_path / "capacity.json"
+    cp.write_text(json.dumps(probe))
+    tool.main(["ingest", str(cp), "-w"])
+    tool.main(["refresh", "-w"])
+    d = sp.load()
+    assert d["measured"] == {} and d["layouts"]["sharded"]["measured"]["1"]["pool_blocks"] == 8194
+    assert d["layouts"]["sharded"]["budget"]["free_after_load_bytes"] == 3_100_000_000
+    assert d["budget"]["free_after_load_bytes"] == base["budget"]["free_after_load_bytes"]
+    p = sp.profile(d, "p300x2-1m")
+    assert p["status"] == "measured" and p["max_model_len"] == 1048576 == sp.supported_context(d)
+    assert sp.profile(d, "p300x2-long")["status"] == "estimate"
+
+
 def test_selected_precision_policy_loads():
     """The policy the adapter installs (GLM53_PRECISION) parses with tt/precision.py and is the one the data names."""
     from models.autoports.zai_org_glm_5_3_flash.tt.precision import PrecisionOverrides
@@ -227,7 +312,7 @@ def test_default_precision_uses_serving_budget(monkeypatch):
     # one sizing rule: at the serving reserve, the generator accepts the data file's 1-slot value
     monkeypatch.setenv("GLM53_DRAM_RESERVE_MIB", str(int(d["budget"]["reserve_bytes"]) >> 20))
     monkeypatch.setattr(gen_mod, "BUDGET", gen_mod._budget())
-    gen_mod.plan_context(1, sp.supported_context(d), serving=True)  # must not raise
+    gen_mod.plan_context(1, sp.max_model_len_for(d, 1), serving=True)  # default (replicated) layout: must not raise
 
 
 def test_apply_precision_default(monkeypatch, expect_error):
@@ -292,11 +377,18 @@ def test_get_max_tokens_all_users(monkeypatch, expect_error):
     d = sp.load()
     cls = gv.Glm5NextForConditionalGeneration
     for p in sp.profiles(d):
-        S, L = p["max_num_seqs"], p["max_model_len"]
+        S, L, lay = p["max_num_seqs"], p["max_model_len"], sp.profile_layout(d, p)
+        # the launcher sets the profile's env (tt-model.yaml serve_profiles[].env): the layout follows GLM53_DSA_SHARD
+        monkeypatch.delenv("GLM53_DSA_SHARD", raising=False)
+        for k, v in sp.layout_env(d, lay).items():
+            monkeypatch.setenv(k, v)
+        assert gv.serving_layout(d) == lay
         t = cls.get_max_tokens_all_users(num_devices=4, max_model_len=L, max_num_seqs=S)
-        assert t == sp.max_tokens_all_users(d, S)
-        with expect_error(ValueError, "does not fit the DSA pool"):
-            cls.get_max_tokens_all_users(num_devices=4, max_model_len=sp.max_model_len_for(d, S) + 2048, max_num_seqs=S)
+        assert t == sp.max_tokens_all_users(d, S, layout=lay)
+        top = sp.floor_to_granularity((sp.pool_blocks(d, S, layout=lay) - 2 - (S - 1)) * 128)
+        with expect_error(ValueError, "DSA pool at max_num_seqs"):
+            cls.get_max_tokens_all_users(num_devices=4, max_model_len=top + 2048, max_num_seqs=S)
+    monkeypatch.delenv("GLM53_DSA_SHARD", raising=False)
     with expect_error(ValueError, "serves one"):
         cls.get_max_tokens_all_users(num_devices=8, max_num_seqs=1)
 
@@ -308,8 +400,8 @@ class FakeGenerator:
 
     def __init__(self, mesh, *, max_batch_size, max_seq_len, defer_caches=False, **kw):
         assert defer_caches
-        # the adapter does the DRAM check from serving_profiles.json and fixes the layout the profiles were sized for
-        assert kw == {"dsa_layout": sp.load()["dsa_layout"], "budget_check": False}, kw
+        # the adapter does the DRAM check from serving_profiles.json and fixes the layout of the process (GLM53_DSA_SHARD)
+        assert kw == {"dsa_layout": gv.serving_layout(), "budget_check": False}, kw
         self.S, self.T = max_batch_size, max_seq_len
         self.model = SimpleNamespace(layers=[0] * 45, sampling=object())
         self.calls = []

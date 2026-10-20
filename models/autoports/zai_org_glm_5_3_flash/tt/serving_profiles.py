@@ -11,7 +11,12 @@ the `serve` / `serve_profiles` sections of tt-model.yaml from it. Readers:
   ~/glm53-flash-bringup/scripts/09-serve.sh, 09-g9-probe.sh   (profile -> max_num_seqs, max_model_len, trace region)
   tests/test_generator_vllm_host.py
 
-Sizing rule (per die; the DSA pool is replicated on every die, the KDA state is per slot):
+DSA layouts: the top-level `dsa_layout` (replicated) uses the top-level `budget` / `measured`. Another layout (e.g.
+`sharded`: the block-sharded fp8 latent, tt/dsa_shard.py) has an entry in `layouts` with its own `budget` (merged over
+the top-level one), `measured` and `env` (the process settings the layout was measured with). A profile names its
+layout with `dsa_layout`; the vLLM adapter takes the layout of the served process from layout_from_env().
+
+Sizing rule (per die and per layout; the KDA state is per slot):
   pool_blocks(S)    = measured[S].pool_blocks if the capacity probe measured S slots, else
                       floor((free_after_load - (kda_slots(S) - 2) * kda_bytes_per_slot - reserve) / dsa_bytes_per_block)
                       (free_after_load is measured with 2 KDA slots: a 1-slot build pads KDA to 2 slots)
@@ -20,6 +25,7 @@ Sizing rule (per die; the DSA pool is replicated on every die, the KDA state is 
                       ceil(L / 128) + (S - 1) + 2 <= pool_blocks(S)
                       (one request of L tokens, one block for every other slot, vLLM's null block, the dummy block:
                       tt/generator.blocks_needed(serving=True))
+                      and L <= advertised_context (the checkpoint's max_position_embeddings)
 
 This module has no ttnn / torch import: the bundle's verify step, the scripts and the host tests import it alone.
 """
@@ -81,18 +87,76 @@ def blocks_needed(S: int, max_model_len: int) -> int:
     return math.ceil(int(max_model_len) / BLOCK) + (int(S) - 1) + 2
 
 
-def _measured(data: dict, S: int) -> dict | None:
-    m = (data.get("measured") or {}).get(str(int(S)))
+# ------------------------------------------------------------------------------------------------ layouts
+LAYOUT_ENV = "GLM53_DSA_SHARD"  # the generator's layout switch (tt/generator.plan_context, tt/multichip_decoder)
+
+
+def default_layout(data: dict) -> str:
+    return data.get("dsa_layout", "replicated")
+
+
+def layouts(data: dict) -> list[str]:
+    return [default_layout(data)] + [k for k in (data.get("layouts") or {}) if k != default_layout(data)]
+
+
+def _layout(data: dict, layout: str | None) -> dict:
+    """{budget, measured, env} of a layout; a non-default layout's budget is merged over the top-level one."""
+    layout = layout or default_layout(data)
+    if layout == default_layout(data):
+        return {"budget": data["budget"], "measured": data.get("measured") or {}, "env": {}}
+    ent = (data.get("layouts") or {}).get(layout)
+    if ent is None:
+        raise KeyError(f"no DSA layout {layout!r} in {path()} (have {layouts(data)})")
+    return {
+        "budget": {**data["budget"], **(ent.get("budget") or {})},
+        "measured": ent.get("measured") or {},
+        "env": dict(ent.get("env") or {}),
+    }
+
+
+def layout_budget(data: dict, layout: str | None = None) -> dict:
+    return _layout(data, layout)["budget"]
+
+
+def layout_env(data: dict, layout: str | None = None) -> dict:
+    """Process settings a layout was measured with ({} for the default layout)."""
+    return _layout(data, layout)["env"]
+
+
+def profile_layout(data: dict, p: dict) -> str:
+    return p.get("dsa_layout") or default_layout(data)
+
+
+def layout_from_env(data: dict, environ=None) -> str:
+    """The layout of this process: GLM53_DSA_SHARD=1 -> the non-default layout that sets it (sharded), =0 / unset ->
+    the default layout."""
+    environ = os.environ if environ is None else environ
+    v = str(environ.get(LAYOUT_ENV, "")).strip().lower()
+    if v in ("1", "true", "on", "yes"):
+        for name in layouts(data):
+            if str(layout_env(data, name).get(LAYOUT_ENV, "")).strip() == "1":
+                return name
+        raise KeyError(f"{LAYOUT_ENV}={v} but no layout of {path()} sets it")
+    return default_layout(data)
+
+
+def advertised_context(data: dict) -> int | None:
+    v = data.get("advertised_context")
+    return int(v) if v else None
+
+
+def _measured(data: dict, S: int, layout: str | None = None) -> dict | None:
+    m = _layout(data, layout)["measured"].get(str(int(S)))
     return m if m and m.get("pool_blocks") else None
 
 
-def pool_blocks(data: dict, S: int, extra_reserve_bytes: int = 0) -> int:
+def pool_blocks(data: dict, S: int, extra_reserve_bytes: int = 0, layout: str | None = None) -> int:
     """DSA pool blocks per die (incl. the model's dummy block) at S slots."""
-    m = _measured(data, S)
+    b = layout_budget(data, layout)
+    m = _measured(data, S, layout)
     if m is not None:
-        per_block = int(data["budget"]["dsa_bytes_per_block"])
+        per_block = int(b["dsa_bytes_per_block"])
         return max(0, int(m["pool_blocks"]) - math.ceil(int(extra_reserve_bytes) / per_block))
-    b = data["budget"]
     avail = (
         int(b["free_after_load_bytes"])
         - (kda_slots(S) - 2) * int(b["kda_bytes_per_slot"])
@@ -102,35 +166,38 @@ def pool_blocks(data: dict, S: int, extra_reserve_bytes: int = 0) -> int:
     return max(0, avail // int(b["dsa_bytes_per_block"]))
 
 
-def pool_source(data: dict, S: int) -> str:
-    m = _measured(data, S)
+def pool_source(data: dict, S: int, layout: str | None = None) -> str:
+    m = _measured(data, S, layout)
     return (
         f"measured ({m.get('evidence', '?')})"
         if m is not None
-        else f"budget rule ({data['budget'].get('status', '?')})"
+        else f"budget rule ({layout_budget(data, layout).get('status', '?')})"
     )
 
 
-def max_model_len_for(data: dict, S: int, extra_reserve_bytes: int = 0) -> int:
-    """Largest max_model_len that fits the DSA pool at S slots (0 if none)."""
-    nb = pool_blocks(data, S, extra_reserve_bytes)
-    return floor_to_granularity((nb - 2 - (int(S) - 1)) * BLOCK)
+def max_model_len_for(data: dict, S: int, extra_reserve_bytes: int = 0, layout: str | None = None) -> int:
+    """Largest max_model_len that fits the DSA pool at S slots (0 if none), at most the advertised context."""
+    nb = pool_blocks(data, S, extra_reserve_bytes, layout)
+    L = floor_to_granularity((nb - 2 - (int(S) - 1)) * BLOCK)
+    adv = advertised_context(data)
+    return min(L, adv) if adv else L
 
 
-def max_tokens_all_users(data: dict, S: int, extra_reserve_bytes: int = 0) -> int:
+def max_tokens_all_users(data: dict, S: int, extra_reserve_bytes: int = 0, layout: str | None = None) -> int:
     """The value for the plugin's get_max_tokens_all_users. The plugin adds one block per user and rounds up to whole
     blocks, so its num_blocks = pool_blocks - 1; the model adds the dummy block."""
-    return (pool_blocks(data, S, extra_reserve_bytes) - 1) * BLOCK - BLOCK * int(S)
+    return (pool_blocks(data, S, extra_reserve_bytes, layout) - 1) * BLOCK - BLOCK * int(S)
 
 
-def check_fit(data: dict, S: int, max_model_len: int, extra_reserve_bytes: int = 0) -> None:
-    nb = pool_blocks(data, S, extra_reserve_bytes)
+def check_fit(data: dict, S: int, max_model_len: int, extra_reserve_bytes: int = 0, layout: str | None = None) -> None:
+    nb = pool_blocks(data, S, extra_reserve_bytes, layout)
     need = blocks_needed(S, max_model_len)
     if need > nb:
         raise ValueError(
-            f"max_model_len {max_model_len} does not fit the DSA pool at max_num_seqs {S}: needs {need} blocks of "
-            f"{BLOCK} tokens, the pool holds {nb} per die ({pool_source(data, S)}); the largest max_model_len here is "
-            f"{max_model_len_for(data, S, extra_reserve_bytes)} ({path()})"
+            f"max_model_len {max_model_len} does not fit the {layout or default_layout(data)} DSA pool at max_num_seqs "
+            f"{S}: needs {need} blocks of {BLOCK} tokens, the pool holds {nb} per die "
+            f"({pool_source(data, S, layout)}); the largest max_model_len here is "
+            f"{max_model_len_for(data, S, extra_reserve_bytes, layout)} ({path()})"
         )
 
 
@@ -149,8 +216,9 @@ def profile(data: dict, name: str | None = None) -> dict:
 
 
 def supported_context(data: dict) -> int:
-    """The context-contract value: the 1-slot limit (the largest context the DRAM allows)."""
-    return max_model_len_for(data, 1)
+    """The context-contract value: the largest 1-slot limit over the layouts (the largest context the DRAM allows,
+    at most the advertised context)."""
+    return max(max_model_len_for(data, 1, layout=lay) for lay in layouts(data))
 
 
 def validate(data: dict) -> list[str]:
@@ -166,11 +234,21 @@ def validate(data: dict) -> list[str]:
     names = [p["name"] for p in profiles(data)]
     if data.get("default_profile") not in names:
         errs.append(f"default_profile {data.get('default_profile')!r} is not a profile")
+    for name in layouts(data)[1:]:
+        if not str(layout_env(data, name).get(LAYOUT_ENV, "")).strip() == "1":
+            errs.append(f"layout {name}: env must set {LAYOUT_ENV}=1 (layout_from_env)")
+    adv = advertised_context(data)
     for p in profiles(data):
         S, L = int(p["max_num_seqs"]), int(p["max_model_len"])
-        if blocks_needed(S, L) > pool_blocks(data, S):
+        lay = profile_layout(data, p)
+        if lay not in layouts(data):
+            errs.append(f"profile {p['name']}: unknown dsa_layout {lay!r}")
+            continue
+        if blocks_needed(S, L) > pool_blocks(data, S, layout=lay):
             errs.append(
                 f"profile {p['name']}: max_model_len {L} does not fit at {S} slots "
-                f"(largest {max_model_len_for(data, S)})"
+                f"(largest {max_model_len_for(data, S, layout=lay)}, {lay} layout)"
             )
+        if adv and L > adv:
+            errs.append(f"profile {p['name']}: max_model_len {L} exceeds the advertised context {adv}")
     return errs

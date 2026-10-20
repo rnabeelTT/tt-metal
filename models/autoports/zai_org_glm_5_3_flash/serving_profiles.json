@@ -16,6 +16,8 @@
  ],
  "block_size": 128,
  "dsa_layout": "replicated",
+ "advertised_context": 1048576,
+ "advertised_context_source": "config.json text_config.max_position_embeddings (doc/context_contract.json advertised_context)",
  "trace_region_bytes": 67108864,
  "budget": {
   "status": "MEASURED for 1 slot: free_after_load_bytes and dsa_bytes_per_block come from the combo_a_kv_dense4_g4 1-slot capacity probe (doc/vllm/capacity/s1); reserve_bytes = the 1,024 MiB serving workspace of the G9 probes. A slot count without a measured entry uses this rule.",
@@ -57,6 +59,26 @@
   }
  },
  "measured_note": "slots -> {pool_blocks, max_model_len_tested, prompt_len, copy_accuracy, free_at_prefill_peak_bytes, evidence, date}; written by tools/serving_profiles.py ingest from a COMPLETED capacity probe (load, bind, warm-up, capture, longest prefill, traced decode). A measured entry wins over the budget rule for that slot count.",
+ "layouts": {
+  "sharded": {
+   "description": "block-sharded DSA latent with fp8 e4m3 rows (tt/dsa_shard.py): global block b on die b % 4, 576-byte rows (512 latent + 64 control columns); pool keys, indexer and top-512 selection replicated. 2,288 B per token per die (replicated: 6,336). Costs about +2.9 ms per decode token at 16K (doc/context_contract.json dsa_block_sharded_fp8).",
+   "env": {
+    "GLM53_DSA_SHARD": "1",
+    "GLM53_MOE_SORTED_ROWS": "512",
+    "GLM53_DSA_INDEX_BLOCK_MB": "32"
+   },
+   "budget": {
+    "status": "ESTIMATE until the G9 probe of this layout is ingested: dsa_bytes_per_block from the stage-6 sharded capacity probe; free_after_load_bytes inherited (same weights); reserve_bytes = the 600 MiB workspace that probe measured (the DSA constants, 180,549,632 B, come out of it).",
+    "dsa_bytes_per_block": 292864,
+    "reserve_bytes": 629145600,
+    "evidence": {
+     "dsa_bytes_per_block": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/capacity.json dsa_bytes_per_block_all_layers (11 x 128 x (576 / 4 + 64))",
+     "reserve_bytes": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/capacity.json workspace_mib 600 (1,048,576 tokens, copy 1.0; 194 MB free at the warm-up peak)"
+    }
+   },
+   "measured": {}
+  }
+ },
  "profiles": [
   {
    "name": "p300x2",
@@ -75,6 +97,16 @@
    "max_num_seqs": 1,
    "max_model_len": 325632,
    "status": "measured"
+  },
+  {
+   "name": "p300x2-1m",
+   "description": "Two p300 boards, one sequence, the advertised 1,048,576-token context with the block-sharded fp8 DSA cache (slower decode than p300x2-long).",
+   "hardware": "p300x2",
+   "mesh_device": "P300x2",
+   "max_num_seqs": 1,
+   "dsa_layout": "sharded",
+   "max_model_len": 1048576,
+   "status": "estimate"
   },
   {
    "name": "p300x2-wide",
@@ -99,6 +131,7 @@
  "default_profile_note": "PENDING stage 10: choose the default from the measured decode speed of the 16-slot build (one decode trace width for all slots) against the 1-slot build.",
  "pending": [
   "G9: completed capacity probes at 1, 16 and 32 slots with the selected policy (combo_a_kv_dense4_g4) on the committed code (tools/serving_profiles.py ingest each), then refresh + render-yaml",
-  "Trace region: re-confirm 64 MiB covers the model trace and every sampler variant at 16 and 32 slots (capacity probe trace_allocated)"
+  "Trace region: re-confirm 64 MiB covers the model trace and every sampler variant at 16 and 32 slots (capacity probe trace_allocated)",
+  "G9: the 1-slot capacity probe of the sharded layout (profile p300x2-1m) through 09-g9-probe.sh, then ingest + refresh + render-yaml"
  ]
 }
