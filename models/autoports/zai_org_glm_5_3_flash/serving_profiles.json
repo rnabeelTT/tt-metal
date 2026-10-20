@@ -6,7 +6,7 @@
  "weights_revision_source": "HF download metadata of the E192 build (~/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8/.cache/huggingface/download/*.metadata): the parent commit every stage ran against",
  "expert_set": "E192: 192 of 288 routed experts per MoE layer (tt/e192_mask.json, mask of autotrust/GLM5.3-Flash-E192-DGX-Spark)",
  "precision": {
-  "id": "combo_a_kv",
+  "id": "combo_a_kv_dense4_g4",
   "config": "doc/datatype_sweep/selected_precision_config.json",
   "kv_latent_dtype": "fp8_e4m3"
  },
@@ -18,7 +18,7 @@
  "dsa_layout": "replicated",
  "trace_region_bytes": 67108864,
  "budget": {
-  "status": "PARTIAL: free_after_load_bytes and dsa_bytes_per_block are measured at bind time by the combo_a_kv 1-slot capacity probe; reserve_bytes = the 1,024 MiB serving workspace of that probe. Slot counts without a measured entry use this rule until the G9 probes (1 / 16 / 32 slots) are ingested.",
+  "status": "PARTIAL: free_after_load_bytes and dsa_bytes_per_block are measured at bind time by the combo_a_kv 1-slot (pending the combo_a_kv_dense4_g4 G9 rerun) capacity probe; reserve_bytes = the 1,024 MiB serving workspace of that probe. Slot counts without a measured entry use this rule until the G9 probes (1 / 16 / 32 slots) are ingested.",
   "free_after_load_bytes": 3047399936,
   "kda_bytes_per_slot": 35651584,
   "dsa_bytes_per_block": 811008,
