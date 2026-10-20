@@ -1,0 +1,7489 @@
+{
+  "source": "tools/hf_full_ref.py --mode score-trajectory",
+  "hf_model_id": "zai-org/GLM-5.3-Flash",
+  "hf_revision": "91b69215804f2d2036a8867f6ce44848e278dcda",
+  "checkpoint": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "tokenizer": "TokenizersBackend from /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+  "command": "/home/raahem/glm53-flash-bringup/.venv_hf/bin/python -I models/autoports/zai_org_glm_5_3_flash/tools/hf_full_ref.py --mode score-trajectory --threads 8 --expert-cache-gb 16 --trajectory models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1/checks/autoregressive/autoregressive_meta.json --trajectory-side tt --score-out models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1/checks/autoregressive/hf_scores_tt_trajectory.json",
+  "note": "CPU HF reference (tools/hf_full_ref.py): unmodified HF Glm5NextTextModel, E192-masked routed experts FP8->bf16 dequantized lazily, non-expert weights bf16; greedy argmax of fp32 last-position logits with a DynamicCache (model.generate(do_sample=False) equivalent).",
+  "versions": {
+    "transformers": "5.19.0",
+    "torch": "2.11.0+cpu"
+  },
+  "threads": 8,
+  "expert_cache_gb": 16.0,
+  "trajectory": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1/checks/autoregressive/autoregressive_meta.json",
+  "side": "tt",
+  "num_tokens": 256,
+  "hf_top1_agreement": 0.9375,
+  "hf_top5_agreement": 1.0,
+  "worst_ranks": [
+    [
+      4,
+      53
+    ],
+    [
+      2,
+      74
+    ],
+    [
+      2,
+      35
+    ],
+    [
+      2,
+      4
+    ],
+    [
+      1,
+      146
+    ],
+    [
+      1,
+      93
+    ],
+    [
+      1,
+      82
+    ],
+    [
+      1,
+      76
+    ],
+    [
+      1,
+      49
+    ],
+    [
+      1,
+      47
+    ]
+  ],
+  "hf_greedy_first_divergence": 0,
+  "rows": [
+    {
+      "i": 0,
+      "emitted": 2494,
+      "emitted_str": " something",
+      "hf_top5": [
+        264,
+        2494,
+        458,
+        279,
+        429
+      ],
+      "hf_top5_str": [
+        " a",
+        " something",
+        " an",
+        " the",
+        " that"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        18.625,
+        17.25,
+        16.5,
+        16.0
+      ],
+      "emitted_logit": 18.625,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 1,
+      "emitted": 14876,
+      "emitted_str": " strange",
+      "hf_top5": [
+        14876,
+        18480,
+        43447,
+        10317,
+        23676
+      ],
+      "hf_top5_str": [
+        " strange",
+        " unusual",
+        " peculiar",
+        " odd",
+        " extraordinary"
+      ],
+      "hf_top5_logits": [
+        18.375,
+        18.0,
+        15.25,
+        14.938,
+        14.812
+      ],
+      "emitted_logit": 18.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 2,
+      "emitted": 25,
+      "emitted_str": ":",
+      "hf_top5": [
+        25,
+        1959,
+        304,
+        481,
+        911
+      ],
+      "hf_top5_str": [
+        ":",
+        " —",
+        " in",
+        " -",
+        " about"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        17.25,
+        16.75,
+        16.625,
+        16.5
+      ],
+      "emitted_logit": 18.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 3,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        264,
+        1378,
+        458,
+        34342
+      ],
+      "hf_top5_str": [
+        " the",
+        " a",
+        " two",
+        " an",
+        " shadows"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        18.75,
+        15.938,
+        14.75,
+        14.438
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 4,
+      "emitted": 3100,
+      "emitted_str": " light",
+      "hf_top5": [
+        29403,
+        10896,
+        3100,
+        19617,
+        9951
+      ],
+      "hf_top5_str": [
+        " clouds",
+        " leaves",
+        " light",
+        " birds",
+        " wind"
+      ],
+      "hf_top5_logits": [
+        16.375,
+        16.375,
+        15.938,
+        15.75,
+        15.688
+      ],
+      "emitted_logit": 15.938,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 5,
+      "emitted": 9321,
+      "emitted_str": " seemed",
+      "hf_top5": [
+        9321,
+        504,
+        315,
+        3207,
+        429
+      ],
+      "hf_top5_str": [
+        " seemed",
+        " from",
+        " of",
+        " didn",
+        " that"
+      ],
+      "hf_top5_logits": [
+        18.375,
+        16.625,
+        14.688,
+        13.812,
+        13.812
+      ],
+      "emitted_logit": 18.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 6,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        52211,
+        311,
+        16231,
+        62681,
+        70389
+      ],
+      "hf_top5_str": [
+        " brighter",
+        " to",
+        " stronger",
+        " softer",
+        " brightest"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        19.0,
+        18.0,
+        15.375,
+        15.312
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.375
+    },
+    {
+      "i": 7,
+      "emitted": 36629,
+      "emitted_str": " bend",
+      "hf_top5": [
+        36629,
+        15242,
+        3271,
+        1795,
+        32259
+      ],
+      "hf_top5_str": [
+        " bend",
+        " dance",
+        " move",
+        " follow",
+        " shine"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        17.5,
+        16.75,
+        16.25,
+        16.0
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 8,
+      "emitted": 2163,
+      "emitted_str": " around",
+      "hf_top5": [
+        2163,
+        11,
+        10073,
+        323,
+        438
+      ],
+      "hf_top5_str": [
+        " around",
+        ",",
+        " slightly",
+        " and",
+        " as"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        18.75,
+        17.625,
+        17.25,
+        17.0
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 9,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        264,
+        458,
+        3654
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " a",
+        " an",
+        " certain"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        18.125,
+        17.375,
+        15.75,
+        15.625
+      ],
+      "emitted_logit": 19.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 10,
+      "emitted": 10896,
+      "emitted_str": " leaves",
+      "hf_top5": [
+        6821,
+        10896,
+        4916,
+        22973,
+        12402
+      ],
+      "hf_top5_str": [
+        " edge",
+        " leaves",
+        " tree",
+        " rocks",
+        " trees"
+      ],
+      "hf_top5_logits": [
+        15.562,
+        15.125,
+        14.75,
+        14.562,
+        14.375
+      ],
+      "emitted_logit": 15.125,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.438
+    },
+    {
+      "i": 11,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        315,
+        1573,
+        13,
+        438
+      ],
+      "hf_top5_str": [
+        ",",
+        " of",
+        " before",
+        ".",
+        " as"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        17.75,
+        17.625,
+        16.5,
+        16.125
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 12,
+      "emitted": 6825,
+      "emitted_str": " creating",
+      "hf_top5": [
+        6825,
+        24103,
+        3259,
+        438,
+        27871
+      ],
+      "hf_top5_str": [
+        " creating",
+        " casting",
+        " making",
+        " as",
+        " dancing"
+      ],
+      "hf_top5_logits": [
+        17.375,
+        16.875,
+        16.375,
+        16.375,
+        16.25
+      ],
+      "emitted_logit": 17.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 13,
+      "emitted": 13664,
+      "emitted_str": " tiny",
+      "hf_top5": [
+        34342,
+        13664,
+        12618,
+        264,
+        2613
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " tiny",
+        " patterns",
+        " a",
+        " small"
+      ],
+      "hf_top5_logits": [
+        19.5,
+        19.25,
+        18.0,
+        17.75,
+        16.0
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 14,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        34342,
+        11169,
+        12618,
+        47319,
+        12449
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " rain",
+        " patterns",
+        " rainbow",
+        " shadow"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        18.0,
+        16.125,
+        15.25,
+        14.688
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 15,
+      "emitted": 1380,
+      "emitted_str": " where",
+      "hf_top5": [
+        1380,
+        2878,
+        429,
+        23902,
+        315
+      ],
+      "hf_top5_str": [
+        " where",
+        " within",
+        " that",
+        " beneath",
+        " of"
+      ],
+      "hf_top5_logits": [
+        18.875,
+        18.25,
+        18.125,
+        16.75,
+        15.75
+      ],
+      "emitted_logit": 18.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 16,
+      "emitted": 6857,
+      "emitted_str": " none",
+      "hf_top5": [
+        6857,
+        1052,
+        902,
+        34342,
+        279
+      ],
+      "hf_top5_str": [
+        " none",
+        " there",
+        " no",
+        " shadows",
+        " the"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        19.625,
+        18.375,
+        18.0,
+        16.75
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 17,
+      "emitted": 1265,
+      "emitted_str": " should",
+      "hf_top5": [
+        1265,
+        1030,
+        24226,
+        45588,
+        21724
+      ],
+      "hf_top5_str": [
+        " should",
+        " had",
+        " existed",
+        " belonged",
+        " ought"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        18.125,
+        17.125,
+        16.125,
+        15.375
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.625
+    },
+    {
+      "i": 18,
+      "emitted": 387,
+      "emitted_str": " be",
+      "hf_top5": [
+        387,
+        3000,
+        614,
+        4399,
+        3063
+      ],
+      "hf_top5_str": [
+        " be",
+        " exist",
+        " have",
+        " fall",
+        " grow"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        20.5,
+        17.5,
+        17.375,
+        14.75
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 19,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        2146,
+        11
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        "...\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        20.25,
+        18.25,
+        15.688,
+        13.938,
+        13.562
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 20,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        60368,
+        68076,
+        330,
+        69089,
+        2932
+      ],
+      "hf_top5_str": [
+        " Intr",
+        " Elena",
+        " \"",
+        " Fasc",
+        " She"
+      ],
+      "hf_top5_logits": [
+        15.5,
+        15.188,
+        14.812,
+        14.75,
+        14.25
+      ],
+      "emitted_logit": 15.188,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.312
+    },
+    {
+      "i": 21,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        29939,
+        3867,
+        7391,
+        6635
+      ],
+      "hf_top5_str": [
+        ",",
+        " wondered",
+        " took",
+        " spent",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        16.625,
+        15.438,
+        15.188,
+        14.938,
+        14.562
+      ],
+      "emitted_logit": 16.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.188
+    },
+    {
+      "i": 22,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        879,
+        60388,
+        3512,
+        6693
+      ],
+      "hf_top5_str": [
+        " being",
+        " who",
+        " fascinated",
+        " ever",
+        " whose"
+      ],
+      "hf_top5_logits": [
+        18.5,
+        16.5,
+        16.375,
+        16.375,
+        15.75
+      ],
+      "emitted_logit": 18.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 23,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        17687,
+        2176,
+        279,
+        22153
+      ],
+      "hf_top5_str": [
+        " a",
+        " naturally",
+        " both",
+        " the",
+        " curious"
+      ],
+      "hf_top5_logits": [
+        17.125,
+        16.25,
+        16.0,
+        15.812,
+        15.75
+      ],
+      "emitted_logit": 17.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 24,
+      "emitted": 22153,
+      "emitted_str": " curious",
+      "hf_top5": [
+        22153,
+        42422,
+        3743,
+        5810,
+        17687
+      ],
+      "hf_top5_str": [
+        " curious",
+        " thoughtful",
+        " girl",
+        " natural",
+        " naturally"
+      ],
+      "hf_top5_logits": [
+        16.875,
+        16.625,
+        16.5,
+        15.438,
+        15.375
+      ],
+      "emitted_logit": 16.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 25,
+      "emitted": 3908,
+      "emitted_str": " young",
+      "hf_top5": [
+        3378,
+        3908,
+        1682,
+        3743,
+        323
+      ],
+      "hf_top5_str": [
+        " sort",
+        " young",
+        " child",
+        " girl",
+        " and"
+      ],
+      "hf_top5_logits": [
+        17.5,
+        17.375,
+        17.375,
+        17.125,
+        16.375
+      ],
+      "emitted_logit": 17.375,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.125
+    },
+    {
+      "i": 26,
+      "emitted": 3743,
+      "emitted_str": " girl",
+      "hf_top5": [
+        3743,
+        11,
+        1697,
+        13518,
+        1682
+      ],
+      "hf_top5_str": [
+        " girl",
+        ",",
+        " person",
+        " soul",
+        " child"
+      ],
+      "hf_top5_logits": [
+        17.625,
+        14.625,
+        14.0,
+        13.375,
+        13.375
+      ],
+      "emitted_logit": 17.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 27,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        879,
+        553,
+        448,
+        6941
+      ],
+      "hf_top5_str": [
+        ",",
+        " who",
+        " by",
+        " with",
+        " named"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        17.125,
+        17.125,
+        16.875,
+        15.75
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 28,
+      "emitted": 6635,
+      "emitted_str": " decided",
+      "hf_top5": [
+        6635,
+        29939,
+        3867,
+        4588,
+        6009
+      ],
+      "hf_top5_str": [
+        " decided",
+        " wondered",
+        " took",
+        " asked",
+        " began"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        16.375,
+        16.375,
+        16.125,
+        16.0
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.875
+    },
+    {
+      "i": 29,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        429,
+        1340,
+        419,
+        1221
+      ],
+      "hf_top5_str": [
+        " to",
+        " that",
+        " she",
+        " this",
+        " then"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        17.875,
+        16.625,
+        15.75,
+        15.75
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.75
+    },
+    {
+      "i": 30,
+      "emitted": 19278,
+      "emitted_str": " investigate",
+      "hf_top5": [
+        19278,
+        25289,
+        3920,
+        13178,
+        3270
+      ],
+      "hf_top5_str": [
+        " investigate",
+        " climb",
+        " study",
+        " explore",
+        " write"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        18.125,
+        16.875,
+        16.75,
+        16.75
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.125
+    },
+    {
+      "i": 31,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        419,
+        382,
+        4623,
+        279
+      ],
+      "hf_top5_str": [
+        ".",
+        " this",
+        ".\n\n",
+        " further",
+        " the"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        19.125,
+        18.125,
+        17.875,
+        17.875
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 32,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        7209,
+        68076,
+        576,
+        12879
+      ],
+      "hf_top5_str": [
+        " She",
+        " Every",
+        " Elena",
+        " The",
+        " Cur"
+      ],
+      "hf_top5_logits": [
+        18.0,
+        16.5,
+        13.938,
+        13.625,
+        13.625
+      ],
+      "emitted_logit": 18.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.5
+    },
+    {
+      "i": 33,
+      "emitted": 20150,
+      "emitted_str": " gathered",
+      "hf_top5": [
+        20150,
+        44161,
+        7391,
+        4588,
+        41207
+      ],
+      "hf_top5_str": [
+        " gathered",
+        " climbed",
+        " spent",
+        " asked",
+        " fetched"
+      ],
+      "hf_top5_logits": [
+        18.0,
+        17.5,
+        17.25,
+        17.0,
+        16.375
+      ],
+      "emitted_logit": 18.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 34,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        264,
+        1449,
+        279,
+        678
+      ],
+      "hf_top5_str": [
+        " her",
+        " a",
+        " every",
+        " the",
+        " all"
+      ],
+      "hf_top5_logits": [
+        18.5,
+        15.438,
+        15.188,
+        15.188,
+        14.25
+      ],
+      "emitted_logit": 18.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.062
+    },
+    {
+      "i": 35,
+      "emitted": 7375,
+      "emitted_str": " tools",
+      "hf_top5": [
+        77903,
+        8387,
+        7375,
+        24668,
+        23252
+      ],
+      "hf_top5_str": [
+        " notebooks",
+        " notes",
+        " tools",
+        " courage",
+        " instruments"
+      ],
+      "hf_top5_logits": [
+        14.875,
+        14.625,
+        14.438,
+        14.375,
+        14.188
+      ],
+      "emitted_logit": 14.438,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 36,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        11,
+        25,
+        27901,
+        1959
+      ],
+      "hf_top5_str": [
+        " and",
+        ",",
+        ":",
+        "—a",
+        " —"
+      ],
+      "hf_top5_logits": [
+        19.125,
+        18.875,
+        17.625,
+        16.375,
+        16.0
+      ],
+      "emitted_logit": 19.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 37,
+      "emitted": 44161,
+      "emitted_str": " climbed",
+      "hf_top5": [
+        44161,
+        7391,
+        738,
+        6009,
+        16859
+      ],
+      "hf_top5_str": [
+        " climbed",
+        " spent",
+        " set",
+        " began",
+        " measured"
+      ],
+      "hf_top5_logits": [
+        17.125,
+        16.125,
+        15.812,
+        15.75,
+        14.812
+      ],
+      "emitted_logit": 17.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 38,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        311,
+        1182,
+        1495,
+        5080
+      ],
+      "hf_top5_str": [
+        " the",
+        " to",
+        " back",
+        " down",
+        " higher"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        18.5,
+        18.375,
+        17.75,
+        16.625
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 39,
+      "emitted": 23086,
+      "emitted_str": " eastern",
+      "hf_top5": [
+        23086,
+        23879,
+        37675,
+        4916,
+        18463
+      ],
+      "hf_top5_str": [
+        " eastern",
+        " hill",
+        " oak",
+        " tree",
+        " western"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        17.25,
+        17.25,
+        16.875,
+        15.75
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 40,
+      "emitted": 23879,
+      "emitted_str": " hill",
+      "hf_top5": [
+        23879,
+        16287,
+        30115,
+        4916,
+        57437
+      ],
+      "hf_top5_str": [
+        " hill",
+        " mountain",
+        " slope",
+        " tree",
+        " ridge"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        17.0,
+        16.5,
+        16.125,
+        16.0
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 41,
+      "emitted": 3055,
+      "emitted_str": " once",
+      "hf_top5": [
+        3055,
+        1549,
+        11,
+        13,
+        311
+      ],
+      "hf_top5_str": [
+        " once",
+        " again",
+        ",",
+        ".",
+        " to"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        19.625,
+        18.875,
+        16.875,
+        16.875
+      ],
+      "emitted_logit": 19.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 42,
+      "emitted": 803,
+      "emitted_str": " more",
+      "hf_top5": [
+        803,
+        1549,
+        2146,
+        11,
+        1112
+      ],
+      "hf_top5_str": [
+        " more",
+        " again",
+        "...\n\n",
+        ",",
+        "..."
+      ],
+      "hf_top5_logits": [
+        22.0,
+        17.875,
+        13.375,
+        12.125,
+        11.75
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.125
+    },
+    {
+      "i": 43,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        624,
+        2146
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        ".\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        19.875,
+        18.75,
+        16.125,
+        15.812
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 44,
+      "emitted": 419,
+      "emitted_str": " this",
+      "hf_top5": [
+        419,
+        10094,
+        714,
+        10833,
+        28885
+      ],
+      "hf_top5_str": [
+        " this",
+        " watching",
+        " but",
+        " determined",
+        " measuring"
+      ],
+      "hf_top5_logits": [
+        17.0,
+        16.25,
+        15.0,
+        14.938,
+        14.625
+      ],
+      "emitted_logit": 17.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 45,
+      "emitted": 882,
+      "emitted_str": " time",
+      "hf_top5": [
+        882,
+        7246,
+        3009,
+        3039,
+        98689
+      ],
+      "hf_top5_str": [
+        " time",
+        "-time",
+        "_time",
+        " times",
+        "时间"
+      ],
+      "hf_top5_logits": [
+        24.625,
+        15.562,
+        14.188,
+        13.812,
+        13.5
+      ],
+      "emitted_logit": 24.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.062
+    },
+    {
+      "i": 46,
+      "emitted": 448,
+      "emitted_str": " with",
+      "hf_top5": [
+        448,
+        10094,
+        28885,
+        15319,
+        12672
+      ],
+      "hf_top5_str": [
+        " with",
+        " watching",
+        " measuring",
+        " carrying",
+        " bringing"
+      ],
+      "hf_top5_logits": [
+        17.375,
+        16.75,
+        16.5,
+        16.25,
+        15.812
+      ],
+      "emitted_logit": 17.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 47,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        1059,
+        264,
+        23252,
+        36972,
+        77903
+      ],
+      "hf_top5_str": [
+        " her",
+        " a",
+        " instruments",
+        " notebook",
+        " notebooks"
+      ],
+      "hf_top5_logits": [
+        17.375,
+        17.25,
+        15.375,
+        15.25,
+        14.5
+      ],
+      "emitted_logit": 17.25,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.125
+    },
+    {
+      "i": 48,
+      "emitted": 36972,
+      "emitted_str": " notebook",
+      "hf_top5": [
+        36972,
+        92825,
+        2613,
+        7428,
+        6249
+      ],
+      "hf_top5_str": [
+        " notebook",
+        " prism",
+        " small",
+        " purpose",
+        " camera"
+      ],
+      "hf_top5_logits": [
+        17.375,
+        14.875,
+        14.812,
+        14.5,
+        14.375
+      ],
+      "emitted_logit": 17.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 49,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        304,
+        323,
+        311,
+        13,
+        2480
+      ],
+      "hf_top5_str": [
+        " in",
+        " and",
+        " to",
+        ".",
+        " full"
+      ],
+      "hf_top5_logits": [
+        18.875,
+        18.0,
+        16.5,
+        15.812,
+        15.25
+      ],
+      "emitted_logit": 18.0,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 50,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        5750,
+        45839,
+        6249
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        " pen",
+        " pencil",
+        " camera"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        16.25,
+        15.0,
+        14.375,
+        13.438
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 51,
+      "emitted": 45839,
+      "emitted_str": " pencil",
+      "hf_top5": [
+        45839,
+        5750,
+        6249,
+        2613,
+        45295
+      ],
+      "hf_top5_str": [
+        " pencil",
+        " pen",
+        " camera",
+        " small",
+        " borrowed"
+      ],
+      "hf_top5_logits": [
+        14.562,
+        14.25,
+        14.25,
+        13.875,
+        13.688
+      ],
+      "emitted_logit": 14.562,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.312
+    },
+    {
+      "i": 52,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        11,
+        304,
+        45295
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ",",
+        " in",
+        " borrowed"
+      ],
+      "hf_top5_logits": [
+        18.625,
+        16.25,
+        14.75,
+        14.5,
+        13.938
+      ],
+      "emitted_logit": 18.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 53,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        1634,
+        576,
+        7209,
+        3555,
+        2932
+      ],
+      "hf_top5_str": [
+        " As",
+        " The",
+        " Every",
+        " What",
+        " She"
+      ],
+      "hf_top5_logits": [
+        15.938,
+        15.625,
+        15.25,
+        15.062,
+        14.938
+      ],
+      "emitted_logit": 14.938,
+      "emitted_rank": 4,
+      "hf_top1_margin": 0.312
+    },
+    {
+      "i": 54,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        13158,
+        6139,
+        20150,
+        7391
+      ],
+      "hf_top5_str": [
+        " watched",
+        " observed",
+        " wrote",
+        " gathered",
+        " spent"
+      ],
+      "hf_top5_logits": [
+        19.75,
+        18.875,
+        18.75,
+        18.75,
+        18.375
+      ],
+      "emitted_logit": 19.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.875
+    },
+    {
+      "i": 55,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        438,
+        1246,
+        11,
+        323
+      ],
+      "hf_top5_str": [
+        " the",
+        " as",
+        " how",
+        ",",
+        " and"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        18.25,
+        16.25,
+        15.375,
+        15.125
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 56,
+      "emitted": 63364,
+      "emitted_str": " sunrise",
+      "hf_top5": [
+        63364,
+        3100,
+        34342,
+        36629,
+        7015
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " light",
+        " shadows",
+        " bend",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        20.125,
+        17.875,
+        16.5,
+        16.0,
+        15.938
+      ],
+      "emitted_logit": 20.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 57,
+      "emitted": 6177,
+      "emitted_str": " paint",
+      "hf_top5": [
+        6177,
+        36629,
+        15242,
+        11,
+        323
+      ],
+      "hf_top5_str": [
+        " paint",
+        " bend",
+        " dance",
+        ",",
+        " and"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        18.125,
+        16.75,
+        16.5,
+        15.688
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 58,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        34342,
+        1059,
+        11,
+        1112
+      ],
+      "hf_top5_str": [
+        " the",
+        " shadows",
+        " her",
+        ",",
+        "..."
+      ],
+      "hf_top5_logits": [
+        21.625,
+        15.5,
+        15.375,
+        15.0,
+        14.938
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.125
+    },
+    {
+      "i": 59,
+      "emitted": 33419,
+      "emitted_str": " valley",
+      "hf_top5": [
+        33419,
+        6623,
+        16287,
+        33966,
+        20703
+      ],
+      "hf_top5_str": [
+        " valley",
+        " gold",
+        " mountain",
+        " hills",
+        " golden"
+      ],
+      "hf_top5_logits": [
+        21.25,
+        15.062,
+        14.25,
+        14.125,
+        14.0
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.188
+    },
+    {
+      "i": 60,
+      "emitted": 6623,
+      "emitted_str": " gold",
+      "hf_top5": [
+        6623,
+        11,
+        323,
+        304,
+        448
+      ],
+      "hf_top5_str": [
+        " gold",
+        ",",
+        " and",
+        " in",
+        " with"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        16.625,
+        16.375,
+        15.688,
+        15.188
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 61,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        323,
+        1549,
+        3055,
+        1393
+      ],
+      "hf_top5_str": [
+        ",",
+        " and",
+        " again",
+        " once",
+        " while"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        20.625,
+        19.5,
+        18.125,
+        17.375
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.0
+    },
+    {
+      "i": 62,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        714,
+        1101,
+        678,
+        26222
+      ],
+      "hf_top5_str": [
+        " and",
+        " but",
+        " just",
+        " all",
+        " noting"
+      ],
+      "hf_top5_logits": [
+        19.0,
+        18.75,
+        16.5,
+        15.875,
+        15.688
+      ],
+      "emitted_logit": 19.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 63,
+      "emitted": 1340,
+      "emitted_str": " she",
+      "hf_top5": [
+        1340,
+        438,
+        1221,
+        1549,
+        419
+      ],
+      "hf_top5_str": [
+        " she",
+        " as",
+        " then",
+        " again",
+        " this"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        17.375,
+        17.125,
+        16.875,
+        16.875
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 64,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        6139,
+        5485,
+        13677,
+        16859
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wrote",
+        " saw",
+        " noticed",
+        " measured"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        19.5,
+        19.5,
+        19.0,
+        18.75
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 65,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        432,
+        1059,
+        438,
+        34342
+      ],
+      "hf_top5_str": [
+        " the",
+        " it",
+        " her",
+        " as",
+        " shadows"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        17.625,
+        15.375,
+        14.812,
+        14.562
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.375
+    },
+    {
+      "i": 66,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        34342,
+        3100,
+        37675,
+        10896,
+        14876
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " light",
+        " oak",
+        " leaves",
+        " strange"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        20.125,
+        18.125,
+        17.0,
+        16.875
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 67,
+      "emitted": 15242,
+      "emitted_str": " dance",
+      "hf_top5": [
+        15242,
+        1352,
+        9563,
+        1380,
+        4994
+      ],
+      "hf_top5_str": [
+        " dance",
+        " form",
+        " gather",
+        " where",
+        " appear"
+      ],
+      "hf_top5_logits": [
+        20.625,
+        16.75,
+        16.375,
+        16.375,
+        16.375
+      ],
+      "emitted_logit": 20.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 68,
+      "emitted": 23902,
+      "emitted_str": " beneath",
+      "hf_top5": [
+        23902,
+        1948,
+        4221,
+        3941,
+        2163
+      ],
+      "hf_top5_str": [
+        " beneath",
+        " between",
+        " among",
+        " across",
+        " around"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        19.875,
+        19.5,
+        19.375,
+        19.125
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 69,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        1449,
+        1817,
+        37675
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " every",
+        " each",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        21.125,
+        19.875,
+        16.375,
+        15.375,
+        14.625
+      ],
+      "emitted_logit": 21.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 70,
+      "emitted": 37675,
+      "emitted_str": " oak",
+      "hf_top5": [
+        37675,
+        10896,
+        23028,
+        3100,
+        12402
+      ],
+      "hf_top5_str": [
+        " oak",
+        " leaves",
+        " branches",
+        " light",
+        " trees"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        17.5,
+        15.938,
+        15.875,
+        15.875
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 71,
+      "emitted": 4916,
+      "emitted_str": " tree",
+      "hf_top5": [
+        4916,
+        10896,
+        12402,
+        23028,
+        13
+      ],
+      "hf_top5_str": [
+        " tree",
+        " leaves",
+        " trees",
+        " branches",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.375,
+        19.0,
+        17.0,
+        16.375,
+        16.375
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 72,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        594,
+        11,
+        10896,
+        382
+      ],
+      "hf_top5_str": [
+        ".",
+        "'s",
+        ",",
+        " leaves",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        18.625,
+        18.0,
+        17.125,
+        17.125
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 73,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        1597,
+        330
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " And",
+        " \""
+      ],
+      "hf_top5_logits": [
+        16.5,
+        15.938,
+        15.562,
+        15.562,
+        15.312
+      ],
+      "emitted_logit": 16.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.562
+    },
+    {
+      "i": 74,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        6139,
+        13677,
+        15372,
+        44161,
+        10194
+      ],
+      "hf_top5_str": [
+        " wrote",
+        " noticed",
+        " watched",
+        " climbed",
+        " filled"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        18.875,
+        18.75,
+        17.75,
+        17.75
+      ],
+      "emitted_logit": 18.75,
+      "emitted_rank": 2,
+      "hf_top1_margin": 0.75
+    },
+    {
+      "i": 75,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        323,
+        11,
+        3080,
+        63364
+      ],
+      "hf_top5_str": [
+        " the",
+        " and",
+        ",",
+        " until",
+        " sunrise"
+      ],
+      "hf_top5_logits": [
+        20.5,
+        19.125,
+        18.0,
+        16.0,
+        15.812
+      ],
+      "emitted_logit": 20.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 76,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        63364,
+        34342,
+        3100,
+        33419,
+        37675
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " shadows",
+        " light",
+        " valley",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        17.5,
+        17.0,
+        16.0,
+        15.875
+      ],
+      "emitted_logit": 17.5,
+      "emitted_rank": 1,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 77,
+      "emitted": 15242,
+      "emitted_str": " dance",
+      "hf_top5": [
+        15242,
+        6177,
+        11,
+        36629,
+        25289
+      ],
+      "hf_top5_str": [
+        " dance",
+        " paint",
+        ",",
+        " bend",
+        " climb"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        16.25,
+        15.438,
+        15.25,
+        15.0
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.5
+    },
+    {
+      "i": 78,
+      "emitted": 23902,
+      "emitted_str": " beneath",
+      "hf_top5": [
+        23902,
+        11,
+        13,
+        323,
+        3080
+      ],
+      "hf_top5_str": [
+        " beneath",
+        ",",
+        ".",
+        " and",
+        " until"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        18.0,
+        17.25,
+        16.625,
+        16.25
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.375
+    },
+    {
+      "i": 79,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        1449,
+        11,
+        13
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " every",
+        ",",
+        "."
+      ],
+      "hf_top5_logits": [
+        20.875,
+        18.25,
+        16.0,
+        15.188,
+        14.5
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 80,
+      "emitted": 37675,
+      "emitted_str": " oak",
+      "hf_top5": [
+        37675,
+        10896,
+        23086,
+        2244,
+        3100
+      ],
+      "hf_top5_str": [
+        " oak",
+        " leaves",
+        " eastern",
+        " great",
+        " light"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        15.5,
+        14.812,
+        14.625,
+        14.312
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.875
+    },
+    {
+      "i": 81,
+      "emitted": 4916,
+      "emitted_str": " tree",
+      "hf_top5": [
+        4916,
+        11,
+        13,
+        12402,
+        382
+      ],
+      "hf_top5_str": [
+        " tree",
+        ",",
+        ".",
+        " trees",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        15.75,
+        15.188,
+        13.438,
+        13.438
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.125
+    },
+    {
+      "i": 82,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        13,
+        11,
+        382,
+        1549,
+        3080
+      ],
+      "hf_top5_str": [
+        ".",
+        ",",
+        ".\n\n",
+        " again",
+        " until"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        18.625,
+        16.25,
+        14.375,
+        14.312
+      ],
+      "emitted_logit": 18.625,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.625
+    },
+    {
+      "i": 83,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        26222,
+        20252,
+        22153,
+        714
+      ],
+      "hf_top5_str": [
+        " and",
+        " noting",
+        " wondering",
+        " curious",
+        " but"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        15.188,
+        14.375,
+        14.0,
+        14.0
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.438
+    },
+    {
+      "i": 84,
+      "emitted": 1340,
+      "emitted_str": " she",
+      "hf_top5": [
+        1340,
+        279,
+        68076,
+        1817,
+        1449
+      ],
+      "hf_top5_str": [
+        " she",
+        " the",
+        " Elena",
+        " each",
+        " every"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        16.625,
+        14.5,
+        14.25,
+        14.188
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 85,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        6139,
+        29939,
+        10194,
+        44161
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wrote",
+        " wondered",
+        " filled",
+        " climbed"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        19.5,
+        18.125,
+        17.875,
+        17.75
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.375
+    },
+    {
+      "i": 86,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1105,
+        3080,
+        2146,
+        1112
+      ],
+      "hf_top5_str": [
+        " the",
+        " them",
+        " until",
+        "...\n\n",
+        "..."
+      ],
+      "hf_top5_logits": [
+        21.25,
+        20.0,
+        14.062,
+        14.0,
+        14.0
+      ],
+      "emitted_logit": 21.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 87,
+      "emitted": 63364,
+      "emitted_str": " sunrise",
+      "hf_top5": [
+        63364,
+        3100,
+        34342,
+        7015,
+        10896
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " light",
+        " shadows",
+        " sun",
+        " leaves"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        17.25,
+        16.75,
+        15.562,
+        15.375
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 88,
+      "emitted": 6177,
+      "emitted_str": " paint",
+      "hf_top5": [
+        6177,
+        25289,
+        13,
+        11,
+        3100
+      ],
+      "hf_top5_str": [
+        " paint",
+        " climb",
+        ".",
+        ",",
+        " light"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        16.75,
+        15.938,
+        15.625,
+        15.562
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 89,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        13,
+        11,
+        1112,
+        2146
+      ],
+      "hf_top5_str": [
+        " the",
+        ".",
+        ",",
+        "...",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        17.25,
+        16.25,
+        15.312,
+        15.188
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.625
+    },
+    {
+      "i": 90,
+      "emitted": 33419,
+      "emitted_str": " valley",
+      "hf_top5": [
+        33419,
+        84692,
+        16287,
+        14117,
+        6623
+      ],
+      "hf_top5_str": [
+        " valley",
+        " valleys",
+        " mountain",
+        " village",
+        " gold"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        14.875,
+        14.625,
+        14.188,
+        13.938
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 91,
+      "emitted": 6623,
+      "emitted_str": " gold",
+      "hf_top5": [
+        6623,
+        13,
+        11,
+        304,
+        1549
+      ],
+      "hf_top5_str": [
+        " gold",
+        ".",
+        ",",
+        " in",
+        " again"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        14.562,
+        13.938,
+        13.125,
+        13.062
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 92,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        11,
+        382,
+        1549,
+        624
+      ],
+      "hf_top5_str": [
+        ".",
+        ",",
+        ".\n\n",
+        " again",
+        ".\n"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        19.875,
+        19.125,
+        17.375,
+        15.938
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 93,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        2932,
+        68076,
+        1597,
+        7209,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " And",
+        " Every",
+        " The"
+      ],
+      "hf_top5_logits": [
+        17.375,
+        16.25,
+        15.062,
+        15.062,
+        14.812
+      ],
+      "emitted_logit": 16.25,
+      "emitted_rank": 1,
+      "hf_top1_margin": 1.125
+    },
+    {
+      "i": 94,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        15372,
+        6139,
+        20150,
+        6635
+      ],
+      "hf_top5_str": [
+        ",",
+        " watched",
+        " wrote",
+        " gathered",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        20.0,
+        17.75,
+        17.75,
+        17.625,
+        17.625
+      ],
+      "emitted_logit": 20.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.25
+    },
+    {
+      "i": 95,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        279,
+        448,
+        22153,
+        264
+      ],
+      "hf_top5_str": [
+        " being",
+        " the",
+        " with",
+        " curious",
+        " a"
+      ],
+      "hf_top5_logits": [
+        20.0,
+        15.938,
+        14.875,
+        14.812,
+        14.625
+      ],
+      "emitted_logit": 20.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.062
+    },
+    {
+      "i": 96,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        458,
+        22153,
+        279,
+        1059
+      ],
+      "hf_top5_str": [
+        " a",
+        " an",
+        " curious",
+        " the",
+        " her"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        15.562,
+        15.25,
+        15.0,
+        13.562
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.812
+    },
+    {
+      "i": 97,
+      "emitted": 22153,
+      "emitted_str": " curious",
+      "hf_top5": [
+        22153,
+        3908,
+        10833,
+        51058,
+        3743
+      ],
+      "hf_top5_str": [
+        " curious",
+        " young",
+        " determined",
+        " stubborn",
+        " girl"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        14.938,
+        14.938,
+        13.438,
+        13.125
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 98,
+      "emitted": 3908,
+      "emitted_str": " young",
+      "hf_top5": [
+        3908,
+        3743,
+        323,
+        48177,
+        1682
+      ],
+      "hf_top5_str": [
+        " young",
+        " girl",
+        " and",
+        " investigator",
+        " child"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        15.875,
+        14.188,
+        14.188,
+        13.0
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 99,
+      "emitted": 3743,
+      "emitted_str": " girl",
+      "hf_top5": [
+        3743,
+        28452,
+        48177,
+        4238,
+        11
+      ],
+      "hf_top5_str": [
+        " girl",
+        "girl",
+        " investigator",
+        " friend",
+        ","
+      ],
+      "hf_top5_logits": [
+        22.875,
+        13.562,
+        13.562,
+        11.938,
+        11.938
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.312
+    },
+    {
+      "i": 100,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        448,
+        879,
+        553,
+        13
+      ],
+      "hf_top5_str": [
+        ",",
+        " with",
+        " who",
+        " by",
+        "."
+      ],
+      "hf_top5_logits": [
+        20.875,
+        14.375,
+        14.188,
+        13.625,
+        13.625
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 101,
+      "emitted": 6635,
+      "emitted_str": " decided",
+      "hf_top5": [
+        6635,
+        44161,
+        6139,
+        20150,
+        10194
+      ],
+      "hf_top5_str": [
+        " decided",
+        " climbed",
+        " wrote",
+        " gathered",
+        " filled"
+      ],
+      "hf_top5_logits": [
+        19.375,
+        17.75,
+        17.5,
+        17.125,
+        16.75
+      ],
+      "emitted_logit": 19.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.625
+    },
+    {
+      "i": 102,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        429,
+        419,
+        279,
+        1493
+      ],
+      "hf_top5_str": [
+        " to",
+        " that",
+        " this",
+        " the",
+        " these"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        18.625,
+        15.625,
+        15.625,
+        15.188
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 103,
+      "emitted": 19278,
+      "emitted_str": " investigate",
+      "hf_top5": [
+        19278,
+        25289,
+        3736,
+        3270,
+        13178
+      ],
+      "hf_top5_str": [
+        " investigate",
+        " climb",
+        " watch",
+        " write",
+        " explore"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        19.0,
+        18.0,
+        17.75,
+        16.125
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.75
+    },
+    {
+      "i": 104,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        4623,
+        3055,
+        1549
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        " further",
+        " once",
+        " again"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        18.25,
+        17.125,
+        16.625,
+        16.5
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 105,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        576,
+        3776,
+        7209
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " The",
+        " One",
+        " Every"
+      ],
+      "hf_top5_logits": [
+        18.75,
+        16.0,
+        14.75,
+        14.562,
+        14.562
+      ],
+      "emitted_logit": 18.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 106,
+      "emitted": 20150,
+      "emitted_str": " gathered",
+      "hf_top5": [
+        20150,
+        15372,
+        44161,
+        13677,
+        14538
+      ],
+      "hf_top5_str": [
+        " gathered",
+        " watched",
+        " climbed",
+        " noticed",
+        " collected"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        21.125,
+        18.875,
+        16.875,
+        16.0
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.0
+    },
+    {
+      "i": 107,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        7375,
+        264,
+        806,
+        279
+      ],
+      "hf_top5_str": [
+        " her",
+        " tools",
+        " a",
+        " his",
+        " the"
+      ],
+      "hf_top5_logits": [
+        24.625,
+        15.375,
+        14.938,
+        14.438,
+        14.312
+      ],
+      "emitted_logit": 24.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.25
+    },
+    {
+      "i": 108,
+      "emitted": 7375,
+      "emitted_str": " tools",
+      "hf_top5": [
+        7375,
+        36972,
+        23252,
+        29397,
+        45839
+      ],
+      "hf_top5_str": [
+        " tools",
+        " notebook",
+        " instruments",
+        " climbing",
+        " pencil"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        15.188,
+        14.438,
+        13.625,
+        13.188
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.188
+    },
+    {
+      "i": 109,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        11,
+        3055,
+        13,
+        825
+      ],
+      "hf_top5_str": [
+        " and",
+        ",",
+        " once",
+        ".",
+        " one"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        18.125,
+        16.625,
+        15.062,
+        15.0
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 110,
+      "emitted": 44161,
+      "emitted_str": " climbed",
+      "hf_top5": [
+        44161,
+        15372,
+        25289,
+        20150,
+        6635
+      ],
+      "hf_top5_str": [
+        " climbed",
+        " watched",
+        " climb",
+        " gathered",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        16.25,
+        14.812,
+        14.75,
+        14.75
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.125
+    },
+    {
+      "i": 111,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        3055,
+        11,
+        2146,
+        1112
+      ],
+      "hf_top5_str": [
+        " the",
+        " once",
+        ",",
+        "...\n\n",
+        "..."
+      ],
+      "hf_top5_logits": [
+        22.75,
+        16.25,
+        14.75,
+        14.312,
+        14.125
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 112,
+      "emitted": 23086,
+      "emitted_str": " eastern",
+      "hf_top5": [
+        23086,
+        23879,
+        18463,
+        33419,
+        33966
+      ],
+      "hf_top5_str": [
+        " eastern",
+        " hill",
+        " western",
+        " valley",
+        " hills"
+      ],
+      "hf_top5_logits": [
+        22.125,
+        15.75,
+        13.75,
+        12.688,
+        12.625
+      ],
+      "emitted_logit": 22.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.375
+    },
+    {
+      "i": 113,
+      "emitted": 23879,
+      "emitted_str": " hill",
+      "hf_top5": [
+        23879,
+        27415,
+        33966,
+        16287,
+        33419
+      ],
+      "hf_top5_str": [
+        " hill",
+        "hill",
+        " hills",
+        " mountain",
+        " valley"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        16.5,
+        15.812,
+        14.188,
+        13.438
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 114,
+      "emitted": 3055,
+      "emitted_str": " once",
+      "hf_top5": [
+        3055,
+        11,
+        1549,
+        13,
+        825
+      ],
+      "hf_top5_str": [
+        " once",
+        ",",
+        " again",
+        ".",
+        " one"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        20.0,
+        18.5,
+        17.0,
+        16.125
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.0
+    },
+    {
+      "i": 115,
+      "emitted": 803,
+      "emitted_str": " more",
+      "hf_top5": [
+        803,
+        1549,
+        6384,
+        271,
+        11
+      ],
+      "hf_top5_str": [
+        " more",
+        " again",
+        "more",
+        "\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        22.375,
+        13.25,
+        13.0,
+        12.438,
+        12.312
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.125
+    },
+    {
+      "i": 116,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        624,
+        448
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        ".\n",
+        " with"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        19.125,
+        17.875,
+        15.625,
+        15.438
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 117,
+      "emitted": 419,
+      "emitted_str": " this",
+      "hf_top5": [
+        419,
+        323,
+        10094,
+        448,
+        36972
+      ],
+      "hf_top5_str": [
+        " this",
+        " and",
+        " watching",
+        " with",
+        " notebook"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        17.125,
+        14.75,
+        13.938,
+        13.688
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.625
+    },
+    {
+      "i": 118,
+      "emitted": 882,
+      "emitted_str": " time",
+      "hf_top5": [
+        882,
+        2146,
+        98689,
+        1112,
+        271
+      ],
+      "hf_top5_str": [
+        " time",
+        "...\n\n",
+        "时间",
+        "...",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        26.0,
+        14.062,
+        13.562,
+        13.188,
+        12.688
+      ],
+      "emitted_logit": 26.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.938
+    },
+    {
+      "i": 119,
+      "emitted": 448,
+      "emitted_str": " with",
+      "hf_top5": [
+        448,
+        10094,
+        2146,
+        1340,
+        271
+      ],
+      "hf_top5_str": [
+        " with",
+        " watching",
+        "...\n\n",
+        " she",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        17.5,
+        13.875,
+        13.438,
+        13.188
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 120,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        279,
+        40007,
+        2146
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        " the",
+        " curiosity",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        16.25,
+        13.312,
+        13.062,
+        13.062
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 121,
+      "emitted": 36972,
+      "emitted_str": " notebook",
+      "hf_top5": [
+        36972,
+        45839,
+        5750,
+        5185,
+        72599
+      ],
+      "hf_top5_str": [
+        " notebook",
+        " pencil",
+        " pen",
+        " note",
+        " lantern"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        16.375,
+        13.688,
+        13.562,
+        13.312
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.375
+    },
+    {
+      "i": 122,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        13,
+        11,
+        382,
+        2480
+      ],
+      "hf_top5_str": [
+        " and",
+        ".",
+        ",",
+        ".\n\n",
+        " full"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        15.75,
+        14.938,
+        14.562,
+        14.438
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 123,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        45839,
+        458,
+        1340
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        " pencil",
+        " an",
+        " she"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        14.125,
+        13.688,
+        12.938,
+        12.688
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 124,
+      "emitted": 45839,
+      "emitted_str": " pencil",
+      "hf_top5": [
+        45839,
+        5750,
+        3736,
+        23655,
+        25450
+      ],
+      "hf_top5_str": [
+        " pencil",
+        " pen",
+        " watch",
+        " compass",
+        " sketch"
+      ],
+      "hf_top5_logits": [
+        21.375,
+        14.5,
+        13.188,
+        12.5,
+        12.0
+      ],
+      "emitted_logit": 21.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.875
+    },
+    {
+      "i": 125,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        20.25,
+        18.25,
+        16.125,
+        14.812,
+        13.812
+      ],
+      "emitted_logit": 20.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 126,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        18.25,
+        16.375,
+        15.125,
+        14.312,
+        13.812
+      ],
+      "emitted_logit": 18.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.875
+    },
+    {
+      "i": 127,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        20150,
+        44161,
+        13677,
+        6139
+      ],
+      "hf_top5_str": [
+        " watched",
+        " gathered",
+        " climbed",
+        " noticed",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        20.625,
+        18.625,
+        17.875,
+        17.75
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.625
+    },
+    {
+      "i": 128,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        323,
+        271,
+        438
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " and",
+        "\n\n",
+        " as"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        14.312,
+        13.688,
+        13.625,
+        13.562
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.062
+    },
+    {
+      "i": 129,
+      "emitted": 63364,
+      "emitted_str": " sunrise",
+      "hf_top5": [
+        63364,
+        34342,
+        42739,
+        7015,
+        3100
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " shadows",
+        " sunset",
+        " sun",
+        " light"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        20.25,
+        14.562,
+        14.125,
+        14.062
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 1.25
+    },
+    {
+      "i": 130,
+      "emitted": 6177,
+      "emitted_str": " paint",
+      "hf_top5": [
+        6177,
+        11,
+        36629,
+        323,
+        15242
+      ],
+      "hf_top5_str": [
+        " paint",
+        ",",
+        " bend",
+        " and",
+        " dance"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        14.562,
+        13.875,
+        13.5,
+        13.438
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.688
+    },
+    {
+      "i": 131,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        11,
+        2146,
+        271,
+        1782
+      ],
+      "hf_top5_str": [
+        " the",
+        ",",
+        "...\n\n",
+        "\n\n",
+        "the"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        14.625,
+        13.625,
+        13.375,
+        13.188
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.375
+    },
+    {
+      "i": 132,
+      "emitted": 33419,
+      "emitted_str": " valley",
+      "hf_top5": [
+        33419,
+        84692,
+        14117,
+        1044,
+        23436
+      ],
+      "hf_top5_str": [
+        " valley",
+        " valleys",
+        " village",
+        " val",
+        " mountains"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        16.375,
+        14.938,
+        14.25,
+        13.875
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 133,
+      "emitted": 6623,
+      "emitted_str": " gold",
+      "hf_top5": [
+        6623,
+        11,
+        323,
+        6177,
+        271
+      ],
+      "hf_top5_str": [
+        " gold",
+        ",",
+        " and",
+        " paint",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        16.25,
+        13.625,
+        13.25,
+        13.062
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 134,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        323,
+        382,
+        271
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        " and",
+        ".\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        16.625,
+        16.25,
+        15.25,
+        14.312
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 135,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        10094,
+        1340,
+        68076,
+        1393
+      ],
+      "hf_top5_str": [
+        " and",
+        " watching",
+        " she",
+        " Elena",
+        " while"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        14.5,
+        14.312,
+        14.125,
+        13.5
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 136,
+      "emitted": 1340,
+      "emitted_str": " she",
+      "hf_top5": [
+        1340,
+        279,
+        1221,
+        271,
+        2932
+      ],
+      "hf_top5_str": [
+        " she",
+        " the",
+        " then",
+        "\n\n",
+        " She"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        15.312,
+        14.75,
+        13.438,
+        13.0
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.938
+    },
+    {
+      "i": 137,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        29939,
+        83060,
+        7578,
+        44161
+      ],
+      "hf_top5_str": [
+        " watched",
+        " wondered",
+        " danced",
+        " sat",
+        " climbed"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        14.875,
+        14.625,
+        14.625,
+        14.438
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 138,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        2146,
+        264,
+        1112,
+        271
+      ],
+      "hf_top5_str": [
+        " the",
+        "...\n\n",
+        " a",
+        "...",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        13.438,
+        12.812,
+        12.688,
+        12.562
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.062
+    },
+    {
+      "i": 139,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        34342,
+        63364,
+        3100,
+        7015,
+        42739
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " sunrise",
+        " light",
+        " sun",
+        " sunset"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        16.875,
+        16.125,
+        14.438,
+        14.062
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.0
+    },
+    {
+      "i": 140,
+      "emitted": 15242,
+      "emitted_str": " dance",
+      "hf_top5": [
+        15242,
+        98036,
+        2146,
+        271,
+        3271
+      ],
+      "hf_top5_str": [
+        " dance",
+        "dance",
+        "...\n\n",
+        "\n\n",
+        " move"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        14.5,
+        13.938,
+        13.75,
+        13.75
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 141,
+      "emitted": 23902,
+      "emitted_str": " beneath",
+      "hf_top5": [
+        23902,
+        13,
+        382,
+        387,
+        2146
+      ],
+      "hf_top5_str": [
+        " beneath",
+        ".",
+        ".\n\n",
+        " be",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        16.125,
+        14.75,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 142,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        271,
+        37675,
+        13
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        "\n\n",
+        " oak",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.0,
+        15.062,
+        12.875,
+        12.625,
+        12.188
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.938
+    },
+    {
+      "i": 143,
+      "emitted": 37675,
+      "emitted_str": " oak",
+      "hf_top5": [
+        37675,
+        4916,
+        271,
+        5590,
+        1340
+      ],
+      "hf_top5_str": [
+        " oak",
+        " tree",
+        "\n\n",
+        " oil",
+        " she"
+      ],
+      "hf_top5_logits": [
+        23.5,
+        13.25,
+        13.0,
+        11.625,
+        11.438
+      ],
+      "emitted_logit": 23.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.25
+    },
+    {
+      "i": 144,
+      "emitted": 4916,
+      "emitted_str": " tree",
+      "hf_top5": [
+        4916,
+        37675,
+        99403,
+        13,
+        9341
+      ],
+      "hf_top5_str": [
+        " tree",
+        " oak",
+        "树",
+        ".",
+        "tree"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        15.0,
+        13.625,
+        13.5,
+        13.25
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.875
+    },
+    {
+      "i": 145,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        18.875,
+        16.625,
+        15.375,
+        14.812
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 146,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        17.5,
+        17.25,
+        14.562,
+        13.812,
+        13.625
+      ],
+      "emitted_logit": 17.25,
+      "emitted_rank": 1,
+      "hf_top1_margin": 0.25
+    },
+    {
+      "i": 147,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        20150,
+        6635,
+        44161,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        " gathered",
+        " decided",
+        " climbed",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        20.875,
+        18.375,
+        16.875,
+        16.75,
+        16.375
+      ],
+      "emitted_logit": 20.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.5
+    },
+    {
+      "i": 148,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        448,
+        11693,
+        279,
+        264
+      ],
+      "hf_top5_str": [
+        " being",
+        " with",
+        " sitting",
+        " the",
+        " a"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        14.875,
+        14.812,
+        14.688,
+        14.5
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 149,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        22153,
+        458,
+        1059,
+        279
+      ],
+      "hf_top5_str": [
+        " a",
+        " curious",
+        " an",
+        " her",
+        " the"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        14.125,
+        13.875,
+        13.5,
+        13.312
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 150,
+      "emitted": 22153,
+      "emitted_str": " curious",
+      "hf_top5": [
+        22153,
+        3908,
+        2613,
+        271,
+        11240
+      ],
+      "hf_top5_str": [
+        " curious",
+        " young",
+        " small",
+        "\n\n",
+        " famous"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        16.875,
+        15.125,
+        12.75,
+        12.562
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.25
+    },
+    {
+      "i": 151,
+      "emitted": 3908,
+      "emitted_str": " young",
+      "hf_top5": [
+        3908,
+        2613,
+        22153,
+        3743,
+        80521
+      ],
+      "hf_top5_str": [
+        " young",
+        " small",
+        " curious",
+        " girl",
+        "young"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        14.562,
+        14.312,
+        14.125,
+        13.125
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 152,
+      "emitted": 3743,
+      "emitted_str": " girl",
+      "hf_top5": [
+        3743,
+        28452,
+        40068,
+        2150,
+        4238
+      ],
+      "hf_top5_str": [
+        " girl",
+        "girl",
+        " gir",
+        " page",
+        " friend"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        16.125,
+        14.125,
+        13.375,
+        12.688
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 153,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        6941,
+        3554,
+        448,
+        6635
+      ],
+      "hf_top5_str": [
+        ",",
+        " named",
+        ",\n\n",
+        " with",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        14.625,
+        13.812,
+        13.75,
+        13.25
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.25
+    },
+    {
+      "i": 154,
+      "emitted": 6635,
+      "emitted_str": " decided",
+      "hf_top5": [
+        6635,
+        20150,
+        10194,
+        13677,
+        15372
+      ],
+      "hf_top5_str": [
+        " decided",
+        " gathered",
+        " filled",
+        " noticed",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        17.75,
+        16.75,
+        16.5,
+        16.5
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 155,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        429,
+        1340,
+        2146,
+        1112
+      ],
+      "hf_top5_str": [
+        " to",
+        " that",
+        " she",
+        "...\n\n",
+        "..."
+      ],
+      "hf_top5_logits": [
+        22.625,
+        16.625,
+        14.062,
+        13.812,
+        13.125
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 156,
+      "emitted": 19278,
+      "emitted_str": " investigate",
+      "hf_top5": [
+        19278,
+        3736,
+        25289,
+        13178,
+        2725
+      ],
+      "hf_top5_str": [
+        " investigate",
+        " watch",
+        " climb",
+        " explore",
+        " invest"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        16.75,
+        14.188,
+        13.75,
+        13.5
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 157,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        1549
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        " again"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        18.25,
+        16.25,
+        15.0,
+        14.938
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 158,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        19.875,
+        14.938,
+        14.812,
+        14.062,
+        13.812
+      ],
+      "emitted_logit": 19.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.938
+    },
+    {
+      "i": 159,
+      "emitted": 20150,
+      "emitted_str": " gathered",
+      "hf_top5": [
+        20150,
+        44161,
+        15372,
+        7578,
+        14538
+      ],
+      "hf_top5_str": [
+        " gathered",
+        " climbed",
+        " watched",
+        " sat",
+        " collected"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        20.5,
+        20.5,
+        16.625,
+        15.812
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.25
+    },
+    {
+      "i": 160,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        279,
+        1923,
+        2146,
+        264
+      ],
+      "hf_top5_str": [
+        " her",
+        " the",
+        "her",
+        "...\n\n",
+        " a"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        14.688,
+        14.5,
+        14.312,
+        14.312
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.562
+    },
+    {
+      "i": 161,
+      "emitted": 7375,
+      "emitted_str": " tools",
+      "hf_top5": [
+        7375,
+        36972,
+        15906,
+        23252,
+        37675
+      ],
+      "hf_top5_str": [
+        " tools",
+        " notebook",
+        "tools",
+        " instruments",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        25.25,
+        13.875,
+        13.688,
+        13.625,
+        12.938
+      ],
+      "emitted_logit": 25.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.375
+    },
+    {
+      "i": 162,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        11,
+        13,
+        3055,
+        382
+      ],
+      "hf_top5_str": [
+        " and",
+        ",",
+        ".",
+        " once",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        17.125,
+        14.812,
+        14.625,
+        14.25
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 163,
+      "emitted": 44161,
+      "emitted_str": " climbed",
+      "hf_top5": [
+        44161,
+        15372,
+        20150,
+        25289,
+        29397
+      ],
+      "hf_top5_str": [
+        " climbed",
+        " watched",
+        " gathered",
+        " climb",
+        " climbing"
+      ],
+      "hf_top5_logits": [
+        26.125,
+        17.875,
+        16.625,
+        16.25,
+        15.0
+      ],
+      "emitted_logit": 26.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.25
+    },
+    {
+      "i": 164,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        3055,
+        11,
+        13,
+        1549
+      ],
+      "hf_top5_str": [
+        " the",
+        " once",
+        ",",
+        ".",
+        " again"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        16.5,
+        14.875,
+        14.625,
+        14.125
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.125
+    },
+    {
+      "i": 165,
+      "emitted": 23086,
+      "emitted_str": " eastern",
+      "hf_top5": [
+        23086,
+        23879,
+        18463,
+        271,
+        10979
+      ],
+      "hf_top5_str": [
+        " eastern",
+        " hill",
+        " western",
+        "\n\n",
+        " east"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        13.812,
+        13.188,
+        13.125,
+        12.875
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.562
+    },
+    {
+      "i": 166,
+      "emitted": 23879,
+      "emitted_str": " hill",
+      "hf_top5": [
+        23879,
+        33966,
+        27415,
+        25289,
+        13985
+      ],
+      "hf_top5_str": [
+        " hill",
+        " hills",
+        "hill",
+        " climb",
+        " hall"
+      ],
+      "hf_top5_logits": [
+        25.0,
+        15.5,
+        14.625,
+        14.438,
+        13.5
+      ],
+      "emitted_logit": 25.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 167,
+      "emitted": 3055,
+      "emitted_str": " once",
+      "hf_top5": [
+        3055,
+        11,
+        1549,
+        13,
+        825
+      ],
+      "hf_top5_str": [
+        " once",
+        ",",
+        " again",
+        ".",
+        " one"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        19.0,
+        17.25,
+        16.5,
+        16.25
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 168,
+      "emitted": 803,
+      "emitted_str": " more",
+      "hf_top5": [
+        803,
+        271,
+        198,
+        6384,
+        4398
+      ],
+      "hf_top5_str": [
+        " more",
+        "\n\n",
+        "\n",
+        "more",
+        " More"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        13.875,
+        13.125,
+        13.0,
+        12.375
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 169,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        448,
+        624
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        " with",
+        ".\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        18.25,
+        17.0,
+        15.0,
+        14.625
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.625
+    },
+    {
+      "i": 170,
+      "emitted": 419,
+      "emitted_str": " this",
+      "hf_top5": [
+        419,
+        323,
+        448,
+        10094,
+        1340
+      ],
+      "hf_top5_str": [
+        " this",
+        " and",
+        " with",
+        " watching",
+        " she"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        15.812,
+        15.312,
+        14.375,
+        13.312
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.812
+    },
+    {
+      "i": 171,
+      "emitted": 882,
+      "emitted_str": " time",
+      "hf_top5": [
+        882,
+        3039,
+        271,
+        448,
+        198
+      ],
+      "hf_top5_str": [
+        " time",
+        " times",
+        "\n\n",
+        " with",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        27.0,
+        15.0,
+        14.75,
+        14.562,
+        14.125
+      ],
+      "emitted_logit": 27.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 12.0
+    },
+    {
+      "i": 172,
+      "emitted": 448,
+      "emitted_str": " with",
+      "hf_top5": [
+        448,
+        10094,
+        2146,
+        1340,
+        271
+      ],
+      "hf_top5_str": [
+        " with",
+        " watching",
+        "...\n\n",
+        " she",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        14.562,
+        13.188,
+        13.0,
+        13.0
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 173,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        279,
+        2146,
+        458
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        " the",
+        "...\n\n",
+        " an"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        14.188,
+        13.062,
+        12.812,
+        12.688
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.562
+    },
+    {
+      "i": 174,
+      "emitted": 36972,
+      "emitted_str": " notebook",
+      "hf_top5": [
+        36972,
+        45839,
+        5185,
+        37675,
+        3736
+      ],
+      "hf_top5_str": [
+        " notebook",
+        " pencil",
+        " note",
+        " oak",
+        " watch"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        16.625,
+        15.0,
+        13.562,
+        12.625
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 175,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        13,
+        11,
+        382,
+        2146
+      ],
+      "hf_top5_str": [
+        " and",
+        ".",
+        ",",
+        ".\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        14.938,
+        14.5,
+        13.438,
+        12.375
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.938
+    },
+    {
+      "i": 176,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        1340,
+        458,
+        271
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        " she",
+        " an",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        12.562,
+        12.125,
+        11.562,
+        11.125
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.812
+    },
+    {
+      "i": 177,
+      "emitted": 45839,
+      "emitted_str": " pencil",
+      "hf_top5": [
+        45839,
+        36972,
+        64798,
+        5750,
+        95531
+      ],
+      "hf_top5_str": [
+        " pencil",
+        " notebook",
+        " penc",
+        " pen",
+        " pencils"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        16.25,
+        12.312,
+        11.75,
+        11.312
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.5
+    },
+    {
+      "i": 178,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        7110,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ".\\",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        21.125,
+        17.875,
+        16.0,
+        14.062,
+        13.688
+      ],
+      "emitted_logit": 21.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.25
+    },
+    {
+      "i": 179,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        19.25,
+        16.125,
+        15.312,
+        14.25,
+        13.562
+      ],
+      "emitted_logit": 19.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 180,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        20150,
+        44161,
+        6139,
+        7578
+      ],
+      "hf_top5_str": [
+        " watched",
+        " gathered",
+        " climbed",
+        " wrote",
+        " sat"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        20.5,
+        19.125,
+        17.625,
+        17.125
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 181,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        271,
+        2146,
+        63364,
+        323
+      ],
+      "hf_top5_str": [
+        " the",
+        "\n\n",
+        "...\n\n",
+        " sunrise",
+        " and"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        13.938,
+        13.438,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.812
+    },
+    {
+      "i": 182,
+      "emitted": 63364,
+      "emitted_str": " sunrise",
+      "hf_top5": [
+        63364,
+        34342,
+        42739,
+        3100,
+        38810
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " shadows",
+        " sunset",
+        " light",
+        " sunlight"
+      ],
+      "hf_top5_logits": [
+        21.0,
+        19.0,
+        14.25,
+        14.188,
+        13.312
+      ],
+      "emitted_logit": 21.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.0
+    },
+    {
+      "i": 183,
+      "emitted": 6177,
+      "emitted_str": " paint",
+      "hf_top5": [
+        6177,
+        11,
+        271,
+        323,
+        33455
+      ],
+      "hf_top5_str": [
+        " paint",
+        ",",
+        "\n\n",
+        " and",
+        "paint"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        13.375,
+        12.938,
+        12.875,
+        12.5
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.375
+    },
+    {
+      "i": 184,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        271,
+        2146,
+        11,
+        1112
+      ],
+      "hf_top5_str": [
+        " the",
+        "\n\n",
+        "...\n\n",
+        ",",
+        "..."
+      ],
+      "hf_top5_logits": [
+        21.5,
+        13.062,
+        12.688,
+        12.625,
+        12.562
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 185,
+      "emitted": 33419,
+      "emitted_str": " valley",
+      "hf_top5": [
+        33419,
+        84692,
+        14117,
+        1044,
+        33560
+      ],
+      "hf_top5_str": [
+        " valley",
+        " valleys",
+        " village",
+        " val",
+        " vale"
+      ],
+      "hf_top5_logits": [
+        26.875,
+        16.875,
+        16.125,
+        16.125,
+        14.75
+      ],
+      "emitted_logit": 26.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.0
+    },
+    {
+      "i": 186,
+      "emitted": 6623,
+      "emitted_str": " gold",
+      "hf_top5": [
+        6623,
+        11,
+        271,
+        323,
+        13
+      ],
+      "hf_top5_str": [
+        " gold",
+        ",",
+        "\n\n",
+        " and",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.625,
+        14.75,
+        13.188,
+        12.75,
+        12.562
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.875
+    },
+    {
+      "i": 187,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        323,
+        382,
+        2146
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        " and",
+        ".\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        16.75,
+        15.438,
+        15.375,
+        13.625
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.875
+    },
+    {
+      "i": 188,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        68076,
+        1340,
+        15372,
+        10094
+      ],
+      "hf_top5_str": [
+        " and",
+        " Elena",
+        " she",
+        " watched",
+        " watching"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        14.0,
+        13.438,
+        12.75,
+        12.688
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.75
+    },
+    {
+      "i": 189,
+      "emitted": 1340,
+      "emitted_str": " she",
+      "hf_top5": [
+        1340,
+        279,
+        1059,
+        1221,
+        825
+      ],
+      "hf_top5_str": [
+        " she",
+        " the",
+        " her",
+        " then",
+        " one"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        15.75,
+        13.688,
+        13.562,
+        12.938
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.625
+    },
+    {
+      "i": 190,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        83060,
+        13677,
+        44161,
+        7578
+      ],
+      "hf_top5_str": [
+        " watched",
+        " danced",
+        " noticed",
+        " climbed",
+        " sat"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        17.875,
+        16.75,
+        16.625,
+        15.688
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.5
+    },
+    {
+      "i": 191,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        264,
+        1059,
+        2146,
+        1782
+      ],
+      "hf_top5_str": [
+        " the",
+        " a",
+        " her",
+        "...\n\n",
+        "the"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        13.562,
+        13.312,
+        12.75,
+        12.25
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 192,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        34342,
+        3100,
+        37675,
+        63364,
+        12449
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " light",
+        " oak",
+        " sunrise",
+        " shadow"
+      ],
+      "hf_top5_logits": [
+        21.75,
+        16.0,
+        15.812,
+        15.312,
+        14.0
+      ],
+      "emitted_logit": 21.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.75
+    },
+    {
+      "i": 193,
+      "emitted": 15242,
+      "emitted_str": " dance",
+      "hf_top5": [
+        15242,
+        98036,
+        13,
+        2146,
+        271
+      ],
+      "hf_top5_str": [
+        " dance",
+        "dance",
+        ".",
+        "...\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        15.188,
+        13.438,
+        13.375,
+        13.25
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.688
+    },
+    {
+      "i": 194,
+      "emitted": 23902,
+      "emitted_str": " beneath",
+      "hf_top5": [
+        23902,
+        13,
+        382,
+        387,
+        271
+      ],
+      "hf_top5_str": [
+        " beneath",
+        ".",
+        ".\n\n",
+        " be",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        15.688,
+        14.375,
+        13.312,
+        12.688
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.312
+    },
+    {
+      "i": 195,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        271,
+        13,
+        37675
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        "\n\n",
+        ".",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        15.188,
+        12.5,
+        12.438,
+        12.25
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.062
+    },
+    {
+      "i": 196,
+      "emitted": 37675,
+      "emitted_str": " oak",
+      "hf_top5": [
+        37675,
+        4916,
+        18254,
+        33419,
+        271
+      ],
+      "hf_top5_str": [
+        " oak",
+        " tree",
+        " Oak",
+        " valley",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        13.625,
+        12.625,
+        12.25,
+        12.125
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.25
+    },
+    {
+      "i": 197,
+      "emitted": 4916,
+      "emitted_str": " tree",
+      "hf_top5": [
+        4916,
+        37675,
+        13,
+        99403,
+        9341
+      ],
+      "hf_top5_str": [
+        " tree",
+        " oak",
+        ".",
+        "树",
+        "tree"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        14.688,
+        14.0,
+        13.5,
+        13.312
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.812
+    },
+    {
+      "i": 198,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        4192
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\n\n\n"
+      ],
+      "hf_top5_logits": [
+        20.75,
+        18.0,
+        16.25,
+        16.0,
+        13.938
+      ],
+      "emitted_logit": 20.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.75
+    },
+    {
+      "i": 199,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        7209,
+        576,
+        1597
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " Every",
+        " The",
+        " And"
+      ],
+      "hf_top5_logits": [
+        17.875,
+        17.375,
+        14.125,
+        13.75,
+        13.438
+      ],
+      "emitted_logit": 17.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 0.5
+    },
+    {
+      "i": 200,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        20150,
+        6139,
+        6635,
+        15372
+      ],
+      "hf_top5_str": [
+        ",",
+        " gathered",
+        " wrote",
+        " decided",
+        " watched"
+      ],
+      "hf_top5_logits": [
+        21.5,
+        18.0,
+        16.875,
+        16.375,
+        15.875
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.5
+    },
+    {
+      "i": 201,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        11693,
+        448,
+        279,
+        264
+      ],
+      "hf_top5_str": [
+        " being",
+        " sitting",
+        " with",
+        " the",
+        " a"
+      ],
+      "hf_top5_logits": [
+        22.625,
+        15.188,
+        14.875,
+        14.812,
+        14.375
+      ],
+      "emitted_logit": 22.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.438
+    },
+    {
+      "i": 202,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        22153,
+        1059,
+        279,
+        458
+      ],
+      "hf_top5_str": [
+        " a",
+        " curious",
+        " her",
+        " the",
+        " an"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        14.25,
+        14.0,
+        13.5,
+        13.188
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.0
+    },
+    {
+      "i": 203,
+      "emitted": 22153,
+      "emitted_str": " curious",
+      "hf_top5": [
+        22153,
+        3908,
+        25304,
+        2613,
+        271
+      ],
+      "hf_top5_str": [
+        " curious",
+        " young",
+        " mysterious",
+        " small",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        16.25,
+        13.125,
+        12.938,
+        12.75
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.75
+    },
+    {
+      "i": 204,
+      "emitted": 3908,
+      "emitted_str": " young",
+      "hf_top5": [
+        3908,
+        3743,
+        323,
+        2310,
+        271
+      ],
+      "hf_top5_str": [
+        " young",
+        " girl",
+        " and",
+        " old",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        14.562,
+        13.062,
+        12.75,
+        12.688
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 205,
+      "emitted": 3743,
+      "emitted_str": " girl",
+      "hf_top5": [
+        3743,
+        40068,
+        28452,
+        11358,
+        342
+      ],
+      "hf_top5_str": [
+        " girl",
+        " gir",
+        "girl",
+        " Girl",
+        " g"
+      ],
+      "hf_top5_logits": [
+        26.375,
+        14.75,
+        14.375,
+        13.062,
+        13.062
+      ],
+      "emitted_logit": 26.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.625
+    },
+    {
+      "i": 206,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        3554,
+        448,
+        2146
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ",\n\n",
+        " with",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        14.375,
+        13.188,
+        13.062,
+        13.0
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.0
+    },
+    {
+      "i": 207,
+      "emitted": 6635,
+      "emitted_str": " decided",
+      "hf_top5": [
+        6635,
+        20150,
+        44161,
+        10194,
+        6139
+      ],
+      "hf_top5_str": [
+        " decided",
+        " gathered",
+        " climbed",
+        " filled",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        17.375,
+        17.0,
+        16.5,
+        15.688
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.125
+    },
+    {
+      "i": 208,
+      "emitted": 311,
+      "emitted_str": " to",
+      "hf_top5": [
+        311,
+        429,
+        1340,
+        2146,
+        1112
+      ],
+      "hf_top5_str": [
+        " to",
+        " that",
+        " she",
+        "...\n\n",
+        "..."
+      ],
+      "hf_top5_logits": [
+        23.0,
+        15.875,
+        13.875,
+        13.812,
+        13.375
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.125
+    },
+    {
+      "i": 209,
+      "emitted": 19278,
+      "emitted_str": " investigate",
+      "hf_top5": [
+        19278,
+        2725,
+        25289,
+        4665,
+        3736
+      ],
+      "hf_top5_str": [
+        " investigate",
+        " invest",
+        " climb",
+        " investig",
+        " watch"
+      ],
+      "hf_top5_logits": [
+        24.125,
+        15.625,
+        15.625,
+        15.062,
+        14.875
+      ],
+      "emitted_logit": 24.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.5
+    },
+    {
+      "i": 210,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        11,
+        7110
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ",",
+        ".\\"
+      ],
+      "hf_top5_logits": [
+        22.0,
+        17.25,
+        15.625,
+        15.188,
+        13.875
+      ],
+      "emitted_logit": 22.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.75
+    },
+    {
+      "i": 211,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        20.375,
+        15.188,
+        14.438,
+        13.875,
+        13.812
+      ],
+      "emitted_logit": 20.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.188
+    },
+    {
+      "i": 212,
+      "emitted": 20150,
+      "emitted_str": " gathered",
+      "hf_top5": [
+        20150,
+        44161,
+        15372,
+        7578,
+        6139
+      ],
+      "hf_top5_str": [
+        " gathered",
+        " climbed",
+        " watched",
+        " sat",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        19.75,
+        18.25,
+        15.5,
+        15.312
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.0
+    },
+    {
+      "i": 213,
+      "emitted": 1059,
+      "emitted_str": " her",
+      "hf_top5": [
+        1059,
+        323,
+        2146,
+        1923,
+        279
+      ],
+      "hf_top5_str": [
+        " her",
+        " and",
+        "...\n\n",
+        "her",
+        " the"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        13.75,
+        13.562,
+        13.5,
+        13.438
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.625
+    },
+    {
+      "i": 214,
+      "emitted": 7375,
+      "emitted_str": " tools",
+      "hf_top5": [
+        7375,
+        23007,
+        23252,
+        39508,
+        15906
+      ],
+      "hf_top5_str": [
+        " tools",
+        " toys",
+        " instruments",
+        "_tools",
+        "tools"
+      ],
+      "hf_top5_logits": [
+        27.25,
+        15.312,
+        14.375,
+        13.875,
+        13.312
+      ],
+      "emitted_logit": 27.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 11.938
+    },
+    {
+      "i": 215,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        11,
+        3055,
+        13,
+        382
+      ],
+      "hf_top5_str": [
+        " and",
+        ",",
+        " once",
+        ".",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        23.375,
+        16.375,
+        16.125,
+        15.375,
+        14.375
+      ],
+      "emitted_logit": 23.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.0
+    },
+    {
+      "i": 216,
+      "emitted": 44161,
+      "emitted_str": " climbed",
+      "hf_top5": [
+        44161,
+        25289,
+        20150,
+        15372,
+        7578
+      ],
+      "hf_top5_str": [
+        " climbed",
+        " climb",
+        " gathered",
+        " watched",
+        " sat"
+      ],
+      "hf_top5_logits": [
+        25.0,
+        16.125,
+        15.375,
+        14.625,
+        14.125
+      ],
+      "emitted_logit": 25.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 217,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        3055,
+        13,
+        271,
+        382
+      ],
+      "hf_top5_str": [
+        " the",
+        " once",
+        ".",
+        "\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        15.188,
+        13.875,
+        13.562,
+        13.25
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.312
+    },
+    {
+      "i": 218,
+      "emitted": 23086,
+      "emitted_str": " eastern",
+      "hf_top5": [
+        23086,
+        23879,
+        18463,
+        271,
+        198
+      ],
+      "hf_top5_str": [
+        " eastern",
+        " hill",
+        " western",
+        "\n\n",
+        "\n"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        14.438,
+        14.25,
+        13.812,
+        13.375
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.688
+    },
+    {
+      "i": 219,
+      "emitted": 23879,
+      "emitted_str": " hill",
+      "hf_top5": [
+        23879,
+        27415,
+        33966,
+        8107,
+        25289
+      ],
+      "hf_top5_str": [
+        " hill",
+        "hill",
+        " hills",
+        " Hill",
+        " climb"
+      ],
+      "hf_top5_logits": [
+        25.125,
+        15.5,
+        14.25,
+        14.25,
+        14.0
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.625
+    },
+    {
+      "i": 220,
+      "emitted": 3055,
+      "emitted_str": " once",
+      "hf_top5": [
+        3055,
+        11,
+        825,
+        1549,
+        13
+      ],
+      "hf_top5_str": [
+        " once",
+        ",",
+        " one",
+        " again",
+        "."
+      ],
+      "hf_top5_logits": [
+        24.0,
+        18.0,
+        16.5,
+        16.375,
+        16.125
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 221,
+      "emitted": 803,
+      "emitted_str": " more",
+      "hf_top5": [
+        803,
+        271,
+        198,
+        6384,
+        2146
+      ],
+      "hf_top5_str": [
+        " more",
+        "\n\n",
+        "\n",
+        "more",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        24.5,
+        13.562,
+        13.062,
+        12.688,
+        12.062
+      ],
+      "emitted_logit": 24.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.938
+    },
+    {
+      "i": 222,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        3554,
+        624
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        ",\n\n",
+        ".\n"
+      ],
+      "hf_top5_logits": [
+        23.25,
+        17.875,
+        16.625,
+        14.562,
+        14.312
+      ],
+      "emitted_logit": 23.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.375
+    },
+    {
+      "i": 223,
+      "emitted": 419,
+      "emitted_str": " this",
+      "hf_top5": [
+        419,
+        448,
+        323,
+        2932,
+        1340
+      ],
+      "hf_top5_str": [
+        " this",
+        " with",
+        " and",
+        " She",
+        " she"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        15.25,
+        14.0,
+        13.25,
+        13.0
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.5
+    },
+    {
+      "i": 224,
+      "emitted": 882,
+      "emitted_str": " time",
+      "hf_top5": [
+        882,
+        3039,
+        1616,
+        1992,
+        3550
+      ],
+      "hf_top5_str": [
+        " time",
+        " times",
+        " way",
+        " place",
+        " space"
+      ],
+      "hf_top5_logits": [
+        27.875,
+        17.125,
+        16.75,
+        15.125,
+        14.062
+      ],
+      "emitted_logit": 27.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.75
+    },
+    {
+      "i": 225,
+      "emitted": 448,
+      "emitted_str": " with",
+      "hf_top5": [
+        448,
+        2146,
+        271,
+        13,
+        1112
+      ],
+      "hf_top5_str": [
+        " with",
+        "...\n\n",
+        "\n\n",
+        ".",
+        "..."
+      ],
+      "hf_top5_logits": [
+        22.875,
+        13.25,
+        13.0,
+        12.375,
+        12.312
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.625
+    },
+    {
+      "i": 226,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        1112,
+        2146,
+        279
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        "...",
+        "...\n\n",
+        " the"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        13.625,
+        12.75,
+        12.688,
+        12.5
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 227,
+      "emitted": 36972,
+      "emitted_str": " notebook",
+      "hf_top5": [
+        36972,
+        45839,
+        5185,
+        56232,
+        37675
+      ],
+      "hf_top5_str": [
+        " notebook",
+        " pencil",
+        " note",
+        " fountain",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        17.125,
+        13.812,
+        13.312,
+        13.25
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.0
+    },
+    {
+      "i": 228,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        13,
+        11,
+        382,
+        2146
+      ],
+      "hf_top5_str": [
+        " and",
+        ".",
+        ",",
+        ".\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        22.375,
+        15.438,
+        14.438,
+        13.812,
+        12.5
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.938
+    },
+    {
+      "i": 229,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        1059,
+        64,
+        279,
+        458
+      ],
+      "hf_top5_str": [
+        " a",
+        " her",
+        "a",
+        " the",
+        " an"
+      ],
+      "hf_top5_logits": [
+        25.5,
+        12.188,
+        11.375,
+        10.875,
+        10.75
+      ],
+      "emitted_logit": 25.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 13.312
+    },
+    {
+      "i": 230,
+      "emitted": 45839,
+      "emitted_str": " pencil",
+      "hf_top5": [
+        45839,
+        36972,
+        64798,
+        122303,
+        5750
+      ],
+      "hf_top5_str": [
+        " pencil",
+        " notebook",
+        " penc",
+        "铅笔",
+        " pen"
+      ],
+      "hf_top5_logits": [
+        24.375,
+        14.75,
+        13.062,
+        12.562,
+        12.0
+      ],
+      "emitted_logit": 24.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.625
+    },
+    {
+      "i": 231,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        47590,
+        10341
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ".\",\"",
+        ".\",\n"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        17.75,
+        16.0,
+        14.5,
+        14.125
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.875
+    },
+    {
+      "i": 232,
+      "emitted": 2932,
+      "emitted_str": " She",
+      "hf_top5": [
+        2932,
+        68076,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " She",
+        " Elena",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        19.625,
+        16.5,
+        14.562,
+        13.938,
+        13.062
+      ],
+      "emitted_logit": 19.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 233,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        20150,
+        44161,
+        7578,
+        6139
+      ],
+      "hf_top5_str": [
+        " watched",
+        " gathered",
+        " climbed",
+        " sat",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        24.25,
+        18.625,
+        17.75,
+        15.938,
+        15.875
+      ],
+      "emitted_logit": 24.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.625
+    },
+    {
+      "i": 234,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        2146,
+        271,
+        323
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        "...\n\n",
+        "\n\n",
+        " and"
+      ],
+      "hf_top5_logits": [
+        24.25,
+        14.125,
+        13.812,
+        13.75,
+        13.562
+      ],
+      "emitted_logit": 24.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.125
+    },
+    {
+      "i": 235,
+      "emitted": 63364,
+      "emitted_str": " sunrise",
+      "hf_top5": [
+        63364,
+        34342,
+        3100,
+        42739,
+        7015
+      ],
+      "hf_top5_str": [
+        " sunrise",
+        " shadows",
+        " light",
+        " sunset",
+        " sun"
+      ],
+      "hf_top5_logits": [
+        23.0,
+        18.625,
+        15.938,
+        15.688,
+        15.188
+      ],
+      "emitted_logit": 23.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 4.375
+    },
+    {
+      "i": 236,
+      "emitted": 6177,
+      "emitted_str": " paint",
+      "hf_top5": [
+        6177,
+        11,
+        13,
+        271,
+        382
+      ],
+      "hf_top5_str": [
+        " paint",
+        ",",
+        ".",
+        "\n\n",
+        ".\n\n"
+      ],
+      "hf_top5_logits": [
+        22.25,
+        13.375,
+        13.062,
+        12.812,
+        12.562
+      ],
+      "emitted_logit": 22.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.875
+    },
+    {
+      "i": 237,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        271,
+        11,
+        323,
+        13
+      ],
+      "hf_top5_str": [
+        " the",
+        "\n\n",
+        ",",
+        " and",
+        "."
+      ],
+      "hf_top5_logits": [
+        22.375,
+        13.062,
+        12.562,
+        12.375,
+        12.375
+      ],
+      "emitted_logit": 22.375,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.312
+    },
+    {
+      "i": 238,
+      "emitted": 33419,
+      "emitted_str": " valley",
+      "hf_top5": [
+        33419,
+        84692,
+        1044,
+        13039,
+        271
+      ],
+      "hf_top5_str": [
+        " valley",
+        " valleys",
+        " val",
+        " Valley",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        24.25,
+        14.75,
+        14.188,
+        13.938,
+        13.5
+      ],
+      "emitted_logit": 24.25,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.5
+    },
+    {
+      "i": 239,
+      "emitted": 6623,
+      "emitted_str": " gold",
+      "hf_top5": [
+        6623,
+        11,
+        20703,
+        323,
+        37675
+      ],
+      "hf_top5_str": [
+        " gold",
+        ",",
+        " golden",
+        " and",
+        " oak"
+      ],
+      "hf_top5_logits": [
+        25.125,
+        15.688,
+        14.938,
+        14.188,
+        14.062
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.438
+    },
+    {
+      "i": 240,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        13,
+        382,
+        323,
+        3554
+      ],
+      "hf_top5_str": [
+        ",",
+        ".",
+        ".\n\n",
+        " and",
+        ",\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        16.25,
+        14.938,
+        14.438,
+        13.375
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 6.625
+    },
+    {
+      "i": 241,
+      "emitted": 323,
+      "emitted_str": " and",
+      "hf_top5": [
+        323,
+        68076,
+        1340,
+        1393,
+        264
+      ],
+      "hf_top5_str": [
+        " and",
+        " Elena",
+        " she",
+        " while",
+        " a"
+      ],
+      "hf_top5_logits": [
+        23.125,
+        15.75,
+        12.812,
+        11.75,
+        11.625
+      ],
+      "emitted_logit": 23.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 242,
+      "emitted": 1340,
+      "emitted_str": " she",
+      "hf_top5": [
+        1340,
+        279,
+        271,
+        1059,
+        1221
+      ],
+      "hf_top5_str": [
+        " she",
+        " the",
+        "\n\n",
+        " her",
+        " then"
+      ],
+      "hf_top5_logits": [
+        23.75,
+        14.0,
+        12.812,
+        12.75,
+        12.688
+      ],
+      "emitted_logit": 23.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.75
+    },
+    {
+      "i": 243,
+      "emitted": 15372,
+      "emitted_str": " watched",
+      "hf_top5": [
+        15372,
+        13677,
+        3736,
+        83060,
+        6139
+      ],
+      "hf_top5_str": [
+        " watched",
+        " noticed",
+        " watch",
+        " danced",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        24.875,
+        15.0,
+        14.75,
+        14.438,
+        14.188
+      ],
+      "emitted_logit": 24.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.875
+    },
+    {
+      "i": 244,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        264,
+        2146,
+        271
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " a",
+        "...\n\n",
+        "\n\n"
+      ],
+      "hf_top5_logits": [
+        22.875,
+        12.5,
+        12.5,
+        12.312,
+        12.312
+      ],
+      "emitted_logit": 22.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.375
+    },
+    {
+      "i": 245,
+      "emitted": 34342,
+      "emitted_str": " shadows",
+      "hf_top5": [
+        34342,
+        3100,
+        37675,
+        12449,
+        63364
+      ],
+      "hf_top5_str": [
+        " shadows",
+        " light",
+        " oak",
+        " shadow",
+        " sunrise"
+      ],
+      "hf_top5_logits": [
+        21.875,
+        14.5,
+        14.125,
+        13.938,
+        12.875
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 7.375
+    },
+    {
+      "i": 246,
+      "emitted": 15242,
+      "emitted_str": " dance",
+      "hf_top5": [
+        15242,
+        98036,
+        13,
+        271,
+        2146
+      ],
+      "hf_top5_str": [
+        " dance",
+        "dance",
+        ".",
+        "\n\n",
+        "...\n\n"
+      ],
+      "hf_top5_logits": [
+        24.0,
+        14.688,
+        12.938,
+        12.812,
+        12.562
+      ],
+      "emitted_logit": 24.0,
+      "emitted_rank": 0,
+      "hf_top1_margin": 9.312
+    },
+    {
+      "i": 247,
+      "emitted": 23902,
+      "emitted_str": " beneath",
+      "hf_top5": [
+        23902,
+        13,
+        382,
+        11,
+        387
+      ],
+      "hf_top5_str": [
+        " beneath",
+        ".",
+        ".\n\n",
+        ",",
+        " be"
+      ],
+      "hf_top5_logits": [
+        23.875,
+        15.438,
+        14.188,
+        13.188,
+        13.125
+      ],
+      "emitted_logit": 23.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.438
+    },
+    {
+      "i": 248,
+      "emitted": 279,
+      "emitted_str": " the",
+      "hf_top5": [
+        279,
+        1059,
+        37675,
+        271,
+        13
+      ],
+      "hf_top5_str": [
+        " the",
+        " her",
+        " oak",
+        "\n\n",
+        "."
+      ],
+      "hf_top5_logits": [
+        21.875,
+        13.25,
+        12.25,
+        12.0,
+        11.875
+      ],
+      "emitted_logit": 21.875,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.625
+    },
+    {
+      "i": 249,
+      "emitted": 37675,
+      "emitted_str": " oak",
+      "hf_top5": [
+        37675,
+        4916,
+        18254,
+        13,
+        33419
+      ],
+      "hf_top5_str": [
+        " oak",
+        " tree",
+        " Oak",
+        ".",
+        " valley"
+      ],
+      "hf_top5_logits": [
+        24.75,
+        14.375,
+        12.5,
+        12.312,
+        12.25
+      ],
+      "emitted_logit": 24.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.375
+    },
+    {
+      "i": 250,
+      "emitted": 4916,
+      "emitted_str": " tree",
+      "hf_top5": [
+        4916,
+        99403,
+        9341,
+        37675,
+        13
+      ],
+      "hf_top5_str": [
+        " tree",
+        "树",
+        "tree",
+        " oak",
+        "."
+      ],
+      "hf_top5_logits": [
+        25.125,
+        14.625,
+        13.875,
+        13.375,
+        13.312
+      ],
+      "emitted_logit": 25.125,
+      "emitted_rank": 0,
+      "hf_top1_margin": 10.5
+    },
+    {
+      "i": 251,
+      "emitted": 13,
+      "emitted_str": ".",
+      "hf_top5": [
+        13,
+        382,
+        624,
+        4192,
+        11
+      ],
+      "hf_top5_str": [
+        ".",
+        ".\n\n",
+        ".\n",
+        ".\n\n\n",
+        ","
+      ],
+      "hf_top5_logits": [
+        21.5,
+        18.375,
+        16.75,
+        14.75,
+        14.562
+      ],
+      "emitted_logit": 21.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 3.125
+    },
+    {
+      "i": 252,
+      "emitted": 68076,
+      "emitted_str": " Elena",
+      "hf_top5": [
+        68076,
+        2932,
+        7209,
+        3776,
+        576
+      ],
+      "hf_top5_str": [
+        " Elena",
+        " She",
+        " Every",
+        " One",
+        " The"
+      ],
+      "hf_top5_logits": [
+        18.75,
+        15.938,
+        14.25,
+        13.688,
+        13.5
+      ],
+      "emitted_logit": 18.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 2.812
+    },
+    {
+      "i": 253,
+      "emitted": 11,
+      "emitted_str": ",",
+      "hf_top5": [
+        11,
+        20150,
+        44161,
+        6635,
+        6139
+      ],
+      "hf_top5_str": [
+        ",",
+        " gathered",
+        " climbed",
+        " decided",
+        " wrote"
+      ],
+      "hf_top5_logits": [
+        21.625,
+        16.375,
+        16.25,
+        15.812,
+        15.312
+      ],
+      "emitted_logit": 21.625,
+      "emitted_rank": 0,
+      "hf_top1_margin": 5.25
+    },
+    {
+      "i": 254,
+      "emitted": 1660,
+      "emitted_str": " being",
+      "hf_top5": [
+        1660,
+        279,
+        1340,
+        264,
+        6635
+      ],
+      "hf_top5_str": [
+        " being",
+        " the",
+        " she",
+        " a",
+        " decided"
+      ],
+      "hf_top5_logits": [
+        22.75,
+        14.062,
+        14.0,
+        13.688,
+        13.438
+      ],
+      "emitted_logit": 22.75,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.688
+    },
+    {
+      "i": 255,
+      "emitted": 264,
+      "emitted_str": " a",
+      "hf_top5": [
+        264,
+        22153,
+        11,
+        271,
+        1059
+      ],
+      "hf_top5_str": [
+        " a",
+        " curious",
+        ",",
+        "\n\n",
+        " her"
+      ],
+      "hf_top5_logits": [
+        22.5,
+        13.938,
+        13.125,
+        12.75,
+        12.562
+      ],
+      "emitted_logit": 22.5,
+      "emitted_rank": 0,
+      "hf_top1_margin": 8.562
+    }
+  ]
+}

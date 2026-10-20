@@ -1,0 +1,326 @@
+{
+ "kda_in": {
+  "field": "kda_in",
+  "current": {
+   "tag": "default",
+   "us": 150.96,
+   "rel_err": 0.006562364357229152,
+   "scale": 0.9971709352789877
+  },
+  "fastest": {
+   "tag": "1d_c29_ib4",
+   "us": 74.35
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c29_ib4",
+   "spec": "1d:c29:ib4",
+   "us": 74.35,
+   "gain_us": 76.61,
+   "rel_err": 0.006562364357229152,
+   "scale": 0.9971709352789877,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib8": 74.71,
+   "ds_a8_ib16_r1": 128.99
+  },
+  "refused": [
+   "ds_a2_ib32_r1",
+   "ds_a2_ib64_r1",
+   "ds_a2_ib64_r3",
+   "ds_a4_ib32_r1"
+  ],
+  "candidates": 51
+ },
+ "kda_out": {
+  "field": "kda_out",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 28.56,
+   "rel_err": 0.005917641643634398,
+   "scale": 0.997171970101479
+  },
+  "fastest": {
+   "tag": "1d_c16_ib16",
+   "us": 25.03
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib16",
+   "spec": "1d:c16:ib16",
+   "us": 25.03,
+   "gain_us": 3.53,
+   "rel_err": 0.005917641643634398,
+   "scale": 0.997171970101479,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib16": 26.03,
+   "ds_a8_ib8_r1": 41.47
+  },
+  "refused": [],
+  "candidates": 43
+ },
+ "dsa_o": {
+  "field": "dsa_o",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 47.22,
+   "rel_err": 0.005864884369516562,
+   "scale": 0.997160715344224
+  },
+  "fastest": {
+   "tag": "1d_c16_ib16",
+   "us": 39.55
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib16",
+   "spec": "1d:c16:ib16",
+   "us": 39.55,
+   "gain_us": 7.67,
+   "rel_err": 0.005864884369516562,
+   "scale": 0.997160715344224,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib16": 40.62,
+   "ds_a8_ib16_r1": 68.67
+  },
+  "refused": [
+   "ds_a2_ib64_r1"
+  ],
+  "candidates": 44
+ },
+ "dsa_qb": {
+  "field": "dsa_qb",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 23.82,
+   "rel_err": 0.004811995160705037,
+   "scale": 0.9971450726836291
+  },
+  "fastest": {
+   "tag": "1d_c16_ib16",
+   "us": 21.1
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib16",
+   "spec": "1d:c16:ib16",
+   "us": 21.1,
+   "gain_us": 2.72,
+   "rel_err": 0.004811995160705037,
+   "scale": 0.9971450726836291,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib16": 22.29,
+   "ds_a4_ib12_r1": 34.55
+  },
+  "refused": [],
+  "candidates": 29
+ },
+ "pack_a": {
+  "field": "pack_a_spec",
+  "current": {
+   "tag": "1d_c32_ib8",
+   "us": 29.49,
+   "rel_err": 0.0047136628516833545,
+   "scale": 0.9971865179530738
+  },
+  "fastest": {
+   "tag": "1d_c16_ib32",
+   "us": 25.27
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib32",
+   "spec": "1d:c16:ib32",
+   "us": 25.27,
+   "gain_us": 4.22,
+   "rel_err": 0.0047136628516833545,
+   "scale": 0.9971865179530738,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib32": 26.55,
+   "ds_a8_ib16_r1": 40.4
+  },
+  "refused": [],
+  "candidates": 40
+ },
+ "shared_gu": {
+  "field": "shared_gu",
+  "current": {
+   "tag": "1d_c32_ib16",
+   "us": 22.75,
+   "rel_err": 0.0047876089872736305,
+   "scale": 0.9971963548059165
+  },
+  "fastest": {
+   "tag": "1d_c16_ib64",
+   "us": 18.65
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib64",
+   "spec": "1d:c16:ib64",
+   "us": 18.65,
+   "gain_us": 4.1,
+   "rel_err": 0.0047876089872736305,
+   "scale": 0.9971963548059165,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib64": 20.19,
+   "ds_a4_ib32_r1": 25.92
+  },
+  "refused": [],
+  "candidates": 35
+ },
+ "shared_dn": {
+  "field": "shared_dn",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 14.43,
+   "rel_err": 0.005191342095342138,
+   "scale": 0.9971108173271906
+  },
+  "fastest": {
+   "tag": "1d_c16_ib16",
+   "us": 13.28
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib16",
+   "spec": "1d:c16:ib16",
+   "us": 13.28,
+   "gain_us": 1.15,
+   "rel_err": 0.005191342095342138,
+   "scale": 0.9971108173271906,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib16": 13.95,
+   "ds_a4_ib4_r1": 20.34
+  },
+  "refused": [],
+  "candidates": 27
+ },
+ "mlp_gu": {
+  "field": "mlp_gu",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 61.3,
+   "rel_err": 0.006167892867384828,
+   "scale": 0.9971782277458281
+  },
+  "fastest": {
+   "tag": "1d_c16_ib8",
+   "us": 55.69
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib8",
+   "spec": "1d:c16:ib8",
+   "us": 55.69,
+   "gain_us": 5.62,
+   "rel_err": 0.006167892867384828,
+   "scale": 0.9971782277458281,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib8": 56.46,
+   "ds_a8_ib16_r1": 96.92
+  },
+  "refused": [
+   "ds_a2_ib32_r1",
+   "ds_a2_ib64_r1",
+   "ds_a2_ib64_r2",
+   "ds_a2_ib64_r3",
+   "ds_a4_ib32_r1"
+  ],
+  "candidates": 57
+ },
+ "mlp_dn": {
+  "field": "mlp_dn",
+  "current": {
+   "tag": "1d_c16_ib4",
+   "us": 37.9,
+   "rel_err": 0.007107250559138792,
+   "scale": 0.9971895210936692
+  },
+  "fastest": {
+   "tag": "1d_c16_ib16",
+   "us": 33.04
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c16_ib16",
+   "spec": "1d:c16:ib16",
+   "us": 33.04,
+   "gain_us": 4.86,
+   "rel_err": 0.007107250559138792,
+   "scale": 0.9971895210936692,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c16_ib16": 33.36,
+   "ds_a8_ib12_r1": 55.04
+  },
+  "refused": [
+   "ds_a2_ib48_r1"
+  ],
+  "candidates": 38
+ },
+ "lm_head": {
+  "field": "lm_head",
+  "current": {
+   "tag": "default",
+   "us": 355.3,
+   "rel_err": 0.00588154686603557,
+   "scale": 0.9971818471406173
+  },
+  "fastest": {
+   "tag": "ds_a16_ib4_r2",
+   "us": 329.94
+  },
+  "fastest_within_noise": {
+   "tag": "1d_c110_ib4",
+   "spec": "1d:c110:ib4",
+   "us": 330.82,
+   "gain_us": 24.48,
+   "rel_err": 0.00588154686603557,
+   "scale": 0.9971818471406173,
+   "bit_identical_to_current": true
+  },
+  "hifi2_trials": {
+   "1d_c47_ib4": 333.82,
+   "ds_a16_ib4_r2": 335.86
+  },
+  "refused": [
+   "1d_c16_ib32",
+   "1d_c16_ib64",
+   "1d_c32_ib32",
+   "1d_c32_ib64",
+   "1d_c47_ib64",
+   "1d_c64_ib64",
+   "1d_c76_ib64",
+   "ds_a16_ib4_r1",
+   "ds_a16_ib8_r1",
+   "ds_a16_ib8_r2",
+   "ds_a2_ib32_r1",
+   "ds_a2_ib32_r2",
+   "ds_a2_ib64_r1",
+   "ds_a2_ib64_r2",
+   "ds_a2_ib8_r1",
+   "ds_a2_ib8_r2",
+   "ds_a32_ib2_r1",
+   "ds_a32_ib4_r1",
+   "ds_a4_ib16_r1",
+   "ds_a4_ib16_r2",
+   "ds_a4_ib32_r1",
+   "ds_a4_ib32_r2",
+   "ds_a4_ib8_r1",
+   "ds_a4_ib8_r2",
+   "ds_a8_ib16_r1",
+   "ds_a8_ib16_r2",
+   "ds_a8_ib8_r1",
+   "ds_a8_ib8_r2"
+  ],
+  "candidates": 32
+ }
+}

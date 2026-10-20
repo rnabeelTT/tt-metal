@@ -207,3 +207,30 @@ copy of `tt/dsa.py`; reported to the coordinator. The classification run waits f
 - P3: stale comments fixed (tt/model.py, tt/multichip_decoder.py, tools/dtype_sweep.py, tools/long_ctx_check.py);
   `evidence/` (kv_fp8 probe json, OOM and crash excerpts); `min_top1_perf.png` with the 91 % line; report gate checks
   prefill-check top-1 too; trace replays must equal 2 x decode steps.
+
+## Review #2 rework (914af5b9594 reviewed: MORE-WORK-NEEDED, 2 P2 + 12 P3)
+
+Snapshots `~/glm53-flash-bringup/s8r2_snapshot` (`git archive 914af5b9594 models/` + the review-2 edits) and
+`s8r2b_snapshot` (+ the LM-head program hook, the `*_g4*` configs). Three device tickets, QPRIO unset:
+- Ticket A (17:30 - 18:05): `tools/mc_matmul_sweep.py --wdtype bfp4 --fidelity LoFi --alt-fidelity HiFi2
+  --no-prefill` on all bfp4 groups and the LM head (`geometry/`). At bfp4, ttnn's default kda_in program takes 151 µs,
+  `1d:c29:ib4` takes 74 µs. Every family's fastest buildable program had an output hash identical to the current one.
+  Tracy windows combo_a vs combo_a_kv (`profile/`). Capacity step 337,920 / 832 MiB: out of DRAM in the warm-up prefill.
+- Ticket B (19:20 - 19:50): the HEAD gate. All bfp4 programs (`selected_default_r2`): p2 TF 89 % (fails), 50.01 ms.
+  No programs (`combo_a_kv_nospecs_r2`): 91 / 96 / 91, PC 91 / 95 / 91, 51.06 ms. dense4 with all programs: decode
+  collapse (TF 14 / 8 / 13 %). Stage-7 policy (`shipped_r2`): 92 / 98 / 91, 51.96 ms. Capacity 337,920 / 832 MiB with
+  the MoE row split: out of DRAM in the warm-up prefill.
+- Ticket C (to 21:12): kda_in program alone (`combo_a_kv_g4_kdain_r2`): 91 / 96 / 91, PC 91 / 95 / 91, 50.38 ms
+  (-3.0 % vs 51.96); all programs but kda_in (`combo_a_kv_g4_rest_r2`): p2 89 %. Coordinator rule: ship combo_a_kv +
+  the kda_in program; the rest are "op-level hash identical, full-model numerics shift; not adopted".
+- `selected_precision_config.json` now carries `decode_specs: {kda_in: 1d:c29:ib4, layers inner}`; its policy fields
+  equal `configs/combo_a_kv_g4_kdain.json`.
+- CPU: HF score-trajectory of the r1 autoregressive trajectory: HF top-1 93.75 %, top-5 100 % over 256 tokens. The
+  first try was OOM-killed at a 32 GB expert cache; the retry used 16 GB with MemoryMax=80G.
+- Code: `tt/precision.py` (wrappers keep packer_l1_acc / fp32_dest_acc_en / approx mode; the pack digest covers the pack
+  build code; the ImportError-only fallback is logged; lm_ds skip; `decode_specs` incl. the LM head and a pack rebuild),
+  `tools/mc_matmul_sweep.py` (stage-8 options), `tools/dtype_geometry_summary.py`, `tools/dtype_sweep.py`, `tools/
+  long_ctx_check.py`, `tools/dtype_sweep_report.py` (one marker and frontier per code generation, measured capacity
+  per policy), the three test files (module-scoped autouse fixture instead of the collection-time pin).
+- `doc/context_contract.json`: capacity steps, the 1,024 MiB serving workspace, the corrected
+  `capability_reduction.reason` (6.64 GB at 6,336 B per token; not a hard device limit).

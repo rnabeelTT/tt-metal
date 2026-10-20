@@ -79,6 +79,18 @@ def _ckc(mesh, fidelity, fp32_acc=True, l1_acc=False):
     )
 
 
+def _ckc_like(orig, mesh, fidelity):
+    """The module's own compute config with only the math fidelity changed (fp32 dest accumulation, packer L1
+    accumulation and approx mode are kept: e.g. the LM head's packer_l1_acc=True)."""
+    return ttnn.init_device_compute_kernel_config(
+        mesh.arch(),
+        math_fidelity=fidelity,
+        math_approx_mode=bool(getattr(orig, "math_approx_mode", False)),
+        fp32_dest_acc_en=bool(getattr(orig, "fp32_dest_acc_en", True)),
+        packer_l1_acc=bool(getattr(orig, "packer_l1_acc", False)),
+    )
+
+
 def requant(t: ttnn.Tensor, dtype) -> ttnn.Tensor:
     """Host round-to-nearest re-quantization of a device weight to `dtype`, keeping its per-device shards and memory
     config (each die's shard is read back, packed on the host and written to the same die). Frees `t`."""
@@ -129,12 +141,24 @@ def rq_name(key: str, src, dtype, component: str) -> str:
 
 
 def _component(kind: str) -> str:
+    """Owning component's build-source digest (tt/weight_cache.component_digest). "dsa_pack": the q_a | kv_a pack is
+    built after the cache load by MultichipDSA._build_pack (concat + 1D / DRAM-sharded matmul object), so its digest
+    also covers that code."""
     try:
+        import hashlib
+        import inspect
+
         from .weight_cache import component_digest
 
+        if kind == "dsa_pack":
+            from .multichip_decoder import DSMatmul, IL1DMatmul, MultichipDSA, make_role_mm
+
+            src = "".join(inspect.getsource(o) for o in (MultichipDSA._build_pack, DSMatmul, IL1DMatmul, make_role_mm))
+            return f"dsa-{component_digest('dsa')}-pack-{hashlib.sha256(src.encode()).hexdigest()[:8]}"
         return f"{kind}-{component_digest(kind)}"
-    except Exception as e:  # noqa: BLE001  (host tests without the full package)
-        return f"{kind}-nodigest-{type(e).__name__}"
+    except ImportError as e:  # host tests without the device package: logged, and the name says so
+        logger.warning(f"precision cache: no component digest for {kind} ({e})")
+        return f"{kind}-nodigest-ImportError"
 
 
 @dataclass
@@ -146,6 +170,9 @@ class PrecisionOverrides:
     moe_layer_exceptions: dict = field(default_factory=dict)
     ccl_h_dtype: str = "bf16"
     kv_latent_dtype: str = "bf16"
+    # {MCOpts role-spec field: {"spec": "1d:c..:ib.." | "ds:..", "layers": "all" | "inner" | [i, ...]}}: decode
+    # program of a group on the layers where it applies (e.g. a geometry measured for bfp4 weights); DEFAULT_MC unchanged
+    decode_specs: dict = field(default_factory=dict)
     source: str | None = None
     applied: list = field(default_factory=list)  # (layer or "model", group, what) records of the runtime changes
     _cache: object = field(default=None, repr=False)  # WeightCache scope of the re-quantized tensors (current layer)
@@ -188,6 +215,7 @@ class PrecisionOverrides:
             or self.moe_layer_exceptions
             or self.ccl_h_dtype != "bf16"
             or self.kv_latent_dtype != "bf16"
+            or self.decode_specs
         )
 
     # ------------------------------------------------------------------------------------------- layer selection
@@ -298,8 +326,20 @@ class PrecisionOverrides:
                 self.applied.append((i, "dense_mlp", f"requant {dt}"))
             f = self.fid("dense_mlp", i, first, last)
             if f is not None:
-                _swap_ckc_on_decode(mlp, "forward", _ckc(mesh, f), "dense_mlp")
+                _swap_ckc_on_decode(mlp, "forward", _ckc_like(mlp.ckc, mesh, f), "dense_mlp")
                 self.applied.append((i, "dense_mlp", f"decode fidelity {f}"))
+        for fld, d in self.decode_specs.items():
+            if self._in(d.get("layers", "all"), i, first, last) and hasattr(getattr(dec, "mc", None), fld):
+                setattr(dec.mc, fld, d["spec"])  # dec.mc is this layer's own MCOpts copy (MCOpts.from_env)
+                attn = dec.attn._inner if hasattr(dec.attn, "_inner") else dec.attn
+                if fld == "pack_a_spec" and getattr(attn, "_pack", None) is not None:
+                    # the q_a | kv_a pack object is built at construction (ds_shared): rebuild it on the same weight
+                    from .multichip_decoder import make_role_mm
+
+                    A, B = attn._pack
+                    attn._pack = (make_role_mm(d["spec"], A.w, mesh.compute_with_storage_grid_size().x), B)
+                    attn._pack_specs = (d["spec"], attn._pack_specs[1]) if hasattr(attn, "_pack_specs") else None
+                self.applied.append((i, f"spec:{fld}", d["spec"]))
         if self.ccl_h_dtype != "bf16" and getattr(dec, "ccl", None) is not None:
             _install_ccl_h(dec.ccl, _DT[self.ccl_h_dtype])
             self.applied.append((i, "ccl_h", self.ccl_h_dtype))
@@ -319,7 +359,7 @@ class PrecisionOverrides:
                 p.weights = nw
         f_in, f_out = self.fid("kda_in", i, first, last), self.fid("kda_out", i, first, last)
         if f_in is not None:
-            ck = _ckc(mesh, f_in)
+            ck = _ckc_like(attn.ckc, mesh, f_in)
             orig = attn._in_proj
 
             def _in_proj(x, w_, cc, _o=orig, _c=ck):
@@ -331,7 +371,7 @@ class PrecisionOverrides:
             attn._in_proj = _in_proj
             self.applied.append((i, "kda_in", f"decode fidelity {f_in}"))
         if f_out is not None:
-            _wrap_decode_mm(attn, _ckc(mesh, f_out), "kda_out")
+            _wrap_decode_mm(attn, _ckc_like(attn.ckc, mesh, f_out), "kda_out")
             self.applied.append((i, "kda_out", f"decode fidelity {f_out}"))
 
     def _apply_dsa(self, attn, mesh, i, first, last):
@@ -349,13 +389,13 @@ class PrecisionOverrides:
         dt = self.requant_dtype("dsa_proj", i, first, last)
         if dt is not None:
             A, B = attn._pack  # q_a | kv_a pack (serves prefill and decode: ds_shared), indexer pack (bf16, kept)
-            A.w = self._rq(A.w, dt, "dsa_pack_a", "dsa")
+            A.w = self._rq(A.w, dt, "dsa_pack_a", "dsa_pack")
             attn.w_q_b = self._rq(attn.w_q_b, dt, "dsa_w_q_b", "dsa")
             attn.w_o = self._rq(attn.w_o, dt, "dsa_w_o", "dsa")
             self.applied.append((i, "dsa_proj", f"requant {dt} (q_a|kv_a pack, q_b, o_proj)"))
         f = self.fid("dsa_proj", i, first, last)
         if f is not None:
-            ck = _ckc(mesh, f)
+            ck = _ckc_like(attn.ckc, mesh, f)
             ids = set(attn._pack_ids) if getattr(attn, "_pack_ids", None) else set()
             ids.add(id(attn.w_q_b))
             orig = attn._mm
@@ -380,12 +420,31 @@ class PrecisionOverrides:
     def apply_model(self, model, first: int, last: int):
         self._scope(getattr(model, "weight_cache", None), "top")
         dt = self.requant_dtype("lm_head", -1, first, last)
-        if dt is not None:
+        if dt is not None and getattr(model, "lm_head", None) is None:  # GLM53_HEAD=lm_ds: column-split DS weights
+            logger.warning("precision: lm_head requant skipped (GLM53_HEAD=lm_ds splits are not re-quantized)")
+            self.applied.append(("model", "lm_head", "requant skipped (lm_ds)"))
+        elif dt is not None:
             model.lm_head = self._rq(model.lm_head, dt, "lm_head", "top")
             self.applied.append(("model", "lm_head", f"requant {dt}"))
         f = self.fid("lm_head", -1, first, last)
         if f is not None:
-            model.ckc = _ckc(model.mesh, f)
+            model.ckc = _ckc_like(model.ckc, model.mesh, f)
+        spec = (self.decode_specs.get("lm_head") or {}).get("spec")
+        if spec and getattr(model, "lm_head", None) is not None:
+            # decode rows of the LM head on an explicit role program (tt/multichip_decoder.make_role_mm) on the same
+            # interleaved weight; prefill rows (all_logits) keep ttnn's default
+            from .multichip_decoder import make_role_mm
+
+            mm = make_role_mm(spec, model.lm_head, model.mesh.compute_with_storage_grid_size().x)
+            orig = model._lm_head
+
+            def _lm_head(hn, _o=orig, _m=model, _mm=mm):
+                if _decode_rows(hn) and _m.lm_head is _mm.w:
+                    return _mm(hn, _m.ckc)
+                return _o(hn)
+
+            model._lm_head = _lm_head
+            self.applied.append(("model", "lm_head", f"decode spec {spec}"))
             self.applied.append(("model", "lm_head", f"fidelity {f}"))
 
     def record(self) -> dict:

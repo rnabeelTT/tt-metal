@@ -34,9 +34,9 @@
  "policy": {
   "base": {
    "optimized_decoder.SELECTED": "opt_s5_pf",
-   "multichip_decoder.DEFAULT_MC": "stage-5 default of commit b8198430147 (incl. sinkhorn_faces, dsa_q_mm, dsa_tail_shared, kda_conv_max_batch=16; ag_persistent=False)",
+   "multichip_decoder.DEFAULT_MC": "stage-5 default of commit 914af5b9594 (incl. sinkhorn_faces, dsa_q_mm, dsa_q_mm_ib=64, dsa_tail_shared, kda_conv_max_batch=16; ag_persistent=False)",
    "mesh": "(1, 4), TP4, FABRIC_1D",
-   "measured_on": "selection evidence (18 candidates, 3 references): s8_snapshot (ac03689d2bb + stage-8 files); post-selection gate: commit b8198430147 + the review-#1 tt/precision.py (doc/datatype_sweep/runs/selected_default_r1)"
+   "measured_on": "selection evidence (18 candidates, 3 references): s8_snapshot (ac03689d2bb + stage-8 files); post-selection gate: 914af5b9594 + the review-#2 edits (~/glm53-flash-bringup/s8r2b_snapshot; runs/combo_a_kv_g4_kdain_r2)"
   },
   "layer_range_note": "'inner' = layers 1-43: the first layer 0 (KDA + dense MLP) and the last layer 44 (KDA + MoE) keep bfp8. combo_a_all (bfp4 also on layers 0 / 44) showed a decode collapse (TF 14 / 32 / 95 %, prefill check 90 / 100 / 100 %), cause unclassified (README)",
   "weights": {
@@ -116,6 +116,13 @@
   "runtime_flags": {
    "GLM53_PRECISION": "unset = this file; 'none' = stage-7 policy; <path> = another candidate",
    "GLM53_CACHE_DIR": "re-quantized tensors cached under <cache>/<layer>/prec-<digest>/"
+  },
+  "decode_specs_note": "KDA input projection decode rows on a bfp4-tuned 1D program (1d:c29:ib4) on the bfp4 layers 1-43 (geometry/summary.json: 151 -> 74 us per call at op level; full model token-out 51.06 -> 50.38 ms on 914af5b9594, runs/combo_a_kv_g4_kdain_r2). The other bfp4-tuned programs (kda_out, dsa_o, dsa_qb, pack_a, shared_gu / dn, LM head; mlp_gu / dn for dense4) were op-level hash identical but shifted full-model numerics (p2 teacher forcing 89 %): not adopted. DEFAULT_MC itself is unchanged."
+ },
+ "decode_specs": {
+  "kda_in": {
+   "spec": "1d:c29:ib4",
+   "layers": "inner"
   }
  }
 }

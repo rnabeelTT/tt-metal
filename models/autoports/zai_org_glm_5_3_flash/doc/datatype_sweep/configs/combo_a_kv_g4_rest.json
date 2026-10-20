@@ -1,0 +1,63 @@
+{
+ "id": "combo_a_kv_g4_rest",
+ "description": "combo_a_kv + every bfp4-tuned decode program except kda_in",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ },
+ "kv_latent_dtype": "fp8_e4m3",
+ "decode_specs": {
+  "kda_out": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "dsa_o": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "dsa_qb": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "pack_a_spec": {
+   "spec": "1d:c16:ib32",
+   "layers": "inner"
+  },
+  "shared_gu": {
+   "spec": "1d:c16:ib64",
+   "layers": "inner"
+  },
+  "shared_dn": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "spec": "1d:c110:ib4"
+  }
+ }
+}

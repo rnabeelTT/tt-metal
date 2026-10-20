@@ -9,7 +9,6 @@ measured windows for tt-perf-report.
 
 from __future__ import annotations
 
-__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import os
 import time
 
@@ -26,6 +25,15 @@ from models.autoports.zai_org_glm_5_3_flash.tests.harness import (
     stream_in,
 )
 from models.autoports.zai_org_glm_5_3_flash.tt.ckpt import CheckpointReader
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _stage7_precision_policy():
+    """Stage 8: these decoder-level comparisons use the stage-7 precision policy (GLM53_PRECISION=none) unless the caller
+    set GLM53_PRECISION; scoped to this module (no leak into other modules of the session)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GLM53_PRECISION", os.environ.get("GLM53_PRECISION", "none"))
+        yield
 
 
 def _decoder_cls():

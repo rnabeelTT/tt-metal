@@ -7,16 +7,27 @@ decoder's stream-interleaved layout and gathers it back, so the same HF referenc
 
 GLM53_OPT=<candidate> selects the precision policy (tt/optimized_decoder.CANDIDATES; default SELECTED)."""
 
-__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import importlib.util
 import os
 from pathlib import Path
+
+import pytest
 
 os.environ.setdefault("GLM53_TP", "4")
 
 import ttnn  # noqa: E402
 from models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder import MultichipDecoder  # noqa: E402
 from models.autoports.zai_org_glm_5_3_flash.tt.optimized_decoder import CANDIDATES, SELECTED  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _stage7_precision_policy():
+    """Stage 8: these decoder-level comparisons use the stage-7 precision policy (GLM53_PRECISION=none) unless the caller
+    set GLM53_PRECISION; scoped to this module (no leak into other modules of the session)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GLM53_PRECISION", os.environ.get("GLM53_PRECISION", "none"))
+        yield
+
 
 _spec = importlib.util.spec_from_file_location(
     "glm53_multichip_decoder_suite", Path(__file__).with_name("test_functional_decoder.py")

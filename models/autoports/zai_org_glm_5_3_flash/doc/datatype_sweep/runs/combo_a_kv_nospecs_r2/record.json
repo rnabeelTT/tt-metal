@@ -1,0 +1,1648 @@
+{
+  "id": "combo_a_kv",
+  "args": {
+    "id": "combo_a_kv",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ready,extra,ttft,decode",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2",
+    "extra_refs": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T19:40:56Z",
+  "argv": [
+    "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py",
+    "--id",
+    "combo_a_kv",
+    "--seq-len",
+    "16384",
+    "--do",
+    "policy,ready,extra,ttft,decode",
+    "--prompts",
+    "128,161,2048",
+    "--ptcheck",
+    "100,161,300",
+    "--steps",
+    "30",
+    "--extra-refs",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "--report-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2",
+    "--checks-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/checks",
+    "--out",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/record.json"
+  ],
+  "env": {
+    "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+    "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+    "GLM53_PRECISION": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv.json",
+    "GLM53_TP": "4",
+    "MESH_DEVICE": "P300x2",
+    "S8_BASE_COMMIT": "914af5b9594",
+    "S8_REQUIRE_PKG": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models",
+    "S8_SCRIPT": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+  },
+  "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+  "cwd": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot",
+  "base_commit": "914af5b9594",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "9950ff43360f",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "92dbdf0b3be8",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "16b9673568d1",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "b7f5e2eafe66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    },
+    "md5_map_digest": "c5331d047bc7"
+  },
+  "build_s": 117.01377868652344,
+  "precision": {
+    "id": "combo_a_kv",
+    "requant": {
+      "kda_in": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "kda_out": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "dsa_proj": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "shared_expert": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "lm_head": {
+        "dtype": "bfp4"
+      }
+    },
+    "fidelity": {
+      "kda_in": "LoFi",
+      "kda_out": "LoFi",
+      "dsa_proj": "LoFi",
+      "dense_mlp": "LoFi",
+      "shared_expert": "LoFi",
+      "lm_head": "LoFi"
+    },
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "fp8_e4m3",
+    "decode_specs": {},
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv.json",
+    "applied": [
+      [
+        "model",
+        "lm_head",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "0",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "1",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "1",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "2",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "2",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "3",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "5",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "5",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "6",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "6",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "7",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "7",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "7",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "8",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "8",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "9",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "9",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "10",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "10",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "11",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "11",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "11",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "12",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "12",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "13",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "13",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "14",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "14",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "15",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "15",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "15",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "16",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "16",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "17",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "17",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "18",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "18",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "19",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "19",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "19",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "20",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "20",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "21",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "21",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "22",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "22",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "23",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "23",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "23",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "24",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "24",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "25",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "25",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "26",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "26",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "27",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "27",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "27",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "28",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "28",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "29",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "29",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "30",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "30",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "31",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "31",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "31",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "32",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "32",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "33",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "33",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "34",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "34",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "35",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "35",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "35",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "36",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "36",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "37",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "37",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "38",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "38",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "39",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "39",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "39",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "40",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "40",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "41",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "41",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "42",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "42",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "43",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "43",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "43",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "44",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "44",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "44",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 914,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 3908736000,
+  "dram_free_per_bank": 355216768,
+  "dram_largest_free_block_per_bank": 354369792,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT4_B",
+      "fidelity": "MathFidelity.LoFi"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 1,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT4_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT4_B",
+        "dsa_q_b": "DataType.BFLOAT4_B",
+        "dsa_o": "DataType.BFLOAT4_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.FP8_E4M3 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT4_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 44,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "teacher_forcing": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100,
+      "elapsed_s": 5.473773357924074,
+      "e2e_t/s/u": 18.26893323144913,
+      "ttft_ms": 420.0317768845707,
+      "decode_tokens": 99.0,
+      "decode_elapsed_s": 5.05371627304703,
+      "decode_t/s/u": 19.589544535374177
+    }
+  ],
+  "prefill_check": [
+    {
+      "top1": 0.91,
+      "top5": 1.0,
+      "top100": 1.0,
+      "matches_top1": 91,
+      "matches_top5": 100,
+      "matches_top100": 100,
+      "total": 100,
+      "k": 100
+    }
+  ],
+  "readiness_trace_replays": 198,
+  "readiness_trace_replays_expected": 198,
+  "trace_verified": true,
+  "extra_refs": {
+    "readiness_aime24_chat_p1": {
+      "teacher_forcing": [
+        {
+          "top1": 0.96,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 96,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.4729219088330865,
+          "e2e_t/s/u": 18.27177541828321,
+          "ttft_ms": 417.68408799543977,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.0552139359060675,
+          "decode_t/s/u": 19.583740916843276
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.95,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 95,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    },
+    "readiness_aime24_chat_p2": {
+      "teacher_forcing": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100,
+          "elapsed_s": 5.46265511889942,
+          "e2e_t/s/u": 18.30611631585985,
+          "ttft_ms": 411.6322409827262,
+          "decode_tokens": 99.0,
+          "decode_elapsed_s": 5.050985617097467,
+          "decode_t/s/u": 19.600135004322194
+        }
+      ],
+      "prefill_check": [
+        {
+          "top1": 0.91,
+          "top5": 1.0,
+          "top100": 1.0,
+          "matches_top1": 91,
+          "matches_top5": 100,
+          "matches_top100": 100,
+          "total": 100,
+          "k": 100
+        }
+      ]
+    }
+  },
+  "moe_split": {
+    "mode": "auto",
+    "rows": "0",
+    "largest_free_bytes_per_die": 2857158656,
+    "need_bytes": 1073741824
+  },
+  "ttft": {
+    "eager": {
+      "128": {
+        "plan": [
+          [
+            128,
+            128
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 207.13291806168854,
+          "total_ms": 227.35405690036714
+        },
+        "warm": {
+          "dispatch_ms": 207.48929679393768,
+          "total_ms": 227.80673997476697
+        },
+        "host_logits_ms": 242.59707890450954,
+        "first_token": 53389
+      },
+      "161": {
+        "plan": [
+          [
+            512,
+            161
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 343.5829801019281,
+          "total_ms": 374.0235969889909
+        },
+        "warm": {
+          "dispatch_ms": 343.9384379889816,
+          "total_ms": 374.31306997314095
+        },
+        "host_logits_ms": 386.78447320125997,
+        "first_token": 291
+      },
+      "2048": {
+        "plan": [
+          [
+            2048,
+            2048
+          ]
+        ],
+        "cold": {
+          "dispatch_ms": 949.1175748407841,
+          "total_ms": 1025.5988128483295
+        },
+        "warm": {
+          "dispatch_ms": 948.977897875011,
+          "total_ms": 1025.5794660188258
+        },
+        "host_logits_ms": 1037.001196993515,
+        "first_token": 87
+      }
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 50.67554050280402,
+      "model_enqueue_ms": 0.001593035024901231,
+      "sampler_ms": 0.38256957195699215,
+      "tokenout_ms": 51.05927226444086,
+      "generate_ms": 51.18583640238891,
+      "generate_tsu": 19.536654478763754
+    }
+  }
+}

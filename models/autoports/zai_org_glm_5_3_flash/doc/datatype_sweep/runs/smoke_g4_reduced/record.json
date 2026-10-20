@@ -1,0 +1,552 @@
+{
+  "id": "combo_a_kv_g4",
+  "args": {
+    "id": "combo_a_kv_g4",
+    "slots": 1,
+    "seq_len": 16384,
+    "do": "policy,ptcheck,decode,fidcount",
+    "prompts": "128,161,2048",
+    "ptcheck": "100,161,300",
+    "steps": 30,
+    "reference": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced",
+    "extra_refs": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "checks_dir": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced/checks",
+    "trace_region": 67108864,
+    "out": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced/record.json"
+  },
+  "precision_env": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_g4.json",
+  "env_mc": "",
+  "cache_dir": "/home/raahem/.cache/glm53_flash",
+  "commit": "",
+  "mesh": "P300x2",
+  "started": "2026-10-18T19:24:00Z",
+  "argv": [
+    "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py",
+    "--id",
+    "combo_a_kv_g4",
+    "--seq-len",
+    "16384",
+    "--do",
+    "policy,ptcheck,decode,fidcount",
+    "--prompts",
+    "128,161,2048",
+    "--ptcheck",
+    "100,161,300",
+    "--steps",
+    "30",
+    "--extra-refs",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt",
+    "--report-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced",
+    "--checks-dir",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced/checks",
+    "--out",
+    "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/smoke_g4_reduced/record.json"
+  ],
+  "env": {
+    "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+    "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+    "GLM53_LAYERS": "0,3,4",
+    "GLM53_PRECISION": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_g4.json",
+    "GLM53_TP": "4",
+    "MESH_DEVICE": "P300x2",
+    "S8_BASE_COMMIT": "914af5b9594",
+    "S8_REQUIRE_PKG": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models",
+    "S8_SCRIPT": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+  },
+  "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+  "cwd": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot",
+  "base_commit": "914af5b9594",
+  "code": {
+    "package": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tt",
+    "md5": {
+      "__init__.py": "53fbca0cafb2",
+      "ckpt.py": "daa701ea8bbd",
+      "decode_inputs.py": "eba59efeff02",
+      "dsa.py": "e16ae30c4dc9",
+      "dsa_shard.py": "60b55f51d867",
+      "functional_decoder.py": "252ff34a8daf",
+      "fused_decoder.py": "9950ff43360f",
+      "generator.py": "746a1c153739",
+      "kda.py": "2e7dde09ee2a",
+      "mhc.py": "6acd0fb3c3ad",
+      "mlp.py": "952a9a2ad222",
+      "model.py": "92dbdf0b3be8",
+      "moe.py": "6f6667949b4d",
+      "moe_dispatch.py": "f1bc95c39a49",
+      "moe_opt.py": "56a26881d001",
+      "multichip_decoder.py": "16b9673568d1",
+      "optimized_decoder.py": "3413548afa4b",
+      "precision.py": "b7f5e2eafe66",
+      "serving_state.py": "446ac30d4ad5",
+      "synthetic.py": "5c661837e535",
+      "weight_cache.py": "1e22c3469e02"
+    },
+    "md5_map_digest": "c5331d047bc7"
+  },
+  "build_s": 10.594447612762451,
+  "precision": {
+    "id": "combo_a_kv_g4",
+    "requant": {
+      "kda_in": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "kda_out": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "dsa_proj": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "shared_expert": {
+        "dtype": "bfp4",
+        "layers": "inner"
+      },
+      "lm_head": {
+        "dtype": "bfp4"
+      }
+    },
+    "fidelity": {
+      "kda_in": "LoFi",
+      "kda_out": "LoFi",
+      "dsa_proj": "LoFi",
+      "dense_mlp": "LoFi",
+      "shared_expert": "LoFi",
+      "lm_head": "LoFi"
+    },
+    "fidelity_layers": {},
+    "moe_layer_exceptions": {},
+    "ccl_h_dtype": "bf16",
+    "kv_latent_dtype": "fp8_e4m3",
+    "decode_specs": {
+      "kda_in": {
+        "spec": "1d:c29:ib4",
+        "layers": "inner"
+      },
+      "kda_out": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "dsa_o": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "dsa_qb": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "pack_a_spec": {
+        "spec": "1d:c16:ib32",
+        "layers": "inner"
+      },
+      "shared_gu": {
+        "spec": "1d:c16:ib64",
+        "layers": "inner"
+      },
+      "shared_dn": {
+        "spec": "1d:c16:ib16",
+        "layers": "inner"
+      },
+      "lm_head": {
+        "spec": "1d:c110:ib4"
+      }
+    },
+    "source": "/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_g4.json",
+    "applied": [
+      [
+        "model",
+        "lm_head",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "model",
+        "lm_head",
+        "decode spec 1d:c110:ib4"
+      ],
+      [
+        "model",
+        "lm_head",
+        "fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "0",
+        "dense_mlp",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "3",
+        "kv_latent",
+        "fp8_e4m3"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "requant DataType.BFLOAT4_B (q_a|kv_a pack, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "dsa_proj",
+        "decode fidelity MathFidelity.LoFi (q_a|kv_a, q_b, o_proj)"
+      ],
+      [
+        "3",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "3",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "3",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "3",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "3",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "3",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "3",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "kda_in",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_out",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "kda_in",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "kda_out",
+        "decode fidelity MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "shared_expert",
+        "requant DataType.BFLOAT4_B"
+      ],
+      [
+        "4",
+        "moe",
+        "routed MathFidelity.LoFi shared MathFidelity.LoFi"
+      ],
+      [
+        "4",
+        "spec:kda_in",
+        "1d:c29:ib4"
+      ],
+      [
+        "4",
+        "spec:kda_out",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "spec:dsa_o",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "spec:dsa_qb",
+        "1d:c16:ib16"
+      ],
+      [
+        "4",
+        "spec:pack_a_spec",
+        "1d:c16:ib32"
+      ],
+      [
+        "4",
+        "spec:shared_gu",
+        "1d:c16:ib64"
+      ],
+      [
+        "4",
+        "spec:shared_dn",
+        "1d:c16:ib16"
+      ]
+    ]
+  },
+  "weight_cache": {
+    "root": "/home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd",
+    "hits": 58,
+    "stored": 0
+  },
+  "dram_alloc_per_bank": 254707072,
+  "dram_free_per_bank": 4009245696,
+  "dram_largest_free_block_per_bank": 4008516608,
+  "runtime_policy": {
+    "lm_head": {
+      "dtype": "DataType.BFLOAT4_B",
+      "fidelity": "MathFidelity.LoFi"
+    },
+    "layers": [
+      {
+        "layer": 0,
+        "kind": [
+          "kda",
+          "dense"
+        ],
+        "kda_in": "DataType.BFLOAT8_B",
+        "kda_out": "DataType.BFLOAT8_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "dense_mlp": "DataType.BFLOAT8_B/DataType.BFLOAT8_B MathFidelity.HiFi4",
+        "dense_mlp_decode_wrapped": true
+      },
+      {
+        "layer": 3,
+        "kind": [
+          "dsa",
+          "moe"
+        ],
+        "dsa_qa_kva_pack": "DataType.BFLOAT4_B",
+        "dsa_q_b": "DataType.BFLOAT4_B",
+        "dsa_o": "DataType.BFLOAT4_B",
+        "dsa_w_uk": "DataType.BFLOAT8_B",
+        "dsa_ckc": "MathFidelity.HiFi4",
+        "dsa_latent": "DataType.FP8_E4M3 Layout.ROW_MAJOR",
+        "dsa_pooled_keys": "DataType.BFLOAT16",
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      },
+      {
+        "layer": 4,
+        "kind": [
+          "kda",
+          "moe"
+        ],
+        "kda_in": "DataType.BFLOAT4_B",
+        "kda_out": "DataType.BFLOAT4_B",
+        "kda_ckc": "MathFidelity.HiFi4",
+        "kda_in_decode_wrapped": true,
+        "routed": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "shared": "DataType.BFLOAT4_B/DataType.BFLOAT4_B MathFidelity.LoFi",
+        "router": "DataType.BFLOAT16 MathFidelity.HiFi4"
+      }
+    ]
+  },
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        91886,
+        91886
+      ],
+      "tokens_traced": [
+        91886,
+        784,
+        784,
+        784,
+        6672,
+        44609,
+        81,
+        784
+      ],
+      "tokens_eager": [
+        91886,
+        784,
+        784,
+        784,
+        6672,
+        784,
+        784,
+        44609
+      ],
+      "tokens_equal": false,
+      "tokens_eager2": [
+        91886,
+        784,
+        784,
+        784,
+        6672,
+        81805,
+        784,
+        784
+      ],
+      "tokens_traced2": [
+        91886,
+        784,
+        784,
+        784,
+        6672,
+        44609,
+        81,
+        784
+      ],
+      "eager_repeat_equal": false,
+      "traced_repeat_equal": true
+    },
+    "161": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        91886,
+        91886
+      ],
+      "tokens_traced": [
+        91886,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199
+      ],
+      "tokens_eager": [
+        91886,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        91886,
+        77821,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199
+      ],
+      "tokens_traced2": [
+        91886,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199,
+        48199
+      ],
+      "eager_repeat_equal": false,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        67404,
+        67404
+      ],
+      "tokens_traced": [
+        67404,
+        81,
+        81,
+        6408,
+        79258,
+        812,
+        81,
+        81
+      ],
+      "tokens_eager": [
+        67404,
+        81,
+        81,
+        6408,
+        79258,
+        812,
+        81,
+        48199
+      ],
+      "tokens_equal": false,
+      "tokens_eager2": [
+        67404,
+        81,
+        81,
+        6408,
+        79258,
+        812,
+        81,
+        48199
+      ],
+      "tokens_traced2": [
+        67404,
+        81,
+        81,
+        6408,
+        79258,
+        812,
+        81,
+        81
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  },
+  "decode": {
+    "1": {
+      "model_ms": 3.9403196967517338,
+      "model_enqueue_ms": 0.0016498301799098651,
+      "sampler_ms": 0.38301126721004647,
+      "tokenout_ms": 4.321199197632571,
+      "generate_ms": 4.358661368799706,
+      "generate_tsu": 229.42823848584075
+    }
+  },
+  "fidelity_seen_build": {
+    "kda_in:LoFi": 4,
+    "kda_out_o:LoFi": 4,
+    "dense_mlp:LoFi": 2,
+    "dsa_proj:LoFi": 6,
+    "dsa_proj_o:LoFi": 2
+  },
+  "fidelity_seen_one_eager_step": {
+    "kda_in:LoFi": 2,
+    "kda_out_o:LoFi": 2,
+    "dense_mlp:LoFi": 1,
+    "dsa_proj:LoFi": 3,
+    "dsa_proj_o:LoFi": 1
+  }
+}

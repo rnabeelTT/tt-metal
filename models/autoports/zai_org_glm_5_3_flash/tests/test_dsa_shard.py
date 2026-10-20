@@ -17,7 +17,6 @@ Also printed: wall time of the prefill per user and of a traced decode replay (o
 
 from __future__ import annotations
 
-__import__("os").environ.setdefault("GLM53_PRECISION", "none")  # stage 8: stage-7 precision policy unless set
 import dataclasses
 import os
 import time
@@ -49,6 +48,16 @@ from models.autoports.zai_org_glm_5_3_flash.tt.multichip_decoder import (  # noq
     MultichipDecoder,
 )
 from models.autoports.zai_org_glm_5_3_flash.tt.synthetic import synthetic_stream_segment  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _stage7_precision_policy():
+    """Stage 8: these decoder-level comparisons use the stage-7 precision policy (GLM53_PRECISION=none) unless the caller
+    set GLM53_PRECISION; scoped to this module (no leak into other modules of the session)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GLM53_PRECISION", os.environ.get("GLM53_PRECISION", "none"))
+        yield
+
 
 pytestmark = pytest.mark.skipif(not os.environ.get("GLM53_CKPT"), reason="needs the E192 checkpoint (GLM53_CKPT)")
 

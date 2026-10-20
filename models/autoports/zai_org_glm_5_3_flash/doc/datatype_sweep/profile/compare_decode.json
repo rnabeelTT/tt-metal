@@ -1,0 +1,173 @@
+{
+ "note": "reduced model (layers 0,3,4), one decode step (model + sampler replay); per op the max device time over the 4 dies (Tracy drops ops per device)",
+ "total_us": {
+  "combo_a": 4113.7075,
+  "combo_a_kv": 4101.2375
+ },
+ "by_op_us": {
+  "ReduceDeviceOperation": {
+   "combo_a": 49.319,
+   "combo_a_kv": 49.587
+  },
+  "UntilizeWithUnpaddingDeviceOperation": {
+   "combo_a": 26.208,
+   "combo_a_kv": 26.69
+  },
+  "MhcMixDeviceOperation": {
+   "combo_a": 76.309,
+   "combo_a_kv": 76.484
+  },
+  "DsaDecodeScoresDeviceOperation": {
+   "combo_a": 5.789,
+   "combo_a_kv": 5.681
+  },
+  "ManualSeedDeviceOperation": {
+   "combo_a": 18.313,
+   "combo_a_kv": 18.311
+  },
+  "KdaDecodeConvDeviceOperation": {
+   "combo_a": 76.715,
+   "combo_a_kv": 76.88
+  },
+  "TopKDeviceOperation": {
+   "combo_a": 68.274,
+   "combo_a_kv": 68.545
+  },
+  "ReduceScatterMinimalAsyncDeviceOperation": {
+   "combo_a": 84.96375,
+   "combo_a_kv": 83.67750000000001
+  },
+  "FastReduceNCDeviceOperation": {
+   "combo_a": 8.815000000000001,
+   "combo_a_kv": 8.291
+  },
+  "SparseMatmulDeviceOperation": {
+   "combo_a": 251.61299999999997,
+   "combo_a_kv": 251.649
+  },
+  "TilizeWithValPaddingDeviceOperation": {
+   "combo_a": 68.18700000000001,
+   "combo_a_kv": 68.214
+  },
+  "InterleavedToShardedDeviceOperation": {
+   "combo_a": 13.596,
+   "combo_a_kv": 13.795000000000002
+  },
+  "BinaryNgDeviceOperation": {
+   "combo_a": 527.8999999999999,
+   "combo_a_kv": 524.1539999999997
+  },
+  "ScatterRowsDeviceOperation": {
+   "combo_a": 1.13,
+   "combo_a_kv": 1.043
+  },
+  "ShardedToInterleavedDeviceOperation": {
+   "combo_a": 15.210999999999999,
+   "combo_a_kv": 15.108
+  },
+  "SliceDeviceOperation": {
+   "combo_a": 64.491,
+   "combo_a_kv": 64.319
+  },
+  "KdaRecurrentDecodeDeviceOperation": {
+   "combo_a": 120.739,
+   "combo_a_kv": 120.404
+  },
+  "UnaryDeviceOperation": {
+   "combo_a": 90.64900000000003,
+   "combo_a_kv": 90.161
+  },
+  "LayerNormDeviceOperation": {
+   "combo_a": 72.926,
+   "combo_a_kv": 71.453
+  },
+  "MhcSplitSinkhornDeviceOperation": {
+   "combo_a": 424.56100000000004,
+   "combo_a_kv": 424.495
+  },
+  "SamplingDeviceOperation": {
+   "combo_a": 27.619,
+   "combo_a_kv": 27.645
+  },
+  "PagedUpdateCacheDeviceOperation": {
+   "combo_a": 2.904,
+   "combo_a_kv": 2.898
+  },
+  "CopyDeviceOperation": {
+   "combo_a": 17.223,
+   "combo_a_kv": 17.083
+  },
+  "AllGatherAsyncDeviceOperation": {
+   "combo_a": 156.565,
+   "combo_a_kv": 150.10075
+  },
+  "ReshapeViewDeviceOperation": {
+   "combo_a": 42.63100000000001,
+   "combo_a_kv": 42.005
+  },
+  "SparseSDPAOperation": {
+   "combo_a": 60.182,
+   "combo_a_kv": 61.697
+  },
+  "TopkLargeIndicesDeviceOperation": {
+   "combo_a": 174.12199999999999,
+   "combo_a_kv": 173.92
+  },
+  "TypecastDeviceOperation": {
+   "combo_a": 61.07499999999999,
+   "combo_a_kv": 62.195
+  },
+  "TopkRouteFinishDeviceOperation": {
+   "combo_a": 25.448999999999998,
+   "combo_a_kv": 25.694
+  },
+  "AllGatherDeviceOperation": {
+   "combo_a": 16.38075,
+   "combo_a_kv": 16.42525
+  },
+  "TopkRoutePrepDeviceOperation": {
+   "combo_a": 23.898,
+   "combo_a_kv": 23.868
+  },
+  "ConcatDeviceOperation": {
+   "combo_a": 14.883000000000001,
+   "combo_a_kv": 13.994
+  },
+  "MhcPostDeviceOperation": {
+   "combo_a": 151.02599999999998,
+   "combo_a_kv": 150.831
+  },
+  "TernaryDeviceOperation": {
+   "combo_a": 33.037,
+   "combo_a_kv": 32.716
+  },
+  "FillPadDeviceOperation": {
+   "combo_a": 180.07200000000003,
+   "combo_a_kv": 180.31699999999998
+  },
+  "EmbeddingsDeviceOperation": {
+   "combo_a": 1.253,
+   "combo_a_kv": 1.201
+  },
+  "UntilizeCodegenDeviceOperation": {
+   "combo_a": 2.642,
+   "combo_a_kv": 3.129
+  },
+  "UntilizeDeviceOperation": {
+   "combo_a": 4.408,
+   "combo_a_kv": 4.419
+  },
+  "TransposeDeviceOperation": {
+   "combo_a": 59.779999999999994,
+   "combo_a_kv": 60.564
+  },
+  "MhcPreDeviceOperation": {
+   "combo_a": 61.76199999999999,
+   "combo_a_kv": 61.55
+  },
+  "MatmulDeviceOperation": {
+   "combo_a": 931.0869999999999,
+   "combo_a_kv": 930.0439999999999
+  }
+ }
+}

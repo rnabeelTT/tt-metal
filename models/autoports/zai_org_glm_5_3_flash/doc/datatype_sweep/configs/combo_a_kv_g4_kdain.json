@@ -1,0 +1,40 @@
+{
+ "id": "combo_a_kv_g4_kdain",
+ "description": "combo_a_kv + the bfp4-tuned KDA input-projection decode program only (1d:c29:ib4)",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "lm_head": {
+   "dtype": "bfp4"
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ },
+ "kv_latent_dtype": "fp8_e4m3",
+ "decode_specs": {
+  "kda_in": {
+   "spec": "1d:c29:ib4",
+   "layers": "inner"
+  }
+ }
+}

@@ -52,20 +52,28 @@
     "capability_reduction": null
   },
   "full_model": {
-    "status": "measured (stage 6)",
+    "status": "stage-6/7 rework 2026-10-18 (see doc/full_model/README.md)",
     "hardware": "p300x2, mesh (1,4), TP4",
-    "supported_context": 104448,
-    "per_slot_profiles_max_model_len": {
-      "1": 104448,
-      "4": 94208,
-      "8": 81920,
-      "16": 57344,
-      "32": 8192
-    },
-    "budget": "doc/full_model/memory_budget.json",
-    "dsa_cache": "paged shared pool of 128-token blocks, replicated per die, 11,968 B per token; KDA state 35.65 MB per slot per die",
+    "supported_context": 311296,
+    "per_slot_profiles_max_model_len": "serving_profiles.json (stage 9: the single sizing rule, tt/serving_profiles.py)",
+    "budget": "tt/generator.BUDGET = serving_profiles.json budget when its precision id is the build's, else the built-in stage-7 numbers; DSA bytes per block from the latent dtype; reserve max(data reserve, GLM53_DRAM_RESERVE_MIB=1200 MiB)",
+    "dsa_cache": "replicated paged pool of 128-token blocks: 6,336 B per token per die (fp8 latent, default) / 11,968 B (bf16, GLM53_PRECISION=none); block-sharded 3,696 B (bf16 only); KDA state 35.65 MB per slot per die",
     "trace_region_bytes_needed": 47972352,
-    "dram_budget_note": "E192 weights at bfp4 experts are ~28.5 GiB of the 31.9 GiB per die; the 11 DSA layers' latent cache (512 x 2 B per token per layer) and the 34 KDA states per slot share the remainder. Any reduction below the advertised context will be recorded here with the byte calculation and a capacity probe."
+    "dram_budget_note": "Build-time layout choice (tt/generator.plan_context): the fastest DSA layout whose pool holds the requested (slots, max_seq_len), block-sharded only with a bf16 latent; a request that fits no layout raises ValueError before any weight loads; the standalone generator re-checks against the measured free DRAM after load. Decode overrun guard: positions >= max_seq_len raise on the host and are inactive on the device (no cache write).",
+    "standalone_generator_defaults": {
+      "combo_a_kv": {
+        "1": 280576,
+        "8": 30720,
+        "32": 2048
+      },
+      "GLM53_PRECISION=none": {
+        "1": "59,392 replicated / 194,560 block-sharded",
+        "8": "4,096 / 16,384",
+        "32": "does not fit"
+      },
+      "evidence": "j2_s1_default (1 slot, 280,576: TF 91/100/100, copy 1.0 at 32,768 and 100,000 tokens), j3_s8, j4_s32 (doc/optimized_full_model/runs/s67r/)"
+    },
+    "context_size_cost": "the sparse DSA indexer scores every allocated pool slot of the user (P_alloc from max_seq_len): 1 slot, same code, 16,384 vs 280,576: token-out decode 51.10 vs 56.24 ms, TTFT at 8,192 tokens 4,408 vs 6,444 ms (j2b_s1_16k vs j2_s1_default); TTFT <= 2,048 tokens unchanged"
   },
   "multichip_decoder": {
     "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py; stage-4 path MCOpts(), code default DEFAULT_MC)",
@@ -92,7 +100,16 @@
       },
       "block_sharded": {
         "1": 281344,
-        "note": "measured at 1 slot; other slot counts scale as (pool bytes - KDA state per extra slot) / 3,696 B, not probed"
+        "note": "measured at 1 slot; other slot counts scale as (pool bytes - KDA state per extra slot) / 3,696 B, not probed",
+        "computed_profiles_standalone_generator": {
+          "1": 194560,
+          "2": 96256,
+          "4": 43008,
+          "8": 16384,
+          "16": 2048,
+          "32": 0
+        },
+        "computed_note": "computed, not probed: tt/generator.plan_context with the bf16 budget (free after load 1,984,045,568 B, KDA 35.65 MB per extra slot, 473,088 B per block, 1,200 MiB reserve = GLM53_DRAM_RESERVE_MIB default), every slot owning max_seq_len (the standalone generator); the stage-4 measurement (281,344 at 1 slot) used a 900 MiB workspace; j6_s1_shard runs 131,072 tokens on this layout"
       }
     },
     "capacity_evidence_block_sharded": {
@@ -107,7 +124,8 @@
       "from": 1048576,
       "to_replicated": 104448,
       "to_block_sharded": 281344,
-      "reason": "device DRAM per die after weights (32.13 GB of 34.11 GB allocatable). Block-sharded is the largest measured layout; 1,048,576 tokens need 3.9 GB of DSA cache per die even sharded (3,696 B x 1M) vs ~1.25 GB available. Further steps (memory_budget.json path_to_1M): shard the pool keys too (2,992 B), a bfp8 / fp8 latent, host embedding lookup."
+      "reason": "device DRAM per die after weights (32.13 GB of 34.11 GB allocatable, stage-7 policy). Block-sharded is the largest measured bf16 layout; 1,048,576 tokens need 3.9 GB of DSA cache per die even sharded (3,696 B x 1M) vs ~1.25 GB available. Further steps: top-level capability_reduction.path_to_advertised (pool-key sharding 3,168 B/token, +16.7 %; an fp8 e4m3 latent -- bfp8 is a tile format sparse_sdpa cannot read).",
+      "to_block_sharded_note": "281,344 measured with a 900 MiB workspace (335 MB free at the prefill peak); ~338K estimated at 700 MiB, not re-probed (stage-6/7 rework: superseded by the fp8 replicated default)"
     },
     "doc": "doc/multichip_decoder/README.md (Memory, Block-sharded DSA cache)"
   },
@@ -129,26 +147,28 @@
     "status": "unchanged from the multichip decoder (see multichip_decoder; the block-sharded DSA cache is an MCOpts option of both)"
   },
   "supported_context": 311296,
-  "limiting_reason": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv): weights + model-level tensors leave 3.05 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a 1,024 MiB prefill / warm-up workspace",
+  "limiting_reason": "device_dram",
   "capacity_evidence": {
     "probe": "tools/memory_probe.py capacity --slots 1 --trace-region 67108864 --workspace-mib 1024, GLM53_PRECISION unset (selected default)",
     "runs": {
       "311296": "doc/datatype_sweep/capacity/combo_a_kv_s1/capacity.json (s8_snapshot code, --max-context 311296): pool 2,433 blocks, 311,235-token non-aligned copy prompt, prefill 408.5 s, copy accuracy 1.0, 648 MB per die free after the prefill",
-      "337920": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920/capacity.json (commit b8198430147 code, --max-context 337920; provenance.json): free DRAM still sizes the pool to 2,433 blocks under the 1,024 MiB workspace rule, so the larger pool was not reached; the same 311,235-token prompt, prefill 419.8 s, copy accuracy 1.0, 836 MB per die free after the prefill"
+      "337920": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920/capacity.json (commit b8198430147 code, --max-context 337920; provenance.json): free DRAM still sizes the pool to 2,433 blocks under the 1,024 MiB workspace rule, so the larger pool was not reached; the same 311,235-token prompt, prefill 419.8 s, copy accuracy 1.0, 836 MB per die free after the prefill",
+      "337920_832MiB": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832 (HEAD 914af5b9594): pool 2,641 blocks, out of DRAM in the warm-up prefill (MoE _routed_masked); doc/datatype_sweep/evidence/r2_cap_337920.excerpt.txt",
+      "337920_832MiB_moesplit": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832_moesplit (HEAD, GLM53_MOE_SORTED_ROWS=1024): out of DRAM in the warm-up prefill (MoE _routed_sorted_split); doc/datatype_sweep/evidence/r2_cap_337920_split.excerpt.txt"
     },
-    "result": "311,296 measured; the next step (337,920) did not get a larger pool under the 1,024 MiB workspace rule",
+    "result": "311,296 at the 1,024 MiB workspace is the largest passing step; 337,920 needs a smaller workspace (832 MiB) and runs out of DRAM in the warm-up prefill, with and without the MoE row split",
     "first_attempt": "364,544 with a 700 MiB workspace ran out of DRAM in the warm-up prefill (doc/datatype_sweep/evidence/cap_combo_a_kv_s1_try1_oom.excerpt.txt)"
   },
   "capability_reduction": {
     "from": 1048576,
     "to": 311296,
-    "reason": "hard physical limit: DRAM per die (byte budget doc/full_model/memory_budget.json; the advertised 1,048,576 tokens need 12.5 GB of DSA cache per die at the replicated layout)",
+    "reason": "DRAM per die under the stage-8 default (combo_a_kv): the advertised 1,048,576 tokens need 1,048,576 x 6,336 B = 6.64 GB of replicated DSA cache per die, against 3.05 GB free after the weights load (before the 64 MiB trace region and the measured 1,024 MiB workspace). This is a limit of the current replicated cache layout and workspace, not a hard device limit: path_to_advertised lists the layouts that raise it",
     "setting": "Glm53Generator / vLLM with the stage-8 default (GLM53_PRECISION unset): max_num_seqs 1, max_model_len 311296 (block_size 128), workspace 1,024 MiB, GLM53_TRACE_REGION 67108864; GLM53_PRECISION=none: max_model_len 104448 (stage7_policy_GLM53_PRECISION_none); other slot counts: datatype_sweep.derived_profiles_max_model_len (stage 9 measures them)",
-    "path_to_advertised": "block-sharded DSA latent implemented as an option (MCOpts.dsa_shard): 281,344 tokens at 1 slot measured (multichip_decoder.capacity_evidence_block_sharded); further: pool-key sharding, bfp8/fp8 latent, host embedding lookup (memory_budget.json path_to_1M)"
+    "path_to_advertised": "Measured layouts: replicated fp8 latent (stage-8 default, 6,336 B/token/die): 311,296 tokens at 1 slot; block-sharded bf16 latent (MCOpts.dsa_shard, GLM53_PRECISION=none only, 3,696 B/token/die): 281,344 at 1 slot (stage 4, 900 MiB workspace; ~338K estimated at a 700 MiB workspace, not re-probed: the fp8 replicated default supersedes it as the serving layout). Remaining headroom, byte math per die: (a) pool-key sharding on top of the block-sharded bf16 latent: 11 x (544 x 2 / 4 + 64 / 4) = 3,168 B/token (+16.7 % over 3,696); not implemented: needs a distributed indexer top-512 (per-die pool-key scores, a candidate all-gather and a second top-k with a tie-break identical to the replicated selection, plus owner-die-only pool-key writes in the open-pool update) -- a decoder change of the stage-4/5 path, worth ~+50K tokens; (b) block-sharded fp8 latent: 11 x (544 / 4 + 64) = 2,200 B/token (~1.6x the fp8 replicated capacity): blocked by the shard merge's control columns (the KILL logit -1e4 overflows fp8 e4m3, max 448; the sink / ONE columns need an exact 1.0) -- a stage-8 / stage-4 item with an accuracy gate (TF top-5 >= 98 %, long-context copy); (c) host embedding lookup frees ~317 MB per die but breaks the on-device token-feedback decode contract (split sampling writes the token into the device token buffer): not an option. Even (a)+(b) stay below 1,048,576 (1M x 2,200 B = 2.3 GB per die > the ~1.8 GB available after weights and the reserve)."
   },
   "datatype_sweep": {
     "status": "measured (stage 8)",
-    "selected_policy": "combo_a_kv (doc/datatype_sweep/selected_precision_config.json): bfp4 KDA / DSA projections, shared expert, LM head (layers 1-43), fp8 e4m3 DSA latent pool",
+    "selected_policy": "combo_a_kv + the bfp4-tuned KDA input-projection decode program (doc/datatype_sweep/selected_precision_config.json): bfp4 KDA / DSA projections, shared expert (layers 1-43) and LM head at LoFi, fp8 e4m3 DSA latent pool",
     "kv_cache_dtype": "DSA latent fp8_e4m3 ROW_MAJOR rows (512 B per token per DSA layer) + bf16 indexer pool keys (64 B); 6,336 B per token per die (was 11,968)",
     "hardware": "p300x2, mesh (1,4), TP4, trace region 64 MiB",
     "supported_context_1slot": 311296,
@@ -171,12 +191,13 @@
     "long_context_accuracy": "doc/datatype_sweep/long_context/compare_shipped_vs_combo_a_kv.json: true-next-token top-1 at 2K / 32K / 100K tokens 0.83 / 0.54 / 0.695 vs shipped 0.84 / 0.555 / 0.70; no accuracy evidence beyond 100K tokens (the 311K copy prompt checks function, not accuracy)",
     "block_sharded_cache": "GLM53_DSA_SHARD=1 keeps a bf16 latent (fp8 not implemented in tt/dsa_shard.py); warning logged",
     "non_aligned_prompts": "every sweep run: 100 / 161 / 300-token prompts, traced vs eager continuations equal; capacity probe prompt 311,235 tokens",
-    "top_level": "applied: supported_context / capability_reduction.to / setting are the selected-default values"
+    "top_level": "applied: supported_context / capability_reduction.to / setting are the selected-default values",
+    "serving_workspace_mib": 1024
   },
   "stage7_policy_GLM53_PRECISION_none": {
     "note": "the stage-6/7 values, valid with GLM53_PRECISION=none (bf16 latent, bfp8 projections)",
     "supported_context": 104448,
-    "limiting_reason": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin",
+    "limiting_reason": "device_dram",
     "capacity_evidence": {
       "probe": "tools/memory_probe.py capacity --trace-region 67108864 --workspace-mib 700 --max-context 131072 (scripts: ~/glm53-flash-bringup/scripts/s6mem_cap.sh)",
       "result": "doc/full_model/memory/capacity_probe_1slot.json, log doc/full_model/memory/capacity_probe.log",
@@ -190,6 +211,8 @@
       "reason": "hard physical limit: DRAM per die (byte budget doc/full_model/memory_budget.json; the advertised 1,048,576 tokens need 12.5 GB of DSA cache per die at the replicated layout)",
       "setting": "Glm53Generator / vLLM: max_num_seqs 1, max_model_len 104448 (block_size 128), GLM53_TRACE_REGION 67108864; other slot counts: doc/full_model/memory_budget.json recommended_profiles_anchored_to_capacity_probe",
       "path_to_advertised": "block-sharded DSA latent implemented as an option (MCOpts.dsa_shard): 281,344 tokens at 1 slot measured (multichip_decoder.capacity_evidence_block_sharded); further: pool-key sharding, bfp8/fp8 latent, host embedding lookup (memory_budget.json path_to_1M)"
-    }
-  }
+    },
+    "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin"
+  },
+  "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv): weights + model-level tensors leave 3.05 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a 1,024 MiB prefill / warm-up workspace"
 }

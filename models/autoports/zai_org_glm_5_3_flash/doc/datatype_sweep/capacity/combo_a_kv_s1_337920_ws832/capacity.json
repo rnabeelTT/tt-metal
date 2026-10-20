@@ -1,0 +1,35 @@
+{
+ "mode": "capacity",
+ "S": 1,
+ "max_seq_len": 337920,
+ "workspace_mib": 832.0,
+ "bank_size": 4263952768,
+ "die_allocatable_bytes": 34111622144,
+ "trace_region_bytes": 67108864,
+ "after_open": {
+  "allocated": 0,
+  "free": 34111622144,
+  "largest_free_block_per_bank": 4263952768,
+  "trace_allocated": 0
+ },
+ "load_seconds": 92.6,
+ "after_load": {
+  "allocated": 31064254976,
+  "free": 3047367168,
+  "largest_free_block_per_bank": 380849664,
+  "trace_allocated": 0
+ },
+ "dsa_shard": false,
+ "free_after_load_bytes": 3047367168,
+ "dsa_bytes_per_block_all_layers": 811008,
+ "num_blocks_fit": 2681,
+ "num_blocks": 2641,
+ "capped_by_max_seq_len": true,
+ "dsa_pool_bytes_measured": 2580630016,
+ "after_bind": {
+  "allocated": 33644884992,
+  "free": 466737152,
+  "largest_free_block_per_bank": 58037248,
+  "trace_allocated": 0
+ }
+}

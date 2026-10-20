@@ -9,11 +9,17 @@ from 100 traced replays. Prefill rows (M = 2048): ttnn default, the explicit 2D 
 with in0_block_w variants, HiFi2. Every candidate's error against an fp64 product of the same (dequantized) weight.
 
   python -m models.autoports.zai_org_glm_5_3_flash.tools.mc_matmul_sweep --out sweep.jsonl [--roles kda_in,dsa_o]
+
+Stage-8 options (defaults keep the stage-5 behaviour): --wdtype bfp4 sweeps the same geometries on bfp4 weights (host
+round-to-nearest), --fidelity / --alt-fidelity set the base and the second-trial compute fidelity (default HiFi4 /
+HiFi2); every decode record carries `out_sha` (sha256 of the output bytes) so bit-identical candidates can be told
+apart; role lm_head = the LM head [4096, 38720] per die (no prefill).
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 
@@ -36,7 +42,11 @@ ROLES = {
     "shared_dn": (512, 4096, B8, B16, B16),
     "mlp_gu": (4096, 6144, B8, B16, B16),
     "mlp_dn": (3072, 4096, B8, B16, B16),
+    "lm_head": (4096, 38720, B8, B16, None),
 }
+WDT = {"bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
+FID = {f: getattr(ttnn.MathFidelity, f) for f in ("LoFi", "HiFi2", "HiFi3", "HiFi4")}
+OPTS = {"wdtype": None, "base": None, "alt": None}  # stage-8 overrides (main)
 
 
 def ckc(fid, l1_acc):
@@ -96,6 +106,8 @@ def divisors(n, cands):
 
 def sweep_role(dev, name, out, do_prefill):
     K, N, wdt, xdt, pdt = ROLES[name]
+    wdt = OPTS["wdtype"] or wdt
+    BASE, ALT = OPTS["base"] or HIFI4, OPTS["alt"] or HIFI2
     g = torch.Generator().manual_seed(hash(name) % 1000)
     w_host = torch.randn(K, N, generator=g) / K**0.5
     w = dev_t(dev, w_host, wdt)
@@ -116,13 +128,16 @@ def sweep_role(dev, name, out, do_prefill):
         try:
             us, res = time_traced(dev, fn)
             e, sc = err(res, ref, N)
-            rec(mode="decode", cand=tag, family=fam, fidelity=str(fid), us=us, rel_err=e, scale=sc)
-            if fid == HIFI4 and (fam not in best or us < best[fam][0]):
+            sha = hashlib.sha256(res.reshape(-1, res.shape[-1])[:32, :N].contiguous().numpy().tobytes()).hexdigest()[
+                :16
+            ]
+            rec(mode="decode", cand=tag, family=fam, fidelity=str(fid), us=us, rel_err=e, scale=sc, out_sha=sha)
+            if fid == BASE and (fam not in best or us < best[fam][0]):
                 best[fam] = (us, tag)
         except Exception as ex:  # noqa: BLE001 - record the refusal (L1 / config) and continue
             rec(mode="decode", cand=tag, family=fam, fidelity=str(fid), error=f"{type(ex).__name__}: {str(ex)[:300]}")
 
-    run("default", lambda: ttnn.linear(x, w, compute_kernel_config=ckc(HIFI4, False)), "default", HIFI4)
+    run("default", lambda: ttnn.linear(x, w, compute_kernel_config=ckc(BASE, False)), "default", BASE)
     fns = {}
     for cores in sorted({c for c in (16, 32, 48, 64, 80, 96, 110) if c <= grid.x * grid.y}):
         pcn = -(-nt // cores)
@@ -144,7 +159,7 @@ def sweep_role(dev, name, out, do_prefill):
                 )
             )(pc)
             fns[tag] = ("1d", f)
-            run(tag, f(HIFI4), "1d", HIFI4)
+            run(tag, f(BASE), "1d", BASE)
     # DRAM-sharded: N padded to 8 banks x 32
     Np = tpc._roundup(N, 32 * tpc.DRAM_CORES)
     wp = torch.zeros(K, Np)
@@ -167,10 +182,10 @@ def sweep_role(dev, name, out, do_prefill):
                     continue
                 f = (lambda mm_: (lambda fid: (lambda: mm_(x, ckc(fid, False)))))(mm)
                 fns[tag] = ("ds", f)
-                run(tag, f(HIFI4), "ds", HIFI4)
+                run(tag, f(BASE), "ds", BASE)
     for fam, (us, tag) in best.items():  # fidelity trial on each family's best
         if tag in fns:
-            run(tag, fns[tag][1](HIFI2), fam, HIFI2)
+            run(tag, fns[tag][1](ALT), fam, ALT)
     ttnn.deallocate(w_ds)
     ttnn.deallocate(x)
 
@@ -211,7 +226,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--roles", default=",".join(ROLES))
     ap.add_argument("--no-prefill", action="store_true")
+    ap.add_argument("--wdtype", choices=sorted(WDT), default=None, help="stage 8: weight dtype of every role")
+    ap.add_argument("--fidelity", choices=sorted(FID), default=None, help="stage 8: base fidelity (default HiFi4)")
+    ap.add_argument("--alt-fidelity", choices=sorted(FID), default=None, help="second trial (default HiFi2)")
     args = ap.parse_args()
+    OPTS.update(wdtype=WDT.get(args.wdtype), base=FID.get(args.fidelity), alt=FID.get(args.alt_fidelity))
     out = open(args.out, "a")
     dev = ttnn.open_device(device_id=0, trace_region_size=64 << 20)
     try:

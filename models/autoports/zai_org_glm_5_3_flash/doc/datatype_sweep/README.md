@@ -6,7 +6,8 @@ datatypes of the optimized full model (stage 7).
 
 ## Result
 
-**Selected: `combo_a_kv`** (`selected_precision_config.json`). It is the stage-7 policy plus these changes:
+**Selected: `combo_a_kv` + the bfp4-tuned KDA input-projection program** (`selected_precision_config.json`, measured as
+`configs/combo_a_kv_g4_kdain.json`). It is the stage-7 policy plus these changes:
 
 | Group | Stage 7 (`GLM53_PRECISION=none`) | Selected (default) |
 |---|---|---|
@@ -16,36 +17,49 @@ datatypes of the optimized full model (stage 7).
 | LM head | bfp8, HiFi2 | **bfp4, LoFi** |
 | KDA projections of layers 0 and 44, shared expert of layer 44, dense MLP (layers 0-2) | bfp8, HiFi4 | bfp8, **LoFi** (decode rows) |
 | DSA latent pool (KV cache) | bf16 rows | **fp8 e4m3 rows** |
+| KDA input projection decode program, layers 1-43 | ttnn default | **`1d:c29:ib4`** (`decode_specs`) |
 | Routed experts, router, DSA W_UK / W_UV, indexer, residual, CCL, norms, mHC | unchanged | unchanged |
 
 The DSA cache drops from 11,968 to 6,336 bytes per token per die.
 
-**Headline: the post-selection gate on the committed code.** The run used `git archive b8198430147` plus the
-review-#1 `tt/precision.py`. That file is the only `tt/*.py` whose md5 differs from the commit
-(`runs/selected_default_r1/record.json`, `code`). `GLM53_PRECISION` was unset, so the default policy loaded. The
-precision cache was cold: 180 re-quantized tensors were stored. The shipped policy ran on the same code as
-`GLM53_PRECISION=none` (`runs/shipped_r1`).
+**Headline: the post-selection gate on HEAD (914af5b9594).** HEAD differs from the code gated in review #1
+(b8198430147): the stage-5 review-#3 commit 8e9efeb7dd7 added `dsa_q_mm_ib=64`, the build-time shared-tail buffer and a
+q_rm lifetime fix. The gate ran on `~/glm53-flash-bringup/s8r2b_snapshot` = `git archive 914af5b9594 models/` + the
+review-#2 edits (`tt/precision.py`, the stage-8 tools, the configs). Only `tt/precision.py` differs from the commit
+among the `tt/*.py` (record `code`). The stage-7 policy ran on the same code as `GLM53_PRECISION=none`.
 
-| Metric (1 slot, max_seq_len 16,384, TP4) | Stage-7 policy, same code | Selected `combo_a_kv` |
-|---|---|---|
-| Teacher forcing top-1 p0 / p1 / p2 (top-5, top-100: 100 %) | 92 / 98 / 91 % | 91 / 96 / 91 % |
-| Prefill check top-1 p0 / p1 / p2 (top-5, top-100: 100 %) | 91 / 97 / 91 % | 91 / 95 / 91 % |
-| Trace replays during teacher forcing | 198 (= 2 x 99 decode steps) | 198 |
-| Token-out decode (model + sampler trace, device feedback, no readback, 30 replays) | 52.20 ms = 19.16 t/s/u | **51.14 ms = 19.55 t/s/u (-2.0 %)** |
-| Trace-verified teacher-forcing decode (readiness runner, 1 readback per step) | 19.16 t/s/u | 19.55 t/s/u |
-| Generate loop, one token readback per step | 52.33 ms | 51.23 ms |
-| TTFT, warm, device logits: 128 / 161 / 2048 tokens | 229 / 382 / 1035 ms | 226 / 377 / 1026 ms |
-| Non-aligned prompts (100 / 161 / 300 tokens): traced vs eager, repeated | equal | equal |
-| Model weight load, warm cache | 86.9 s | 92.1 s (cold precision cache: 147.8 s) |
-| 1-slot context (max_model_len) | 104,448 (stage-6 probe) | **311,296** (measured, below) |
+| Metric (1 slot, max_seq_len 16,384, TP4) | Stage-7 policy (`shipped_r2`) | combo_a_kv, no decode programs (`combo_a_kv_nospecs_r2`) | **Selected (`combo_a_kv_g4_kdain_r2`)** |
+|---|---|---|---|
+| Teacher forcing top-1 p0 / p1 / p2 (top-5, top-100: 100 %) | 92 / 98 / 91 % | 91 / 96 / 91 % | **91 / 96 / 91 %** |
+| Prefill check top-1 p0 / p1 / p2 (top-5, top-100: 100 %) | 91 / 97 / 91 % | 91 / 95 / 91 % | **91 / 95 / 91 %** |
+| Trace replays during teacher forcing | 198 (= 2 x 99 decode steps) | 198 | 198 |
+| Token-out decode (model + sampler trace, device feedback, no readback, 30 replays) | 51.96 ms = 19.25 t/s/u | 51.06 ms (-1.7 %) | **50.38 ms = 19.85 t/s/u (-3.0 %)** |
+| Trace-verified teacher-forcing decode (readiness runner, 1 readback per step) | 19.25 t/s/u | 19.59 t/s/u | **19.88 t/s/u** |
+| Generate loop, one token readback per step | 52.07 ms | 51.19 ms | 50.50 ms |
+| TTFT, warm, device logits: 128 / 161 / 2048 tokens | 230 / 376 / 1033 ms | 228 / 374 / 1026 ms | same program as no-specs (decode-only change) |
+| Non-aligned prompts (100 / 161 / 300 tokens): traced vs eager, repeated | - | - | equal |
+| Model weight load, warm cache | 95.6 s | 103.8 s | 89.4 s |
+| 1-slot context (max_model_len) | 104,448 (stage-6 probe) | 311,296 | **311,296** (measured, below) |
 
-The selected default also passed these checks on the committed code (`runs/selected_default_r1/checks/`):
+- Load times vary by about +-10 s between builds of the same weights. The cold precision cache (first load after the
+  key change) took 147.8 s (`runs/selected_default_r1`).
+- The review-#1 gate on b8198430147 (`runs/selected_default_r1`, `runs/shipped_r1`) gave the same accuracy and
+  51.14 vs 52.20 ms.
+
+The qualitative and autoregressive checks ran on two builds of the default:
+- `runs/selected_default_r1/checks/` (b8198430147, no decode programs);
+- `runs/selected_default_r2/checks/` (HEAD, all bfp4-tuned programs, not adopted).
+The final config (kda_in program only) had no separate qualitative run. Its teacher-forcing results equal the
+no-specs build on all three references.
 - **Qualitative suite**: 6 chat prompts. 5 end on EOS. q3 reaches the 2,048-token budget, as in stage 7.
   - The texts are coherent and on topic.
   - q5 leaves "Bonjour, how are you today?" untranslated. The HF control does the same (doc/full_model/qualitative/VERDICT.md).
 - **Autoregressive check**: two runs bit-identical, `check_degenerate_output` exit 0 (adjacent duplication 0.0).
-  - TT leaves the HF path at token 0. TT picks " something", which is HF's rank-2 token, 0.625 logits below HF's " a".
-  - This is the same near-tie class that doc/full_model/autoregressive/VERDICT.md documents.
+  - Its own HF control: `tools/hf_full_ref.py --mode score-trajectory` over the r1 trajectory
+    (`runs/selected_default_r1/checks/autoregressive/hf_scores_tt_trajectory.json`, CPU).
+  - HF top-1 agreement is 93.75 % and top-5 is 100 % over 256 tokens; the worst TT pick is HF's rank 5 (token 53).
+  - TT leaves HF's greedy path at token 0. TT picks " something", HF's rank-2 token, 0.375 logits below " a" in HF's
+    teacher-forced pass (0.625 in HF's incremental decode, doc/full_model/autoregressive/VERDICT.md).
 
 **Acceptance gate** (skill default): teacher-forcing top-1 >= 90 %, top-5 >= 98 % and top-100 = 100 %. The prefill
 check must meet the same values (`tools/dtype_sweep_report.py` applies all six).
@@ -55,7 +69,7 @@ check must meet the same values (`tools/dtype_sweep_report.py` applies all six).
    The references are p0 (the readiness reference), p1 and p2. Top-5 and top-100 must hold on all three.
 2. Among the configs that pass, prefer context, then decode speed.
 3. A context gain below ~5 % that is only estimated (unmeasured) does not override a config with fewer bfp4 groups
-   at equal speed.
+   at equal speed. This rule was added after `combo_a_kv_dense4` was measured (review #1). It decided only that case.
 
 ![min top-1 vs speed](min_top1_perf.png)
 ![top-1 vs speed](top1_perf_pareto.png)
@@ -66,9 +80,11 @@ is the gate.
 - `min_top1_perf.png`: x = the minimum top-1 over p0 / p1 / p2. Only three-reference runs are points. The line is at 91 %.
 - `top1_perf_pareto.png` and `top5_perf_pareto.png`: x = accuracy on p0. Every evaluated full-model run is a point.
 - On the top-5 chart every point except `combo_a_all` ties at 100 %. So the frontier is the single fastest point.
-- Points from two code generations appear (Method). Compare speeds only within one generation:
-  - `_r1` runs: commit b8198430147. They are about 2 ms per step faster from the stage-5 defaults.
-  - All other runs: s8_snapshot.
+- Points from three code generations appear (Method), with one marker and one frontier per generation. Compare speeds
+  only within one generation:
+  - `_r2` runs: HEAD 914af5b9594.
+  - `_r1` runs: commit b8198430147. They are about 2 ms per step faster than s8_snapshot from the stage-5 defaults.
+  - All other runs: s8_snapshot (ac03689d2bb).
 
 ## Method
 
@@ -79,15 +95,23 @@ is the gate.
 | `~/glm53-flash-bringup/s8_snapshot` | `git archive ac03689d2bb models/` + the stage-8 files: `tt/precision.py`, the fp8 pool in `tt/dsa.py`, the hooks in `tt/model.py` and `tt/multichip_decoder.py`, `tt/dsa_shard.py` fp8 sizing (`dsa_bytes_per_token`), `tools/dtype_sweep*.py`, `tools/kv_fp8_probe.py`, `tools/long_ctx_*.py`; `tools/memory_probe.py` patched to load the weight cache (`weight_cache="env"`) | the 18-candidate sweep, the three-reference finalists, the first capacity probe, the long-context check |
 | `~/glm53-flash-bringup/s8_snapshot2` | s8_snapshot + the then-current stage-6/7 rework files `tt/{dsa, dsa_shard, decode_inputs, functional_decoder, generator, generator_vllm, model, weight_cache, serving_state}.py`, `tt/e192_mask.json`, `tools/{memory_probe, readiness}.py`; dsa_shard.py md5 changed (fp8 sizing line re-added) | the combo_a_all rerun that crashed (below) |
 | `~/glm53-flash-bringup/s8_snapshot_flip` | s8_snapshot + the default flip in `tt/precision.py`, the `root_cache` hook, `tests/test_precision_host.py` | the first post-selection runs (`runs/selected_default*`, superseded by `_r1`) |
-| `~/glm53-flash-bringup/s8r1_snapshot` | `git archive b8198430147 models/` + the review-#1 `tt/precision.py`, `tools/dtype_sweep.py`, `tools/long_ctx_check.py`, `tests/test_precision_host.py`, `configs/combo_a_kv_dense4.json`; `tools/memory_probe.py` patched to `weight_cache="env"` | the post-selection gate (`_r1`), the 337,920 capacity probe |
+| `~/glm53-flash-bringup/s8r1_snapshot` | `git archive b8198430147 models/` + the review-#1 `tt/precision.py`, `tools/dtype_sweep.py`, `tools/long_ctx_check.py`, `tests/test_precision_host.py`, `configs/combo_a_kv_dense4.json`; `tools/memory_probe.py` patched to `weight_cache="env"` | the review-#1 gate (`_r1`), the 337,920 / 1,024 MiB capacity probe |
+| `~/glm53-flash-bringup/s8r2_snapshot` | `git archive 914af5b9594 models/` + the review-#2 `tt/precision.py`, `tools/{mc_matmul_sweep, dtype_sweep, dtype_sweep_report, long_ctx_check}.py`, `tests/test_precision_host.py`; `tools/memory_probe.py` patched to `weight_cache="env"` | ticket A: the bfp4 geometry sweep, the fp8 profile, the 337,920 / 832 MiB capacity step |
+| `~/glm53-flash-bringup/s8r2b_snapshot` | s8r2_snapshot + the LM-head decode-program hook in `tt/precision.py`, `tools/dtype_geometry_summary.py`, the `*_g4*` configs | tickets B and C: the HEAD gate (`_r2`), the program bisect, the 337,920 MoE-split step |
 
-Every job ran with its working directory inside the snapshot. `python -m` puts the working directory before
-PYTHONPATH. One early baseline ran from the live tree by mistake (6 / 28 / 99 %); it was discarded
-(`logs/s8/shipped_LEAKED_livetree.log`). Every record holds:
-- the md5 of each `tt/*.py` (`code.md5`) and a digest of that map;
-- the base commit;
-- from the review-#1 runs on, the real argv, the GLM53_* / MESH environment and the calling script.
-Older rows in `sweep_results.*` mark their command as `[reconstructed]`. Kernels and the ttnn build always come from
+Every job after the first baseline ran with its working directory inside its snapshot. `python -m` puts the working
+directory before PYTHONPATH. One early baseline ran from the live tree by mistake (6 / 28 / 99 %); it was discarded
+(`logs/s8/shipped_LEAKED_livetree.log`).
+
+What each record holds:
+- The md5 of each `tt/*.py` (`code.md5`): every `tools/dtype_sweep.py` run from the code pinning on.
+- The digest of that md5 map, the base commit, the real argv, the GLM53_* / MESH environment and the calling script:
+  the review-#1 and review-#2 runs (`_r1`, `_r2`) only.
+- Older rows in `sweep_results.*` mark their command and script as `[reconstructed]`.
+- The long-context records (`long_context/*.json`) predate both. They record the indexer block size
+  (`GLM53_DSA_INDEX_BLOCK_MB`: 32 MB for shipped, 64 MB default for combo_a_kv) but no md5 map.
+- The capacity probes have a sidecar `provenance.json` with the md5 map, from the 337,920 probes on. The first
+  probe (`capacity/combo_a_kv_s1`) has none. Kernels and the ttnn build always come from
 the repo. The live mhc_split_sinkhorn kernel diff against HEAD at the time was inert: only `#ifdef SK_FACES` paths,
 which no stage-8 job enabled.
 
@@ -104,6 +128,8 @@ which no stage-8 job enabled.
   re-quantized tensors are not cached either.
 - `ccl_h_dtype`: the decode all-gathers of the residual in bfp8 (cast before, cast back after).
 - `kv_latent_dtype`: the DSA latent pool in fp8 e4m3 rows.
+- `decode_specs`: per-layer MCOpts decode-program specs (and `lm_head`) on the layers where a group is bfp4. DEFAULT_MC
+  itself is unchanged.
 
 `GLM53_PRECISION` selects the policy:
 - unset or empty: `selected_precision_config.json` (the default);
@@ -117,7 +143,9 @@ overridden groups.
 
 A warm load must not re-quantize. `PrecisionOverrides._rq` stores each re-quantized tensor in the weight cache at
 `<root>/<layer_i | top>/prec-<requant source digest>/<group>-<dtype>-<digest>.tensorbin`. The final digest covers:
-- the owning component's source digest (`weight_cache.component_digest`: kda / dsa / mlp / moe / top);
+- the owning component's source digest (`weight_cache.component_digest`: kda / dsa / mlp / moe / top). For the DSA
+  q_a|kv_a pack it also covers `MultichipDSA._build_pack`, `DSMatmul`, `IL1DMatmul` and `make_role_mm`. The
+  ImportError fallback (host tests) is logged and named `nodigest`;
 - the source tensor's memory config, padded shape and dtype.
 
 On a cache hit the loaded tensor's memory config, padded shape and dtype are checked against the source tensor. A
@@ -128,8 +156,11 @@ mismatch rebuilds the file. The default and an explicit `GLM53_PRECISION=<select
 - `runtime_policy`: dtypes and compute fidelities read back from the live model objects.
 - `precision.applied`: every change, per layer.
 - `fidelity_seen_one_eager_step`: the fidelity the wrappers passed to each decode matmul group in one eager decode
-  step. On the committed code it is kda_in LoFi x 34, kda_out LoFi x 34, DSA q_a|kv_a / q_b LoFi x 33, DSA o_proj
-  LoFi x 11, dense MLP LoFi x 3. This is every layer of each group (`runs/selected_default_r1/record.json`).
+  step. On HEAD it is kda_in LoFi x 34, kda_out LoFi x 34, DSA q_a|kv_a / q_b LoFi x 33, DSA o_proj LoFi x 11,
+  dense MLP LoFi x 3. This is every layer of each group (`runs/combo_a_kv_g4_kdain_r2/record.json`).
+- The wrappers keep each module's own `fp32_dest_acc_en`, `packer_l1_acc` and approx mode, and change only the
+  fidelity (review #2). Before that, the LM head at LoFi had run without packer L1 accumulation. That affects the
+  s8_snapshot rows `lm4_lofi` / `lm8_lofi` and the combinations; the `_r2` gate carries the fixed numerics.
 
 ### Accuracy and performance
 
@@ -197,13 +228,21 @@ On the committed code (`_r1`, three references):
 - **Noise.** Top-5 and top-100 are 100 % in every finalist cell. Repeat builds of one policy measure the same token-out
   time to 0.02 ms: shipped 54.08 / 54.07, combo_a 53.03 / 53.04, combo_a_kv 53.22 / 53.22 (warm rebuild on the
   committed code: 51.14 / 51.13). So the speed ranking is real.
-- **combo_a_kv_dense4.** It passes the rule at equal speed. Its 37 MB per die of freed DRAM is ~+5.8K tokens
-  (~+1.9 %, estimated). That is below the ~5 % bar of rule 3, and it puts bfp4 on early dense layers, which stage 3
-  rejected at layer level. It is recorded, not selected.
-- **fp8 latent inside the combinations.** It costs +0.17 to +0.19 ms per step (combo_a 53.03 -> combo_a_kv 53.22;
-  combo_b 53.41 -> combo_b_kv 53.58), but only +0.01 ms on the stage-7 policy. The difference repeats across builds.
-  No device profile was taken, so the cause is not identified. A candidate cause is that the fp8 rows are tilized
-  in-op by `sparse_sdpa`; the cost would then show only once the DSA projections no longer hide it.
+- **combo_a_kv_dense4.** It passes the rule (review #1, b8198430147) at 51.13 vs 51.14 ms. Its 37 MB per die of freed
+  DRAM is ~+5.8K tokens, an estimate. On the same estimate basis (`sweep_results`, upper bounds) dense4 reads 370,688
+  against 364,544 for combo_a_kv (+1.7 %); combo_a_kv measured 311,296. That is below the ~5 % bar of rule 3. It is
+  recorded, not selected.
+  - Stage 3 had rejected dense bfp4 at layer level, but on layer 0 only. Stage 3 also rejected kda_in4 and
+    mlp8_lofi, which pass here at model level, so that argument carries little weight.
+  - "Equal speed" held without decode programs. With the bfp4-tuned programs, dense4 plus its dense-MLP programs
+    (`combo_a_kv_dense4_g4_r2`) collapsed in decode: TF 14 / 8 / 13 %, prefill check 92 / 95 / 91 %. So dense4 was
+    not re-decided.
+- **fp8 latent inside the combinations.** It costs +0.17 to +0.19 ms per step in the full model (combo_a 53.03 ->
+  combo_a_kv 53.22; combo_b 53.41 -> combo_b_kv 53.58), but only +0.01 ms on the stage-7 policy.
+  - A Tracy decode window of combo_a vs combo_a_kv on the reduced model (layers 0, 3, 4; `profile/compare_decode.json`;
+    per op the maximum device time over the 4 dies) shows +1.5 µs in `sparse_sdpa` and one +1 µs cast per DSA layer.
+  - The total device time is 4,114 vs 4,101 µs. About 0.03 ms of the 0.17-0.19 ms is in the fp8 ops; the rest is not
+    in the device op time. The cause is not identified.
 
 ### combo_a_all: decode collapse, cause unclassified
 
@@ -213,9 +252,13 @@ Extending the bfp4 groups to the first layer (0: KDA + dense MLP) and the last l
 - deterministic greedy continuations that collapse into `</think>` (token 154842) loops, equal in eager and traced
   runs and repeatable (`runs/combo_a_all/record.json`, `ptcheck`).
 
-This signature matches two decode-collapse failures that are not precision problems: the stage-7 `ag_persistent`
-failure (TF top-5 32 %) and the open prefill->decode hand-off race that the stage-6/7 rework is fixing. So the cause
-is not classified. combo_a_all is still rejected on the measured result.
+This signature matches two decode-collapse failures that are not precision problems:
+- the stage-7 `ag_persistent` failure (TF top-5 32 %);
+- the deterministic, layout-dependent decode corruption that the stage-6/7 rework is fixing (the prefill->decode
+  hand-off).
+
+So the cause is not classified. combo_a_all is rejected on the measured result. It is to be re-gated after the
+stage-6/7 fix. `combo_a_kv_dense4_g4_r2` (above) shows the same signature.
 
 The rerun on the then-current rework code (`s8_snapshot2`, `TT_METAL_TRACE_ALLOC_TRACKING=1`) crashed in the warm-up
 prefill inside that code's `tt/dsa.py _set_open_pool` before any measurement (`evidence/combo_a_all_s2trk.excerpt.txt`).
@@ -239,8 +282,50 @@ The classification runs wait for the race fix, because before it they would be c
 | KDA out, DSA, shared expert, LM head | bfp4 | LoFi | see the table above | 93-94 | yes | |
 | LM head | bfp8 | LoFi vs HiFi2 | 54.09 vs 54.08 | 92 | no | no difference |
 
-bfp4 at HiFi2 was compared against bfp4 at LoFi only for the KDA input projection, the largest bfp4 group. For the
-other bfp4 groups only LoFi was run.
+bfp4 at HiFi2 was compared against bfp4 at LoFi at model level only for the KDA input projection, the largest bfp4
+group. For the other bfp4 groups only LoFi was run at model level. The op-level geometry sweep (next section) ran
+HiFi2 on each family's best program (`geometry/summary.json`, `hifi2_trials`).
+
+## Decode programs for bfp4 weights
+
+The DEFAULT_MC decode programs were tuned on bfp8 weights in stage 5. The bfp4 groups saved only about 35-40 % of the
+bandwidth-bound expectation, so `tools/mc_matmul_sweep.py --wdtype bfp4 --fidelity LoFi --alt-fidelity HiFi2` swept the
+decode geometries again on bfp4 weights (one die, 100 traced replays per candidate). It covered in0 blocks 4-64,
+1D core counts 16-110, DRAM-sharded activation cores and readers, and the LM head [4096 x 38720].
+Results: `geometry/bfp4_lofi_decode.jsonl`, summary `geometry/summary.json` (`tools/dtype_geometry_summary.py`).
+
+| Group | Current program | µs | Fastest buildable within noise | µs | Output vs current | Adopted |
+|---|---|---|---|---|---|---|
+| kda_in | ttnn default | 151.0 | `1d:c29:ib4` | 74.4 | hash identical | **yes** |
+| kda_out | `1d:c16:ib4` | 28.6 | `1d:c16:ib16` | 25.0 | hash identical | no |
+| dsa_o | `1d:c16:ib4` | 47.2 | `1d:c16:ib16` | 39.6 | hash identical | no |
+| dsa_qb | `1d:c16:ib4` | 23.8 | `1d:c16:ib16` | 21.1 | hash identical | no |
+| pack_a (q_a\|kv_a) | `1d:c32:ib8` | 29.5 | `1d:c16:ib32` | 25.3 | hash identical | no |
+| shared_gu | `1d:c32:ib16` | 22.8 | `1d:c16:ib64` | 18.7 | hash identical | no |
+| shared_dn | `1d:c16:ib4` | 14.4 | `1d:c16:ib16` | 13.3 | hash identical | no |
+| mlp_gu (dense4 only) | `1d:c16:ib4` | 61.3 | `1d:c16:ib8` | 55.7 | hash identical | no |
+| mlp_dn (dense4 only) | `1d:c16:ib4` | 37.9 | `1d:c16:ib16` | 33.0 | hash identical | no |
+| LM head | ttnn default | 355.3 | `1d:c110:ib4` | 330.8 | hash identical | no |
+
+"Buildable" means `make_role_mm` builds the same core count: the 1D core count divides the N tiles. "Within noise"
+means the error against fp64 is within 5 % of the current program's error. "Hash identical" means the output's sha256
+on the sweep's input equals the current program's.
+
+Model-level gate on HEAD, 3 references (adoption rule (b) of the coordinator):
+
+| Run | Programs | TF top-1 p0 / p1 / p2 | PC top-1 | Token-out |
+|---|---|---|---|---|
+| combo_a_kv_nospecs_r2 | none | 91 / 96 / 91 | 91 / 95 / 91 | 51.06 ms |
+| selected_default_r2 | all | 91 / 96 / **89** | 91 / 95 / 91 | 50.01 ms |
+| combo_a_kv_g4_kdain_r2 | kda_in only | **91 / 96 / 91** | **91 / 95 / 91** | **50.38 ms** |
+| combo_a_kv_g4_rest_r2 | all but kda_in | 91 / 96 / **89** | 91 / 95 / 91 | 50.77 ms |
+
+- The largest gain (kda_in) passes alone and is adopted.
+- The other programs: op-level hash identical, full-model numerics shift (p2 teacher forcing 89 %); not adopted. The
+  bisect stopped there (coordinator).
+- The op-level hash covers one random input per program. The shift shows that these programs are not equivalent on
+  every input.
+- The realized kda_in gain is 0.68 ms per step, against about 2.4 ms that the op-level times x 32 layers predict.
 
 ## Groups not reduced
 
@@ -296,35 +381,42 @@ DRAM.
 4. prefill one non-aligned copy prompt that fills the pool;
 5. run 24 traced decode steps at the top.
 
-Settings: selected policy, 1 slot, 64 MiB trace region.
+Settings: selected policy, 1 slot, 64 MiB trace region. The probe sizes the pool as
+`(free after load - workspace) // bytes per block`, capped at the `--max-context` tokens. A larger step therefore
+needs a smaller workspace.
 
-| Item | Stage-6 probe (stage-7 policy) | Selected, probe 1 | Selected, probe 2 |
-|---|---|---|---|
-| Code | stage 6 | s8_snapshot | commit b8198430147 |
-| `--max-context` / workspace | 131,072 / 700 MiB | 311,296 / 1,024 MiB | 337,920 / 1,024 MiB |
-| Free DRAM per die after load | 1,988,502,016 B | 3,047,399,936 B | 3,047,399,936 B |
-| DSA cache per token per die | 11,968 B | 6,336 B | 6,336 B |
-| Pool | 818 blocks (sized by free DRAM) | 2,433 blocks (sized by free DRAM) | 2,433 blocks (sized by free DRAM) |
-| Copy prompt / prefill time / copy accuracy | 104,515 tokens / 170 s / 1.0 | 311,235 / 408.5 s / 1.0 | 311,235 / 419.8 s / 1.0 |
-| Free per die after the top-of-pool prefill | 183 MB | 648 MB | 836 MB |
-| **max_model_len, 1 slot** | 104,448 | **311,296** | same pool: the next step was not reached |
+| Step | Code | `--max-context` / workspace | Pool | Result |
+|---|---|---|---|---|
+| stage 6 (stage-7 policy) | stage 6 | 131,072 / 700 MiB | 818 blocks (free DRAM) | 104,515-token prompt, 170 s, copy 1.0; 183 MB free after the prefill |
+| 1 | s8_snapshot | 364,544 / 700 MiB | 2,849 blocks | **out of DRAM** in the warm-up prefill (`evidence/cap_combo_a_kv_s1_try1_oom.excerpt.txt`) |
+| 2 | s8_snapshot | 311,296 / 1,024 MiB | 2,433 blocks (free DRAM) | **pass**: 311,235-token prompt, 408.5 s, copy 1.0; 648 MB free after the prefill |
+| 3 | b8198430147 | 337,920 / 1,024 MiB | 2,433 blocks (free DRAM) | pass, same pool as step 2 (the larger step was not reached); 836 MB free after the prefill |
+| 4 | HEAD | 337,920 / 832 MiB | 2,641 blocks | **out of DRAM** in the warm-up prefill, MoE `_routed_masked` (`evidence/r2_cap_337920.excerpt.txt`) |
+| 5 | HEAD | 337,920 / 832 MiB, MoE row split 1,024 | 2,641 blocks | **out of DRAM** in the warm-up prefill, `_routed_sorted_split` (`evidence/r2_cap_337920_split.excerpt.txt`) |
 
-Files: `capacity/combo_a_kv_s1/capacity.json`, `capacity/combo_a_kv_s1_337920/{capacity.json, provenance.json}`.
-Both selected probes pass `tools/serving_profiles.py ingest`; that tool is not edited here.
+All selected-policy steps ran with free DRAM after load 3,047,399,936 B per die and 6,336 B per token per die (stage
+7: 1,988,502,016 B and 11,968 B). Files: `capacity/combo_a_kv_s1*/capacity.json` and `provenance.json`.
 
-- The workspaces differ: 700 MiB for stage 6, 1,024 MiB for stage 8. The first stage-8 attempt, at 364,544 tokens
-  with 700 MiB, ran out of DRAM in the warm-up prefill (`evidence/cap_combo_a_kv_s1_try1_oom.excerpt.txt`). The DSA
-  constants grow with max_context.
-- **311,296 is measured.** The step to 337,920 kept the 1,024 MiB workspace rule, so free DRAM again sized the pool
-  to 2,433 blocks. 836 MB per die remained free at the peak. The true limit is therefore higher, but it is not measured.
+- **311,296 is the largest passing step, at the 1,024 MiB workspace.** The stage-8 serving workspace is therefore
+  1,024 MiB (stage 6: 700 MiB). Hand that number to stage 9 together with the probe (`capacity/combo_a_kv_s1`).
+- The 836 MB free after the step-3 prefill does not carry over to a larger pool. The warm-up prefill (every bucket,
+  the MoE chunk and the trace capture) peaks higher than the top-of-pool prefill, and it ran out of DRAM at 2,641
+  blocks even with the MoE row split.
+- Steps 2 and 3 pass `tools/serving_profiles.py ingest` (dry run); that tool is not edited here. Step 3 reports
+  `max_model_len_tested` 337,920, but its pool holds 311,424 tokens, so ingest step 2.
 
 The other slot counts are derived as in stage 6: the pool minus 43.96 blocks (35.65 MB of KDA state) per extra slot,
 minus one block per user, floored to 2,048. They are 4 slots 292,864, 8 slots 270,336, 16 slots 223,232 and 32 slots
 131,072 tokens. Stage 9 measures each serving profile.
 
-`doc/context_contract.json`: `supported_context` = 311,296, with `capability_reduction.to` and `setting` (1 slot,
-1,024 MiB workspace, 64 MiB trace region). The stage-7 values (104,448) are kept under
-`stage7_policy_GLM53_PRECISION_none`. Section `datatype_sweep` holds the details.
+`doc/context_contract.json`:
+- `supported_context` = 311,296, with `capability_reduction.to` and `setting` (1 slot, 1,024 MiB workspace, 64 MiB
+  trace region).
+- `capability_reduction.reason`: 1,048,576 tokens x 6,336 B = 6.64 GB of replicated DSA cache per die, against
+  3.05 GB free after load. That is a limit of the replicated layout and the workspace, not a hard device limit;
+  `path_to_advertised` lists the layouts that raise it.
+- The stage-7 values (104,448) are kept under `stage7_policy_GLM53_PRECISION_none`. Section `datatype_sweep` holds
+  the details.
 
 The block-sharded cache (`GLM53_DSA_SHARD=1`: 281,344 tokens at 1 slot in stage 4) keeps a bf16 latent. fp8 is not
 implemented there. A build with both requested logs a warning and uses bf16 (readiness 92 / 100 / 100 %).
@@ -332,7 +424,10 @@ implemented there. A build with both requested logs a warning and uses bf16 (rea
 ## Default and test policy
 
 - `GLM53_PRECISION` unset = `selected_precision_config.json`. It is consumed by every path that builds `Glm53Model` /
-  `MultichipDecoder`: `build_generator`, the readiness runners, the full model and the vLLM adapter.
+  `MultichipDecoder`: `build_generator`, the readiness runners and the full model. The vLLM adapter
+  (`tt/generator_vllm.py`) is not committed yet; that it loads the same policy is a stage-9 propagation check.
+- With `GLM53_HEAD=lm_ds`, the LM head requant is skipped with a warning (the column-split weights are not
+  re-quantized).
 - Host test `tests/test_precision_host.py` (10 tests) covers:
   - the default resolves to the selected file;
   - `none` / `shipped` / `off` / `0` resolve to stage 7;
@@ -343,16 +438,19 @@ implemented there. A build with both requested logs a warning and uses bf16 (rea
 
 | Suite / tool | Policy |
 |---|---|
-| tests/test_multichip_decoder.py, test_dsa_shard.py, test_perf_decoder.py; tools/mc_decode_ab.py, dsa_shard_probe.py, s5_sparse_probe.py, baseline_dump.py | stage 7 (`GLM53_PRECISION` defaults to `none` in the file): they compare against stage-3/5/7 references |
+| tests/test_multichip_decoder.py, test_dsa_shard.py, test_perf_decoder.py | stage 7 through a module-scoped autouse fixture (`GLM53_PRECISION` = the caller's value or `none`, no leak into other modules): they compare against stage-3/5/7 references |
+| tools/mc_decode_ab.py, dsa_shard_probe.py, s5_sparse_probe.py, baseline_dump.py | stage 7 (`GLM53_PRECISION` defaults to `none` at the top of the tool) |
 | tests/test_model_probe.py, tools/model_step_probe.py, tools/memory_probe.py, readiness / full-model / vLLM paths | the default (combo_a_kv): the model-level gates and capacity test the shipping policy |
 | tools/dtype_sweep.py, tools/long_ctx_check.py | whatever `GLM53_PRECISION` says (recorded) |
 
 ## Limitations
 
 - Accuracy evidence is 300 teacher-forced positions on three AIME24 chat prompts, plus the long-context check to 100K
-  tokens. Top-1 differences of 1-2 points between finalists are at the noise level of 100-position references.
-- The 18-candidate sweep and the long-context check ran on the s8_snapshot code. The post-selection gate ran on the
-  committed code. Speeds compare only within one code generation.
+  tokens. There is no accuracy evidence beyond 100K tokens; the 311K capacity probe checks function (copy accuracy). Top-1 differences of 1-2 points between finalists are at the noise level of 100-position references.
+- The 18-candidate sweep and the long-context check ran on the s8_snapshot code. The gates ran on b8198430147 and
+  on HEAD 914af5b9594. Speeds compare only within one code generation.
+- The final config (kda_in program) had no separate qualitative run (above).
+- The combo_a_kv_dense4_g4 decode collapse is unclassified, like combo_a_all.
 - All performance numbers are for 1 slot. Multi-slot decode was not swept per candidate. The precision changes reduce
   weight bytes, which the 8- and 32-slot paths read the same way.
 - The combo_a_all failure is unclassified (above).
@@ -370,10 +468,14 @@ implemented there. A build with both requested logs a warning and uses bf16 (rea
 - `sweep_results.json`, `sweep_results.csv`, `min_top1_perf.png`, `top1_perf_pareto.png`, `top5_perf_pareto.png`
   (`tools/dtype_sweep_report.py`).
 - `capacity/`, `long_context/`, `refs/` (p1, p2 references and metadata, the long-context document ids).
-- `evidence/`: `kv_fp8_probe.json` and excerpts of the two OOM logs and the snapshot2 crash.
+- `geometry/` (the bfp4 decode-program sweep and its summary), `profile/` (the combo_a vs combo_a_kv Tracy windows).
+- `evidence/`: `kv_fp8_probe.json` and excerpts of the OOM logs (capacity steps 1, 4, 5; the shipped long-context
+  run) and of the snapshot2 crash.
 - Code: `tt/precision.py`; the hooks in `tt/model.py` and `tt/multichip_decoder.py`; the fp8 pool in `tt/dsa.py`;
   `tt/dsa_shard.dsa_bytes_per_token`.
-- Tools: `tools/dtype_sweep.py`, `tools/dtype_sweep_report.py`, `tools/kv_fp8_probe.py`, `tools/long_ctx_check.py`,
-  `tools/long_ctx_compare.py`. Test: `tests/test_precision_host.py`.
-- Scripts: `~/glm53-flash-bringup/scripts/s8_*.sh`, `s8r1_inner.sh`. Logs: `~/glm53-flash-bringup/logs/s8/`.
+- Tools: `tools/dtype_sweep.py`, `tools/dtype_sweep_report.py`, `tools/dtype_geometry_summary.py`,
+  `tools/kv_fp8_probe.py`, `tools/long_ctx_check.py`, `tools/long_ctx_compare.py`; the stage-8 options of
+  `tools/mc_matmul_sweep.py` (`--wdtype`, `--fidelity`, `--alt-fidelity`, `out_sha`, role `lm_head`). Test:
+  `tests/test_precision_host.py`.
+- Scripts: `~/glm53-flash-bringup/scripts/s8_*.sh`, `s8r1_inner.sh`, `s8r2a_inner.sh`, `s8r2b_inner.sh`, `s8r2c_inner.sh`. Logs: `~/glm53-flash-bringup/logs/s8/`.
   Work log: `work_log.md`.

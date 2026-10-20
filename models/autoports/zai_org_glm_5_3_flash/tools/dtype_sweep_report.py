@@ -48,6 +48,8 @@ def row(r, bases, cfg_dir: Path):
     t2048 = ttft.get("2048") or ttft.get(2048) or {}
     cid = r["id"]
     cap_id = "combo_a_kv" if cid == "selected_default" else cid  # the post-selection runs are the selected policy
+    # decode programs (decode_specs) do not change the weights: the combo_a_kv capacity probes cover these variants
+    cap_src = "combo_a_kv" if cid.startswith("combo_a_kv_g4") else cap_id
     gen = r.get("base_commit") or "ac03689d2bb (s8_snapshot)"
     cfg = cfg_dir / f"{cap_id}.json"
     desc = json.loads(cfg.read_text()).get("description", "") if cfg.exists() else ""
@@ -60,7 +62,7 @@ def row(r, bases, cfg_dir: Path):
     blocks = int((SHIPPED_BLOCKS * BLOCK * DSA_BPT - extra) // (BLOCK * bpt))
     ctx = blocks * BLOCK // 2048 * 2048
     ctx_status = "estimate (upper bound: excludes the max_context-dependent DSA constants and workspace)"
-    caps = sorted((DOC / "capacity").glob(f"{cap_id}_s1*/capacity.json"))
+    caps = sorted((DOC / "capacity").glob(f"{cap_src}_s1*/capacity.json"))
     if abs(extra) < (16 << 20) and bpt == DSA_BPT:
         ctx, ctx_status = 104448, "measured (stage-6 capacity probe)"
     for cap in caps:  # the largest completed probe with copy accuracy 1.0
@@ -116,9 +118,9 @@ def row(r, bases, cfg_dir: Path):
         "fidelity": json.dumps((r.get("precision") or {}).get("fidelity") or {}, sort_keys=True),
         "kv_latent_dtype": (r.get("precision") or {}).get("kv_latent_dtype", "bf16"),
         "ccl_h_dtype": (r.get("precision") or {}).get("ccl_h_dtype", "bf16"),
-        "precision_env": "none (stage-7 policy)"
-        if cid == "shipped"
-        else (r.get("precision_env") or "unset (selected default)"),
+        "precision_env": (
+            "none (stage-7 policy)" if cid == "shipped" else (r.get("precision_env") or "unset (selected default)")
+        ),
         "applied_overrides": len((r.get("precision") or {}).get("applied") or []),
         "tf_top1": top1,
         "tf_top5": top5,
@@ -145,18 +147,20 @@ def row(r, bases, cfg_dir: Path):
         "max_context_status": ctx_status,
         "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / "
         "(128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
-        "ptcheck_tokens_equal": all(v.get("tokens_equal") for v in (r.get("ptcheck") or {}).values())
-        if r.get("ptcheck")
-        else None,
+        "ptcheck_tokens_equal": (
+            all(v.get("tokens_equal") for v in (r.get("ptcheck") or {}).values()) if r.get("ptcheck") else None
+        ),
         "pass": ok and traced,
         "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
         "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
         "commit": r.get("commit"),
-        "command": " ".join(r["argv"])
-        if r.get("argv")
-        else (
-            f"[reconstructed] GLM53_PRECISION={'none' if cid == 'shipped' else 'doc/datatype_sweep/configs/' + cid + '.json'} "
-            "python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)"
+        "command": (
+            " ".join(r["argv"])
+            if r.get("argv")
+            else (
+                f"[reconstructed] GLM53_PRECISION={'none' if cid == 'shipped' else 'doc/datatype_sweep/configs/' + cid + '.json'} "
+                "python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)"
+            )
         ),
         "script": r.get("script") or "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
     }
@@ -174,28 +178,50 @@ def plot(rows, key, xmin, fname, selected, label=None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    gen_of = {r["run"]: r.get("code") or "?" for r in rows}
+    gens = sorted({gen_of[r["run"]] for r in rows}, key=lambda g: (not g.startswith("ac03"), g))
+    styles = [
+        ("o", "#4c72b0", "#55a868"),
+        ("s", "#dd8452", "#c49a00"),
+        ("D", "#8172b3", "#937860"),
+        ("^", "#64b5cd", "#8c8c8c"),
+    ]
+    sty = {g: styles[i % len(styles)] for i, g in enumerate(gens)}
     allpts = [(r[key] * 100, r["tf_decode_tsu"], r["run"]) for r in rows if r[key] is not None and r["tf_decode_tsu"]]
     lo = min(xmin * 100 - 2, min(p[0] for p in allpts if p[0] >= xmin * 100 - 10))
     pts = [p for p in allpts if p[0] >= lo]
     off = [p for p in allpts if p[0] < lo]
     fig, ax = plt.subplots(figsize=(11, 7), dpi=150)
     ax.set_facecolor("#fbfbfd")
-    for x, y, n in pts:
-        sel = n == selected
-        ax.scatter(
-            x, y, s=120 if sel else 55, color="#d62728" if sel else "#4c72b0", edgecolor="white", lw=1.2, zorder=3
-        )
-    front = pareto([(x, y) for x, y, _ in pts])
-    if front:
-        ax.plot(
-            [p[0] for p in front],
-            [p[1] for p in front],
-            "-",
-            color="#55a868",
-            lw=2.0,
-            alpha=0.85,
-            label="Pareto frontier",
-        )
+    for g in gens:  # one marker / frontier per code generation: speeds compare only within a generation
+        gp = [p for p in pts if gen_of[p[2]] == g]
+        if not gp:
+            continue
+        mk, col, fcol = sty[g]
+        for x, y, n in gp:
+            sel = n == selected
+            ax.scatter(
+                x,
+                y,
+                s=130 if sel else 55,
+                marker=mk,
+                color="#d62728" if sel else col,
+                edgecolor="white",
+                lw=1.2,
+                zorder=3,
+            )
+        ax.scatter([], [], marker=mk, color=col, label=f"code {g}")
+        front = pareto([(x, y) for x, y, _ in gp])
+        if len(front) > 1:
+            ax.plot(
+                [p[0] for p in front],
+                [p[1] for p in front],
+                "-",
+                color=fcol,
+                lw=1.8,
+                alpha=0.85,
+                label=f"Pareto frontier ({g})",
+            )
     ax.axvline(xmin * 100, ls=":", color="#c44e52", lw=1.6, label=f"minimum {key.split('_')[1]} = {xmin * 100:.0f} %")
     ys = [p[1] for p in pts]
     y0, y1 = min(ys), max(ys)
@@ -242,7 +268,7 @@ def plot(rows, key, xmin, fname, selected, label=None):
     ax.set_ylabel("trace-verified teacher-forcing decode (t/s/u)")
     ax.set_title(f"GLM-5.3-Flash (E192) datatype sweep: {key.split('_')[1]} vs decode speed (p300x2, TP4, 1 slot)")
     ax.grid(alpha=0.3)
-    ax.legend(loc="upper left", fontsize=8)
+    ax.legend(loc="lower right", fontsize=8)
     ax.set_xticks([t for t in ax.get_xticks() if lo - 0.5 <= t <= 100])
     fig.tight_layout()
     fig.savefig(DOC / fname)
@@ -257,10 +283,17 @@ def main():
     runs = [
         r
         for r in load_runs(DOC / "runs")
-        if r["_run"] not in ("selected_default_warm", "selected_default_r1_warm", "selected_default_dsashard")
+        if r["_run"]
+        not in (
+            "selected_default_warm",
+            "selected_default_r1_warm",
+            "selected_default_r2_warm",
+            "selected_default_dsashard",
+            "smoke_g4_reduced",
+        )
     ]
     bases = {}
-    for name, key in (("shipped", "s1"), ("shipped_r1", "b8198430147")):
+    for name, key in (("shipped", "s1"), ("shipped_r1", "b8198430147"), ("shipped_r2", "914af5b9594")):
         b = next((r for r in runs if r["_run"] == name), None)
         if b is not None:
             bases[key] = b.get("dram_alloc_per_bank")
