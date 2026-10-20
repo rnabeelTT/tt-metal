@@ -1,0 +1,20 @@
+{
+  "findings": [],
+  "measured": [
+    {
+      "artifact": "autoregressive/autoregressive_meta.json",
+      "label": "tt free-running completion",
+      "source": "words",
+      "num_tokens": 221,
+      "adjacent_duplication": 0.0,
+      "trigram_loop_fraction": 0.2308
+    },
+    {
+      "artifact": "autoregressive/autoregressive_meta.json",
+      "label": "hf/tt token agreement (informational)",
+      "matching_tokens": 5,
+      "compared_tokens": 256
+    }
+  ],
+  "exit_code": 0
+}

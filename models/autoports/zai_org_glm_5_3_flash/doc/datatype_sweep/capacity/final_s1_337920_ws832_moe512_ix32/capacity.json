@@ -1,0 +1,53 @@
+{
+ "mode": "capacity",
+ "S": 1,
+ "max_seq_len": 337920,
+ "workspace_mib": 832.0,
+ "bank_size": 4263952768,
+ "die_allocatable_bytes": 34111622144,
+ "trace_region_bytes": 67108864,
+ "after_open": {
+  "allocated": 0,
+  "free": 34111622144,
+  "largest_free_block_per_bank": 4263952768,
+  "trace_allocated": 0
+ },
+ "plan": {
+  "layout": "replicated",
+  "max_seq_len": 337920,
+  "dsa_shard": false
+ },
+ "load_seconds": 94.6,
+ "after_load": {
+  "allocated": 30971694080,
+  "free": 3139928064,
+  "largest_free_block_per_bank": 391778304,
+  "trace_allocated": 0
+ },
+ "dsa_shard": false,
+ "free_after_load_bytes": 3139928064,
+ "dsa_bytes_per_block_all_layers": 811008,
+ "num_blocks_fit": 2795,
+ "num_blocks": 2641,
+ "capped_by_max_seq_len": true,
+ "dsa_pool_bytes_measured": 2635442176,
+ "after_bind": {
+  "allocated": 33607136256,
+  "free": 504485888,
+  "largest_free_block_per_bank": 62840576,
+  "trace_allocated": 0
+ },
+ "model_plus_sampler_variants_trace_bytes": 39387136,
+ "warm_and_capture_peak_bytes": 33968685568,
+ "warm_and_capture_peak_op": "ttnn.moe_gather_add_rows",
+ "warm_and_capture_seconds": 439.0,
+ "after_capture": {
+  "allocated": 33628171776,
+  "free": 483450368,
+  "largest_free_block_per_bank": 59867520,
+  "trace_allocated": 39387136
+ },
+ "trace_bytes_model_plus_greedy_sampler": 39387136,
+ "prompt_len": 337859,
+ "passage_tokens": 1500
+}

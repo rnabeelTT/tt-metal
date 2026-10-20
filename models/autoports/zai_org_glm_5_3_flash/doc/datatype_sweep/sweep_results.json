@@ -4,7 +4,7 @@
   "top5": 0.98,
   "top100": 1.0
  },
- "selected": "combo_a_kv_g4_kdain_r2",
+ "selected": "final_default_h9",
  "results": [
   {
    "run": "ccl_h_bfp8",
@@ -71,7 +71,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/ccl_h_bfp8.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a",
@@ -138,7 +139,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_a.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_all",
@@ -205,7 +207,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_a_all.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "combo_a_all_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.91,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.9,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.95,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.96,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.9,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.89,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.89,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 276,
+   "pass_selection_rule": false,
+   "config_id": "combo_a_all",
+   "config_path": "doc/datatype_sweep/configs/combo_a_all.json",
+   "description": "combo_a extended to the first and last layers (0, 44)",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "2944ac6cd9d9",
+   "requant": "{\"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"all\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"all\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"all\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"all\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "bf16",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_all.json",
+   "applied_overrides": 247,
+   "tf_top1": 0.91,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.9,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 19.607106347133264,
+   "tf_ttft_ms": 406.6951491404325,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 50.647482268201806,
+   "tokenout_ms": 51.039081594596304,
+   "tokenout_tsu": 19.592829039186192,
+   "generate_ms": 51.11861426848918,
+   "ttft_128_ms": 227.8533549979329,
+   "ttft_161_ms": 374.0497680846602,
+   "ttft_2048_ms": 1025.6938461679965,
+   "dram_alloc_per_die_bytes": 31321563136,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 11968,
+   "max_context_1slot": null,
+   "max_context_status": "not estimated (no stage-7 build of this code generation)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_all --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_all_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_all_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_all_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv",
@@ -272,7 +369,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_a_kv.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "combo_a_kv_dense4_g4_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.92,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.95,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.91,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 279,
+   "pass_selection_rule": true,
+   "config_id": "combo_a_kv_dense4_g4",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv_dense4_g4.json",
+   "description": "combo_a_kv_dense4 + bfp4-tuned decode programs (incl. dense MLP on layers 1-2)",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "2944ac6cd9d9",
+   "requant": "{\"dense_mlp\": {\"dtype\": \"bfp4\", \"layers\": [1, 2]}, \"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_dense4_g4.json",
+   "applied_overrides": 439,
+   "tf_top1": 0.92,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.92,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 20.030216853347326,
+   "tf_ttft_ms": 406.1656780540943,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 49.56412736016015,
+   "tokenout_ms": 49.95257039554417,
+   "tokenout_tsu": 20.018989855408947,
+   "generate_ms": 50.109889932597675,
+   "ttft_128_ms": 225.63022398389876,
+   "ttft_161_ms": 374.1881940513849,
+   "ttft_2048_ms": 1022.8129350580275,
+   "dram_alloc_per_die_bytes": 31237398528,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 325632,
+   "max_context_status": "measured (capacity/final_s1_325632_ws1000_moe512_ix32/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_dense4_g4 --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_dense4_g4_r2",
@@ -356,8 +548,8 @@
    "dram_alloc_per_die_bytes": 31232385024,
    "extra_dram_per_die_bytes": -1099776000,
    "dsa_bytes_per_token": 6336,
-   "max_context_1slot": 370688,
-   "max_context_status": "estimate (upper bound: excludes the max_context-dependent DSA constants and workspace)",
+   "max_context_1slot": 325632,
+   "max_context_status": "measured (capacity/final_s1_325632_ws1000_moe512_ix32/capacity.json)",
    "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
    "ptcheck_tokens_equal": true,
    "pass": false,
@@ -365,7 +557,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_dense4_g4 --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r2 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r2/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_g4_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "combo_a_kv_dense4_kdain_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.92,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.95,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.91,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 279,
+   "pass_selection_rule": true,
+   "config_id": "combo_a_kv_dense4_kdain",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv_dense4_kdain.json",
+   "description": "combo_a_kv_dense4 + the bfp4-tuned kda_in decode program only",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "2944ac6cd9d9",
+   "requant": "{\"dense_mlp\": {\"dtype\": \"bfp4\", \"layers\": [1, 2]}, \"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_dense4_kdain.json",
+   "applied_overrides": 287,
+   "tf_top1": 0.92,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.92,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 19.879051330123723,
+   "tf_ttft_ms": 408.23902608826756,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 49.92633436340839,
+   "tokenout_ms": 50.321650536110006,
+   "tokenout_tsu": 19.872162167701873,
+   "generate_ms": 50.43091870223483,
+   "ttft_128_ms": 226.73180885612965,
+   "ttft_161_ms": 377.99310800619423,
+   "ttft_2048_ms": 1022.1751939971,
+   "dram_alloc_per_die_bytes": 31237414912,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 325632,
+   "max_context_status": "measured (capacity/final_s1_325632_ws1000_moe512_ix32/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_dense4_kdain --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_kdain_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_kdain_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_kdain_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_dense4_r1",
@@ -458,7 +745,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_dense4 --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_r1 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_r1/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_dense4_r1/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "combo_a_kv_g4_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.91,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.96,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.89,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.89,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 276,
+   "pass_selection_rule": false,
+   "config_id": "combo_a_kv_g4",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv_g4.json",
+   "description": "combo_a_kv + bfp4-tuned decode programs (geometry/summary.json; all bit-identical to the bfp8-tuned programs at op level)",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "4571ea6e12e5",
+   "requant": "{\"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_g4.json",
+   "applied_overrides": 433,
+   "tf_top1": 0.91,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.91,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 19.984739487001274,
+   "tf_ttft_ms": 407.5762659776956,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 49.66346449994793,
+   "tokenout_ms": 50.052351504564285,
+   "tokenout_tsu": 19.979081300681944,
+   "generate_ms": 50.15723426671078,
+   "ttft_128_ms": 226.64798493497074,
+   "ttft_161_ms": 374.32176410220563,
+   "ttft_2048_ms": 1025.0912508927286,
+   "dram_alloc_per_die_bytes": 31274885120,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 311296,
+   "max_context_status": "measured (capacity/combo_a_kv_s1/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_g4 --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_g4_kdain_r2",
@@ -551,7 +933,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_g4_kdain --seq-len 16384 --do policy,ready,extra,ptcheck,decode,fidcount --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_kdain_r2 --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_kdain_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2c_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2c_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "combo_a_kv_g4_rest_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.91,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.96,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.89,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.89,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 276,
+   "pass_selection_rule": false,
+   "config_id": "combo_a_kv_g4_rest",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv_g4_rest.json",
+   "description": "combo_a_kv + every bfp4-tuned decode program except kda_in",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "4571ea6e12e5",
+   "requant": "{\"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/configs/combo_a_kv_g4_rest.json",
+   "applied_overrides": 401,
+   "tf_top1": 0.91,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.91,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 19.69075130575358,
+   "tf_ttft_ms": 406.75346716307104,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 50.38316656524936,
+   "tokenout_ms": 50.7723677981024,
+   "tokenout_tsu": 19.69575269714671,
+   "generate_ms": 50.95185793470591,
+   "ttft_128_ms": 225.43428395874798,
+   "ttft_161_ms": 374.8996870126575,
+   "ttft_2048_ms": 1025.8426109794527,
+   "dram_alloc_per_die_bytes": 31274885120,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 311296,
+   "max_context_status": "measured (capacity/combo_a_kv_s1/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_g4_rest --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_rest_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_rest_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_rest_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_g4_rest_r2",
@@ -644,7 +1121,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_g4_rest --seq-len 16384 --do policy,ready,extra,ptcheck,decode,fidcount --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_rest_r2 --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_g4_rest_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2c_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2c_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_nospecs_r2",
@@ -737,7 +1215,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv --seq-len 16384 --do policy,ready,extra,ttft,decode --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/combo_a_kv_nospecs_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_kv_r3",
@@ -830,7 +1309,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_a_kv.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_a_r3",
@@ -923,7 +1403,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_a.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_b",
@@ -990,7 +1471,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_b.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_b_kv_r3",
@@ -1083,7 +1565,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_b_kv.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "combo_b_r3",
@@ -1176,7 +1659,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/combo_b.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "dsa4_lofi",
@@ -1243,7 +1727,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/dsa4_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "exp8dn_edge",
@@ -1310,7 +1795,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/exp8dn_edge.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "final_default_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.92,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.95,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.92,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.91,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 279,
+   "pass_selection_rule": true,
+   "config_id": "combo_a_kv_dense4_g4",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv_dense4_g4.json",
+   "description": "combo_a_kv_dense4 + bfp4-tuned decode programs (incl. dense MLP on layers 1-2)",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "2211166a962a",
+   "requant": "{\"dense_mlp\": {\"dtype\": \"bfp4\", \"layers\": [1, 2]}, \"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "unset (the default at run time: combo_a_kv_dense4_g4 (the selection))",
+   "applied_overrides": 439,
+   "tf_top1": 0.92,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.92,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 20.01787353041056,
+   "tf_ttft_ms": 406.29642992280424,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 49.56029326810191,
+   "tokenout_ms": 49.94253107191374,
+   "tokenout_tsu": 20.023014023059226,
+   "generate_ms": 50.09654063420991,
+   "ttft_128_ms": 225.59368214569986,
+   "ttft_161_ms": 378.3543920144439,
+   "ttft_2048_ms": 1023.7721120938659,
+   "dram_alloc_per_die_bytes": 31237398528,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 325632,
+   "max_context_status": "measured (capacity/final_s1_325632_ws1000_moe512_ix32/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv_dense4_g4 --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,checks,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/final_default_h9 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/final_default_h9/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/final_default_h9/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3b_inner.sh",
+   "code_matches_tree": true
   },
   {
    "run": "kda_in4_hifi2",
@@ -1377,7 +1957,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/kda_in4_hifi2.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "kda_in4_lofi",
@@ -1444,7 +2025,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/kda_in4_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "kda_out4_lofi",
@@ -1511,7 +2093,102 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/kda_out4_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
+  },
+  {
+   "run": "kdain_default_h9",
+   "references": [
+    "p0",
+    "p1",
+    "p2"
+   ],
+   "per_reference": {
+    "p0": {
+     "tf": [
+      0.91,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    },
+    "p1": {
+     "tf": [
+      0.96,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.95,
+      1.0,
+      1.0
+     ]
+    },
+    "p2": {
+     "tf": [
+      0.91,
+      1.0,
+      1.0
+     ],
+     "pc": [
+      0.91,
+      1.0,
+      1.0
+     ]
+    }
+   },
+   "min_top1_all_refs": 0.91,
+   "min_top5_all_refs": 1.0,
+   "min_top100_all_refs": 1.0,
+   "tf_top1_sum": 278,
+   "pass_selection_rule": true,
+   "config_id": "combo_a_kv",
+   "config_path": "doc/datatype_sweep/configs/combo_a_kv.json",
+   "description": "combo_a + fp8 DSA latent pool",
+   "code": "9fcc17c0dc4",
+   "code_md5_map_digest": "2211166a962a",
+   "requant": "{\"dsa_proj\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_in\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"kda_out\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}, \"lm_head\": {\"dtype\": \"bfp4\"}, \"shared_expert\": {\"dtype\": \"bfp4\", \"layers\": \"inner\"}}",
+   "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
+   "kv_latent_dtype": "fp8_e4m3",
+   "ccl_h_dtype": "bf16",
+   "precision_env": "unset (the default at run time: combo_a_kv_g4_kdain (the review-2 default))",
+   "applied_overrides": 285,
+   "tf_top1": 0.91,
+   "tf_top5": 1.0,
+   "tf_top100": 1.0,
+   "tf_tokens": 100,
+   "pc_top1": 0.91,
+   "pc_top5": 1.0,
+   "pc_top100": 1.0,
+   "tf_decode_tsu": 19.85491160544537,
+   "tf_ttft_ms": 406.8568320944905,
+   "readiness_trace_replays": 198,
+   "trace_verified": true,
+   "model_trace_ms": 50.0087175052613,
+   "tokenout_ms": 50.39987643249333,
+   "tokenout_tsu": 19.841318486949493,
+   "generate_ms": 50.66769723780453,
+   "ttft_128_ms": 225.52179917693138,
+   "ttft_161_ms": 377.8479821048677,
+   "ttft_2048_ms": 1024.311943911016,
+   "dram_alloc_per_die_bytes": 31274901504,
+   "extra_dram_per_die_bytes": 0,
+   "dsa_bytes_per_token": 6336,
+   "max_context_1slot": 311296,
+   "max_context_status": "measured (capacity/combo_a_kv_s1/capacity.json)",
+   "max_context_note": "estimates: floor((818 x 128 x 11,968 - DRAM delta vs the shipped build of the same code) / (128 x bytes per token)), an upper bound; 'measured' = a capacity probe of this policy",
+   "ptcheck_tokens_equal": true,
+   "pass": true,
+   "regime": "1 slot, max_seq_len 16384, warm; TF = readiness runner traced decode (host wall incl. 1 token readback per step)",
+   "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
+   "commit": "",
+   "command": "/home/raahem/glm53-flash-bringup/s8r3_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,checks,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r3 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r3/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r3/record.json",
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r3a_inner.sh",
+   "code_matches_tree": true
   },
   {
    "run": "kv_fp8",
@@ -1578,7 +2255,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/kv_fp8.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "kv_fp8_r3",
@@ -1671,7 +2349,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/kv_fp8.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "lm4_lofi",
@@ -1738,7 +2417,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/lm4_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "lm8_lofi",
@@ -1805,7 +2485,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/lm8_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "proj8_hifi2",
@@ -1872,7 +2553,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/proj8_hifi2.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "proj8_lofi",
@@ -1939,7 +2621,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/proj8_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "routed_hifi3",
@@ -2006,7 +2689,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/routed_hifi3.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "selected_default",
@@ -2067,7 +2751,7 @@
    "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
    "kv_latent_dtype": "fp8_e4m3",
    "ccl_h_dtype": "bf16",
-   "precision_env": "unset (selected default)",
+   "precision_env": "unset (the default at run time: combo_a_kv)",
    "applied_overrides": 253,
    "tf_top1": 0.91,
    "tf_top5": 1.0,
@@ -2099,7 +2783,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/selected_default.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "selected_default_r1",
@@ -2160,7 +2845,7 @@
    "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
    "kv_latent_dtype": "fp8_e4m3",
    "ccl_h_dtype": "bf16",
-   "precision_env": "unset (selected default)",
+   "precision_env": "unset (the default at run time: combo_a_kv)",
    "applied_overrides": 253,
    "tf_top1": 0.91,
    "tf_top5": 1.0,
@@ -2192,7 +2877,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,checks,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r1/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "selected_default_r2",
@@ -2253,7 +2939,7 @@
    "fidelity": "{\"dense_mlp\": \"LoFi\", \"dsa_proj\": \"LoFi\", \"kda_in\": \"LoFi\", \"kda_out\": \"LoFi\", \"lm_head\": \"LoFi\", \"shared_expert\": \"LoFi\"}",
    "kv_latent_dtype": "fp8_e4m3",
    "ccl_h_dtype": "bf16",
-   "precision_env": "unset (selected default)",
+   "precision_env": "unset (the default at run time: combo_a_kv_g4 (all bfp4 decode programs; rejected))",
    "applied_overrides": 555,
    "tf_top1": 0.91,
    "tf_top5": 1.0,
@@ -2285,7 +2971,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id combo_a_kv --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,checks,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r2 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r2/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/selected_default_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "shared4_lofi",
@@ -2352,7 +3039,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=doc/datatype_sweep/configs/shared4_lofi.json python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "shipped",
@@ -2419,7 +3107,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=none python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "shipped_r1",
@@ -2512,7 +3201,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r1_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id shipped --seq-len 16384 --do policy,ready,extra,ptcheck,ttft,decode,fidcount --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r1/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r1_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "shipped_r2",
@@ -2605,7 +3295,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "/home/raahem/glm53-flash-bringup/s8r2b_snapshot/models/autoports/zai_org_glm_5_3_flash/tools/dtype_sweep.py --id shipped --seq-len 16384 --do policy,ready,extra,ttft,decode --prompts 128,161,2048 --ptcheck 100,161,300 --steps 30 --extra-refs /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p1.refpt,/home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/refs/readiness_aime24_chat_p2.refpt --report-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r2 --checks-dir /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r2/checks --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/runs/shipped_r2/record.json",
-   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh"
+   "script": "/home/raahem/glm53-flash-bringup/scripts/s8r2b_inner.sh",
+   "code_matches_tree": false
   },
   {
    "run": "shipped_r3",
@@ -2698,7 +3389,8 @@
    "hardware": "p300x2 (4 Blackhole dies), mesh (1, 4), FABRIC_1D, TP4",
    "commit": "",
    "command": "[reconstructed] GLM53_PRECISION=none python -m ...tools.dtype_sweep (scripts/s8_sweep.sh / s8_batch_inner.sh)",
-   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh"
+   "script": "[reconstructed] ~/glm53-flash-bringup/scripts/s8_sweep.sh or s8_batch_inner.sh",
+   "code_matches_tree": false
   }
  ]
 }

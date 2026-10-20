@@ -146,18 +146,19 @@
     "doc": "doc/optimized_multichip_decoder/README.md (Memory and context contract)",
     "status": "unchanged from the multichip decoder (see multichip_decoder; the block-sharded DSA cache is an MCOpts option of both)"
   },
-  "supported_context": 311296,
+  "supported_context": 325632,
   "limiting_reason": "device_dram",
   "capacity_evidence": {
-    "probe": "tools/memory_probe.py capacity --slots 1 --trace-region 67108864 --workspace-mib 1024, GLM53_PRECISION unset (selected default)",
+    "probe": "tools/memory_probe.py capacity --slots 1 --trace-region 67108864, GLM53_PRECISION unset (selected default combo_a_kv_dense4_g4), code HEAD 9fcc17c0dc4 + tt/precision.py 6f46fec82f0f (~/glm53-flash-bringup/s8r3b_snapshot; scripts s8r3b_inner.sh, s8r3c_inner.sh)",
+    "free_after_load_bytes": 3139928064,
+    "dsa_bytes_per_block_all_layers": 811008,
     "runs": {
-      "311296": "doc/datatype_sweep/capacity/combo_a_kv_s1/capacity.json (s8_snapshot code, --max-context 311296): pool 2,433 blocks, 311,235-token non-aligned copy prompt, prefill 408.5 s, copy accuracy 1.0, 648 MB per die free after the prefill",
-      "337920": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920/capacity.json (commit b8198430147 code, --max-context 337920; provenance.json): free DRAM still sizes the pool to 2,433 blocks under the 1,024 MiB workspace rule, so the larger pool was not reached; the same 311,235-token prompt, prefill 419.8 s, copy accuracy 1.0, 836 MB per die free after the prefill",
-      "337920_832MiB": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832 (HEAD 914af5b9594): pool 2,641 blocks, out of DRAM in the warm-up prefill (MoE _routed_masked); doc/datatype_sweep/evidence/r2_cap_337920.excerpt.txt",
-      "337920_832MiB_moesplit": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832_moesplit (HEAD, GLM53_MOE_SORTED_ROWS=1024): out of DRAM in the warm-up prefill (MoE _routed_sorted_split); doc/datatype_sweep/evidence/r2_cap_337920_split.excerpt.txt"
+      "325632_ws1000": "PASS: doc/datatype_sweep/capacity/final_s1_325632_ws1000_moe512_ix32 (GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32): pool 2,545 blocks, 325,571-token non-aligned copy prompt, prefill 520.4 s, 24 traced decode steps, copy accuracy 1.0, 224 MB per die free at the prefill peak",
+      "337920_ws832_ix32": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512_ix32 (same options): pool 2,641 blocks; warm-up and capture pass; the 337,859-token prefill runs out of DRAM in the MoE row split (82.6 MB, largest free block 8.6 MB per bank); doc/datatype_sweep/evidence/h9c_cap_337920_ix32.excerpt.txt",
+      "337920_ws832": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512 (GLM53_MOE_SORTED_ROWS=512 only): out of DRAM in the warm-up prefill, DSA indexer _select_pools (43 MB); doc/datatype_sweep/evidence/h9_cap_337920_moe512.excerpt.txt"
     },
-    "result": "311,296 at the 1,024 MiB workspace is the largest passing step; 337,920 needs a smaller workspace (832 MiB) and runs out of DRAM in the warm-up prefill, with and without the MoE row split",
-    "first_attempt": "364,544 with a 700 MiB workspace ran out of DRAM in the warm-up prefill (doc/datatype_sweep/evidence/cap_combo_a_kv_s1_try1_oom.excerpt.txt)"
+    "result": "bracket: 325,632 passes, 337,920 fails (the 2,048-token steps between were not probed). The passing probe sets two non-default bit-identical split options (MoE rows 512, indexer score blocks 32 MB; defaults 1,024 rows and 64 MB).",
+    "earlier_weights_combo_a_kv": "datatype_sweep.capacity_evidence (311,296 at 1,024 MiB, review #1 / #2)"
   },
   "capability_reduction": {
     "from": 1048576,
@@ -167,31 +168,43 @@
     "path_to_advertised": "Measured layouts: replicated fp8 latent (stage-8 default, 6,336 B/token/die): 311,296 tokens at 1 slot; block-sharded bf16 latent (MCOpts.dsa_shard, GLM53_PRECISION=none only, 3,696 B/token/die): 281,344 at 1 slot (stage 4, 900 MiB workspace; ~338K estimated at a 700 MiB workspace, not re-probed: the fp8 replicated default supersedes it as the serving layout). Remaining headroom, byte math per die: (a) pool-key sharding on top of the block-sharded bf16 latent: 11 x (544 x 2 / 4 + 64 / 4) = 3,168 B/token (+16.7 % over 3,696); not implemented: needs a distributed indexer top-512 (per-die pool-key scores, a candidate all-gather and a second top-k with a tie-break identical to the replicated selection, plus owner-die-only pool-key writes in the open-pool update) -- a decoder change of the stage-4/5 path, worth ~+50K tokens; (b) block-sharded fp8 latent: 11 x (544 / 4 + 64) = 2,200 B/token (~1.6x the fp8 replicated capacity): blocked by the shard merge's control columns (the KILL logit -1e4 overflows fp8 e4m3, max 448; the sink / ONE columns need an exact 1.0) -- a stage-8 / stage-4 item with an accuracy gate (TF top-5 >= 98 %, long-context copy); (c) host embedding lookup frees ~317 MB per die but breaks the on-device token-feedback decode contract (split sampling writes the token into the device token buffer): not an option. Even (a)+(b) stay below 1,048,576 (1M x 2,200 B = 2.3 GB per die > the ~1.8 GB available after weights and the reserve)."
   },
   "datatype_sweep": {
-    "status": "measured (stage 8)",
-    "selected_policy": "combo_a_kv + the bfp4-tuned KDA input-projection decode program (doc/datatype_sweep/selected_precision_config.json): bfp4 KDA / DSA projections, shared expert (layers 1-43) and LM head at LoFi, fp8 e4m3 DSA latent pool",
+    "status": "measured (stage 8, review #3 rework on HEAD 9fcc17c0dc4)",
+    "selected_policy": "combo_a_kv_dense4_g4 (doc/datatype_sweep/selected_precision_config.json): bfp4 LoFi KDA / DSA projections, shared expert and LM head (layers 1-43), dense MLP bfp4 LoFi on layers 1-2, the bfp4-tuned decode programs of all ten groups, fp8 e4m3 DSA latent pool",
     "kv_cache_dtype": "DSA latent fp8_e4m3 ROW_MAJOR rows (512 B per token per DSA layer) + bf16 indexer pool keys (64 B); 6,336 B per token per die (was 11,968)",
     "hardware": "p300x2, mesh (1,4), TP4, trace region 64 MiB",
-    "supported_context_1slot": 311296,
+    "supported_context_1slot": 325632,
     "capacity_evidence": {
       "probe": "tools/memory_probe.py capacity --slots 1 --max-context 311296 --workspace-mib 1024 --trace-region 67108864, GLM53_PRECISION=configs/combo_a_kv.json (scripts: ~/glm53-flash-bringup/scripts/s8_cap_inner.sh)",
       "result": "doc/datatype_sweep/capacity/combo_a_kv_s1/capacity.json, log ~/glm53-flash-bringup/logs/s8/cap_combo_a_kv_s1.log",
       "measured": "free after load 3,047,399,936 B per die (shipped 1,988,502,016); pool 2,433 blocks (811,008 B per block, all 11 DSA layers); 311,235-token non-aligned copy prompt prefilled in 408.5 s; 24 traced decode steps at the top: copy accuracy 1.0; free after prefill 647.6 MB per die (prefill peak over the layer entry <= 311 MB)",
       "first_attempt": "--max-context 364544 --workspace-mib 700 ran out of DRAM in the warm-up prefill (the per-max_context DSA constants grow with T): logs/s8/cap_combo_a_kv_s1_try1_oom.log",
       "headroom": "~340 MB per die remain at the measured peak: 311,296 is the measured value, not the maximum",
-      "second_probe_337920": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920/capacity.json (commit b8198430147 code, --max-context 337920; provenance.json): free DRAM still sizes the pool to 2,433 blocks under the 1,024 MiB workspace rule, so the larger pool was not reached; the same 311,235-token prompt, prefill 419.8 s, copy accuracy 1.0, 836 MB per die free after the prefill"
+      "second_probe_337920": "doc/datatype_sweep/capacity/combo_a_kv_s1_337920/capacity.json (commit b8198430147 code, --max-context 337920; provenance.json): free DRAM still sizes the pool to 2,433 blocks under the 1,024 MiB workspace rule, so the larger pool was not reached; the same 311,235-token prompt, prefill 419.8 s, copy accuracy 1.0, 836 MB per die free after the prefill",
+      "note": "combo_a_kv weights (reviews #1 / #2), superseded by the final weights (top-level capacity_evidence)",
+      "third_and_fourth_probes_337920_ws832": "914af5b9594 code: doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832 and _moesplit both fail on the same allocation in MoE _routed_sorted_split: the default split is 1,024 rows, so GLM53_MOE_SORTED_ROWS=1024 is the same configuration (review #2 reported them as without / with the split in error)"
     },
     "derived_profiles_max_model_len": {
-      "rule": "measured 1-slot pool (2,433 blocks) minus 43.96 blocks (35.65 MB KDA state) per extra slot and one block per user (vLLM), floored to the 2048-row prefill bucket; to be measured per profile by stage 9 (G9)",
-      "1": 311296,
-      "4": 292864,
-      "8": 270336,
-      "16": 223232,
-      "32": 131072
+      "rule": "context_sizing.rule; stage 9 measures the 1 / 16 / 32-slot profiles (G9) and ingests them into serving_profiles.json",
+      "superseded": "the review-1 values derived from the combo_a_kv pool (1: 311,296, 4: 292,864, 8: 270,336, 16: 223,232, 32: 131,072)"
     },
     "long_context_accuracy": "doc/datatype_sweep/long_context/compare_shipped_vs_combo_a_kv.json: true-next-token top-1 at 2K / 32K / 100K tokens 0.83 / 0.54 / 0.695 vs shipped 0.84 / 0.555 / 0.70; no accuracy evidence beyond 100K tokens (the 311K copy prompt checks function, not accuracy)",
-    "block_sharded_cache": "GLM53_DSA_SHARD=1 keeps a bf16 latent (fp8 not implemented in tt/dsa_shard.py); warning logged",
-    "non_aligned_prompts": "every sweep run: 100 / 161 / 300-token prompts, traced vs eager continuations equal; capacity probe prompt 311,235 tokens",
-    "top_level": "applied: supported_context / capability_reduction.to / setting are the selected-default values",
+    "block_sharded_cache": "GLM53_DSA_SHARD=1 with the committed tt/dsa_shard.py keeps a bf16 latent (a request for fp8 logs a warning). Another agent (DSA-1M work) is re-implementing the sharded layout with an fp8 latent and owns its capacity and the capability_reduction section",
+    "non_aligned_prompts": "every sweep run: 100 / 161 / 300-token prompts, traced vs eager continuations equal; capacity probe prompts 311,235 (combo_a_kv) and 325,571 (final) tokens",
+    "top_level": "supported_context, capacity_evidence and limiting_reason_detail are the final-weights stage-8 values; capability_reduction is owned by the DSA-1M work",
+    "supported_context_1slot_note": "stage-8 standalone capacity probe on the final weights (capacity_evidence at the top level). It is evidence of the largest feasible value of the replicated fp8 layout; it does not set the served max_model_len (see context_sizing).",
+    "context_sizing": {
+      "rule": "one rule for the replicated layout, in tt/serving_profiles.py (data serving_profiles.json) and tt/generator.plan_context: pool_blocks = measured[S].pool_blocks if serving_profiles.json has a probe for S slots, else floor((free_after_load - (kda_slots(S) - 2) x 35,651,584 B - reserve) / 811,008 B); max_model_len = the largest multiple of 2,048 with ceil(L / 128) + (S - 1) + 2 <= pool_blocks",
+      "reserve": "serving (vLLM, serving_profiles.json budget.reserve_bytes): 1,024 MiB. Standalone Glm53Generator: max(that, GLM53_DRAM_RESERVE_MIB, default 1,200 MiB): 176 MiB more headroom; GLM53_DRAM_RESERVE_MIB=1024 gives the serving value",
+      "values_1slot_final_weights": {
+        "stage8_standalone_probe_measured": 325632,
+        "rule_at_1024MiB_reserve_computed": 325632,
+        "standalone_generator_default_computed": 294912,
+        "stage9_serving_probe_measured": "pending (stage 9 A2: doc/vllm/capacity/s1, 1,024 MiB workspace, code-default split options)"
+      },
+      "governs_serving": "the stage-9 serving probe. tools/serving_profiles.py ingest writes it to serving_profiles.json measured['1'], and a measured entry wins over the rule. Until then serving_profiles.json holds the combo_a_kv budget (free 3,047,399,936 B): its rule gives 309,248 at 1 slot (stage 9 owns the file).",
+      "full_model_section_note": "full_model.standalone_generator_defaults (combo_a_kv '1': 280,576) is the stage-6/7 standalone generator default on the combo_a_kv budget with the 1,200 MiB reserve; it is not a serving value",
+      "decode_regime": "every stage-8 decode speed is at max_seq_len 16,384; the indexer scores every allocated pool slot, so decode at the served max_model_len is about 10 % slower (full_model.context_size_cost); stage 9 re-measures token-out at the served max_model_len"
+    },
     "serving_workspace_mib": 1024
   },
   "stage7_policy_GLM53_PRECISION_none": {
@@ -214,5 +227,5 @@
     },
     "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin"
   },
-  "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv): weights + model-level tensors leave 3.05 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a 1,024 MiB prefill / warm-up workspace"
+  "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv_dense4_g4): weights + model-level tensors leave 3.14 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a ~1,000 MiB prefill / warm-up workspace"
 }

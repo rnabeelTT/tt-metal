@@ -7,19 +7,29 @@ Context cost: the 1-slot capacity of the shipped policy is 104,448 tokens (doc/f
 of 128 tokens, 11,968 B per token per die). A candidate that allocates D more bytes per die after build loses
 ceil(D / (128 * 11968)) blocks; max_model_len is floored to the 2048-row prefill bucket.
 
-usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.dtype_sweep_report [--selected shipped]
+usage: python -m models.autoports.zai_org_glm_5_3_flash.tools.dtype_sweep_report [--selected final_default_h9]
+       [--code-ref HEAD]
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 DOC = Path(__file__).resolve().parents[1] / "doc" / "datatype_sweep"
 TOP1_MIN, TOP5_MIN, TOP100_MIN = 0.90, 0.98, 1.0
 SHIPPED_BLOCKS, BLOCK, DSA_BPT, BANKS = 818, 128, 11968, 8
+# runs with GLM53_PRECISION unset: the policy the default resolved to then (the record id names only the weights policy)
+DEFAULT_AT_RUN = {
+    "selected_default": "combo_a_kv",
+    "selected_default_r2": "combo_a_kv_g4 (all bfp4 decode programs; rejected)",
+    "kdain_default_h9": "combo_a_kv_g4_kdain (the review-2 default)",
+    "final_default_h9": "combo_a_kv_dense4_g4 (the selection)",
+}
 
 
 def load_runs(runs_dir: Path):
@@ -50,6 +60,8 @@ def row(r, bases, cfg_dir: Path):
     cap_id = "combo_a_kv" if cid == "selected_default" else cid  # the post-selection runs are the selected policy
     # decode programs (decode_specs) do not change the weights: the combo_a_kv capacity probes cover these variants
     cap_src = "combo_a_kv" if cid.startswith("combo_a_kv_g4") else cap_id
+    if cid in ("combo_a_kv_dense4_g4", "combo_a_kv_dense4_kdain"):  # the final weights: capacity/final_s1_* probes
+        cap_src = "final"
     gen = r.get("base_commit") or "ac03689d2bb (s8_snapshot)"
     cfg = cfg_dir / f"{cap_id}.json"
     desc = json.loads(cfg.read_text()).get("description", "") if cfg.exists() else ""
@@ -63,7 +75,9 @@ def row(r, bases, cfg_dir: Path):
     ctx = blocks * BLOCK // 2048 * 2048
     ctx_status = "estimate (upper bound: excludes the max_context-dependent DSA constants and workspace)"
     caps = sorted((DOC / "capacity").glob(f"{cap_src}_s1*/capacity.json"))
-    if abs(extra) < (16 << 20) and bpt == DSA_BPT:
+    if base_alloc is None:  # no same-code stage-7 build to take the DRAM delta against
+        ctx, ctx_status = None, "not estimated (no stage-7 build of this code generation)"
+    if base_alloc and abs(extra) < (16 << 20) and bpt == DSA_BPT:
         ctx, ctx_status = 104448, "measured (stage-6 capacity probe)"
     for cap in caps:  # the largest completed probe with copy accuracy 1.0
         c = json.loads(cap.read_text())
@@ -119,7 +133,9 @@ def row(r, bases, cfg_dir: Path):
         "kv_latent_dtype": (r.get("precision") or {}).get("kv_latent_dtype", "bf16"),
         "ccl_h_dtype": (r.get("precision") or {}).get("ccl_h_dtype", "bf16"),
         "precision_env": (
-            "none (stage-7 policy)" if cid == "shipped" else (r.get("precision_env") or "unset (selected default)")
+            "none (stage-7 policy)"
+            if cid == "shipped"
+            else (r.get("precision_env") or f"unset (the default at run time: {DEFAULT_AT_RUN.get(r['_run'], cid)})")
         ),
         "applied_overrides": len((r.get("precision") or {}).get("applied") or []),
         "tf_top1": top1,
@@ -277,7 +293,10 @@ def plot(rows, key, xmin, fname, selected, label=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--selected", default="combo_a_kv_r3")
+    ap.add_argument("--selected", default="final_default_h9")
+    ap.add_argument(
+        "--code-ref", default=None, help="compare the md5 maps with tt/*.py at this git ref (default: the tree)"
+    )
     a = ap.parse_args()
     # the post-selection warm rebuild (decode only) and the GLM53_DSA_SHARD fallback run are not sweep candidates
     runs = [
@@ -288,6 +307,7 @@ def main():
             "selected_default_warm",
             "selected_default_r1_warm",
             "selected_default_r2_warm",
+            "final_default_h9_warm",
             "selected_default_dsashard",
             "smoke_g4_reduced",
         )
@@ -298,6 +318,24 @@ def main():
         if b is not None:
             bases[key] = b.get("dram_alloc_per_bank")
     rows = [row(r, bases, DOC / "configs") for r in runs]
+    # the selected row must have run the code being committed: compare its md5 map with this tree's tt/*.py
+    tt_dir = DOC.parents[1] / "tt"
+    tree = {f.name: hashlib.md5(f.read_bytes()).hexdigest()[:12] for f in sorted(tt_dir.glob("*.py"))}
+    if a.code_ref:  # the committed tt/*.py (the live tree can carry other stages' uncommitted edits)
+        top = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=tt_dir, text=True).strip())
+        rel = tt_dir.relative_to(top).as_posix()
+        names = subprocess.check_output(["git", "ls-tree", "--name-only", a.code_ref, f"{rel}/"], cwd=top, text=True)
+        tree = {}
+        for n in names.split():
+            if n.endswith(".py"):
+                blob = subprocess.check_output(["git", "show", f"{a.code_ref}:{n}"], cwd=top)
+                tree[Path(n).name] = hashlib.md5(blob).hexdigest()[:12]
+    for r, rec in zip(rows, runs):
+        md5 = (rec.get("code") or {}).get("md5")
+        r["code_matches_tree"] = (md5 == tree) if md5 else None
+        if r["run"] == a.selected and not r["code_matches_tree"]:
+            diff = sorted(k for k in set(tree) | set(md5 or {}) if (md5 or {}).get(k) != tree.get(k))
+            print(f"WARNING: selected run {a.selected} did not run this tree's tt/*.py (differs: {diff})")
     (DOC / "sweep_results.json").write_text(
         json.dumps(
             {

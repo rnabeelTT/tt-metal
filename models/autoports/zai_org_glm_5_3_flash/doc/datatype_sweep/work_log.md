@@ -234,3 +234,58 @@ Snapshots `~/glm53-flash-bringup/s8r2_snapshot` (`git archive 914af5b9594 models
   per policy), the three test files (module-scoped autouse fixture instead of the collection-time pin).
 - `doc/context_contract.json`: capacity steps, the 1,024 MiB serving workspace, the corrected
   `capability_reduction.reason` (6.64 GB at 6,336 B per token; not a hard device limit).
+
+## Review #3 rework (aa104284595 reviewed: MORE-WORK-NEEDED, 4 P2 + 12 P3)
+
+Code: HEAD 9fcc17c0dc4 (it holds the logits-pad fix 46b2a5a601d). Snapshots `~/glm53-flash-bringup/s8r3_snapshot`
+(`git archive 9fcc17c0dc4 models/` + `configs/combo_a_kv_dense4_kdain.json` + the review-3 `tt/precision.py`) and
+`s8r3b_snapshot` (+ `tt/precision.py` md5 6f46fec82f0f + `selected_precision_config.json` = combo_a_kv_dense4_g4).
+Three device tickets, `scripts/s8r3{a,b,c}_inner.sh`:
+- Ticket A (18:05 - 18:32 UTC, P2-1): the reselection on the fixed code, 3 references each, max_seq_len 16,384.
+  - `combo_a_kv_g4_h9` (all programs): TF 91 / 96 / 89, PC 91 / 95 / 91, 50.05 ms. Fail. The p2 shift stays on the
+    fixed code, so it is real numerics of those programs on the combo_a_kv weights, not the logits-pad bug.
+  - `combo_a_kv_g4_rest_h9`: TF 91 / 96 / 89, PC 91 / 95 / 91, 50.77 ms. Fail.
+  - `combo_a_kv_dense4_g4_h9`: TF 92 / 95 / 92, PC 92 / 95 / 91, 49.95 ms. Pass, fastest: selected.
+  - `combo_a_kv_dense4_kdain_h9`: TF 92 / 95 / 92, PC 92 / 95 / 91, 50.32 ms. Pass, slower.
+  - `combo_a_all_h9`: TF 91 / 95 / 90, PC 90 / 96 / 89, 51.04 ms. Fail (PC p2 89 < 90).
+  - `kdain_default_h9` (the review-2 default, same code): TF 91 / 96 / 91, PC 91 / 95 / 91, 50.40 ms.
+  - Both earlier decode collapses (dense4_g4 14 / 8 / 13, combo_a_all 14 / 32 / 95) were the logits-pad lifetime bug.
+    No bisect was necessary: no collapse remains.
+- Ticket B (18:34 - 18:56, P2-2): the final gate on HEAD, `GLM53_PRECISION` unset (`final_default_h9`):
+  - TF 92 / 95 / 92, PC 92 / 95 / 91, top-5 / top-100 100 %, 198 trace replays, non-aligned check equal;
+  - TTFT 226 / 378 / 1024 ms (128 / 161 / 2048 tokens);
+  - token-out 49.94 ms = 20.02 t/s/u (warm rebuild 49.96 ms), -3.9 % vs the stage-7 policy (51.96 ms, `shipped_r2`);
+  - qualitative suite: 6 prompts, coherent; q3 reaches the budget as in stage 7; q5 is the HF behaviour;
+  - autoregressive check: two runs bit-identical, degenerate check exit 0;
+  - HF score trajectory (CPU, `hfscore_h9`): top-1 94.9 %, top-5 99.2 %; two picks outside the top 5 (position 22 ".",
+    position 24 " sat" rank 21) at flat story-branch points. Stage 6: 97.7 / 99.6 %, worst rank 5. Recorded as a known
+    observation.
+  - The record md5 map equals HEAD for every `tt/*.py` (`tools/dtype_sweep_report.py --code-ref HEAD`: no warning).
+  - Capacity, final weights (free after load 3,139,928,064 B per die), 512-row MoE split:
+    - 337,920 at 832 MiB: out of DRAM in the warm-up prefill, DSA indexer `_select_pools` (43 MB)
+      (`evidence/h9_cap_337920_moe512.excerpt.txt`).
+    - 324,608 at 944 MiB: not a valid step (max_context must be a multiple of 2,048); no device result.
+- Ticket C (from 18:57, P2-3): capacity with the 512-row MoE split and 32 MB indexer score blocks
+  (`GLM53_DSA_INDEX_BLOCK_MB=32`, bit-identical, stage 6), stop at the first pass:
+  - 337,920 at 832 MiB: warm-up and capture pass (peak op `moe_gather_add_rows`); the 337,859-token prefill runs out of
+    DRAM in the MoE row split (82.6 MB buffer, 10.3 MB per bank, largest free block 8.6 MB)
+    (`evidence/h9c_cap_337920_ix32.excerpt.txt`).
+  - 325,632 at 1,000 MiB: pass. Pool 2,545 blocks, 325,571-token copy prompt, prefill 520.4 s, 24 traced decode steps,
+    copy accuracy 1.0, 224 MB per die free at the prefill peak. Ticket end 19:27 UTC.
+  - Bracket: 325,632 passes, 337,920 fails; the steps between were not probed. The rule of `tt/serving_profiles.py`
+    at the 1,024 MiB serving reserve gives the same 325,632 on these weights. The stage-9 serving probe (A2, 1,024 MiB,
+    code-default split options) governs the served max_model_len.
+- Docs (P2-1 to P2-4 and the P3s):
+  - README: Result and selection on `_h9`; capacity tables for the final and the combo_a_kv weights (steps 4 and 5
+    of review #2 are one configuration); "One 1-slot number and one sizing rule"; the sweep baseline vs the in-model
+    program (kda_in 90.2 µs in model, LM head with `packer_l1_acc=True`); the `precision.applied` layer-kind filter;
+    199 decode steps + the prefill logits in the long-context check; 183 MB is the prefill-peak value; the fp8
+    sharded latent is another agent's work; `tools/serving_profiles.py` is committed (de9852c604d); the raw Tracy
+    op CSVs stay in `logs/s8/`.
+  - `doc/context_contract.json`: top-level `supported_context` 325,632, `capacity_evidence`, `limiting_reason_detail`
+    and `datatype_sweep` (with `context_sizing`). `capability_reduction` is not changed (DSA-1M work).
+  - `tools/dtype_sweep_report.py`: `--code-ref` (md5 check against a git ref), default `--selected final_default_h9`,
+    the precision_env label names the policy the default resolved to at run time, no stage-6 capacity for a run
+    without a same-code stage-7 build, the final-weights capacity probes. Run:
+    `python -m models.autoports.zai_org_glm_5_3_flash.tools.dtype_sweep_report --selected final_default_h9
+    --code-ref HEAD` (no md5 warning).

@@ -1,0 +1,37 @@
+{
+ "base_commit": "9fcc17c0dc4",
+ "snapshot": "/home/raahem/glm53-flash-bringup/s8r3b_snapshot",
+ "exit_code": 1,
+ "env": {
+  "GLM53_MOE_SORTED_ROWS": "512",
+  "GLM53_DSA_INDEX_BLOCK_MB": "32",
+  "GLM53_PRECISION": "<unset>"
+ },
+ "command": "tools/memory_probe.py capacity --weight-cache 1 --trace-region 67108864 --workspace-mib 832 --max-context 337920 --slots 1",
+ "selected_precision_config_md5": "d96fae9836a8",
+ "tt_md5": {
+  "__init__.py": "53fbca0cafb2",
+  "ckpt.py": "daa701ea8bbd",
+  "decode_inputs.py": "b6d033397b4b",
+  "dsa.py": "b721bd51cf2a",
+  "dsa_shard.py": "a24a4337c9c1",
+  "functional_decoder.py": "e6b204abc327",
+  "fused_decoder.py": "9950ff43360f",
+  "generator.py": "096051734773",
+  "generator_vllm.py": "6714e98bd0ca",
+  "kda.py": "2e7dde09ee2a",
+  "mhc.py": "6acd0fb3c3ad",
+  "mlp.py": "952a9a2ad222",
+  "model.py": "5fee3c6742a7",
+  "moe.py": "6e6482118b1b",
+  "moe_dispatch.py": "f1bc95c39a49",
+  "moe_opt.py": "cb2026a5d2e7",
+  "multichip_decoder.py": "6a83d8937bce",
+  "optimized_decoder.py": "3bda6fd3efee",
+  "precision.py": "6f46fec82f0f",
+  "serving_profiles.py": "efc886f97066",
+  "serving_state.py": "446ac30d4ad5",
+  "synthetic.py": "5c661837e535",
+  "weight_cache.py": "07b7a1bed270"
+ }
+}
