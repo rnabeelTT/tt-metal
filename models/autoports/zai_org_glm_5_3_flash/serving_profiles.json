@@ -56,6 +56,19 @@
    "free_after_load_bytes": 2640805888,
    "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s16/capacity.json",
    "date": "2026-10-20"
+  },
+  "32": {
+   "pool_blocks": 1229,
+   "capped_by_max_seq_len": false,
+   "max_model_len_tested": 153600,
+   "prompt_len": 153539,
+   "copy_accuracy": 1.0,
+   "free_at_prefill_peak_bytes": 412589056,
+   "trace_allocated_bytes": 48693248,
+   "free_after_load_bytes": 2070396928,
+   "workspace_mib": 1024.0,
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32/capacity.json",
+   "date": "2026-10-20"
   }
  },
  "measured_note": "slots -> {pool_blocks, max_model_len_tested, prompt_len, copy_accuracy, free_at_prefill_peak_bytes, evidence, date}; written by tools/serving_profiles.py ingest from a COMPLETED capacity probe (load, bind, warm-up, capture, longest prefill, traced decode). A measured entry wins over the budget rule for that slot count.",
@@ -115,7 +128,7 @@
    "mesh_device": "P300x2",
    "max_num_seqs": 32,
    "max_model_len": 151552,
-   "status": "estimate"
+   "status": "measured"
   },
   {
    "name": "p150x4",
