@@ -186,8 +186,12 @@ which no stage-8 job enabled.
 
 `GLM53_PRECISION` selects the policy:
 - unset or empty: `selected_precision_config.json` (the default);
-- `none`, `shipped`, `off` or `0`: the stage-7 policy;
+- `none`, `shipped`, `off` or `0`: the stage-7 policy (standalone generator and tests only);
 - `<json>`: a candidate.
+
+The vLLM adapter refuses the stage-7 spellings with a `ValueError` (`tt/generator_vllm.py` `apply_precision_default`):
+`serving_profiles.json` budgets the selected policy only. The stage-7 bf16 latent needs about 1.9 times the DSA bytes
+per block, and its weights leave less free DRAM. Run stage-7 A/B comparisons with the standalone generator.
 
 No candidate needs its own 116 GB weight cache. Every build loads the shipped-policy cache and changes only the
 overridden groups.
@@ -560,7 +564,7 @@ measured here.
 |---|---|
 | tests/test_multichip_decoder.py, test_dsa_shard.py, test_perf_decoder.py | stage 7 through a module-scoped autouse fixture (`GLM53_PRECISION` = the caller's value or `none`, no leak into other modules): they compare against stage-3/5/7 references |
 | tools/mc_decode_ab.py, dsa_shard_probe.py, s5_sparse_probe.py, baseline_dump.py | stage 7 (`GLM53_PRECISION` defaults to `none` at the top of the tool) |
-| tests/test_model_probe.py, tools/model_step_probe.py, tools/memory_probe.py, readiness / full-model / vLLM paths | the default (`combo_a_kv_dense4_g4`): the model-level gates and capacity test the shipping policy |
+| tests/test_model_probe.py, tools/model_step_probe.py, tools/memory_probe.py, readiness / full-model / vLLM paths | the default (`combo_a_kv_dense4_g4`; the vLLM path refuses `none`): the model-level gates and capacity test the shipping policy |
 | tools/dtype_sweep.py, tools/long_ctx_check.py | whatever `GLM53_PRECISION` says (recorded) |
 
 ## Limitations

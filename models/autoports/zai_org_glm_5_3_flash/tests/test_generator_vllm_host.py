@@ -228,7 +228,7 @@ def test_default_precision_uses_serving_budget(monkeypatch):
     gen_mod.plan_context(1, sp.supported_context(d), serving=True)  # must not raise
 
 
-def test_apply_precision_default(monkeypatch):
+def test_apply_precision_default(monkeypatch, expect_error):
     d = sp.load()
     monkeypatch.setenv("GLM53_PRECISION", "")
     gv.apply_precision_default(d)
@@ -237,9 +237,13 @@ def test_apply_precision_default(monkeypatch):
     monkeypatch.chdir("/")
     gv.apply_precision_default(d)
     assert os.environ["GLM53_PRECISION"] == str(sp.MODEL_DIR / d["precision"]["config"])
-    monkeypatch.setenv("GLM53_PRECISION", "none")
+    for spelling in ("none", "NONE", "shipped", "off", "0"):  # stage-7 policy: refused on the vLLM path
+        monkeypatch.setenv("GLM53_PRECISION", spelling)
+        with expect_error(ValueError, "does not serve"):
+            gv.apply_precision_default(d)
+    monkeypatch.setenv("GLM53_PRECISION", "")  # unset -> the selected policy id of the data file
     gv.apply_precision_default(d)
-    assert os.environ["GLM53_PRECISION"] == ""
+    assert gv._precision_id() == d["precision"]["id"]
 
 
 def test_resolve_checkpoint_parent_overlay(monkeypatch, tmp_path, expect_error):

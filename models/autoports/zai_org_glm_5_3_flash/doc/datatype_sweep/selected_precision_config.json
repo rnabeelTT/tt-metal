@@ -121,7 +121,7 @@
   "logits_sampling": "LM head bfp4 x bf16 activations, LoFi, fp32 accumulate; bf16 logits; on-device split greedy / top-k sampler unchanged",
   "moe_routing": "sigmoid router bf16 weights HiFi4, bias + top-8 on device, routed_scaling 2.5 (unchanged)",
   "runtime_flags": {
-   "GLM53_PRECISION": "unset = this file; 'none' = stage-7 policy; <path> = another candidate",
+   "GLM53_PRECISION": "unset = this file; 'none' = stage-7 policy (standalone only; the vLLM adapter refuses it); <path> = another candidate",
    "GLM53_CACHE_DIR": "re-quantized tensors cached under <cache>/<layer>/prec-<digest>/"
   },
   "decode_specs_note": "bfp4-tuned decode programs (geometry/summary.json; tools/mc_matmul_sweep.py --wdtype bfp4 --fidelity LoFi) on the layers where each group is bfp4; DEFAULT_MC itself is unchanged. On combo_a_kv weights the same programs (all, or all but kda_in) shift p2 teacher forcing to 89 % on the fixed code; with the dense-MLP bfp4 weights they pass"

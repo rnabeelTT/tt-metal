@@ -82,17 +82,28 @@ def _check_context(max_model_len: int, data: dict):
         )
 
 
+def _precision_id() -> str:
+    """The resolved policy id the model builds with (logged at init)."""
+    from .precision import PrecisionOverrides
+
+    return PrecisionOverrides.from_env().id
+
+
 def apply_precision_default(data: dict | None = None):
     """GLM53_PRECISION unset -> the selected policy file named in serving_profiles.json (absolute path). A relative
     GLM53_PRECISION that does not exist from the cwd is resolved against the model dir (the container's cwd is not the
-    source tree). GLM53_PRECISION=none keeps the stage-7 policy (A/B only)."""
+    source tree). The stage-7 policy (GLM53_PRECISION=none / shipped / off / 0) is refused: the serving budget in
+    serving_profiles.json is measured for the selected policy only (the stage-7 bf16 latent needs about 1.9x the DSA
+    bytes per block and has less free DRAM)."""
     data = data if data is not None else _profiles()
     cfg = (data.get("precision") or {}).get("config")
     cur = os.environ.get("GLM53_PRECISION", "").strip()
-    if cur.lower() in ("none", "off"):
-        os.environ["GLM53_PRECISION"] = ""
-        logger.warning("GLM53_PRECISION=none: serving the stage-7 precision policy, not the selected one")
-        return
+    if cur.lower() in ("none", "shipped", "off", "0"):
+        raise ValueError(
+            f"GLM53_PRECISION={cur!r} selects the stage-7 precision policy, which the vLLM path does not serve: "
+            f"serving_profiles.json budgets the selected policy ({(data.get('precision') or {}).get('id')}). "
+            "Use the standalone generator (tools/readiness.py) for stage-7 A/B runs."
+        )
     if cur:
         if not Path(cur).exists() and (MODEL_DIR / cur).exists():
             os.environ["GLM53_PRECISION"] = str(MODEL_DIR / cur)
@@ -365,7 +376,7 @@ class Glm5NextForConditionalGeneration:
             faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)  # kill -USR1 <EngineCore pid>
         logger.info(
             f"{cls.__name__}: B={B} max_model_len={max_seq_len} (model context {self.T}, DSA layout {self.layout}, "
-            f"precision {os.environ.get('GLM53_PRECISION') or 'stage-7'}) layers={len(self._gen.model.layers)} "
+            f"precision {_precision_id()}) layers={len(self._gen.model.layers)} "
             f"checkpoint={ckpt} built in {time.time() - t0:.0f}s (vLLM owns the blocks)"
         )
         return self
