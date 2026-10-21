@@ -69,13 +69,22 @@ class OptConfig:
     out_proj_ds: str = ""
     prefill_fidelity: object = None
     # review #3: the committed bit-identical stage-5 option on one die (P1-1): sinkhorn on the valid faces only
-    # (`sinkhorn_faces`, -30 us per layer at 1 user; `dsa_q_mm` fails on one die, see from_state_dict), and the stage-5
-    # decode role specs kda_out / shared_gu / shared_dn (`single_die_specs`, -3 .. -5 us at 1 user, -47 us kda_moe 32
-    # users). KDA prefill input / output projection fidelity (P2-2; None = HiFi4; HiFi2 rejected: L0 prefill scale
-    # 0.987 .. 0.990 with the MLP prefill HiFi2).
+    # (`sinkhorn_faces`, -30 us per layer at 1 user; `dsa_q_mm`: review #4 field dsa_q_mm_ib below), and the stage-5
+    # decode role specs kda_out / shared_gu / shared_dn (`single_die_specs`; the spec rows: -3 .. -5 us at 1 user, about
+    # -8 us kda_moe 32 users). KDA prefill input / output projection fidelity (P2-2; None = HiFi4; review #4: HiFi2 on
+    # the layer kinds of kda_prefill_kinds).
     single_die_r3: bool = False
     single_die_specs: bool = False
     kda_prefill_fidelity: object = None
+    # review #4 (single die; tools/s3r4_ab.py): the layer kinds (mlp_kind) that take kda_prefill_fidelity (P2-2); the
+    # 1-slot DSA q_abs as one masked matmul with its program built for the Hq = 64 query rows of one die (P1-1; 0 = off,
+    # else its in0 block); the 1-slot sparse_sdpa query as 2 rows of 32 heads (P2-1, `sdpa_head_split`); the DSA indexer
+    # query and the MoE routing-weight reshapes through row-major (P2-1, `qi_rm`, `route_rm`)
+    kda_prefill_kinds: tuple = ("dense", "moe")
+    dsa_q_mm_ib: int = 0
+    sdpa_head_split: bool = False
+    qi_rm: bool = False
+    route_rm: bool = False
 
     def describe(self) -> dict:
         m = self.moe
@@ -99,6 +108,11 @@ class OptConfig:
             "single_die_r3": self.single_die_r3,
             "single_die_specs": self.single_die_specs,
             "kda_prefill_fidelity": str(self.kda_prefill_fidelity),
+            "kda_prefill_kinds": ",".join(self.kda_prefill_kinds),
+            "dsa_q_mm_ib": self.dsa_q_mm_ib,
+            "sdpa_head_split": self.sdpa_head_split,
+            "qi_rm": self.qi_rm,
+            "route_rm": self.route_rm,
         }
 
     def quant_spec(self) -> dict:
@@ -238,6 +252,25 @@ CANDIDATES.update(
 )
 # review #3 default: review #2 default + sinkhorn faces + stage-5 decode role specs, conv op up to 16 slots
 CANDIDATES["opt_s5_pf"] = _r(_d2, "opt_s5_pf", single_die_r3=True, single_die_specs=True)
+# review #4 trials on top of the review #3 default (tools/s3r4_ab.py switches the decode options at run time on one build)
+_d3 = CANDIDATES["opt_s5_pf"]
+_r4 = dict(dsa_q_mm_ib=64, sdpa_head_split=True, qi_rm=True, route_rm=True)
+CANDIDATES.update(
+    {
+        "opt_s5_pf_r3": _r(_d3, "opt_s5_pf_r3"),  # the review #3 default (control)
+        "t_r4": _r(_d3, "t_r4", **_r4),
+        "t_kda_pf_hifi2_moe": _r(_d3, "t_kda_pf_hifi2_moe", kda_prefill_fidelity=_HIFI2, kda_prefill_kinds=("moe",)),
+    }
+)
+# review #4 default: the review #3 default + the sparse_sdpa head split and the two row-major reshapes (tools/s3r4_ab.py,
+# logs/s3r4_ab.log: every variant bit-identical to the control) + KDA prefill projections at HiFi2 on the KDA + MoE
+# layers only (L4 prefill scale 0.9938 .. 0.9976, logs_r3/s3r3_pcc_t_kda_pf_hifi2.log; the KDA + dense layer L0 keeps
+# HiFi4: 0.9869 .. 0.9897 with its MLP prefill HiFi2). dsa_q_mm (now legal on one die) is NOT taken: Tracy
+# (candidates_r4/t_r4 dsa_moe 1 user) has its q path at 92.1 us (masked multiply 16.2, matmul 72.4 on the 16 cores of
+# its 16 N tiles, untilize 3.5) against 82.9 us for the per-head path
+CANDIDATES["opt_s5_pf"] = _r(
+    _d3, "opt_s5_pf", kda_prefill_fidelity=_HIFI2, kda_prefill_kinds=("moe",), **dict(_r4, dsa_q_mm_ib=0)
+)
 # selected (review #1): `opt` + the stage-5 single-die decode options + the prefill program configs; routed experts
 # stay LoFi (HiFi3 removes the -0.5 % routed scale bias but costs +1.3 % / +3 % / +5 % at B=1 / B=32 / prefill on
 # the MoE layers; doc/optimized_decoder/README.md "Accuracy")
@@ -307,6 +340,180 @@ def _single_die_kda():
     if not _SINGLE_DIE_KDA:
         _SINGLE_DIE_KDA.append(_single_die_kda_cls())
     return _SINGLE_DIE_KDA[0]
+
+
+def _single_die_dsa_cls():
+    from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+    from .dsa import BLOCK
+    from .multichip_decoder import MultichipDSA, _decode_rows
+
+    RM, TILE, DRAM = ttnn.ROW_MAJOR_LAYOUT, ttnn.TILE_LAYOUT, ttnn.DRAM_MEMORY_CONFIG
+
+    class SingleDieDSA(MultichipDSA):
+        """MultichipDSA on one die (review #4). The flags are instance attributes (set from OptConfig; an A/B may switch
+        them between steps):
+        - q_mm_rows: the dsa_q_mm program (MCOpts.dsa_q_mm) built for the Hq query rows of the die. MultichipDSA builds
+          it for 32 rows (TP4: 16 heads padded to 32). One die has Hq = 64 rows: 2 row tiles x 16 column tiles = 32
+          blocks on a 22-core grid (TT_FATAL num_blocks_total <= num_cores). With m = Hq the program has 16 blocks.
+        - head_split: the 1-slot decode query [1, 64, 1, 512] goes to sparse_sdpa as [1, 32, 2, 512] (2 query rows of
+          32 heads; the index row repeated; cache_batch_idx 0 keeps both rows on the slot's page-table row). The op
+          splits its work over query rows (sparse_sdpa_program_factory.cpp: base = S / num_cores), so 2 rows use 2
+          cores instead of 1. All heads share the one latent cache and the index row, so a head can sit in any
+          (head, row) place: the plain row-major view (head 2h + j -> head h, row j) needs no permute.
+        - qi_rm: the decode indexer query [1,1,S,4096] -> [1,1,S*32,128] as untilize, row-major view, tilize instead
+          of the tiled reshape. GlmDSA.decode_forward then reshapes to the same shape (ttnn returns the tensor)."""
+
+        q_mm_rows = False
+        head_split = False
+        qi_rm = False
+
+        def _pc_q(self, c):
+            return tpc.create_matmul_1d_decode_progcfg(
+                c.Hq,
+                self.H * self.Dn,
+                self.R,
+                min(self.R // 32, 64),
+                fp32_acc=True,
+                grid_w=self.mesh.compute_with_storage_grid_size().x,
+                in0_block_w=c.qib,
+            )
+
+        def _hm_consts(self):
+            c = super()._hm_consts()
+            if self.q_mm_rows and getattr(c, "pc_q_key", None) != (c.Hq, c.qib):
+                c.pc_q = self._pc_q(c)
+                c.pc_q_key = (c.Hq, c.qib)
+            return c
+
+        def _q_abs(self, x, rows: int):
+            if self.q_mm_rows and self.mc.dsa_q_mm and self._hm(x):
+                c = self._hm_consts()
+                if self.mc.dsa_q_mm_ib and c.qib != self.mc.dsa_q_mm_ib:  # run-time A/B of the in0 block
+                    c.qib = self.mc.dsa_q_mm_ib
+                    c.pc_q = self._pc_q(c)
+                    c.pc_q_key = (c.Hq, c.qib)
+            return super()._q_abs(x, rows)
+
+        def _mm(self, x, w, **kw):
+            if not (self.qi_rm and w is self.w_iq and _decode_rows(x)):
+                return super()._mm(x, w, **kw)
+            out = super()._mm(x, w, **kw)  # [1,1,S,IH*ID]
+            S = int(out.shape[-2])
+            rm = ttnn.to_layout(out, RM, memory_config=DRAM)
+            ttnn.deallocate(out)
+            q = ttnn.to_layout(ttnn.reshape(rm, (1, 1, S * self.IH, self.ID)), TILE, memory_config=DRAM)
+            ttnn.deallocate(rm)
+            return q
+
+        def _sparse_attend(self, q_abs, index_f32, cache_batch_idx=None, latent_rows=None):
+            """1-slot decode on one die: the head split (head_split), and the row-major query of dsa_q_mm. The
+            MultichipDSA form slices the output to H heads and frees the op output; with Hq = H = 64 that slice is the
+            same tensor, so the freed buffer was read next (segfault in tilize, logs/s3r4_ab.log, first run)."""
+            H = int(q_abs.shape[1])
+            rm_q = q_abs.layout == RM
+            one = (
+                cache_batch_idx is None
+                and self.S == 1
+                and int(q_abs.shape[2]) == 1
+                and H == self.H
+                and not self.mc.dsa_o_mm
+                and not getattr(self, "dsa_shard", False)
+            )
+            split = one and self.head_split and H % 64 == 0
+            if not (split or (one and rm_q)):
+                return super()._sparse_attend(q_abs, index_f32, cache_batch_idx, latent_rows)
+            q_rm = q_abs if rm_q else ttnn.to_layout(q_abs, RM)  # a row-major q_abs (dsa_q_mm) is the caller's to free
+            idx = ttnn.to_layout(ttnn.typecast(index_f32, ttnn.uint32), RM)  # [1,1,1,IDX_WIDTH]
+            if split:
+                q_in = ttnn.reshape(q_rm, (1, H // 2, 2, self.R))  # row-major view: head 2h + j -> (h, j)
+                idx_in = ttnn.concat([idx, idx], dim=2)  # [1,1,2,IDX_WIDTH]: the slot's index row for both rows
+                ttnn.deallocate(idx)
+            else:
+                q_in, idx_in = q_rm, idx
+            o = ttnn.transformer.sparse_sdpa(
+                q_in,
+                self.latent,
+                idx_in,
+                self.R,
+                kv_format=(
+                    ttnn.SparseKVFormat.FP8_E4M3 if self.latent.dtype == ttnn.fp8_e4m3 else ttnn.SparseKVFormat.BF16
+                ),
+                scale=self.scale,
+                k_chunk_size=32,
+                compute_kernel_config=self.sdpa_ckc,
+                cache_batch_idx=0 if split else None,  # split: both query rows on the slot's page-table row
+                page_table=self.page_table,
+                page_block_size=BLOCK,
+            )
+            ttnn.deallocate(idx_in)
+            if not rm_q:
+                ttnn.deallocate(q_rm)
+            out = ttnn.to_layout(ttnn.reshape(o, (1, H, 1, self.R)) if split else o, TILE)  # [1, H, 1, 512]
+            ttnn.deallocate(o)
+            return out
+
+    return SingleDieDSA
+
+
+_SINGLE_DIE_DSA = []
+
+
+def _single_die_dsa():
+    if not _SINGLE_DIE_DSA:
+        _SINGLE_DIE_DSA.append(_single_die_dsa_cls())
+    return _SINGLE_DIE_DSA[0]
+
+
+class _RoutingReshapeTTNN:
+    """ttnn for one call of Qwen35MoE._route_sigmoid_bias (review #4, route_rm): its decode routing-weight reshape
+    [1, T, k, 1] -> [1, 1, T, k] (fp32, tiled: one core, 35.6 us at T = 32) goes through row-major (untilize, view,
+    tilize; exact). Every other name is ttnn's."""
+
+    def __getattr__(self, name):
+        return getattr(ttnn, name)
+
+    @staticmethod
+    def reshape(t, shape, *a, **kw):
+        s = tuple(int(d) for d in t.shape)
+        if (
+            not a
+            and not kw
+            and t.layout == ttnn.TILE_LAYOUT
+            and len(s) == 4
+            and s[0] == 1
+            and s[3] == 1
+            and tuple(shape) == (1, 1, s[1], s[2])
+        ):
+            mc = t.memory_config()
+            rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT, memory_config=mc)
+            out = ttnn.to_layout(ttnn.reshape(rm, shape), ttnn.TILE_LAYOUT, memory_config=mc)
+            ttnn.deallocate(rm)
+            return out
+        return ttnn.reshape(t, shape, *a, **kw)
+
+
+def _install_route_rm(moe, rows: int = 32):
+    """route_rm: the routing-weight reshape of decode batches of `rows` rows (the measured case) through row-major.
+    moe.py's module name `ttnn` points at _RoutingReshapeTTNN for the duration of the call."""
+    import types
+
+    from . import moe as moe_mod
+
+    base = moe._route_sigmoid_bias  # bound method (class or instance)
+    proxy = _RoutingReshapeTTNN()
+
+    def _route_sigmoid_bias(self, x4, r_mc):
+        if not getattr(self, "route_rm", True) or int(x4.shape[-2]) != rows:
+            return base(x4, r_mc)
+        keep = moe_mod.ttnn
+        moe_mod.ttnn = proxy
+        try:
+            return base(x4, r_mc)
+        finally:
+            moe_mod.ttnn = keep
+
+    moe._route_sigmoid_bias = types.MethodType(_route_sigmoid_bias, moe)
 
 
 def _r2_fields(mc):
@@ -500,7 +707,7 @@ class OptimizedDecoder(FusedDecoder):
                     hc.__class__ = _DecodeMixChunks
                     hc.decode_chunks = opt.mix_chunks_decode
         if opt.single_die_mc and dec.tp == 1:
-            from .multichip_decoder import MCOpts, MultichipDecoder, MultichipDSA, _install_router_ds
+            from .multichip_decoder import MCOpts, MultichipDecoder, _install_router_ds
 
             if not issubclass(cls, MultichipDecoder):  # MultichipDecoder applies its own MCOpts
                 # the stage-5 options measured on one die (review #1), pinned here: tt/multichip_decoder.DEFAULT_MC keeps
@@ -521,24 +728,26 @@ class OptimizedDecoder(FusedDecoder):
                     _r2_fields(mc)
                 if opt.single_die_r3:  # committed bit-identical stage-5 option (review #3 P1-1)
                     mc.sinkhorn_faces = True
-                    # dsa_q_mm (1-slot DSA q_abs as one masked matmul) is NOT taken on one die: with 64 heads its 1D
-                    # program fails TT_FATAL matmul_device_operation.cpp:761 num_blocks_total <= num_cores
-                    # (candidates_r3/t_r3/test_perf_traced_decode_dsa_moe-1_/console.log)
-                    if os.environ.get("GLM53_R3_DSA_Q_MM") == "1":
-                        mc.dsa_q_mm = True
-                        mc.dsa_q_mm_ib = 64
+                if opt.dsa_q_mm_ib:  # review #4 P1-1: with its program built for Hq rows (SingleDieDSA)
+                    mc.dsa_q_mm = True
+                    mc.dsa_q_mm_ib = opt.dsa_q_mm_ib
                 if opt.single_die_specs:  # stage-5 decode role specs (review #3 P1-1 trial)
                     mc.kda_out = "1d:c16:ib4"
                     mc.shared_gu = "1d:c32:ib16"
                     mc.shared_dn = "1d:c16:ib4"
                 dec.mc = mc
                 if dec.attn_kind == "dsa":
-                    dec.attn.__class__ = MultichipDSA
+                    dec.attn.__class__ = _single_die_dsa()  # MultichipDSA + the review #4 one-die overrides
                     dec.attn.mc_init(mc)
+                    dec.attn.q_mm_rows = bool(opt.dsa_q_mm_ib)
+                    dec.attn.head_split = opt.sdpa_head_split
+                    dec.attn.qi_rm = opt.qi_rm
                     if mc.ds_shared and mc.dsa_pack:
                         dec.attn.free_separate()
                 if dec.mlp_kind == "moe":
                     _install_router_ds(dec.mlp, mc)
+                    if opt.route_rm:
+                        _install_route_rm(dec.mlp)
                 dec._norm_sharded = mc.norm_sharded
                 if opt.single_die_r2:
                     dec._apply_single_die_r2(opt, mc)
@@ -580,7 +789,9 @@ class OptimizedDecoder(FusedDecoder):
             self.attn.in_split = _KdaInSplitDS(
                 self.attn.weights.input_projection, self.mesh, opt.kda_in_split_ds, opt.kda_in_ds_cfg
             )
-        if opt.kda_prefill_fidelity is not None and self.attn_kind == "kda":  # review #3 P2-2
+        if (
+            opt.kda_prefill_fidelity is not None and self.attn_kind == "kda" and self.mlp_kind in opt.kda_prefill_kinds
+        ):  # review #3 P2-2; review #4: per layer kind (kda_prefill_kinds)
             ckc = _ckc(self.mesh, opt.kda_prefill_fidelity)  # fp32 accumulation, packer L1 accumulation (as upstream)
             for p in self.attn._prefill.values():
                 p.input_projection_compute_config = ckc

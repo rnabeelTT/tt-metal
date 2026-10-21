@@ -5,21 +5,32 @@ Stage 3 of the tt-model-bringup flow. `tt/optimized_decoder.py` (`OptimizedDecod
 options that need no collective, for one die. Contract, state, paging and semantics are those of
 `tt/functional_decoder.py`. The policies are `OptConfig` entries in `CANDIDATES`; `SELECTED` is the default.
 
-Review #1 (`~/glm53-flash-bringup/artifacts/stage3_review_1.md`) changed the reference, the default and the evidence;
-re-review #2 (`stage3_review_2.md`) added the further single-die options, the fidelity trials of the bfp8
-projections and the P2 items ("Review #2" sections); review #3 added the bit-identical sinkhorn faces kernel, the
-stage-5 decode role specs, the watcher diagnosis of the KDA in-proj split and the batched-reuse matmul diagnosis
-("Review #3"). The name `opt_s5_pf` has held three one-die policies: the review #1 contents (`opt_s5_pf_r1`), the
-review #2 default (`opt_s5_pf_r2`) and the review #3 default (below); the TP4 path and the weight-cache key never
-changed (`GLM53_PRECISION`, the stage-8 policy override, applies only to `MultichipDecoder` / `Glm53Model`). The earlier text of this README is in git history (commits
-21dc7532f26, d48b7fd06ad). The work log has the failures and the order of events. Every `logs/<name>.log` cited here
-is copied to `doc/optimized_decoder/logs_r1/` (review #1) or `logs_r2/` (review #2) from `~/glm53-flash-bringup/logs/`.
+Review history (reports in `~/glm53-flash-bringup/artifacts/stage3_review_<n>.md`; the review #3 report exists only
+as a summary in `PLAN.md`):
 
-## Selected policy (`SELECTED` = `opt_s5_pf`, review #3 contents)
+- Review #1 changed the reference, the default and the evidence.
+- Review #2 added more single-die options, the fidelity trials of the bfp8 projections and the P2 items.
+- Review #3 added the sinkhorn faces kernel, the stage-5 decode role specs, the watcher diagnosis of the KDA in-proj
+  split and the batched-reuse matmul diagnosis.
+- Review #4 made `dsa_q_mm` legal on one die (measured, not taken), added the sparse_sdpa head split, two row-major reshapes, the per-kind KDA prefill
+  fidelity and the refreshed accounting ("Review #4").
 
-Decode device time of the review #3 default, 1 user: kda_dense 1696, kda_moe 1939, dsa_moe 2013 µs; 32 users: 2689 /
-11519 / 11193 µs; prefill 2048 rows: 20641 / 66808 / 75000 µs ("Review #3").
+The name `opt_s5_pf` has held four one-die policies: `opt_s5_pf_r1` (review #1), `opt_s5_pf_r2` (review #2),
+`opt_s5_pf_r3` (review #3) and the review #4 default (below). The TP4 path and the weight-cache key never changed.
+`GLM53_PRECISION` (the stage-8 policy override) applies only to `MultichipDecoder` / `Glm53Model`. The earlier text of
+this README is in git history (commits 21dc7532f26, d48b7fd06ad, 656c998e3df, ea27eda6b7e). The work log has the
+failures and the order of events. Logs of `~/glm53-flash-bringup/logs/` are copied per review to `logs_r1/` .. `logs_r4/`.
+Tracy runs are in `candidates_r1/` .. `candidates_r4/`.
 
+## Selected policy (`SELECTED` = `opt_s5_pf`, review #4 contents)
+
+Device time of the review #4 default (`candidates_r4/final`, one Tracy run per case):
+
+- Decode, 1 user, position 128: kda_dense 1705, kda_moe 1951, dsa_moe 2024 µs.
+- Decode, 1 user, position 16384 (sparse attention): dsa_moe 2374 µs (review #3 default, same session: 2587 µs).
+- Decode, 32 users: 2705 / 11515 / 11210 µs.
+- Prefill, 2048 rows: 20541 / 65011 / 74967 µs. The 128-row prefill was not rerun (review #2 runs: 2739 / 14025 /
+  14555 µs).
 
 | Tensor group / op | Fused decoder (stage 2) | Optimized | Evidence |
 |---|---|---|---|
@@ -37,12 +48,18 @@ Decode device time of the review #3 default, 1 user: kda_dense 1696, kda_moe 193
 | Sinkhorn | 40 normalizations of the whole tile, permutation matmuls HiFi4 | **valid faces only (`sinkhorn_faces`) + permutation matmuls HiFi3** (both bit-identical) | -7 µs (HiFi3), -30 µs per layer at 1 user (faces, review #3) |
 | Decode role programs (`tt/multichip_decoder` specs) | ttnn default / 1D | **1D programs on 22 cores** (`mlp_dn`, `dsa_o`, `kda_out` `1d:c16:ib4`; shared expert `shared_gu` `1d:c32:ib16`, `shared_dn` `1d:c16:ib4`) | -73 / -7 / -3.4 .. -4.6 / -2 .. -3 µs |
 | DSA o_proj and dense-MLP gate|up / down, prefill rows | HiFi4 | **HiFi2 with packer L1 accumulation** | prefill 2048 kda_dense 26987 -> 20641 µs, dsa_moe 77076 -> 75000 µs (review #2 P1-B) |
+| KDA prefill in / out projections, KDA + MoE layers only | HiFi4 | **HiFi2** (packer L1 accumulation) | review #4 P2-2: L4 prefill scale 0.9938 .. 0.9976; L0 (KDA + dense) keeps HiFi4 |
+| DSA q_abs, 1 slot | reshape + permute + per-head bmm + untilize | unchanged: `dsa_q_mm` is legal on one die now (program for the 64 query rows) but 9 µs slower | review #4 P1-1 |
+| DSA sparse_sdpa, 1 slot | 64 heads in 1 query row (1 core) | **2 query rows of 32 heads (2 cores)** | review #4 P2-1; bit-identical; about -200 µs per DSA layer at position 4000 |
+| DSA indexer query reshape, MoE routing-weight reshape (decode) | tiled reshape | **row-major round trip** | review #4 P2-1; bit-identical |
 | mHC, KDA recurrence | unchanged | unchanged | fp32-exact stage-1 / 2 kernels; dispositions in the audit |
 
 `OptConfig` fields: `kda_in_dtype`, `kda_out_dtype`, `moe` (expert dtypes, fidelities, sparse geometry),
 `dsa_bmm_dtype`, `dsa_bmm_reuse`, `out_proj_1d`, `single_die_mc` (the pinned stage-5 option set),
-`prefill_cfg`, `single_die_r2` (review #2 single-die options), `kda_in_split_ds`, and the trial fields `dsa_proj_dtype`,
-`mlp_dtype`, `mlp_fidelity`, `mix_chunks_decode`, `out_proj_ds`, `prefill_fidelity`. All single-die options are gated on
+`prefill_cfg`, `single_die_r2` (review #2 single-die options), `single_die_r3` / `single_die_specs` (review #3),
+`kda_prefill_fidelity` / `kda_prefill_kinds`, `dsa_q_mm_ib`, `sdpa_head_split`, `qi_rm`, `route_rm` (review #4),
+`kda_in_split_ds`, and the trial fields `dsa_proj_dtype`, `mlp_dtype`, `mlp_fidelity`, `mix_chunks_decode`,
+`out_proj_ds`, `prefill_fidelity`. All single-die options are gated on
 one die (`tp == 1`, not a `MultichipDecoder`): the TP4 path, its weights and its weight-cache key are unchanged. The stage-5
 option set is pinned in `OptimizedDecoder.from_state_dict` (`MCOpts(norm_sharded, dsa_pack, pack_a_1d, pack_b_1d,
 dsa_1d, router_1d, ds_shared)`); it does not follow `multichip_decoder.DEFAULT_MC`, which the stage-5 rework still
@@ -150,7 +167,7 @@ prefill `candidates_r2/opt_s5_pf_final/` (measured under the `opt_s5_pf_r2b` pol
 | prefill 2048 dsa_moe | 119821 | 97988 | 77052 | **75000** | -37.4 % | -2.7 % | 75.77 |
 | prefill 128 kda_dense / kda_moe / dsa_moe | 3200 / 19679 / 19824 | - | 2959 / 13968 / 14691 | **2739 / 14025 / 14555** | | | 4.63 / 15.99 / 15.36 |
 
-The table is the review #2 default. Review #3 default (`candidates_r3/t_r3_specs` = the review #3 policy for every case
+The table is the review #2 default. The review #4 default: "Review #4" and "Performance accounting". Review #3 default (`candidates_r3/t_r3_specs` = the review #3 policy for every case
 but 1-user dsa_moe, `candidates_r3/final/` for that one; same-day control `candidates_r3/opt_s5_pf_r2`): see "Review #3". The `opt_s5_pf_r2b` candidate (with the KDA in-proj split) measured
 1647 / 1890 / 2045 µs but trips a watcher assert (below). The kda_dense 32-user host wall of 7.4 ms is one run under host
 load (device 2.713 ms); the other host walls are within 0.7 .. 1.2 ms of device time.
@@ -202,19 +219,28 @@ configs use fp32 destination accumulation and packer L1 accumulation.
 
 | Trial | Change | Suite subset | Lowest real update PCC / scale | Time | Decision |
 |---|---|---|---|---|---|
-| `t_kda_in_ds_hifi2` | KDA in-proj decode: DRAM-sharded copy of 32768 columns (64 cores, in0 2, 2 readers) + 1D 192 columns, HiFi2 | 16 / 16; full suite 44 / 44 | L4 0.995799 (B=32), L0 0.999930; decode mean 0.9979 | -84 µs per KDA layer (in0-interleaved 415 -> DS 293 + 1D 18 + concat 12 + reshard 8); kda_dense 1 user 1647 with the P1-A options | **dropped: TTNN kernel blocker (review #3).** Under the watcher with `TT_METAL_LOGGER_LEVEL=Warning` (env.sh's `Error`
-hid the details in review #2; 2 decoder repeats and the standalone `tools/s3r3_split_watch.py`, identical each time):
-`Device 1 worker core(x=0,y=0) virtual(x=1,y=2): BRISC detected an inter-kernel data race due to kernel completing with
-pending NOC transactions (missing NOC reads flushed barrier). Current kernel:
-ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp`. Watcher
-Device 1 is the test's own chip (review #2 wrongly attributed it to an unused chip). It is the multi-reader path of that
-reader (SPLIT_DRAM_BANK, workers_per_bank > 1). Geometries: 2 readers trip it at (cores, in0) = (64, 2), (64, 1),
-(32, 2); 1 reader is illegal (64 / 2: circular buffers beyond L1; in0 4 on 64 cores: TT_FATAL
-`matmul_device_operation.cpp:1365` shard width % in0_block_w; (32, 4) and (64, 4): same). The review #2 bisection's last
-two variants ran after the default had dropped the split (so "sink" off and "all off" ran without it) |
+| `t_kda_in_ds_hifi2` | KDA in-proj decode: DRAM-sharded copy of 32768 columns (64 cores, in0 2, 2 readers) + 1D 192 columns, HiFi2 | 16 / 16; full suite 44 / 44 | L4 0.995799 (B=32), L0 0.999930; decode mean 0.9979 | -84 µs per KDA layer (in0-interleaved 415 -> DS 293 + 1D 18 + concat 12 + reshard 8); kda_dense 1 user 1647 with the P1-A options | **dropped: TTNN kernel blocker (review #3).** Watcher data race in the multi-reader DRAM-sharded reader (details below the table) |
 | `t_out_ds_hifi2` | KDA out / DSA o_proj decode DRAM-sharded (`ds:r2`), HiFi2 | 26 / 26 | L3 0.998769, L4 0.996756 | slower: KDA out 102.3 -> 121.2 µs, DSA o_proj 191.9 -> 239.6 µs (DRAM-sharded `ds:r2` at HiFi2 vs the 1D config at HiFi4); layer kda_moe 1 user 1999, dsa_moe 2099 µs | rejected (slower; the probe's DS LoFi 78.6 µs needs LoFi, which fails) |
 | `t_out_ds_lofi` | same at LoFi | 25 / 26: L3 32-slot pos 38 (router margin 8.0e-4) matches neither y nor y_swap | L3 0.995564 | not measured (Tracy step dropped when the queue was consolidated; DS LoFi probe: KDA out 78.6, o_proj 150.6 µs) | rejected (correctness) |
 | `t_pf_hifi2` | prefill rows of DSA o_proj and dense-MLP gate|up / down at HiFi2 (+ packer L1 accumulation) | 21 / 21; full suite 44 / 44 (`logs/s3r2_final_suite.log`) | L0 prefill scale 0.9927 .. 0.9940 (0.9948 .. 0.9969 at HiFi4), L3 0.9945 .. 0.9973 | prefill 2048 kda_dense 26987 -> 20676 µs (-23 %), dsa_moe 77076 -> 74974 µs (-2.7 %) | **taken** |
+
+Details of the `t_kda_in_ds_hifi2` blocker (review #3; P3-2 wording of review #4):
+
+- The watcher ran with `TT_METAL_LOGGER_LEVEL=Warning`. The `Error` level of env.sh hid the details in review #2.
+  Two decoder repeats and the standalone `tools/s3r3_split_watch.py` gave the same message each time.
+- Message: `Device 1 worker core(x=0,y=0) virtual(x=1,y=2): BRISC detected an inter-kernel data race due to kernel
+  completing with pending NOC transactions (missing NOC reads flushed barrier)`. Kernel:
+  `ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_bmm_tile_layout_in1_sender_dram_sharded.cpp`.
+- Watcher Device 1 is the test's own chip. Review #2 wrongly said it was an unused chip.
+- The race is in the multi-reader path of that reader (SPLIT_DRAM_BANK, workers_per_bank > 1). 2 readers trip it at
+  (cores, in0) = (64, 2), (64, 1) and (32, 2).
+- 1 reader is legal only at in0 1, and it is 2.3x slower: "split DS c32 in0 1 r1 + 1D" 946.3 µs at HiFi4
+  (`logs/s3r_p14_dense_kdain.log`). At (64, 2) it overflows L1 (circular buffers). At (32, 4) it overflows L1 too
+  (2,601,984 B, `logs/s3r3_split_standalone.log`). At in0 4 on 64 cores and at (64, 4) it fails the TT_FATAL
+  `matmul_device_operation.cpp:1365` (shard width % in0_block_w).
+- Not tried: an N-halved 1-reader variant (64 tiles per bank, two DRAM-sharded matmuls).
+- The review #2 bisection's last two variants ran after the default had dropped the split. So "sink" off and "all
+  off" ran without it.
 
 The review #1 statement that the KDA in-proj DRAM-sharded path "wins only with HiFi2 or bfp4, which the precision
 trials reject" was wrong: no real-weight HiFi2 trial existed then. It exists now: it passes the suite but trips a watcher
@@ -236,7 +262,7 @@ real shapes, the sparse sweep on real layer-4 weights at the `opt` policy.
 | Prefill 2048 sorted / grouped (default 52151 µs with the 1024-row split) | in0 2 +1073 .. +2832, subblock 2 +583, in0 8 overflows; the stage-6 1024-row split (committed in 08bac32f4c1) costs 7.8 ms per MoE layer (44373 µs unsplit, bit-identical) | default kept; the split is a stage-6 / 7 memory decision |
 | DSA per-head matmul at 2048 prefill rows (default 1900 / 2090 µs) | reuse config per_core_M 2 / 4 / 8: 1426 / 941 / **765** (q_abs), 1335 / 873 / 665 (o_uv), PCC 0.999999, no hang (the stage-3 hang was per_core_M = Mt = 64) | **not taken**: the probe is fast and accurate on one chunk, but in the decoder the DSA continuation chunks (prompts over 2048) read 11-22 % low with it on W_UK and non-finite on W_UV (`logs/s3r_bisect_pf.log`, `logs/s3r_final_suite.bmm_wuk.log`); not diagnosed. Knob kept off (`GLM53_PF_OFF=bmm_on` turns it on) |
 | `flash_mla_prefill` 2048 rows (default 22852 µs) | q128 / k128 **6654**, q128 / k64 6753, q64 / k64 11625; PCC 0.99996 vs default; k256 / k512 / q256 overflow L1 | **taken** |
-| Large prefill matmuls (bfp8) | explicit 2D config on the full grid, bit-exact: DSA o_proj 7707 -> **3708**, MLP down 5792 -> **2778**; KDA in / MLP gate-up overflow L1 at in0 4 on that grid. HiFi2: KDA in 10115 -> 7951, gate/up 7094 -> 5594 (precision change) | 2D configs **taken** for o_proj and MLP down; HiFi2 prefill: review #1 did not take it; review #2 trialled it on real weights and **took** it for DSA o_proj and the dense MLP (`t_pf_hifi2`); review #3 rejected it for the KDA in / out projections (`t_kda_pf_hifi2`) |
+| Large prefill matmuls (bfp8) | explicit 2D config on the full grid, bit-exact: DSA o_proj 7707 -> **3708**, MLP down 5792 -> **2778**; KDA in / MLP gate-up overflow L1 at in0 4 on that grid. HiFi2: KDA in 10115 -> 7951, gate/up 7094 -> 5594 (precision change) | 2D configs **taken** for o_proj and MLP down; HiFi2 prefill: review #1 did not take it; review #2 trialled it on real weights and **took** it for DSA o_proj and the dense MLP (`t_pf_hifi2`); review #3 rejected it for the KDA in / out projections (`t_kda_pf_hifi2`); review #4 took it for the KDA + MoE layers |
 
 Prefill configurations end to end: `candidates_r1/opt_s5_pf` (with the W_UK reuse config, later removed) dsa_moe 2048
 rows 97302 -> 77407 µs, kda_dense 29941 -> 26759 µs, kda_moe unchanged (66865); the final numbers without it are in the
@@ -260,49 +286,57 @@ Measured on the CSVs (`candidates_r1/opt`, `opt_s5`, `candidates_r2/opt_s5_pf`);
 | KDA in-proj split (qkv + rest weights) | packed 32960 columns | two weights | `tools/kda_split_probe.py` bfp8: prefill 2048 6550 -> 5908 µs (bit-exact), decode 410 -> 398 µs (B=32 and B=1) | not taken in stage 3: the packed weight layout is shared with the TP4 per-die grouping (stage 5), the weight cache (stage 6) and the deepseek KDA prefill kernels; -642 µs per KDA layer prefill, -12 µs decode; handed to stage 5 / 7 with these numbers |
 | KDA recurrent_decode | B=1 67, B=32 838 (268 MB state) | split each head's state by V columns over 2 cores (the delta-rule update is independent per V column): 128 cores at B=1 | op microbenchmark (`tools/s3r2_glue_probe.py`): B 1 / 2 / 4 / 8 / 16 / 32 = 74.6 / 121.8 / 178.9 / 262.3 / 472.8 / 849.3 µs (112 .. 316 GB/s): **latency bound at B=1** (one head per core, 64 of 110 cores, serial over a 128 x 128 fp32 state), state-bandwidth bound only at 32 | kernel change in `ttnn.experimental.kda.recurrent_decode`; owner: KDA kernel (stage 5) |
 | MoeSortedDispatch | 74.5 on 1 core (B=32), 1.22 ms at 2048 rows | multi-core histogram + scan + scatter | the op is single-core by design (`const CoreCoord core{0,0}`, a counting sort) | blocker: kernel rewrite; owner: MoE dispatch kernel (stage 5 / TTNN) |
-| MoE routing reshape `[1,32,32(8),32(1)]` -> `[1,1,32,32(8)]` fp32 | 35.6 on 1 core (B=32) | ROW_MAJOR -> reshape -> TILE | measured 30.1 vs 39.0 µs host-timed, exact (`ttnn.view` illegal here) | about -9 µs per MoE layer; needs a `tt/moe.py` edit (shared, stage-6/7 owned): handed over with the measurement |
-| DSA indexer qi reshape `[1,1,32,4096]` -> `[1,1,1024,128]` bf16 | 42.1 (B=32) | ROW_MAJOR round trip; `nlp_create_qkv_heads` | round trip 33.5 vs 49.6 µs host-timed, exact; the heads op gives head-major order at 55 µs | about -10 .. -16 µs per DSA layer; needs a `tt/dsa.py` edit (stage 8 edits `dsa.py` now): handed over with the measurement |
+| MoE routing reshape `[1,32,32(8),32(1)]` -> `[1,1,32,32(8)]` fp32 | 35.6 on 1 core (B=32); 2 at B=1 | ROW_MAJOR -> reshape -> TILE | probe 30.1 vs 39.0 µs host-timed, exact (`ttnn.view` illegal here); decoder A/B bit-identical (`logs_r4/s3r4_ab.log`) | **taken in review #4** (`route_rm`, 32-row decode batches only; an instance wrapper of `Qwen35MoE._route_sigmoid_bias`, no `tt/moe.py` edit) |
+| DSA indexer qi reshape `[1,1,32,4096]` -> `[1,1,1024,128]` bf16 | 42.1 (B=32), 19.1 (B=1) | ROW_MAJOR round trip; `nlp_create_qkv_heads` | round trip 33.5 vs 49.6 µs host-timed, exact; the heads op gives head-major order at 55 µs; decoder A/B bit-identical | **taken in review #4** (`qi_rm`, `SingleDieDSA._mm`; no `tt/dsa.py` edit) |
+| mHC pre / post (`MhcPreDeviceOperation`, `MhcPostDeviceOperation`) | pre 50 (25 x 2), post 118 (59 x 2) per layer, the same at 1 and 32 users | none measured | fixed per-tile work: the ops process the [hc_mult = 4 streams x 4096] residual tile rows and the 4 x 4 mixing per call; the cost does not scale with users, so it is 8-10 % of 1-user decode; at 32 users it is 1.5 % of the MoE layers and 6 % of kda_dense. fp32-exact stage-1 / 2 kernels (the mHC contract) | not changed in stage 3. Owner: the mHC kernels (DSv4 `mhc_pre` / `mhc_post`, stage 5 / TTNN). A fused pre + mix or post + residual kernel is the candidate |
 | MoE gather rows / untilize / slices (B=32) | 637 / 260 / 134 (+ others) | down projection with per_core_N 16 / 32 and `untilize_out`; smaller row tiles | the grouped sparse factory requires per_core_N == Nt (TT_FATAL `sparse_matmul_multicore_reuse_grouped.cpp:93`, at 32 and 2048 rows); about 1.8 real rows per 32-row group; the slice exists because `ttnn.swiglu` has no GLM clamp | blocked: N splitting in the grouped sparse factory, or a smaller row tile; owner: TTNN sparse matmul / stage 5 |
 | Decode activations in DRAM | every matmul input 0 | L1 / sharded | 64-256 KB activations, one reshard each; the sharded norm feeds the packs directly | rejected except the producer-sharded path |
 
-## Performance accounting (final default, `candidates_r2/final`)
+## Performance accounting (final default, review #4: `candidates_r4/final`)
 
-Bytes per step: weights from the op shapes and dtypes (bfp8 1.0625, bfp4 0.5625, bf16 2 B per element; 8 routed experts
-at B=1, about 178 distinct at B=32), KDA state fp32 read + write; DRAM 512 GB/s.
+Device time and host wall come from the same Tracy run of each case (review #4 default, seed pinned, position 128 unless
+noted). Bytes per step: weights from the op shapes and dtypes (bfp8 1.0625, bfp4 0.5625, bf16 2 B per element; 8 routed
+experts at B=1, about 178 distinct at B=32), KDA state fp32 read + write; DRAM 512 GB/s. The weight dtypes have not
+changed since review #2, so the bytes are those of review #2.
 
 | Case | Device µs | Host wall µs / step | Host - device | Bytes / step | DRAM floor µs | Roofline fraction |
 |---|---|---|---|---|---|---|
-| kda_dense 1 | 1727 | 2390 | 663 | 350 MB | 684 | 39.6 % |
-| kda_moe 1 | 1974 | 2860 | 886 | 331 MB | 647 | 32.8 % |
-| dsa_moe 1 | 2047 | 3229 | 1182 | 281 MB | 549 | 26.8 % |
-| kda_dense 32 | 2713 | (7413, one loaded run) | - | 610 MB | 1192 | 43.9 % |
-| kda_moe 32 | 11535 | 12304 | 769 | 3.00 GB | 5855 | 50.8 % |
-| dsa_moe 32 | 11263 | 12171 | 908 | 2.69 GB | 5250 | 46.6 % |
+| kda_dense 1 | 1705 | 2396 | 691 | 350 MB | 684 | 40.1 % |
+| kda_moe 1 | 1951 | 2681 | 730 | 331 MB | 647 | 33.2 % |
+| dsa_moe 1 | 2024 | 2804 | 780 | 281 MB | 549 | 27.1 % |
+| dsa_moe 1, position 16384 | 2374 | 3104 | 730 | 283 MB | 553 | 23.3 % |
+| kda_dense 32 | 2705 | 3328 | 623 | 610 MB | 1192 | 44.1 % |
+| kda_moe 32 | 11515 | 12242 | 727 | 3.00 GB | 5855 | 50.8 % |
+| dsa_moe 32 | 11210 | 12103 | 893 | 2.69 GB | 5250 | 46.8 % |
 
-Host wall minus device (0.66 .. 1.2 ms per step) is the input copy between replays plus the replay-boundary gap
-(235 / 280 µs, KDA / DSA; gaps inside one replay 43 .. 127 µs); the stage-7 generator owns the step loop. Prefill is
-compute bound.
+Host wall minus device (0.6 .. 0.9 ms per step) is the input copy between replays plus the replay-boundary gap. The
+host wall is measured under Tracy. The stage-7 generator owns the step loop. Prefill is compute bound.
 
-Per op group, µs per layer (final default):
+Per op group, µs per layer (`tools/s3r4_accounting.py groups`, final default):
 
-| Group | kda_dense 1 | kda_moe 1 | kda_moe 32 | dsa_moe 1 | dsa_moe 32 |
-|---|---|---|---|---|---|
-| Routed sparse matmuls | - | 446 | 7268 | 446 | 7727 |
-| Dense matmuls | 984 | 636 | 635 | 555 | 551 |
-| Norms (sharded) | 17 | 18 | 24 | 29 | 29 |
-| Sinkhorn | 172 | 172 | 172 | 172 | 172 |
-| mHC mix / pre / post | 217 | 217 | 216 | 217 | 216 |
-| KDA conv (op at 1 user, 12-op chain at 32) | 93 | 89 | 145 | - | - |
-| KDA recurrence | 67 | 67 | 839 | - | - |
-| Router TopK | - | 34 | 34 | 34 | 34 |
-| Data movement | 65 | 102 | 1487 | 244 | 1714 |
-| Element-wise / other (incl. DSA ternary) | 113 | 194 | 714 | 292 | 746 |
-| Attention core (sparse SDPA, context 128) | - | - | - | 56 | 74 |
+| Group | kda_dense 1 | kda_moe 1 | dsa_moe 1 | dsa_moe 1, pos 16384 | kda_dense 32 | kda_moe 32 | dsa_moe 32 |
+|---|---|---|---|---|---|---|---|
+| Routed sparse matmuls | - | 443 | 447 | 446 | - | 7283 | 7712 |
+| Dense matmuls | 981 | 630 | 553 | 553 | 983 | 629 | 551 |
+| Norms (sharded) | 18 | 18 | 30 | 30 | 25 | 25 | 30 |
+| Sinkhorn (faces, HiFi3 permutations) | 142 | 141 | 141 | 142 | 153 | 153 | 153 |
+| mHC pre | 51 | 51 | 51 | 51 | 51 | 51 | 52 |
+| mHC post | 119 | 117 | 119 | 118 | 118 | 118 | 118 |
+| mHC mix | 49 | 49 | 49 | 50 | 50 | 49 | 50 |
+| KDA conv op (1 slot; the 12-op chain at 32 is in element-wise / data movement) | 93 | 91 | - | - | - | - | - |
+| KDA recurrence | 67 | 67 | - | - | 840 | 841 | - |
+| Router TopK | - | 34 | 34 | 34 | - | 34 | 34 |
+| DSA attention (sparse SDPA, indexer scores and top-k, cache writes) | - | - | 63 | 402 | - | - | 119 |
+| MoE glue (dispatch, gather rows) | - | - | - | - | - | 735 | 797 |
+| Data movement | 67 | 106 | 249 | 249 | 111 | 727 | 873 |
+| Element-wise / other | 119 | 204 | 289 | 299 | 375 | 871 | 720 |
+| **Total** | **1705** | **1951** | **2024** | **2374** | **2705** | **11515** | **11210** |
 
-Remaining gaps at 1 user: the fixed per-layer work (sinkhorn 172, mHC 215, element-wise 114 .. 292, data movement
-65 .. 244 µs), the KDA in-proj at 65 % of DRAM (its DRAM-sharded HiFi2 form trips a watcher assert), the B=1 sparse
-matmuls at 45 % of DRAM, the latency-bound recurrence (67 µs). At 32 users: the sparse
-matmuls (69 % of DRAM), MoE glue (1.5 .. 1.7 ms) and the KDA state (839 µs). Each has an audit row with its owner.
+Remaining gaps at 1 user: the fixed per-layer work (sinkhorn 142, mHC pre / post / mix 219, element-wise 119 .. 299,
+data movement 67 .. 249 µs), the KDA in-proj at 65 % of DRAM (its DRAM-sharded HiFi2 form trips a watcher race), the
+B=1 sparse matmuls at 45 % of DRAM, the latency-bound recurrence (67 µs). In the sparse regime the sparse SDPA is 354 µs
+of the 402 µs attention group. At 32 users: the sparse matmuls (69 % of DRAM), MoE glue (0.7 .. 0.8 ms) and the KDA
+state (840 µs). Each has an audit row with its owner.
 
 ## Review #2: prefill and sparse-decode items (P2-2, P2-4)
 
@@ -331,10 +365,18 @@ sparse-matmul factory). TTNN blocker (below).
 (2048 x 4096 x 24576) 11 x 10, in0 4, out block 7 x 10, subblock 1 x 2: 6020 vs 7059 µs default, bit-exact; overflowing
 variants: in0 4 out 7 x 70 3,846,144 B, 7 x 35 2,036,224 B, in0 2 7 x 70 3,484,160 B, 7 x 35 1,826,560 B. KDA in-proj
 (2048 x 4096 x 32960) 11 x 10, in0 4, out 1 x 94: 8273 vs 10123 µs. With packer L1 accumulation on, the default configs
-run gate/up 3861 µs and KDA in 5488 µs and the 2D configs add nothing. Gate/up prefill is covered by `t_pf_hifi2` (HiFi2
-+ packer L1 accumulation, real weights, above). The KDA in-proj prefill matmul runs inside the deepseek KDA prefill
-layer, whose compute config the decoder does not own: packer L1 accumulation there (-4.6 ms per KDA layer at 2048 rows
-in the probe) is handed to the KDA prefill owner (stage 5 / 7) with the probe.
+run gate/up 3861 µs and KDA in 5488 µs, and the 2D configs add nothing. Gate/up prefill is covered by `t_pf_hifi2`
+(HiFi2 + packer L1 accumulation, real weights, above).
+
+Correction (review #4 P2-3). Review #2 handed packer L1 accumulation of the KDA in-projection prefill to the KDA
+prefill owner. That hand-off was wrong:
+
+- `models/demos/deepseek_v3_d_p/tt/kda/kda.py:173-178` already sets `packer_l1_acc=True` (since 382e25f6e51,
+  2026-10-14).
+- The in-model row is 4989 µs at HiFi4 (`candidates_r2/opt_s5_pf_final/test_perf_prefill_kda_dense-2048_`). That is
+  the probe's "packer L1 accumulation" value (5488 µs), not its 10123 µs.
+- The decoder can set this compute config itself (`OptimizedDecoder._apply_trials`; `t_kda_pf_hifi2`, review #4
+  P2-2). So nothing is handed over.
 
 **DSA sparse-attention decode past position 2048 (P2-4).** `GLM53_PERF_POS` (`tests/test_perf_decoder.py`), policy
 `opt_s5_pf` (review #2 options for DSA: o_proj spec, sinkhorn HiFi3), `candidates_r2/deep_pos_{4096,16384}/`:
@@ -349,9 +391,9 @@ At 16384: `SparseSDPA` 560 µs at 1 user (51 µs at position 128) and 572 µs at
 indexer top-k about 29 / 47; router TopK 34. `sparse_sdpa` splits work over query rows only (`base = S / num_cores`), so
 one user's 64 heads run on one core. Candidate (`tools/s3r2_sdpa_probe.py`): q `[1,64,1,512]` -> `[1,32,2,512]` with the
 index row duplicated and `cache_batch_idx` = slot: 428.9 -> 287.0 µs at 1 user, bit-exact (about -140 µs per DSA layer
-per step past position 2048). It needs an edit of `_sparse_attend` (`tt/dsa.py`, edited by stage 8 now, and
-`MultichipDSA`, stage 5); at B > 1 it also needs a page table with duplicated rows (not probed). Handed over with the
-probe; larger key chunks (64 / 128) are illegal (top-k 2080 must be a multiple of the chunk).
+per step past position 2048). Review #4 took it at 1 slot as a stage-3 override (`SingleDieDSA._sparse_attend`;
+"Review #4"). At B > 1 it needs a page table with duplicated rows (not probed). Larger key chunks (64 / 128) are
+illegal (top-k 2080 must be a multiple of the chunk).
 
 ## Review #3: single-die options, trials and blockers
 
@@ -361,11 +403,11 @@ pinned, `logs/s3r3_*.log`, Tracy `candidates_r3/`.
 | Option | Evidence | Decision |
 |---|---|---|
 | `sinkhorn_faces` (committed stage-5 kernel option, bit-identical) | suite subset 29 / 29, identical check lines; sinkhorn -30 µs per layer at 1 user, -19 µs at 32 (kda_dense 1 user 1725 -> 1698, kda_moe 1971 -> 1943) | **taken** |
-| `dsa_q_mm` (1-slot DSA q_abs as one masked matmul, in0 blocks 64) | 1-slot dsa_moe decode: TT_FATAL `matmul_device_operation.cpp:761 num_blocks_total <= num_cores` (64 heads on one die; `candidates_r3/t_r3/test_perf_traced_decode_dsa_moe-1_/console.log`); the 8-slot suite does not take the path | **rejected on one die only**; the stage-5 TP4 `DEFAULT_MC` keeps it (16 heads per die). New `test_single_slot_decode[kind]` (1-slot layers) keeps the 1-slot paths in the suite |
-| role specs `kda_out` `1d:c16:ib4`, `shared_gu` `1d:c32:ib16`, `shared_dn` `1d:c16:ib4` | KDA out 32 x 8192 x 4096 -3.4 .. -4.6 µs, shared expert -2 .. -3 µs; kda_moe 32 users -47 µs; suite subset 29 / 29 | **taken** |
+| `dsa_q_mm` (1-slot DSA q_abs as one masked matmul, in0 blocks 64) | 1-slot dsa_moe decode: TT_FATAL `matmul_device_operation.cpp:761 num_blocks_total <= num_cores` (`candidates_r3/t_r3/test_perf_traced_decode_dsa_moe-1_/console.log`). The cause is the program size, not the op: the program is built for 32 rows, one die has 64 (review #4 P1-1) | rejected in review #3 on the error; review #4 fixed it, measured it (exact, 9 µs slower) and did not take it ("Review #4") |
+| role specs `kda_out` `1d:c16:ib4`, `shared_gu` `1d:c32:ib16`, `shared_dn` `1d:c16:ib4` | KDA out 32 x 8192 x 4096 -3.4 .. -4.6 µs, shared expert -2 .. -3 µs. kda_moe 32 users: the layer moved -47 µs, but only about -8 µs is in the spec rows (KDA out -3.5, shared down -3.0, shared gate / up -1.3). The rest (SparseMatmul -27, MoeGatherRows -10 µs) is run-to-run spread (review #4 P2-3; `tools/s3r4_accounting.py diff`). Suite subset 29 / 29 | **taken** |
 | `kda_conv_op_max_rows` | `tools/s3r3_conv_rows.py` (traced): op 97.5 / 140 / 256 / 484 µs, chain 265.5 / 264.5 / 266.4 / 264.3 µs at 1 / 8 / 16 / 32 slots | **16** (was 8) |
-| KDA prefill in / out projections at HiFi2 (`t_kda_pf_hifi2`, `KDAProgramConfig` fidelity fields set on the prefill layers) | prefill 2048 kda_dense 20579 -> 18595 µs, kda_moe 66686 -> 65034 µs; suite subset 9 failed / 18: L0 prefill scale 0.9869 .. 0.9897 (outside 1 +- 0.01; with the dense-MLP prefill HiFi2) | **rejected** |
-| KDA in-proj split DS (P1-2) | watcher race in the DRAM-sharded multi-reader kernel (table above); 1-reader geometries illegal | **blocked** (TTNN) |
+| KDA prefill in / out projections at HiFi2 (`t_kda_pf_hifi2`, `KDAProgramConfig` fidelity fields set on the prefill layers) | prefill 2048 kda_dense 20579 -> 18595 µs, kda_moe 66686 -> 65034 µs; suite subset 9 failed / 18. All 9 failures are kda_dense (L0 prefill scale 0.9869 .. 0.9897, two fidelity biases stacked with the MLP prefill HiFi2). All 6 kda_moe tests pass | rejected for all KDA layers in review #3; **taken for the KDA + MoE layers in review #4** ("Review #4") |
+| KDA in-proj split DS (P1-2) | watcher race in the DRAM-sharded multi-reader kernel (details under the fidelity table); 1 reader is legal only at in0 1 and is 2.3x slower | **blocked** (TTNN) |
 
 Final review #3 default `opt_s5_pf` = review #2 default + `sinkhorn_faces` + the three role specs + conv op <= 16 slots.
 Decode device time (µs, seed pinned; control = review #2 default, same session):
@@ -380,14 +422,133 @@ Decode device time (µs, seed pinned; control = review #2 default, same session)
 | dsa_moe 32 users | 11227 | **11193** |
 
 Against `MultichipDecoder` at TP = 1 with the stage-5 options (`candidates_r1/mc_tp1`: 1745 / 1967 / 2040 µs) the
-review #3 default is faster on the KDA layers (1696 / 1939) and on dsa_moe (2013 vs 2040). Prefill is unchanged from
-review #2 (20641 / 66808 / 75000 µs at 2048 rows).
+review #3 default is faster on the KDA layers (1696 / 1939) and on dsa_moe (2013 vs 2040).
+
+Correction (review #4 P2-3): review #3 said "prefill is unchanged from review #2". That was wrong. `MHC_SINKHORN_FACES`
+is process-wide, and the op takes face mode 2 for T > 16
+(`mhc_split_sinkhorn_device_operation.cpp:133-136`). So the faces change the prefill sinkhorn rows too. Review #3 had
+no prefill Tracy of its default. The review #4 prefill runs measure the final default ("Review #4").
 
 Correctness of the review #3 default: full suite **47 / 47** (44 + the new `test_single_slot_decode`
 for the three kinds; 1-slot dsa_moe decode update PCC >= 0.999957; y_swap 3 of 304, cap 9; `logs/s3r3_suite.log`);
 watcher suite subset (incl. B=32 dsa_moe, decode-only, the 1-slot cases) **23 / 23, 0 suspicious lines**, B=1 traced
 decode per kind under the watcher **3 / 3, 0 suspicious lines** (`watcher_correctness_r3/{suite,decode1}/`,
 `TT_METAL_LOGGER_LEVEL=Warning`); dsa_moe 1-user Tracy host wall 2.941 ms per step (`candidates_r3/final/`).
+
+## Review #4: one-die decode options, KDA prefill per layer kind, refreshed evidence
+
+Runs: one decisive case per run-locked ticket, on pinned snapshots (git archive of HEAD + the stage-3 files of the
+live tree; md5s in `~/glm53-flash-bringup/logs/s3r4.status`, copied to `logs_r4/s3r4.status.log`). Script
+`~/glm53-flash-bringup/scripts/s3r4_one.sh`. Logs `logs_r4/`, Tracy `candidates_r4/`.
+
+### P1-1: `dsa_q_mm` on one die
+
+- Cause of the review #3 TT_FATAL: `MultichipDSA._hm_consts` builds the q program (`pc_q`) for m = 32 rows. TP4 has
+  16 heads, padded to Hq = 32. One die has Hq = 64. With m = 32, `per_core_M` = 1, so the 2 x 16 row and column tiles
+  make 32 blocks on the 22-core grid (11 x 2).
+- Fix, in `tt/optimized_decoder.py` only: `SingleDieDSA` (a subclass of `MultichipDSA`, set on one die) builds
+  `pc_q` with m = Hq. Host check: m = 64 gives `per_core_M` 2, subblock 2 x 1, 16 blocks on 22 cores, for in0 blocks
+  8 / 16 / 32 / 64. `tt/multichip_decoder.py` is not changed, so TP4 is not changed. (At TP4, Hq = 32 and the two
+  builders give the same program.)
+- A second one-die bug showed up in the first A/B run (`logs_r4/s3r4_ab_run1_segv.log`): a segfault in tilize.
+  `MultichipDSA._sparse_attend` slices the output to H heads and frees the op output. With Hq = H = 64 the slice is the
+  same tensor, so the freed buffer was read next. `SingleDieDSA._sparse_attend` handles the 1-slot row-major query
+  without the slice.
+- A/B on one build (`tools/s3r4_ab.py`, `logs_r4/s3r4_ab.log`; dsa_moe, 1 slot, 4000-row real prefill, decode at
+  position 4000, traced, host wall of 50 replays; every variant bit-identical to the control, eager and traced):
+
+| Variant | µs / step (host wall) | Exact |
+|---|---|---|
+| control (review #3 default) | 2895.2 (repeat 2889.3) | - |
+| `dsa_q_mm` in0 8 / 16 / 32 / 64 | 2915.6 / 2897.5 / 2881.9 / 2880.4 | yes |
+| sparse_sdpa head split | 2677.7 | yes |
+| indexer qi row-major reshape | 2883.9 | yes |
+| `dsa_q_mm` 64 + head split | 2672.9 | yes |
+| `dsa_q_mm` 64 + head split + qi row-major | **2670.6** | yes |
+
+- Tracy of that first review #4 default (`candidates_r4/t_r4/test_perf_traced_decode_dsa_moe-1_`, position 128)
+  against `candidates_r3/final` (`tools/s3r4_accounting.py diff`): the `dsa_q_mm` q path costs **92.1 µs** (head-mask
+  multiply 16.2, matmul [64 x 16384] x [16384 x 512] 72.4, untilize 3.5). The per-head path it replaces costs **82.9
+  µs** (tiled reshape 19.5, transpose 4.7, per-head bmm 46.9, untilize 11.8). The matmul has 16 N tiles (R = 512), so
+  the 1D program uses 16 cores, and each core reads 512 K tiles of W_UK (about 7.7 GB/s per core). The per-head bmm
+  reads the same 8.9 MB on 64 cores. The host-wall A/B (-10 .. -15 µs) is inside its spread (control 2895.2 / 2889.3).
+- Decision: **not taken** (+9 µs per DSA layer at 1 user). The fix stays in the code (`dsa_q_mm_ib`, candidate
+  `t_r4`). A faster form needs W_UK split over more cores along K (a 2D or DRAM-sharded program); the 1D multicast
+  program cannot split K. At TP4 (16 heads, 4.5 MB of W_UK per die) stage 5 measured it faster, so `DEFAULT_MC` keeps it.
+
+### P2-1: the three exact decode wins as stage-3 overrides
+
+| Option | Where (no shared-file edit) | Gate | A/B (`logs_r4/s3r4_ab.log`) | Decision | TP4 |
+|---|---|---|---|---|---|
+| sparse_sdpa head split (`sdpa_head_split`) | `SingleDieDSA._sparse_attend` | 1 slot, 64 heads per die | 1 slot, position 4000: -218 µs per DSA layer (host wall); bit-identical | **taken** | no: TP4 has 16 heads per die, padded to one 32-head query row. The op takes whole 32-head rows, so there is nothing to split |
+| indexer qi row-major reshape (`qi_rm`) | `SingleDieDSA._mm` (w_iq decode rows) | decode rows | 1 slot: -11 µs; 32 slots: -19 µs (host wall); bit-identical | **taken** | yes, likely: TP4 runs the same reshape on the same [1,1,S,4096] indexer query (the indexer is replicated). Not measured at TP4 |
+| MoE routing-weight row-major reshape (`route_rm`) | instance wrapper of `Qwen35MoE._route_sigmoid_bias` (moe.py's `ttnn` name points at a proxy whose `reshape` takes the row-major path for this one shape) | 32-row decode batches | 32 slots: -17 .. -27 µs (host wall); both reshapes -40 .. -50 µs; bit-identical | **taken** | yes, likely: TP4 runs the same router per die at 32 rows. Not measured at TP4 |
+
+The 32-slot host-wall deltas are near the run-to-run spread (control 11457.9 / 11447.7 µs). The Tracy rows below give
+the per-op numbers. TP4 code is not changed; stage 10 may take the two reshapes.
+
+New hard checks: `test_single_slot_sparse_decode` (1-slot dsa_moe, 4000-row prefill, decode at positions 4000 ..
+4002 in the sparse regime, against HF on the quantization-aware reference). `test_policy_reached_weights` checks the
+review #4 options on the built layers. `tests/test_kda_decode_conv_one_die.py` adds B = 9 and 16 (the conv-op range
+above the old 8-slot threshold): 6 / 6 (`logs_r4/s3r4_conv_one_die.log`).
+
+### P2-2: KDA prefill HiFi2 per layer kind
+
+`kda_prefill_kinds=("moe",)`: the KDA prefill in / out projections run at HiFi2 on the KDA + MoE layers only. L0
+(KDA + dense) keeps HiFi4. Per-layer numbers (real-weight prefill sequences; update rms ratio against the
+quantization-aware reference; bound 1 +- 0.01):
+
+| Layer | Review #3 default | KDA prefill HiFi2 | Decision |
+|---|---|---|---|
+| L4 (KDA + MoE), suite `logs_r4/s3r4_suite*.log` | 0.9957 .. 0.9984 | 0.9938 .. 0.9976 (synthetic-weight prefill 0.9930) | **taken**: passes; 0.3 .. 0.4 % of the bound is left |
+| L4 decode after the prefill | mean 0.9979, min PCC 0.992610 | mean 0.9978, min PCC 0.992572 | no visible change |
+| L0 (KDA + dense), review #3 trial | 0.9927 .. 0.9939 | 0.9869 .. 0.9897 (with the MLP prefill HiFi2) | not applied to L0 |
+
+The headroom is small: the LoFi routed bias already uses about 0.4 %. Only L4 is tested at layer level. About 31 of the
+34 KDA layers are KDA + MoE. Stage 8 owns the model-level check; `t_kda_pf_hifi2_moe` is the candidate name.
+Prefill time: below.
+
+### Final default and evidence
+
+Final review #4 default `opt_s5_pf` = review #3 default + sparse_sdpa head split + `qi_rm` + `route_rm` + KDA prefill
+HiFi2 on the KDA + MoE layers. `dsa_q_mm` is off.
+
+Tracy, final default (`candidates_r4/final/`), against the review #3 runs (`candidates_r3/t_r3_specs`, `final`; same
+seed, another day) and, at position 16384, against the review #3 default in the same session
+(`candidates_r4/opt_s5_pf_r3/`):
+
+| Case | Review #3 | **Review #4** | Change from the review #4 options (per-op diff) |
+|---|---|---|---|
+| decode kda_dense 1 user | 1696 | **1705** | none (no op moved > 1.5 µs: session drift, about +0.5 %) |
+| decode kda_moe 1 user | 1939 | **1951** | none at 1 row (`route_rm` acts at 32 rows) |
+| decode dsa_moe 1 user, pos 128 | 2013 | **2024** | sparse SDPA 50.7 -> 34.0, indexer reshape 19.1 -> 14.9 (untilize 2.8, row-major view 10.1, tilize 2.0); about -21 µs. The rest of the +11 is drift in small element-wise rows |
+| decode dsa_moe 1 user, pos 16384 (same session) | 2587 | **2374** | **-213 µs (-8.2 %)**: sparse SDPA 560.6 -> 354.3, indexer reshape -4 |
+| decode kda_dense 32 users | 2689 | **2705** | none |
+| decode kda_moe 32 users | 11519 | **11515** | routing reshape 35.5 -> 13.6 (untilize 4.1, view 5.7, tilize 3.8): -22 µs |
+| decode dsa_moe 32 users | 11193 | **11210** | routing reshape -22 µs, indexer reshape 42.6 -> 18.4 (-24 µs); SparseMatmul +27 µs drift |
+| prefill 2048 kda_dense | 20641 (review #2) | **20541** | sinkhorn 186 -> 168 (faces, review #3); recurrence prep -98 |
+| prefill 2048 kda_moe | 66808 (review #2) | **65011** | KDA in-proj 7047 -> 5174, out-proj 1318 -> 1139 (HiFi2); sinkhorn -18; sparse matmuls +312 drift |
+| prefill 2048 dsa_moe | 75000 (review #2) | **74967** | sinkhorn -18; the rest is drift |
+
+The faces kernel changes prefill too (sinkhorn 186 -> 168 µs per layer at 2048 rows, bit-identical): the review #3
+"prefill unchanged" claim is corrected above.
+
+Correctness and stability of the final default (snapshots with the final `tt/optimized_decoder.py`, md5
+9b551ef2ab7292212500dbedf5b72e86):
+
+- Full suite **48 / 48** (`logs_r4/s3r4_suite.log`, third run in the file), including `test_single_slot_decode` and
+  the new `test_single_slot_sparse_decode` (L3 1 slot, prefill 4000: scale 0.9953; decode at 4000 .. 4002: update PCC
+  >= 0.999491, scale 0.9870 .. 0.9940). y_swap 3 of 307 (cap 9).
+- Watcher suite subset (with the 1-slot and sparse 1-slot cases) **24 / 24**, B=1 traced decode per kind **3 / 3**,
+  both with `TT_METAL_LOGGER_LEVEL=Warning` and **0 suspicious lines** (`watcher_correctness_r4/`).
+- One-die conv op at B = 1 / 2 / 8 / 9 / 16 / 32: 6 / 6.
+- The first default (with `dsa_q_mm`) also passed: suite 48 / 48, watcher 24 / 24 + 3 / 3, 0 suspicious lines
+  (`logs_r4/*_qmm.log`, `watcher_correctness_r4_qmm/`).
+
+TP4 is not changed. `tt/multichip_decoder.py`, `tt/dsa.py` and `tt/moe.py` are not edited. The full model builds
+`MultichipDecoder`, which skips the single-die block of `OptimizedDecoder.from_state_dict` (`not issubclass(cls,
+MultichipDecoder)`). The new `OptConfig` fields are read only in that block. The weight-cache key (policy name and
+weight dtypes) does not change.
 
 ### TTNN blockers (not on the TP4 path)
 
@@ -408,7 +569,7 @@ kernel work (owner stage 5).
 |---|---|---|
 | "Try a DRAM-sharded program config" | KDA out, DSA o_proj, wq_b | measured: slower at HiFi4 (DRAM-sharded table) |
 | "Place input 0 in L1" | every matmul | rejected except producer-sharded (audit) |
-| "HiFi2 may also work" | BFP8 HiFi4 matmuls | decode rows are DRAM bound (no gain at HiFi4 -> HiFi2 interleaved: KDA in 401 -> 398 µs); prefill: **taken** for DSA o_proj and dense MLP (review #2, real-weight trial), **rejected** for the KDA in / out projections (review #3: L0 prefill scale 0.987 .. 0.990) |
+| "HiFi2 may also work" | BFP8 HiFi4 matmuls | decode rows are DRAM bound (no gain at HiFi4 -> HiFi2 interleaved: KDA in 401 -> 398 µs); prefill: **taken** for DSA o_proj and dense MLP (review #2, real-weight trial), KDA in / out projections: **taken for the KDA + MoE layers** (review #4), not for L0 (KDA + dense: L0 prefill scale 0.987 .. 0.990) |
 | "HiFi2 is sufficient for BFP8" | indexer prefill fp32 matmuls (59 µs x 2) | rejected: fp32 indexer scores, 0.1 % |
 | "Use HiFi2 / HiFi4 with BF16 activations" | routed sparse matmuls at LoFi | the routed fidelity trial (Accuracy) |
 | "Output subblock 1x1 is small" | small-N decode rows; dense gate/up | small N: one tile per core is the widest grid (rejected, as stage 5); gate/up: <= a few % (311 µs at 344 GB/s), not taken |
@@ -422,8 +583,11 @@ kernel work (owner stage 5).
 | Check | Result | Log / artifact |
 |---|---|---|
 | `opt_s5` (pre-final): suite twice | 44 / 44 twice, identical | `logs/s3r_opt_suite.log`, `logs/s3r_suite_opt_s5_b.log` |
-| **Review #3 default: full suite (incl. `test_single_slot_decode`)** | **47 / 47** | `logs/s3r3_suite.log` |
-| **Review #3 default: watcher** suite subset (incl. B=32 dsa_moe, decode-only, 1-slot) + B=1 traced decode per kind | **23 / 23 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r3/`, `logs/s3r3_watcher_*.log` |
+| **Review #4 default: full suite (incl. `test_single_slot_decode`, `test_single_slot_sparse_decode`)** | **48 / 48** | `logs_r4/s3r4_suite.log` |
+| **Review #4 default: watcher** suite subset + B=1 traced decode per kind | **24 / 24 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r4/`, `logs_r4/s3r4_watcher_*.log` |
+| `kda_decode_conv` at the one-die width, B 1 / 2 / 8 / 9 / 16 / 32 | 6 / 6 | `logs_r4/s3r4_conv_one_die.log` |
+| Review #3 default: full suite (incl. `test_single_slot_decode`) | 47 / 47 | `logs/s3r3_suite.log` |
+| Review #3 default: watcher suite subset (incl. B=32 dsa_moe, decode-only, 1-slot) + B=1 traced decode per kind | **23 / 23 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r3/`, `logs/s3r3_watcher_*.log` |
 | Review #2 default: full suite | **44 / 44** | `logs/s3r2_f3_suite.log` |
 | **Review #2 final: watcher** (suite subset incl. B=32 dsa_moe, decode-only, + B=1 traced decode per kind) | **20 / 20 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r2/{suite,decode1}/`, `logs/s3r2_f3_watcher_*.log` |
 | **Review #2 final: repeated runs** (`test_batch32_all_active` dsa_moe / kda_moe, `test_lengths[dsa_moe-2051]`, `test_decode_only[kda_moe]`, x 5) | **20 / 20** | `logs/s3r2_f3_stress.log` |
@@ -459,6 +623,25 @@ The 2026-10-16 16:10 stall is classified as infrastructure (work log).
 - The KDA in-proj bfp4 rejection rests on router near-tie flips at B=32 (5 y_swap matches over a cap of 2, one token
   matching neither); stage 8 should re-judge it at model level (about -114 µs per KDA layer).
 
+- Process-wide environment (review #4 P3-13). Building an `OptimizedDecoder` with the review #2 / #3 options sets
+  `MHC_SINKHORN_PERM_FIDELITY=3` and `MHC_SINKHORN_FACES=1` (with `setdefault`) and never clears them. A later decoder in
+  the same process (for example a fused-decoder suite) also uses them. Both are bit-identical and are part of the
+  program hash, so the risk is low. `MultichipDecoder` sets the same variables in the same way.
+- KDA prefill chunk terms on one die (review #4 P3-7). Every one-die KDA prefill logs "KDA chunk terms need 2383 KiB
+  per core, over the 320 KiB L1 budget; keeping them in DRAM". The term buffer scales with the heads per die: 64 heads
+  on one die, 16 at TP4 (595 KiB, stage 5). The DRAM fallback is the designed path. At TP4 the 1024-row chunks that fit
+  L1 were slower than one 2048-row chunk (`doc/optimized_multichip_decoder/README.md`, "KDA prefill chunk terms"). On
+  one die even 512-row chunks need about 600 KiB. Classified: expected, not a fault; no change.
+- Sparse-matmul `nnz` (review #4 P3-12). The decode gather path (1 row) uses `indices=` (no `nnz` contract). The
+  grouped path uses the expert id list (`indices=`). The sorted / masked paths pass `nnz=None`: the expert count is
+  data dependent, and a wrong static `nnz` deadlocks the device (`tt/moe.py` docstring). tt-perf-report has no DRAM %
+  for these rows. The accounting computes their bytes by hand (8 experts at 1 user, about 178 at 32).
+- Not done in review #4 (P3 items that need new sweeps): the dense-MLP gate / up one-die geometry table (P3-5), the
+  indexer `wq_b` bfp8 trial (P3-6), the N-halved 1-reader KDA in-proj split (P3-2), repeated runs of the review #4
+  default (P3-11). The KDA in-proj split into two weights (qkv + rest; -642 µs per KDA layer at 2048 prefill rows,
+  -12 µs decode, bit-exact; audit) is still unowned (P3-8). It changes the packed weight layout that stage 5 (TP4
+  grouping), stage 6 (weight cache) and the deepseek KDA prefill kernels share.
+
 ## Commands
 
 ```
@@ -475,5 +658,9 @@ python -m models.autoports.zai_org_glm_5_3_flash.tools.kda_split_probe
 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_conv_rows
 TT_METAL_WATCHER=10 TT_METAL_LOGGER_LEVEL=Warning python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r3_split_watch --cores 64 --in0 2 --readers 2
 python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r2_bmm_repro3 --case uk --pm 8 --m 2048 --oob
+python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r4_ab [--only one,b32]
+python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r4_accounting groups <case dir> ...
+python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r4_accounting diff <case dir A> <case dir B>
 ```
-Job scripts: `~/glm53-flash-bringup/scripts/s3r_{main,trials,s5,follow1..4,bisect,refs2,tracy,p14}.sh`.
+Job scripts: `~/glm53-flash-bringup/scripts/s3r_{main,trials,s5,follow1..4,bisect,refs2,tracy,p14}.sh`, `s3r3_{a,one}.sh`,
+`s3r4_{one,phase1,phase2,phase3}.sh` (copies in `logs_r4/`).

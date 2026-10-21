@@ -167,3 +167,22 @@ kda8_exp4_lofi_pc 12111 µs.
 - `sinkhorn_faces` and the role specs `kda_out` / `shared_gu` / `shared_dn` taken; `dsa_q_mm` rejected on one die
   (TT_FATAL num_blocks_total <= num_cores at 64 heads); `kda_conv_op_max_rows` 16; KDA prefill HiFi2 rejected (L0 scale).
 - `test_single_slot_decode[kind]` added (1-slot layers; the 8-slot suite missed the 1-slot dsa_q_mm failure).
+
+## 2026-10-20 .. 2026-10-21: review #4
+
+- Device rules: one decisive case per run-locked ticket, QPRIO unset, `systemd-run --user`. Each ticket runs on its own
+  snapshot (git archive of HEAD + the stage-3 files of the live tree; md5s in `logs_r4/s3r4.status.log`). Script
+  `~/glm53-flash-bringup/scripts/s3r4_one.sh`. HEAD moved several times during the work (other stages committed);
+  only stage 6-10 files changed, so each snapshot base is logged per ticket.
+- `dsa_q_mm` on one die: the program was built for 32 rows (TP4 Hq). `SingleDieDSA` (in `tt/optimized_decoder.py`)
+  builds it for Hq = 64 rows. The first A/B run then hit a segfault in tilize: `MultichipDSA._sparse_attend` frees the
+  op output after a full-range slice, which on one die is the same tensor. `SingleDieDSA._sparse_attend` handles the
+  1-slot row-major query without that slice.
+- A/B (`tools/s3r4_ab.py`): every variant bit-identical. First default took all four options. The suite passed except
+  `test_policy_reached_weights` (my test edit put the MoE check inside the DSA block); fixed, rerun 48 / 48.
+- Tracy of that default (dsa_moe 1 user) showed the `dsa_q_mm` q path at 92.1 µs against 82.9 µs. `dsa_q_mm` was turned
+  off in the default (candidate `t_r4` keeps it). The suite, the watcher subset, B=1 watcher decode and the 1-user
+  dsa_moe Tracy were rerun on the final default. The earlier runs are kept (`*_qmm` logs, `watcher_correctness_r4_qmm/`,
+  `candidates_r4/t_r4/`).
+- KDA prefill HiFi2 per layer kind taken (KDA + MoE only).
+- 128-row prefill Tracy cases were dropped to save device time on the shared queue (stage 9 had priority).

@@ -89,10 +89,15 @@ def test_policy_reached_weights(mesh, rd):
             dec = _suite.get_layer(mesh, rd, _suite.KINDS[kind])
             assert dec._norm_sharded, kind
             if dec.attn_kind == "dsa":
-                assert type(dec.attn).__name__ == "MultichipDSA" and dec.attn.mc.dsa_pack, kind
+                assert type(dec.attn).__name__ == "SingleDieDSA" and dec.attn.mc.dsa_pack, kind
+                # review #4: the one-die DSA decode options of the policy
+                assert dec.attn.mc.dsa_q_mm == bool(_opt.dsa_q_mm_ib) and dec.attn.q_mm_rows == bool(_opt.dsa_q_mm_ib)
+                assert (dec.attn.head_split, dec.attn.qi_rm) == (_opt.sdpa_head_split, _opt.qi_rm), kind
                 if _opt.prefill_cfg:
                     assert dec.attn.flash_prefill_pc is not None and dec.attn.prefill_o_2d, kind
                     assert dec.attn.bmm_prefill_pm == 0, "per-head prefill reuse config must stay off"
+            if dec.mlp_kind == "moe":
+                assert ("_route_sigmoid_bias" in vars(dec.mlp)) == _opt.route_rm, kind
             if _opt.single_die_r2:
                 import os as _os
 
@@ -105,6 +110,12 @@ def test_policy_reached_weights(mesh, rd):
                 assert os.environ.get("MHC_SINKHORN_FACES") == "1" and dec.mc.sinkhorn_faces, kind
             if _opt.single_die_specs:
                 assert dec.mc.kda_out and dec.mc.shared_gu and dec.mc.shared_dn, kind
+            if dec.attn_kind == "kda":  # review #4: KDA prefill fidelity per layer kind
+                want = _opt.kda_prefill_fidelity if dec.mlp_kind in _opt.kda_prefill_kinds else None
+                for p in dec.attn._prefill.values():
+                    got = p.input_projection_compute_config
+                    assert want is None or got.math_fidelity == want, (kind, got.math_fidelity, want)
+                    assert want is not None or got.math_fidelity == ttnn.MathFidelity.HiFi4, (kind, got.math_fidelity)
             print(f"{kind}: single-die options active ({type(dec.attn).__name__}, {type(dec.mlp).__name__})")
 
 
@@ -138,6 +149,40 @@ def test_single_slot_decode(mesh, rd, kind):
             y[100 + i],
             margin=ref.row_margin(100 + i),
             y_alt=ref.alt(100 + i),
+        )
+    runner.release()
+    del dec
+
+
+def test_single_slot_sparse_decode(mesh, rd):
+    """Review #4: a 1-slot dsa_moe decoder in the sparse-attention regime (positions past 2047: the indexer top-k
+    selection feeds sparse_sdpa). Runs the 1-slot DSA paths of the policy (dsa_q_mm, the sparse_sdpa head split) on
+    the test_lengths[dsa_moe-4000] sequence (cached HF reference): prefill 4000 rows in slot 0, then eager + traced
+    decode at positions 4000 .. 4002, against HF on the quantization-aware reference."""
+    from models.autoports.zai_org_glm_5_3_flash.tests.harness import DecodeRunner, build_layer, prefill_user
+
+    layer, n = _suite.KINDS["dsa_moe"], 4000
+    for k in list(_suite._LAYERS):  # one layer resident (DRAM)
+        del _suite._LAYERS[k]
+    dec = build_layer(mesh, rd, layer, "real", batch=1, decoder_cls=_suite.DECODER_CLS)
+    ref = _suite.reference(layer, "real", 1000 + n, n, 3)  # the request of test_lengths[dsa_moe-4000]
+    x, y = ref
+    out = prefill_user(dec, mesh, x, n, 0)
+    _suite.check(f"L{layer} 1-slot prefill {n}", out, x[:n], y[:n])
+    runner = DecodeRunner(dec, mesh, 1)
+    for i in range(3):
+        if i == 0:
+            o = runner.eager_step({0: x[n]}, [n])[0]
+            runner.capture({0: x[n + 1]}, [n + 1])
+        else:
+            o = runner.traced_step({0: x[n + i]}, [n + i])[0]
+        _suite.check(
+            f"L{layer} 1-slot sparse decode pos {n + i}",
+            o,
+            x[n + i],
+            y[n + i],
+            margin=ref.row_margin(n + i),
+            y_alt=ref.alt(n + i),
         )
     runner.release()
     del dec
