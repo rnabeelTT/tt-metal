@@ -1,0 +1,114 @@
+=== step c_probe_s8_shard start Wed Oct 21 01:43:36 PM UTC 2026: env GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=8 GLM53_DEALLOC_CHECK=1 python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py
+2026-10-21 13:43:38.068 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s4r3_snap
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... 2026-10-21 13:43:38.272 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/glm53-flash-bringup/s4r3_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+collected 7 items
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host 2026-10-21 13:43:39.408 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:__init__:358 - generator plan: {'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True}
+2026-10-21 13:43:39.442 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-21 13:43:41.090 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 13:43:41.209 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 0 (kda/dense) loaded in 0.3s
+2026-10-21 13:43:42.618 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 13:43:42.715 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 3 (dsa/moe) loaded in 1.5s
+2026-10-21 13:43:42.819 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 13:43:44.153 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 13:43:44.209 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 4 (kda/moe) loaded in 1.5s
+2026-10-21 13:43:44.216 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:_install_inactive_skip:316 - inactive-row MoE skip: True
+2026-10-21 13:43:44.270 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.serving_state:install_lockstep_sampling:80 - sampler lockstep installed on 4 dies (fresh identical seeds every draw, die-0 token broadcast)
+2026-10-21 13:43:44.270 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 4.9s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 58 hits, 0 stored)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+2026-10-21 13:43:48.314 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.dsa_buckets:warm:283 - decode buckets: DSA widths None (contexts None), prefill views [] blocks; warm plans []; MoE row buckets [1, 2, 4, 8] paths {1: 'pairs', 2: 'pairs', 4: 'pairs'} on 2 layers
+2026-10-21 13:43:48.462 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.dsa_buckets:capture:472 - decode buckets: decode captured as 3 segments + 0 DSA x 0 + 2 MoE x 4 point traces, 5.4 MiB of trace region
+2026-10-21 13:43:48.470 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:_warm:517 - decode traces captured (model + sampler variants); prefill traces []
+2026-10-21 13:43:48.477 | INFO     | conftest:expect_error_:960 - [EXPECTED_ERROR BEGIN] ValueError message="cache is full"
+2026-10-21 13:43:48.477 | INFO     | conftest:expect_error_:965 - [EXPECTED_ERROR END] ValueError message="cache is full"
+probe generator plan {'layout': 'sharded', 'max_seq_len': 4096, 'dsa_shard': True} skip_inactive True
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager traced [56366, 100380, 91886, 49482, 91886, 4524] eager [56366, 100380, 91886, 49482, 91886, 4524]
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced S67R PTCHANGE {"slot": 1, "prompt_len": 250, "boundary": 256, "old_block": 34, "new_block": 63, "traced": {"tokens": [8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 94411, 29088], "copies_total": 1, "copies_on_unchanged_steps": 0, "new_block_rows_written": 2, "new_block_rows_nonzero": 2, "old_block_unchanged": true, "rows_written_expected": 2}, "eager": {"tokens": [8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 8957, 94411, 29088], "copies_total": 1, "copies_on_unchanged_steps": 0, "new_block_rows_written": 0, "new_block_rows_nonzero": 2, "old_block_unchanged": true, "rows_written_expected": 2}, "traced_vs_eager_min_pcc": 1.0, "traced_vs_eager_max_abs_diff": 0.0, "traced_vs_eager_top1_equal_steps": 12, "steps": 12, "pass": true}
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots S67R BATCH {"slots": [0, 5, 7], "lengths": [161, 300, 517], "steps": 8, "joint_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "5": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "7": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "same_prompt_two_slots": {"slots": [0, 7], "tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "same_prompt_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "mid_prefill": {"step": 2, "slot": 7}, "mid_prefill_others_vs_solo": {"0": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}, "5": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 8, "bit_identical_steps": 8, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 8}}, "mid_prefill_late_slot_vs_solo": {"tokens_equal": true, "first_token_divergence": null, "steps_compared": 6, "bit_identical_steps": 6, "min_pcc": 1.0, "max_abs_diff": 0.0, "top1_equal_steps": 6}, "texts": {"0": "_dimensioninezbreakbreakbreakbreakbreakbreakbreak", "5": "haulhaulhaulhaulhaulhaulhaulhaulhaul", "7": " dynamics complaintsUnload_specs complaints unload_specs complaints unload"}, "pass_tokens": true}
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation S67R SAMPLING {"slots": [0, 7], "prompt_len": 97, "alternating": [{"mode": "greedy", "tokens": [23658, 23658], "dies_agree": true, "greedy_eq_argmax": [true, true]}, {"mode": "topk", "tokens": [94411, 38090], "dies_agree": true, "in_topk": [true, true]}, {"mode": "greedy", "tokens": [66825, 38090], "dies_agree": true, "greedy_eq_argmax": [true, true]}, {"mode": "penalty", "tokens": [137575, 66825], "dies_agree": true, "in_topk": [true, true]}, {"mode": "topk", "tokens": [66825, 99407], "dies_agree": true, "in_topk": [true, true]}, {"mode": "greedy", "tokens": [38090, 8957], "dies_agree": true, "greedy_eq_argmax": [true, true]}, {"mode": "greedy", "tokens": [8957, 8957], "dies_agree": true, "greedy_eq_argmax": [true, true]}, {"mode": "topk", "tokens": [8957, 66825], "dies_agree": true, "in_topk": [true, true]}, {"mode": "greedy", "tokens": [66825, 38090], "dies_agree": true, "greedy_eq_argmax": [true, true]}, {"mode": "penalty", "tokens": [12175, 38090], "dies_agree": true, "in_topk": [true, true]}, {"mode": "topk", "tokens": [38090, 66825], "dies_agree": true, "in_topk": [true, true]}, {"mode": "greedy", "tokens": [8957, 38090], "dies_agree": true, "greedy_eq_argmax": [true, true]}], "greedy_steps_ok": true, "sampled_in_topk": true, "dies_agree_all_steps": true, "seed_reproduces": true, "seed_changes_draws": true, "seeded_tokens": [[[79675, 79675], [66825, 66825], [67404, 67404], [56366, 56366], [108958, 108958], [59505, 59505]], [[79675, 79675], [66825, 66825], [67404, 67404], [56366, 56366], [108958, 108958], [59505, 59505]], [[8957, 8957], [56366, 56366], [38090, 38090], [23658, 23658], [56366, 56366], [83459, 83459]]], "pass": true}
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees shared-buffer frees: {'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:853': 6, 'dsa_shard.py:411 <- dsa_shard.py:367 <- dsa.py:853': 12, 'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:971': 20, 'moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387': 8, '../../../../../../tt-metal/models/common/sampling/tt_sampling.py:1170 <- serving_state.py:69 <- ../../../../../../tt-metal/models/common/lightweightmodule.py:12': 25}
+FAILED2026-10-21 13:43:55.539 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(11))
+2026-10-21 13:43:55.539 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=True, log_probs=False, force_argmax=False, trace_id=MeshTraceId(12))
+
+
+=================================== FAILURES ===================================
+_________________________ test_no_shared_buffer_frees __________________________
+
+gen = <models.autoports.zai_org_glm_5_3_flash.tt.generator.Glm53Generator object at 0x7b28efcf21b0>
+
+    def test_no_shared_buffer_frees(gen):
+        """With GLM53_DEALLOC_CHECK=1 (set by the probe runs): no autoport tt/ module force-frees a buffer that a view still
+        uses (the decode-logits pad bug): every module under the autoport's tt/ (keys are paths relative to tt/). Sites in
+        other packages (models/common, ...) are reported, not failed (owned elsewhere)."""
+        from models.autoports.zai_org_glm_5_3_flash.tt import generator as G
+
+        if os.environ.get("GLM53_DEALLOC_CHECK") != "1":
+            pytest.skip("GLM53_DEALLOC_CHECK=1 not set")
+        gen.generate(list(range(3000, 3161)), 4)
+        print(f"shared-buffer frees: {G.SHARED_FREES}")
+        mine = {k: v for k, v in G.SHARED_FREES.items() if "/" not in k.split(":")[0]}  # any autoport tt/ module
+>       assert not mine, mine
+E       AssertionError: {'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:853': 6, 'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:971': 20, 'dsa_shard.py:411 <- dsa_shard.py:367 <- dsa.py:853': 12, 'moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387': 8}
+E       assert not {'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:853': 6, 'dsa_shard.py:411 <- dsa_shard.py:367 <- dsa.py:853': 12, 'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:971': 20, 'moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387': 8}
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py:182: AssertionError
+=============================== warnings summary ===============================
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+- generated xml file: /home/raahem/glm53-flash-bringup/s4r3_snap/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+10.20s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+3.10s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+1.86s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+1.56s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+0.40s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.23s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+0.08s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.04s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+0.01s call     models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+0.00s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+0.00s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+=========================== short test summary info ============================
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees - AssertionError: {'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:853': 6, 'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:971': 20, 'dsa_shard.py:411 <- dsa_shard.py:367 <- dsa.py:853': 12, 'moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387': 8}
+assert not {'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:853': 6, 'dsa_shard.py:411 <- dsa_shard.py:367 <- dsa.py:853': 12, 'dsa_shard.py:411 <- dsa_shard.py:360 <- dsa.py:971': 20, 'moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387': 8}
+=================== 1 failed, 6 passed, 2 warnings in 17.53s ===================
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+=== step c_probe_s8_shard exit code: 1 Wed Oct 21 01:43:58 PM UTC 2026

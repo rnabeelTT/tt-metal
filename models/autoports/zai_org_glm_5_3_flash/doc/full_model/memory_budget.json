@@ -150,13 +150,14 @@
   "bit_identity": "last-row logits of a 6221-token prefill (3 layers: flash + sparse chunks) bit-identical across MoE rows {0,1024,512} x index block {128,32,16} MB and at 1024-row chunks; one MoE layer's [2048,4096] output bit-identical at 1024 / 512 rows (reduced_probe.json)"
  },
  "path_to_1M": {
+  "status_2026-10-21": "DONE at 1 slot (stage-4 review #3 update). The fp8 e4m3 block-sharded latent (default precision combo_a_kv_dense4_g4 + GLM53_DSA_SHARD=1; 576-B rows) reaches 1,048,576 tokens at 1 slot: 11 x (576 / 4 + 64) = 2,288 B per token per die, copy 24/24 (doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576; doc/context_contract.json dsa_block_sharded_fp8; serving profile p300x2-1m). The entries below are the stage-6 / stage-4 plan with the bf16 latent (GLM53_PRECISION=none); 'not implemented' and 'sharded pool keys too' are corrected in place.",
   "today": "the latent pool (and pool keys) is replicated on all 4 dies: 11,968 B per token per die",
   "sequence-sharded latent": "blocks of the paged pool distributed over the 4 dies (block b on die b % 4): 2,992 B per token per die -> ~4x tokens (~420K at 1 slot with today's free DRAM). Decode: each die runs the indexer on its own pool keys, all-gathers its top candidates (512 x 4 scores), selects the global top-512 pools, attends its local share of the selected tokens and returns (o, lse) partials; one cross-die LSE combine per DSA layer (the flash-decode merge). Prefill: the chunk's latent rows scatter to their home die; sparse_sdpa on per-die index lists + the same LSE merge. Cost: two small CCLs per DSA layer per step.",
   "plus bfp8 latent (TILE, 544 B vs 1024 B per row)": "1,672 B per token per die with sharding -> ~760K tokens",
   "plus host embedding lookup (frees 317 MB per die) and the prefill workspace trims of this stage": "~1.0M tokens at 1 slot (1,048,576 x 1,672 B = 1.75 GB per die)",
-  "not implemented": "pool-key sharding, bfp8 / fp8 latent, host embedding lookup",
+  "not implemented": "pool-key sharding, host embedding lookup. The fp8 e4m3 latent is implemented (stage 8, both layouts); bfp8 is a tile format that sparse_sdpa cannot read as K rows",
   "block-sharded latent (implemented, stage-4 review #1)": "MCOpts.dsa_shard / GLM53_DSA_SHARD=1 (tt/dsa_shard.py): global block b on die b % 4, 544-wide rows (latent + control columns for the cross-die softmax merge), pool keys / indexer / top-512 replicated: 3,696 B per token per die (473,088 B per 128-token block over 11 layers). Measured 1-slot capacity probe: 2199 blocks, 281,283-token prompt + 24 decode steps, copy 24/24, 335 MB free at the prefill peak (doc/multichip_decoder/dsa_shard/capacity/). Cost: decode +~0.41 ms per DSA layer per step.",
-  "sharded pool keys too": "2,992 B per token per die (+24 % tokens): needs a distributed top-512 (candidate all-gather + top-k); not implemented"
+  "sharded pool keys too": "11 x (544 x 2 / 4 + 64 / 4) = 3,168 B per token per die with the bf16 rows (+16.7 % tokens against 3,696 B; the earlier 2,992 B / +24 % left out the sharded pool keys); 11 x (576 / 4 + 16) = 1,760 B with the fp8 rows. Needs a compact per-die pool numbering and a merge top-k (doc/context_contract.json dsa_block_sharded_fp8.pool_key_sharding_a); not implemented, not needed for 1,048,576 at 1 slot"
  },
  "dsa_bytes_per_token_block_sharded": 3696.0
 }

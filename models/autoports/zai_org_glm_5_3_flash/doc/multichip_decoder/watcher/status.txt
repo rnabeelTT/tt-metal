@@ -1,9 +1,25 @@
 # stage-6/7 rework watcher runs on the final snapshot (HEAD 656c998e3df + rework files), TT_METAL_WATCHER=10,
-# TT_METAL_WATCHER_DISABLE_ETH=1, GLM53_WORKER_L1_SIZE=1444864. Earlier runs (2026-10-18 morning, earlier rework
-# snapshots) aborted with rc=134 and no watcher finding; they are superseded; logs in ~/glm53-flash-bringup/logs/s67r/.
-# Scope: Ethernet cores NOT watched (TT_METAL_WATCHER_DISABLE_ETH=1; with them watched, runs died at teardown with
-# "Timed out while waiting for active ethernet core 29-25"). Workloads are reduced-model / single-layer tests
-# (w_full_*: layers 0 / 3 / 4, tools/s67r_checks.py --do batch,chunkplan; shard_*: tests/test_dsa_shard.py cases).
+# TT_METAL_WATCHER_DISABLE_ETH=1, GLM53_WORKER_L1_SIZE=1444864. Earlier runs (2026-10-18 morning and afternoon,
+# Ethernet cores watched, earlier rework snapshots) aborted with rc=134 after the test PASSED; they are superseded;
+# logs in ~/glm53-flash-bringup/logs/s67r/ and the first part of each <case>/console.log. Two teardown forms
+# (doc/optimized_multichip_decoder/README.md, Watcher): shard_b1 13:08 = form (ii), the watcher tripped an assert on
+# eth core (0, 9) / virtual (29, 25) ("subordinate_erisc detected invalid NOC command buffer state",
+# fabric_erisc_router.cpp) after the test output; shard_batch32_dsa_moe 14:3x and shard_lengths_dsa_moe_2051 15:3x =
+# form (i), "Timed out while waiting for active ethernet core 29-25". No finding in a model kernel or a collective.
+# Scope: Ethernet cores NOT watched (TT_METAL_WATCHER_DISABLE_ETH=1). Workloads are single-layer tests:
+# shard_b1 = tests/test_dsa_shard.py::test_shard_matches_replicated[b1]; shard_batch32_dsa_moe and
+# shard_lengths_dsa_moe_2051 = tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] and
+# ::test_lengths[dsa_moe-2051] with GLM53_DSA_SHARD=1. GLM53_PRECISION unset: the test modules pin "none" (bf16 latent).
 watcher shard_b1 rc=0 suspicious_lines=0 Sun Oct 18 09:22:11 PM UTC 2026
 watcher shard_batch32_dsa_moe rc=0 suspicious_lines=0 Sun Oct 18 09:24:40 PM UTC 2026
 watcher shard_lengths_dsa_moe_2051 rc=0 suspicious_lines=0 Sun Oct 18 09:26:43 PM UTC 2026
+# stage-4 review #3 (2026-10-21, ~/glm53-flash-bringup/scripts/s4r3_job.sh, ONE ticket on a pure `git archive HEAD`
+# snapshot of 51997a179ba, md5s in ../dsa_shard/s4r3_job.log; same watcher settings; GLM53_PRECISION =
+# doc/datatype_sweep/selected_precision_config.json, the fp8 e4m3 latent). The watcher logs are <case>/watcher.log.gz.
+# shard_fp8_b1 = tests/test_dsa_shard.py::test_shard_matches_replicated[b1]; shard_fp8_batch32_dsa_moe =
+# GLM53_DSA_SHARD=1 tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]. The second test FAILED on its
+# HF accuracy bars (slot 13 pos 300 delta PCC 0.993068 < 0.995; y_swap cap at teardown). Its bars are for the stage-7
+# policy, and the module pins GLM53_PRECISION=none for that reason. This is not a watcher finding: the process closed
+# with rc=1 (test result), no tripped assert.
+watcher shard_fp8_b1 rc=0 suspicious_lines=0 Wed Oct 21 01:40:12 PM UTC 2026
+watcher shard_fp8_batch32_dsa_moe rc=1 (test failed: HF bars, stage-7 policy) suspicious_lines=0 Wed Oct 21 01:46:41 PM UTC 2026

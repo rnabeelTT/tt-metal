@@ -1,0 +1,81 @@
+=== start Wed Oct 21 01:38:53 PM UTC 2026 : timeout -k 60 7800 /home/raahem/glm53-flash-bringup/scripts/s4r3_job.sh
+snapshot 51997a179ba6623d3de1f4f75bbb36394f95790f (pure git archive HEAD)
+md5check models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/generator.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/__init__.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/kda.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/mhc.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/mlp.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/model.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/precision.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json: OK
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 a12853e1449d78c62a6da08856a9c1e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 83750f1d9f44c6a244046a522024ccbc  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 db1beb810482092fd11f9b3edc3ee67c  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 9b06feb1a5fc715e1d686371fcaee5ea  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 3bda6fd3efeec9bc16caf6b2de3ebfda  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+md5 4daba726e0bd451d3e6f071106e102fe  models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py
+md5 a2abc366f15885e0e401ecd371fbdb70  models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py
+md5 d645ece94a4ac37b8359fa5af6de3f99  models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py
+md5 44fd9de04add8d260d1b9fbec67c76dd  models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json
+2026-10-21 13:38:54.895 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+imports /home/raahem/glm53-flash-bringup/s4r3_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+=== step a_watch_fp8_b1 start Wed Oct 21 01:38:55 PM UTC 2026: env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_WATCHER_DISABLE_ETH=1 TT_METAL_LOGGER_LEVEL=Warning GLM53_PRECISION=/home/raahem/glm53-flash-bringup/s4r3_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json TT_METAL_LOGS_PATH=/home/raahem/glm53-flash-bringup/logs/s4r3/watcher/shard_fp8_b1 python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py::test_shard_matches_replicated[b1]
+=== step a_watch_fp8_b1 exit code: 0 Wed Oct 21 01:40:12 PM UTC 2026
+reset rc=0 Wed Oct 21 01:40:55 PM UTC 2026
+watcher shard_fp8_b1 suspicious_lines=0
+NA
+=== step b_dsa_shard_bf16 start Wed Oct 21 01:40:55 PM UTC 2026: python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_shard.py
+=== step b_dsa_shard_bf16 exit code: 0 Wed Oct 21 01:42:53 PM UTC 2026
+reset rc=0 Wed Oct 21 01:43:36 PM UTC 2026
+=== step c_probe_s8_shard start Wed Oct 21 01:43:36 PM UTC 2026: env GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=8 GLM53_DEALLOC_CHECK=1 python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py
+=== step c_probe_s8_shard exit code: 1 Wed Oct 21 01:43:58 PM UTC 2026
+reset rc=0 Wed Oct 21 01:44:40 PM UTC 2026
+=== step c_probe_s1_shard start Wed Oct 21 01:44:40 PM UTC 2026: env GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=1 GLM53_DEALLOC_CHECK=1 python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py
+=== step c_probe_s1_shard exit code: 1 Wed Oct 21 01:44:58 PM UTC 2026
+reset rc=0 Wed Oct 21 01:45:41 PM UTC 2026
+=== step d_watch_fp8_batch32 start Wed Oct 21 01:45:41 PM UTC 2026: env GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_WATCHER_DISABLE_ETH=1 TT_METAL_LOGGER_LEVEL=Warning GLM53_PRECISION=/home/raahem/glm53-flash-bringup/s4r3_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json GLM53_DSA_SHARD=1 TT_METAL_LOGS_PATH=/home/raahem/glm53-flash-bringup/logs/s4r3/watcher/shard_fp8_batch32_dsa_moe python -m pytest -sv -p no:cacheprovider models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+=== step d_watch_fp8_batch32 exit code: 1 Wed Oct 21 01:46:41 PM UTC 2026
+reset rc=0 Wed Oct 21 01:47:24 PM UTC 2026
+watcher shard_fp8_batch32_dsa_moe suspicious_lines=0
+NA
+=== exit code: 0 Wed Oct 21 01:47:24 PM UTC 2026

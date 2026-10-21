@@ -1,0 +1,10 @@
+a_watch_fp8_b1 rc=0 Wed Oct 21 01:40:12 PM UTC 2026
+watcher shard_fp8_b1 suspicious_lines=0
+NA
+b_dsa_shard_bf16 rc=0 Wed Oct 21 01:42:53 PM UTC 2026
+c_probe_s8_shard rc=1 Wed Oct 21 01:43:58 PM UTC 2026
+c_probe_s1_shard rc=1 Wed Oct 21 01:44:58 PM UTC 2026
+d_watch_fp8_batch32 rc=1 Wed Oct 21 01:46:41 PM UTC 2026
+watcher shard_fp8_batch32_dsa_moe suspicious_lines=0
+NA
+ALLDONE Wed Oct 21 01:47:24 PM UTC 2026

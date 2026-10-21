@@ -4,10 +4,37 @@ Stage 4 of the tt-model-bringup flow. `tt/multichip_decoder.py` (`MultichipDecod
 (`tt/optimized_decoder.py`) on a (1, 4) mesh: p300x2, 4 Blackhole dies, FABRIC_1D. Contract, state, paging and
 semantics are those of `tt/functional_decoder.py`.
 
-The stage-4 path is `MCOpts()` (every stage-5 option off, linear topology), selected with
+The stage-4 runs in this README use
 `GLM53_MC="topology=linear,ccl_l1=0,norm_sharded=0,dsa_pack=0,pack_a_1d=0,pack_b_1d=0,dsa_1d=0,router_1d=0,ds_shared=0,prefill_2d=0"`.
+`GLM53_MC` overrides fields of `DEFAULT_MC` (`MCOpts.from_env(mc or DEFAULT_MC)`). Thus this string gives `DEFAULT_MC`
+(of the run date) with these 10 fields off. It does not give `MCOpts()`: on the current code, the other 20 fields
+that `DEFAULT_MC` sets keep their `DEFAULT_MC` values (for example `packs_prefill_2d`, `prefill_2d_ffn`, the 1D
+program specs `kda_out` / `dsa_o` / `dsa_qb` / ..., `sinkhorn_faces`, `dsa_q_mm`, `kda_conv_op`, `moe_grouped_in0`).
+The complete string for `MCOpts()` on the current code is
+`GLM53_MC="topology=linear,ccl_l1=0,norm_sharded=0,dsa_pack=0,ds_shared=0,pack_b_1d=0,router_1d=0,pack_a_1d=0,dsa_1d=0,prefill_2d=0,packs_prefill_2d=0,pack_a_spec=,kda_out=,dsa_o=,dsa_qb=,dsa_wqb=,shared_gu=,shared_dn=,mlp_gu=,mlp_dn=,prefill_2d_ffn=0,sinkhorn_perm_fidelity=0,sinkhorn_faces=0,dsa_q_mm=0,dsa_q_mm_ib=8,dsa_tail_shared=0,mix_chunks_decode=0,kda_conv_op=0,kda_conv_max_batch=0,moe_grouped_in0=0"`
+(the fields where `DEFAULT_MC` differs from `MCOpts()`; no run in this README used it).
 The code default `DEFAULT_MC` is the stage-5 selection (`doc/optimized_multichip_decoder/README.md`). Exact commands,
 dated events and the review #1 rework are in `work_log.md`.
+
+## Review #3 corrections (2026-10-21)
+
+Stage-4 review #3 (`~/glm53-flash-bringup/artifacts/stage4_review_3.md`) found statements that later stages made
+false. Corrected in place:
+
+- The stage-4 `GLM53_MC` string (above): `DEFAULT_MC` with 10 fields off, not `MCOpts()`.
+- The KV / state table (Memory) applies to `GLM53_PRECISION=none` (stage-7 policy, bf16 latent). It now also has
+  the default-precision (stage-8, fp8 latent) values.
+- 1,048,576 tokens is not a hard DRAM limit. The fp8 block-sharded layout reaches it at 1 slot (fp8 rows, below).
+- Pool-key sharding gives 3,168 B per token for the bf16 rows (+16.7 %), not 2,992 B (+24 %); 1,760 B for the fp8
+  rows.
+- The decode cost of the block-sharded layout in the full model is +2.88 ms per token (measured), not the
+  "~4.6 ms" estimate from the one-layer A/B.
+- `serving_profiles.json` selects a DSA layout per profile since 3489dfefee2.
+- New evidence: the fp8 block-sharded rows under the watcher, the bf16 `test_dsa_shard.py` on the committed code,
+  and the committed sharded row check (`test_model_probe.py`, `GLM53_DSA_SHARD=1`) (Watcher; `dsa_shard/s4r3_*`).
+  The row check passes. The probe's shared-buffer-free check fails at `tt/dsa_shard.py:411` (benign, one-line fix in
+  frozen code, reported) and at a stage-10 MoE bucket site (Block-sharded DSA cache, review #3 re-runs).
+- The sink weight at prefill is not measured (Limitations).
 
 ## Review #1 corrections (2026-10-17)
 
@@ -142,16 +169,19 @@ matmul weights:
 | Embedding, LM head | 0.45 |
 | **Total** | **29.42 of 31.88** |
 
-KV / state contract per die (the measured stage-6 numbers are in `doc/full_model/memory_budget.json`):
+KV / state contract per die (the measured stage-6 numbers are in `doc/full_model/memory_budget.json`). The first two
+columns are the stage-4 measurements with `GLM53_PRECISION=none` (the stage-7 policy: bf16 latent, bfp8 projections).
+The last two columns are the default precision since stage 8 (`combo_a_kv_dense4_g4`, fp8 e4m3 latent;
+`doc/context_contract.json` `dsa_block_sharded_fp8`, `replicated_default_layout`):
 
-| Item | Replicated cache (default) | Block-sharded cache (`dsa_shard`) |
-|---|---|---|
-| DSA latent per token, all 11 DSA layers | 11 x 1024 = 11,264 B | 11 x 544 x 2 / 4 = 2,992 B |
-| DSA pool keys per token (replicated) | 11 x 64 = 704 B | 704 B |
-| **DSA cache per token per die** | **11,968 B** | **3,696 B** |
-| KDA state per slot (34 layers, 16 heads, fp32) | 35.65 MB (+ 1 padding slot at max_batch 1) | same |
-| Weights + model-level tensors after load (measured, 1 slot) | 32.12 GB of 34.18 GB | same |
-| Largest 1-slot context (full-model capacity probe) | 104,448 (stage 6) | **281,344** (2199 blocks; 281,283-token prompt + 24 decode steps, copy 24/24) |
+| Item | Replicated, `none` (bf16) | Block-sharded, `none` (bf16) | Replicated, default (fp8) | Block-sharded, default (fp8) |
+|---|---|---|---|---|
+| DSA latent per token, all 11 DSA layers | 11 x 1024 = 11,264 B | 11 x 544 x 2 / 4 = 2,992 B | 11 x 512 = 5,632 B | 11 x 576 / 4 = 1,584 B |
+| DSA pool keys per token (replicated) | 11 x 64 = 704 B | 704 B | 704 B | 704 B |
+| **DSA cache per token per die** | **11,968 B** | **3,696 B** | **6,336 B** | **2,288 B** |
+| KDA state per slot (34 layers, 16 heads, fp32) | 35.65 MB (+ 1 padding slot at max_batch 1) | same | same | same |
+| Weights + model-level tensors after load (measured, 1 slot) | 32.12 GB of 34.18 GB | same | 3.14 GB free after load | same |
+| Largest 1-slot context (full-model capacity probe) | 104,448 (stage 6) | **281,344** (2199 blocks; 281,283-token prompt + 24 decode steps, copy 24/24) | 325,632 (stage 8/9; 337,920 fails) | **1,048,576** (`dsa_shard/capacity/fp8_s1_1048576`; copy 24/24) |
 
 ## Block-sharded DSA cache (`MCOpts.dsa_shard`, `GLM53_DSA_SHARD=1`)
 
@@ -167,8 +197,10 @@ Design (the paged-pool API is unchanged: GlmDSA page tables / vLLM block tables 
   and SINK.
 - The pooled index keys (64 B of the 1088 B per token per layer), the indexer, the top-512 pool selection and the
   open-pool state stay replicated: the index list of every query row is the replicated layout's list on every die,
-  and needs no collective (no distributed top-k). Sharding them too would give 2,992 B per token per die (+24 %
-  capacity) at the cost of a candidate all-gather + top-k per DSA layer.
+  and needs no collective (no distributed top-k). Sharding them too would give 11 x (544 x 2 / 4 + 64 / 4) =
+  3,168 B per token per die for the bf16 rows (+16.7 % capacity against 3,696 B), and 1,760 B for the fp8 rows
+  (against 2,288 B), at the cost of a candidate all-gather + top-k per DSA layer. Not implemented (see the end of
+  "fp8 rows").
 - Each die maps the logical index list through its own page table: owned blocks -> local block, other blocks -> NULL;
   the indexer-overrun column -> SINK. Every list gets a 32-entry prefix [SINK, 31 x NULL].
 - Rows are 544 wide: the latent and 32 control columns. Real rows carry 1 in column 512 (ONE), the SINK row 1 in
@@ -181,7 +213,8 @@ Design (the paged-pool API is unchanged: GlmDSA page tables / vLLM block tables 
   cancellation) -> reduce-scatter (sum, fp32) of T and M over the head groups -> o_lat = sum T / sum M on the die's
   16 heads -> W_UV and o_proj as before. Prefill rows run in blocks of `GLM53_DSA_SHARD_ROWS` (256).
 - Torch model of the merge (bf16 kernel outputs, 2051 keys spread over 4 dies): relative error 1.8e-3, the bf16
-  rounding of the kernel output itself (PCC 0.9999985).
+  rounding of the kernel output itself (PCC 0.9999985). Script: `tools/dsa_shard_merge_model.py` (host only; seed 0
+  gives 1.83589e-3 and 0.999998510).
 
 Validation (`dsa_shard/`; layer 3 = DSA + MoE, real weights, (1, 4) mesh, `DEFAULT_MC` + `dsa_shard`):
 
@@ -199,16 +232,22 @@ after load 1,984,045,568 B per die -> 2199 blocks at 473,088 B per block (measur
 traced decode capture -> one **281,283-token** prompt (non-aligned) prefilled in 426.9 s -> 24 traced greedy decode
 steps at positions 281,283 .. 281,306 copied the repeated natural-text passage 24/24. Peak 33,776,889,856 of
 34,111,622,144 B allocatable (335 MB free; 2.69x the replicated 104,448). The 335 MB of headroom suggests ~+40K more
-tokens with a smaller workspace (not probed). The advertised 1,048,576 tokens need 3.9 GB of DSA cache per die even
-sharded, against ~1.25 GB available after weights: a hard DRAM limit at this weight precision; the next steps
-(pool-key sharding: 2,992 B per token; a bfp8 / fp8 latent; host embedding lookup) are in
-`doc/full_model/memory_budget.json` `path_to_1M`. The bfp8 / fp8 latent was not attempted: `sparse_sdpa`'s FP8 formats
-would also carry the merge's control columns in fp8 (SCALED_FP8 puts only v_dim latent columns in the output), and the
-accuracy of an e4m3 latent is unmeasured.
+tokens with a smaller workspace (not probed).
+
+Superseded (2026-10-20): this paragraph first said that 1,048,576 tokens is a hard DRAM limit (3.9 GB of bf16 DSA
+cache per die even sharded, against ~1.25 GB available) and that a bfp8 / fp8 latent was not attempted. That applies
+only to the bf16 latent (`GLM53_PRECISION=none`). With the default precision, the fp8 e4m3 block-sharded layout
+reaches **1,048,576 tokens at 1 slot** (2,288 B per token per die; `dsa_shard/capacity/fp8_s1_1048576`, copy 24/24;
+see "fp8 rows" below). The fp8 rows keep the merge's control columns exact (ONE / SINK = 1.0, KILL split between key
+and query). `doc/full_model/memory_budget.json` `path_to_1M` has the updated steps.
 
 Cost (A/B wall time, one layer, host-synchronized traced replay): decode 1 slot 1730 -> 2152 µs (+422 µs, +24 %), 8
-slots 3154 -> 3563 µs (+409 µs) per DSA layer per step: about 4.6 ms per token over 11 DSA layers (~+8 % of a 1-user
-step of ~57 ms). The added work per DSA layer: an all-gather of the 16 local heads' extended queries, `sparse_sdpa` on
+slots 3154 -> 3563 µs (+409 µs) per DSA layer per step. The first estimate from these numbers was about 4.6 ms per
+token over 11 DSA layers. The measured full-model cost is lower: +2.88 ms per token (fp8 rows, 1 slot, 16K:
+52.82 ms in `dsa_shard/fp8/tf_shard/record.json` vs 49.94 ms replicated in
+`doc/datatype_sweep/runs/final_default_h9/record.json`, `tokenout_ms`; "fp8 rows" below). The comment at `tt/generator.py:147`
+(`LAYOUTS`) still says "+~4.6 ms"; the code is frozen, and the measured value is the one in this README.
+The added work per DSA layer: an all-gather of the 16 local heads' extended queries, `sparse_sdpa` on
 64 heads instead of 32 (padded), two reduce-scatters and ~25 small element-wise / layout ops. Prefill (wall incl. host
 I/O, first-use compiles on both sides): 9001 tokens 3.25 -> 2.93 s, 6001 tokens 1.72 -> 1.75 s: within noise at these
 lengths (not separately profiled with Tracy). Memory: the latent pool of the 8-slot test layer
@@ -258,8 +297,9 @@ to the decisive jobs.
 Decision: the default stays replicated because it is faster. The block-sharded fp8 layout is the long-context
 layout. Recommended long serving profile: 1 slot, `max_model_len` 1,048,576, `GLM53_DSA_SHARD=1`, 600 MiB workspace
 (`GLM53_DRAM_RESERVE_MIB=600` for the standalone generator), `GLM53_MOE_SORTED_ROWS=512`,
-`GLM53_DSA_INDEX_BLOCK_MB=32`. `serving_profiles.json` and the vLLM adapter do not yet select a DSA layout per profile
-(stage 9 / 10).
+`GLM53_DSA_INDEX_BLOCK_MB=32`. Since 3489dfefee2 (stage 9), `serving_profiles.json` selects the DSA layout per
+profile: `layouts.sharded` (this layout and settings) is used by the profile `p300x2-1m` (1 slot, `max_model_len`
+1,048,576). The other profiles stay replicated.
 
 Pool-key sharding (option (a), 11 x (576 / 4 + 16) = 1,760 B per token) is not implemented. `indexer_score_dsa` scores
 the full key length of its view (`indexer_score_device_operation.cpp:95-99`). Thus every die must hold a
@@ -309,6 +349,31 @@ must meet PCC 0.999 and |rms ratio - 1| <= 0.005. Final runs (2026-10-18 00:2x .
 | Single-die compare, stage-4 options (`s4r_cmp_s4opts_final.log`) | passed: 0.999803 .. 0.999996 (kda_moe decode near-tie row set aside), rms 0.99838 .. 1.00141 |
 | Sharded DSA cache A/B (`dsa_shard/s4r_shard_ab_final.log`) | 2 passed: attention output worst PCC 0.999908, worst rms deviation 0.0034 |
 | Suite DSA cases + single-die compare, sharded cache (`dsa_shard/s4r_shard_suite_final.log`) | **17 passed**; dsa_moe vs single die 0.999910 .. 0.999977 |
+
+Review #3 re-runs on the committed code (2026-10-21 13:38 .. 13:47, ONE device ticket, pure `git archive HEAD`
+snapshot of 51997a179ba, md5s in `dsa_shard/s4r3_job.log`, script `dsa_shard/s4r3_job.sh`):
+
+| Run | Result |
+|---|---|
+| `tests/test_dsa_shard.py`, bf16 (module default `GLM53_PRECISION=none`; first run since the 675a8b1bed9 refactor; `dsa_shard/s4r3_b_dsa_shard_bf16.log`) | **2 passed**. Attention output worst PCC 0.999908 (8 slots) / 0.999924 (1 slot), worst \|rms ratio - 1\| 0.00344 / 0.00248, the same as the review #1 run. 2 layer-update near-tie keys per case with a matching attention output |
+| `test_dsa_shard.py[b1]`, fp8, watcher (`dsa_shard/s4r3_a_watch_fp8_b1.log`) | **passed**, 0 suspicious watcher lines (Watcher) |
+| `GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=8 GLM53_DEALLOC_CHECK=1 tests/test_model_probe.py` (layers 0 / 3 / 4, default fp8 policy; `dsa_shard/s4r3_c_probe_s8_shard.log`) | **6 passed, 1 failed**. The row check `test_decode_inputs_match_host` (every die's row_idx == `_decode_local_rows`) passed, and so did traced == eager, token feedback, page-table change, batch slots and sampling alternation. Failed: `test_no_shared_buffer_frees` (below) |
+| Same, `GLM53_PROBE_SLOTS=1` (`dsa_shard/s4r3_c_probe_s1_shard.log`) | **5 passed, 1 skipped, 1 failed**: the same `test_no_shared_buffer_frees` |
+
+`test_no_shared_buffer_frees` failures (the debug mode records each `ttnn.deallocate` that would free storage that
+another tensor still references):
+
+- `dsa_shard.py:411 <- dsa_shard.py:360 / 367 <- dsa.py:853 / 971` (8 slots: 38 calls, 1 slot: 34 calls). This is
+  `ttnn.deallocate(q_rm0)` in `_shard_attend`, while `q_rm = ttnn.reshape(q_rm0, ...)` (a view) is still a live
+  Python object. `q_rm` is not used after `sparse_sdpa`, so no op reads freed memory: the result is benign, but it
+  breaks the probe's rule. The fix is one line (for example `del q_rm` before the deallocate). It is in frozen
+  `tt/` code: reported to the lead, not changed here. This site was not found earlier because the sharded probe of
+  2026-10-18 (`~/glm53-flash-bringup/logs/s67r/j1_probe_s8_shard.log`) ran before the dealloc check existed.
+- `moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387` (8 slots only, 8 calls): the stage-10 MoE active-count
+  bucket path. The same site fails the replicated stage-6 probe on 0a2663d0b6b. It is a stage-10 defect (stage 10 owns
+  the fix), not a layout defect.
+
+After the stage-10 fix and the `dsa_shard.py:411` fix land, the two probe runs are to be repeated.
 
 **History.** `doc/multichip_decoder/s4_suite.log` (2026-10-16, stage-4 code, pre-fp32-fix kernels, bfp4 bar shift on
 the MoE layers): 44 passed; update PCC vs single die 0.999782 .. 0.999992, rms ratio 0.99651 .. 1.00353; decode-mean
@@ -390,9 +455,33 @@ TP; stage 5 cuts the replicated projections and norms (`DEFAULT_MC`: dsa_moe 1 u
   `watcher/s4r_watcher.status`: **all 6 passed**, every `watcher/<case>/generated/watcher/watcher.log` has 0 lines
   matching error / assert / sanitize / overflow / exception / bad; the processes end with the same eth-core 29-25
   teardown timeout as stage 5 (watcher-only fabric teardown; the non-watcher suites close cleanly).
+- Block-sharded cache, bf16 latent (review #2 P2-2, 2026-10-18 21:2x; `watcher/status.txt`;
+  `TT_METAL_WATCHER_DISABLE_ETH=1`): `shard_b1` (`tests/test_dsa_shard.py::test_shard_matches_replicated[b1]`),
+  `shard_batch32_dsa_moe` and `shard_lengths_dsa_moe_2051` (`GLM53_DSA_SHARD=1`
+  `tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]` / `::test_lengths[dsa_moe-2051]`): **3 passed**,
+  rc 0, 0 suspicious watcher lines (`watcher/<case>/watcher.log.gz`). The first attempts of the same day, with the
+  Ethernet cores watched, ended with rc 134 after the test PASSED: `shard_b1` in form (ii) (erisc assert in
+  `fabric_erisc_router.cpp` on eth core (29, 25)), the other two in form (i) (eth core 29-25 timeout). The full-model
+  sharded run `w_full_s8_shard` is in `doc/optimized_full_model/watcher/`.
+- Block-sharded cache, fp8 latent (review #3 P2-2, 2026-10-21 13:3x; `GLM53_PRECISION` = the selected stage-8 config;
+  `dsa_shard/s4r3_job.log`): `shard_fp8_b1` (the same A/B test, fp8 in both layouts): **passed**, rc 0, 0 suspicious
+  lines; attention output worst PCC 0.999913, worst |rms ratio - 1| 0.00393. `shard_fp8_batch32_dsa_moe`
+  (`GLM53_DSA_SHARD=1 test_batch32_all_active[dsa_moe]`): 0 suspicious lines, no tripped assert, but the test
+  **failed** its HF accuracy bars (slot 13 pos 300: delta PCC 0.993068 < 0.995, HF router margin 7.1e-3; 2 y_swap
+  matches > cap 1). Classification: test-bar scope, not a watcher finding and not a layout finding. The
+  `test_multichip_decoder.py` HF bars and its quantization-aware reference are for the stage-7 policy (the module
+  pins `GLM53_PRECISION=none` for that reason), and the stage-8 policy adds bfp4 projections and the fp8 latent (update
+  rms ratios 0.994 .. 1.087 against HF in this run). The layout itself is checked at fp8 by the A/B test (same weights,
+  same precision, sharded vs replicated): passed here and in `dsa_shard/fp8/t1_test_dsa_shard_fp8.log`. Not run: the
+  same test with the replicated fp8 layout as a control.
 
 ## Limitations
 
 - The 1-user decode efficiency is 35 to 46 % (above). The stage-4 path is superseded by `DEFAULT_MC`.
 - The single-die compare covers single-chunk prefill (100 / 64 rows) and 3 eager B = 8 decode steps; traced decode,
   32-user decode, multi-chunk prefill and B = 1 are compared against HF only.
+- Block-sharded layout: the per-die sink weight w is measured at decode only. The 1M capacity probe has
+  `sink_stats_prefill: null` (`dsa_shard/capacity/fp8_s1_1048576/capacity.json`; eager decode: headroom >= 73.6
+  nats, no underflow). A prefill sink underflow (w = 0 in bf16 on a die whose share of the selected keys dominates)
+  is not measured. The prefill checks in `tests/test_dsa_shard.py` (attention output PCC >= 0.999 per prefill
+  sequence) and the teacher-forcing run (91 / 95 / 91) show no symptom, but they do not measure w.

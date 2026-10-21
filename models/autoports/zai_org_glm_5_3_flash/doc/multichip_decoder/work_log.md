@@ -18,6 +18,8 @@ Environment: `source ~/glm53-flash-bringup/env.sh` (`GLM53_CKPT`, `TT_METAL_HOME
 | Watcher (per case) | `GLM53_TP=4 GLM53_MC=<stage-4 options> GLM53_WORKER_L1_SIZE=1444864 TT_METAL_WATCHER=10 TT_METAL_WATCHER_NOINLINE=1 TT_METAL_LOGS_PATH=doc/multichip_decoder/watcher/<case> pytest -sv $T/test_multichip_decoder.py::<case>` |
 | Block-sharded DSA cache vs replicated | `GLM53_TP=4 pytest -sv -p no:cacheprovider $T/test_dsa_shard.py` |
 | Multichip suite DSA cases, sharded cache | `GLM53_TP=4 GLM53_DSA_SHARD=1 pytest -sv $T/test_multichip_decoder.py -k "dsa_moe or paged_permuted or single_die_baseline"` |
+| Block-sharded vs replicated, fp8 latent in both layouts | `GLM53_TP=4 GLM53_PRECISION=$MODEL_DIR/doc/datatype_sweep/selected_precision_config.json pytest -sv -p no:cacheprovider $T/test_dsa_shard.py` (the module fixture pins `GLM53_PRECISION=none`, bf16, when it is not set) |
+| Committed sharded row check (full-model wrapper, layers 0 / 3 / 4) | `GLM53_TP=4 GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=8 GLM53_DEALLOC_CHECK=1 pytest -sv -p no:cacheprovider $T/test_model_probe.py` (`GLM53_PRECISION` unset: the default fp8 policy) |
 | Full-model capacity probe, sharded cache | `GLM53_TP=4 GLM53_DSA_SHARD=1 python -m $M.tools.memory_probe capacity --out DIR --trace-region 67108864 --workspace-mib W --max-context N` |
 
 Workspace scripts: `s4_smoke.sh`, `s4_main.sh` (baseline dump, suite, Tracy), `postfix_all.sh` (post-fp32-fix rerun
@@ -99,3 +101,40 @@ See the README sections "Review #1 corrections", "Block-sharded DSA cache" and "
 - 00:2x (2026-10-18) final: baseline dumped last (`SELECTED` = `opt_s5_pf`), full suite on the final `DEFAULT_MC`
   (`ag_persistent=False`): **45 passed** (`s4r_suite_default_final.log`); stage-4-option compare passed
   (`s4r_cmp_s4opts_final.log`); sharded A/B 2 passed and sharded DSA cases + compare 17 passed (`dsa_shard/*_final.log`).
+
+## After review #2 (2026-10-18 .. 2026-10-20)
+
+- 2026-10-18 05:10 `~/glm53-flash-bringup/logs/s67r/j1_probe_s8_shard.log` (stage-6/7 rework, HEAD d48b7fd06ad +
+  rework files): `GLM53_DSA_SHARD=1 GLM53_PROBE_SLOTS=8 tests/test_model_probe.py`, **5 passed, 1 failed**. The row
+  check `test_decode_inputs_match_host` passed. `test_sampling_alternation` failed (a penalty step token outside the
+  top-k); the replicated run `j1_probe_s8.log` of the same code failed the same test. The stage-6/7 rework fixed it
+  (`defer_fix_s8`: 6 passed). The dealloc check (`test_no_shared_buffer_frees`) did not exist yet.
+- 2026-10-18 21:19 .. 21:27 shard watcher set (`scripts/s67r_watcher.sh`, snapshot `s67r_snap`,
+  `TT_METAL_WATCHER_DISABLE_ETH=1`): `shard_b1`, `shard_batch32_dsa_moe`, `shard_lengths_dsa_moe_2051`, rc 0, 0
+  suspicious lines (`watcher/status.txt`). The first attempts (13:08, 14:3x, 15:3x, Ethernet cores watched) ended with
+  rc 134 after the test PASSED: form (ii) for `shard_b1`, form (i) for the other two.
+- 2026-10-20 (DSA-1M agent, committed in 675a8b1bed9): fp8 e4m3 rows for the block-sharded layout (576 columns).
+  19:33 `dsa_shard/fp8/t1_test_dsa_shard_fp8.log`: fp8 A/B **2 passed**. The test command needs `GLM53_PRECISION`
+  set, because the module fixture otherwise pins `none` (bf16):
+  `GLM53_TP=4 GLM53_PRECISION=$MODEL_DIR/doc/datatype_sweep/selected_precision_config.json pytest -sv $T/test_dsa_shard.py`.
+  20:07 `dsa_shard/fp8/tf_shard_fp8_16k.log`: teacher forcing 91 / 95 / 91 with `GLM53_DSA_SHARD=1`. 20:11
+  `cap_fp8_s1_1048576_try1_oom.log`: out of DRAM in `bind_kv_cache` (doubled pool-key view, fixed). 20:39 .. 21:35
+  `cap_fp8_s1_1048576.log`: **1,048,576 tokens at 1 slot**, a 1,048,515-token copy prompt, copy 24/24.
+
+## Review #3 rework (2026-10-21)
+
+- Docs: README "Review #3 corrections" list; `doc/context_contract.json` (`multichip_decoder.capability_reduction`
+  applies_to and to_block_sharded_note, `cost_block_sharded`, `stage7_policy_GLM53_PRECISION_none` path_to_advertised);
+  `doc/full_model/memory_budget.json` `path_to_1M`; `watcher/status.txt`. `tools/dsa_shard_merge_model.py`: the torch
+  model of the merge (relative error 1.83589e-3, PCC 0.999998510, the README numbers).
+- 13:38 .. 13:47 ONE device ticket (`dsa_shard/s4r3_job.sh`, systemd unit `glm53-s4r3-job`, queued from 08:57; pure
+  `git archive HEAD` snapshot of 51997a179ba, md5s in `dsa_shard/s4r3_job.log`):
+  - (a) `shard_fp8_b1` watcher: passed, 0 suspicious lines.
+  - (b) bf16 `test_dsa_shard.py`: 2 passed.
+  - (c) `test_model_probe.py` with `GLM53_DSA_SHARD=1 GLM53_DEALLOC_CHECK=1`, 8 slots: 6 passed, 1 failed; 1 slot: 5
+    passed, 1 skipped, 1 failed. Both failures are `test_no_shared_buffer_frees`: `tt/dsa_shard.py:411` (deallocate of
+    `q_rm0` with its reshape view `q_rm` alive; benign; one-line fix in frozen code, reported to the lead) and, at 8
+    slots, `moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387` (stage-10 defect, the same as the stage-6 probe on
+    0a2663d0b6b). Re-run after both fixes land.
+  - (d) `shard_fp8_batch32_dsa_moe` watcher: 0 suspicious lines, no tripped assert; the test failed its HF bars,
+    which are for the stage-7 policy (README Watcher).
