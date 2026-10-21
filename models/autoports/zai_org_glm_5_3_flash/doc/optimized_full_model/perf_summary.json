@@ -1,46 +1,71 @@
 {
+ "source": "runs/s67r/j2_s1_default.json (final default: Glm53Generator(mesh), 1 slot, combo_a_kv without the stage-8 kda_in decode program, max_seq_len 280,576); short-context row runs/s67r/j2b_s1_16k.json (same code, max_seq_len 16,384); multi-slot runs/s67r/j3_s8.json, j4_s32.json",
  "workload": {
   "profile": "single_user_decode",
-  "prompt_len": 128,
-  "gen_len": 30,
+  "prompt": "real text (tools/s67r_checks.text_ids)",
+  "decode_position": 300,
+  "decode_replays": 20,
   "batch": 1,
-  "max_seq_len": 16384
+  "max_seq_len": 280576,
+  "precision": "combo_a_kv (no kda_in decode program)"
  },
- "ttft_ms": 230.4,
+ "ttft_ms": 228.4,
  "ttft_ms_by_prompt": {
-  "128": 230.4,
-  "161": 375.5,
-  "512": 379.4,
-  "2048": 1034.6,
-  "8192": 4555.8
+  "128": 228.4,
+  "161": 376.8,
+  "512": 375.9,
+  "2048": 1025.9,
+  "8192": 6444.1
  },
- "decode_ms_per_token_e2e": 54.18,
- "decode_ms_per_token_token_out": 54.08,
- "decode_ms_per_token_model_trace": 53.69,
- "decode_ms_per_token_device": 51.3,
- "decode_ms_per_token_layer_stack_lower_bound": 52.3,
+ "decode_ms_per_token_e2e": 56.51,
+ "decode_ms_per_token_token_out": 56.24,
+ "decode_ms_per_token_model_trace": 55.85,
+ "decode_ms_per_token_sampler": 0.39,
+ "short_context_16384": {
+  "ttft_ms_by_prompt": {
+   "128": 224.9,
+   "161": 373.4,
+   "512": 375.4,
+   "2048": 1024.6,
+   "8192": 4408.4
+  },
+  "decode_ms_per_token_e2e": 51.26,
+  "decode_ms_per_token_token_out": 51.1,
+  "decode_ms_per_token_model_trace": 50.71
+ },
+ "decode_ms_per_token_layer_stack_lower_bound": 50.7,
+ "layer_stack_lower_bound_note": "stage-5 sum of the 45 layers' traced replays at stage-5 reference precision (GLM53_PRECISION=none) on the shipped DEFAULT_MC (doc/optimized_multichip_decoder/README.md); not measured at combo_a_kv. The earlier 52.3 ms was measured with ag_persistent on",
+ "decode_ms_per_token_device": null,
+ "device_time_note": "no device-time estimate at combo_a_kv and 280,576 tokens. The stage-7-precision estimate (stage-5 per-kind device time 865 / 1070 / 1332 us x (3, 31, 11) = 50.4 ms + LM head 0.47 + sampler 0.38 = 51.3 ms) applies to the 16,384-token row only (model trace 50.71 ms). At 280,576 the sparse indexer scores the whole allocated pool (+5.1 ms, see named_limitations)",
  "roofline_ms_per_token_estimate": 8.06,
+ "roofline_note": "DRAM roofline per decoder layer from stage 5 (doc/optimized_multichip_decoder): kda_dense 175, kda_moe 169, dsa_moe 179 us per layer per die (weight + cache bytes / DRAM bandwidth) x (3, 31, 11) layers + LM head 168 MB / 512 GB/s ~ 0.33 ms = 8.1 ms per token (stage-7 precision weight bytes; combo_a_kv's bfp4 projections lower it slightly)",
  "eight_slot_build_ms_per_step": {
-  "1": 83.9,
-  "4": 95.7,
-  "8": 114.2
+  "1": 81.65,
+  "4": 93.5,
+  "8": 112.24
+ },
+ "thirty_two_slot_build_ms_per_step": {
+  "1": 115.29,
+  "8": 117.16,
+  "32": 114.24
  },
  "named_limitations": [
-  "decoder layers are 97.5 % of the step (stage-5 lower bound 52.3 ms); terminal path 1.3 ms",
+  "context-size cost: the sparse DSA indexer scores every allocated pool slot (P_alloc from max_seq_len), not the filled prefix: 16,384 vs 280,576 -> token-out 51.10 vs 56.24 ms (+10 %), TTFT at 8,192 tokens 4,408 vs 6,444 ms (+46 %); planned fix (stage 10, PLAN.md 'cap at max position'): score the filled prefix, bucketed",
+  "decoder layers are ~97 % of the step; terminal path (LM head 471 us, sampler 0.39 ms, glue ~0.25 ms) ~1.1 ms",
   "LM head 471 us interleaved bfp8 (168 MB per die); DRAM-sharded column splits slower (10 x 66 us)",
   "128-row prefill chunk is device-bound (~5 ms per layer): prefill traces save 10 ms only",
-  "DEFAULT_MC.ag_persistent=True breaks multi-step decode (TF top-5 32 %); stage-7 numbers use ag_persistent=0",
-  "device time of the full step not profiled (full-stack Tracy forbidden); 1-layer Tracy windows drop ops per device"
+  "persistent decode all-gather (ag_persistent) is off in the shipped DEFAULT_MC: not adopted (capacity re-probe cost); available via MCOpts. Re-tested on the fixed code: quality identical (TF on 3 references, reduced 8-slot repeats), 0.44 ms per token faster (49.96 vs 50.40 ms at 16,384, runs/s7r2/agp{0,1}.json); capacity impact unmeasured",
+  "inactive-row MoE skip rebuilds its sentinel in each of 42 MoE layers: +1.1 % at 8 active (112.24 vs 110.97 ms skip off)",
+  "device time of the full step not profiled (full-stack Tracy forbidden); 1-layer Tracy windows (2026-10-17) are stale"
  ],
- "records": "~/glm53-flash-bringup/artifacts/s7/final_s1.json, final_s8.json",
- "roofline_note": "DRAM roofline per decoder layer from stage 5 (doc/optimized_multichip_decoder): kda_dense 175, kda_moe 169, dsa_moe 179 us per layer per die (weight + cache bytes / DRAM bandwidth) x (3, 31, 11) layers + LM head 168 MB / 512 GB/s ~ 0.33 ms = 8.1 ms per token",
- "device_time_note": "estimate, not a full-stack profile (full-stack Tracy is not allowed): stage-5 per-kind traced decode device time 865 / 1070 / 1332 us x (3, 31, 11) = 50.4 ms + LM head 0.47 ms + sampler 0.38 ms = 51.3 ms, against 53.69 ms model-trace and 54.08 ms token-out end to end (stage-7 final)",
+ "records": "runs/s67r/{j2_s1_default,j2b_s1_16k,j3_s8,j3b_s8_noskip,j4_s32}.json; superseded 2026-10-17 build: ~/glm53-flash-bringup/logs/s7_final_s{1,8}.log (no JSON record)",
  "roofline_gap": {
-  "ratio_e2e_over_roofline": 6.7,
+  "ratio_e2e_over_roofline": 7.0,
   "owners": [
    "Sinkhorn on one core: ~7.7 ms per token (stage 5)",
    "element-wise / mHC glue between the matmuls (stage 5)",
    "matmuls at 41-64 % of DRAM bandwidth (stage 5)",
+   "context-size indexer cost: ~5.1 ms at 280,576 (stage 10)",
    "8-slot builds: MoE pairs glue on all 64 (row, expert) groups (stage 5)"
   ]
  }

@@ -170,16 +170,13 @@ def test_sampling_alternation(gen):
 
 def test_no_shared_buffer_frees(gen):
     """With GLM53_DEALLOC_CHECK=1 (set by the probe runs): no autoport tt/ module force-frees a buffer that a view still
-    uses (the decode-logits pad bug). Sites in other modules are reported, not failed (owned elsewhere)."""
+    uses (the decode-logits pad bug): every module under the autoport's tt/ (keys are paths relative to tt/). Sites in
+    other packages (models/common, ...) are reported, not failed (owned elsewhere)."""
     from models.autoports.zai_org_glm_5_3_flash.tt import generator as G
 
     if os.environ.get("GLM53_DEALLOC_CHECK") != "1":
         pytest.skip("GLM53_DEALLOC_CHECK=1 not set")
     gen.generate(list(range(3000, 3161)), 4)
     print(f"shared-buffer frees: {G.SHARED_FREES}")
-    mine = {
-        k: v
-        for k, v in G.SHARED_FREES.items()
-        if k.split(":")[0] in ("model.py", "generator.py", "decode_inputs.py", "dsa.py", "dsa_shard.py")
-    }
+    mine = {k: v for k, v in G.SHARED_FREES.items() if "/" not in k.split(":")[0]}  # any autoport tt/ module
     assert not mine, mine

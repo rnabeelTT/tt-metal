@@ -82,9 +82,11 @@ def _budget() -> dict:
     else:
         # shipped policy, stage-7 code: s4r capacity probe 2026-10-17 (64 MiB trace region, 2 KDA slots)
         free, kda, reserve, src = 1_984_045_568, 35_651_584, 734_003_200, "built-in (shipped bf16 latent policy)"
-    # reserve: the larger of the data source's and GLM53_DRAM_RESERVE_MIB (default 1200 MiB: headroom above the measured
-    # 1,024 MiB prefill workspace; lower it to trade safety margin for context, doc/full_model/README.md "Defaults")
-    reserve = max(reserve, int(float(os.environ.get("GLM53_DRAM_RESERVE_MIB", 1200)) * (1 << 20)))
+    # reserve: GLM53_DRAM_RESERVE_MIB when set (e.g. 1024 = the serving workspace: the 311,296-token serving context);
+    # else max(data reserve, 1,200 MiB). The 1,200 MiB floor keeps >= 1 GiB free after the build, so the standalone
+    # default runs the unsplit (faster) MoE prefill; long contexts belong to the serving profiles (serving_profiles.json)
+    env_mib = os.environ.get("GLM53_DRAM_RESERVE_MIB")
+    reserve = int(float(env_mib) * (1 << 20)) if env_mib is not None else max(reserve, 1200 << 20)
     return {
         "free_after_load_bytes": int(os.environ.get("GLM53_BUDGET_FREE_BYTES", free)),
         "kda_bytes_per_slot": kda,
@@ -95,7 +97,14 @@ def _budget() -> dict:
     }
 
 
-BUDGET = _budget()
+BUDGET = _budget()  # at import (inspection); sizing calls budget() so GLM53_PRECISION / reserve set later apply
+
+
+def budget() -> dict:
+    """The DRAM budget for the current environment (GLM53_PRECISION, GLM53_DRAM_RESERVE_MIB); refreshes BUDGET."""
+    global BUDGET
+    BUDGET = _budget()
+    return BUDGET
 
 
 def _trace_region_default() -> int:
@@ -113,7 +122,7 @@ def _kda_slots(S: int) -> int:
 
 def pool_blocks(S: int, layout: str, free_bytes: int | None = None) -> int:
     """DSA pool blocks (incl. the dummy block) that fit per die next to S slots' KDA state and the reserve."""
-    b = BUDGET
+    b = budget()
     free = b["free_after_load_bytes"] if free_bytes is None else free_bytes
     avail = free - (_kda_slots(S) - 2) * b["kda_bytes_per_slot"] - b["reserve_bytes"]
     if layout not in b["block_bytes"]:  # the block-sharded layout supports the bf16 latent only
@@ -187,7 +196,8 @@ def install_dealloc_check():
     """Debug mode (GLM53_DEALLOC_CHECK=1, installed at import): ttnn.deallocate runs with force=False and records every
     call that leaves the tensor allocated, i.e. one whose default force=True would have freed storage that another
     tensor (a view: reshape, in-tile pad, full slice) still uses. That bug class corrupted decode (stage-6/7 rework:
-    the decode logits pad). tests/test_model_probe.py fails on any such site in the autoport's own tt/ modules."""
+    the decode logits pad). Calls that pass force=False themselves are not recorded. tests/test_model_probe.py fails
+    on any recorded site in the autoport's own tt/ modules (keys without a directory part)."""
     import traceback
 
     real = ttnn.deallocate
@@ -195,9 +205,9 @@ def install_dealloc_check():
         return
 
     def dealloc(t, *a, **k):
-        k["force"] = False
-        r = real(t, *a, **k)
-        if isinstance(t, ttnn.Tensor) and t.is_allocated():
+        force = k.pop("force", a[0] if a else True)
+        r = real(t, *a[1:], force=False, **k)
+        if force is not False and isinstance(t, ttnn.Tensor) and t.is_allocated():  # force=False callers opted out
             st = [f for f in traceback.extract_stack()[:-1] if "/models/" in f.filename]
             key = " <- ".join(
                 f"{os.path.relpath(f.filename, os.path.dirname(__file__))}:{f.lineno}" for f in st[-3:][::-1]
@@ -293,6 +303,7 @@ class Glm53Generator(Generator):
         if self.page_table is not None:
             self.model.set_page_table(self.page_table)
         self.page_table_copies = 0  # device page-table installs after construction (set_page_table on change only)
+        self.program_cache_growth = []  # programs compiled after the decode capture (guard_programs)
         self.tok_buf = ttnn.from_torch(
             torch.zeros(1, 1, 1, self.model.SR, dtype=torch.int32),  # sampler width (>= S): the model reads [:S]
             dtype=ttnn.uint32,
@@ -540,6 +551,26 @@ class Glm53Generator(Generator):
             return int(fn()) if fn is not None else None
         except Exception:  # noqa: BLE001
             return None
+
+    def guard_programs(self, where: str):
+        """Programs compiled after the decode capture (a warm-up phase missed a shape): their binaries / buffers are
+        allocated while the trace is live and can land in its freed intermediates (rework defect 4). Counted in
+        `program_cache_growth` [(where, new programs)]; GLM53_PROGRAM_GUARD_STANDALONE=warn (default) logs, =raise
+        raises (as the vLLM adapter's GLM53_PROGRAM_GUARD does), =off skips. The baseline moves to the current count after each report.
+        """
+        mode = os.environ.get("GLM53_PROGRAM_GUARD_STANDALONE", "warn")
+        base = getattr(self, "_program_cache_after_capture", None)
+        if mode == "off" or base is None:
+            return
+        now = self.program_cache_entries()
+        if now is None or now == base:
+            return
+        self.program_cache_growth.append((where, now - base))
+        self._program_cache_after_capture = now
+        msg = f"PROGRAM_GUARD: {now - base} program(s) compiled after the trace capture ({where}); a warm-up misses it"
+        if mode == "raise":
+            raise RuntimeError(msg)
+        logger.warning(msg)
 
     def bind_kv_cache(self, num_blocks: int):
         """defer_caches mode: allocate every DSA layer's pools for vLLM's `num_blocks` blocks + the model's dummy block
@@ -847,6 +878,7 @@ class Glm53Generator(Generator):
             self._prefill_syncs = getattr(self, "_prefill_syncs", 0) + 1
             logger.info(f"prefill boundary sync #{self._prefill_syncs}")
         self.check_trace_addresses("after prefill")
+        self.guard_programs(f"prefill of {prompt_lens} tokens")
         return torch.stack(outs, dim=0)
 
     def _prefill_sampled(self, tokens, prompt_lens, slots, sampling_params):

@@ -349,6 +349,7 @@ def run_sampling(g, slots, L: int, steps: int) -> dict:
         "greedy": dict(),
         "topk": dict(temperature=0.8, top_k=20, top_p=0.9),
         "penalty": dict(temperature=0.8, top_k=20, top_p=1.0, rep=1.3),
+        "flat": dict(temperature=1.0, top_k=32, top_p=1.0),  # seed check: a distribution that leaves the draw open
     }
     plan = ["greedy", "topk", "greedy", "penalty", "topk", "greedy"] * (-(-steps // 6))
     plan = plan[:steps]
@@ -405,7 +406,7 @@ def run_sampling(g, slots, L: int, steps: int) -> dict:
         return recs
 
     a = episode(plan)
-    seeded_plan = ["topk"] * 6
+    seeded_plan = ["flat"] * 6
     s1 = episode(seeded_plan, seed=1234)
     s2 = episode(seeded_plan, seed=1234)
     s3 = episode(seeded_plan, seed=99)
@@ -679,12 +680,20 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
 
     def save():
+        gg = G[0]
+        if gg is not None:  # programs compiled after the decode capture (Glm53Generator.guard_programs)
+            gg.guard_programs(f"checks up to {sorted(k for k in rec if k not in ('args', 'provenance_start'))[-1:]}")
+            rec["program_cache_growth"] = list(getattr(gg, "program_cache_growth", []))
+            rec["program_cache_after_capture"] = getattr(gg, "_program_cache_after_capture", None)
         out.write_text(json.dumps(rec, indent=1, default=str) + "\n")
+
+    G = [None]
 
     mesh = P._open_mesh(a.trace_region)
     try:
         t0 = time.time()
         g = Glm53Generator(mesh, max_batch_size=a.slots, max_seq_len=a.seq_len, dsa_layout=a.layout)
+        G[0] = g
         rec["build_s"] = round(time.time() - t0, 1)
         rec["plan"] = g.plan
         rec["skip_inactive"] = getattr(g.model, "skip_inactive", None)

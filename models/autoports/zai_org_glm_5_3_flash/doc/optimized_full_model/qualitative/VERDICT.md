@@ -1,5 +1,17 @@
 # Stage 7 qualitative check (optimized full model, 45 layers, TP4 p300x2)
 
+> **Scope (stage-7 review #2):** this suite ran on the superseded 2026-10-17 build:
+> - stage-7 precision, 16,384 tokens;
+> - pre-rework code, with the logits-pad bug latent.
+>
+> The rework did not rerun it. Coverage of the current default is by composition:
+> - the final default's autoregressive tokens (`j2_s1_default`) are bit-identical to stage 8's
+>   `doc/datatype_sweep/runs/selected_default_r{1,2}` trajectories;
+> - stage 8 r1 ran this chat suite on combo_a_kv (`doc/datatype_sweep/runs/selected_default_r1/checks/qualitative/`):
+>   5 of 6 prompts end on EOS; q3 reaches the budget; q5 is the known E192 French behaviour.
+>
+> The suite has not run on the exact HEAD default (rework code + kda_in).
+
 **Run**: `tools/s7_probe.py --do checks` on the stage-7 final build (`~/glm53-flash-bringup/logs/s7_final_s1.log`;
 1 slot, max_seq_len 16,384, stage-7 defaults with `ag_persistent=0`, which is the `DEFAULT_MC` at HEAD). Prompt format
 as in stage 6 (`doc/full_model/qualitative/qualitative_prompt_format.json`): chat template, one user message,

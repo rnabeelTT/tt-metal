@@ -23,6 +23,7 @@ off / none / 0 disable it). The ROW_MAJOR embedding table is not cached (its loa
 
 from __future__ import annotations
 
+import calendar
 import dataclasses
 import hashlib
 import inspect
@@ -289,12 +290,22 @@ def weight_cache_from_env(mesh, rd, opt) -> WeightCache | None:
         except (OSError, ValueError):
             man = {}
         rec = man.get("checkpoint_files")
-        if rec is None and os.access(root, os.W_OK):  # older manifest: adopt the current fingerprint
-            man["checkpoint_files"] = files
-            tmp = root / f".manifest.{os.getpid()}.tmp"
-            tmp.write_text(json.dumps(man, indent=1))
-            os.replace(tmp, manifest)
-        elif rec is not None and rec != files:  # same config / index, rewritten shards: never reuse those tensors
+        if rec is None:
+            # older manifest without shard fingerprints: adopt the current fingerprint only when no shard file is newer
+            # than the cache (manifest creation); a shard rewritten since then gets a fresh directory below
+            try:
+                made_ns = calendar.timegm(time.strptime(man["created"], "%Y-%m-%dT%H:%M:%SZ")) * 10**9
+            except (KeyError, ValueError, OverflowError):
+                made_ns = manifest.stat().st_mtime_ns
+            if all(v[1] <= made_ns for v in files.values()) and os.access(root, os.W_OK):
+                man["checkpoint_files"] = files
+                tmp = root / f".manifest.{os.getpid()}.tmp"
+                tmp.write_text(json.dumps(man, indent=1))
+                os.replace(tmp, manifest)
+            else:
+                rec = {}  # unverifiable: treat as changed
+        if rec is not None and rec != files and man.get("checkpoint_files") != files:
+            # same config / index, rewritten shards: never reuse those tensors
             logger.warning(
                 f"weight cache {root}: checkpoint shard files changed (size / mtime); using a fresh directory"
             )

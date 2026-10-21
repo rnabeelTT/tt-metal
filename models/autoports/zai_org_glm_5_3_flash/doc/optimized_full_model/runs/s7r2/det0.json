@@ -1,0 +1,125 @@
+{
+  "args": {
+    "slots": 8,
+    "seq_len": 4096,
+    "do": "ptcheck",
+    "prompts": "128,2048",
+    "active": "1",
+    "ptcheck": "100,300",
+    "steps": 20,
+    "tracy_prefill": 128,
+    "reference": "/home/raahem/glm53-flash-bringup/s7r2_snap/models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt",
+    "report_dir": null,
+    "trace_region": 67108864,
+    "out": "/home/raahem/glm53-flash-bringup/artifacts/s7r2/det0.json"
+  },
+  "layers": "0,3,4",
+  "env_mc": "ag_persistent=0",
+  "build_s": 11.349679470062256,
+  "trace_alloc_per_bank": 548864,
+  "trace_total_per_bank": 8388608,
+  "dram_free_per_bank": 4005819456,
+  "dram_alloc_per_bank": 258133312,
+  "ptcheck": {
+    "100": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        91886,
+        91886
+      ],
+      "tokens_traced": [
+        91886,
+        91886,
+        91886,
+        67404,
+        91886,
+        67404,
+        91886,
+        67404
+      ],
+      "tokens_eager": [
+        91886,
+        91886,
+        91886,
+        67404,
+        91886,
+        67404,
+        91886,
+        67404
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        91886,
+        91886,
+        91886,
+        67404,
+        91886,
+        67404,
+        91886,
+        67404
+      ],
+      "tokens_traced2": [
+        91886,
+        91886,
+        91886,
+        67404,
+        91886,
+        67404,
+        91886,
+        67404
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    },
+    "300": {
+      "max_abs_diff": 0.0,
+      "argmax": [
+        67404,
+        67404
+      ],
+      "tokens_traced": [
+        67404,
+        91886,
+        52420,
+        67404,
+        91886,
+        52420,
+        67404,
+        91886
+      ],
+      "tokens_eager": [
+        67404,
+        91886,
+        52420,
+        67404,
+        91886,
+        52420,
+        67404,
+        91886
+      ],
+      "tokens_equal": true,
+      "tokens_eager2": [
+        67404,
+        91886,
+        52420,
+        67404,
+        91886,
+        52420,
+        67404,
+        91886
+      ],
+      "tokens_traced2": [
+        67404,
+        91886,
+        52420,
+        67404,
+        91886,
+        52420,
+        67404,
+        91886
+      ],
+      "eager_repeat_equal": true,
+      "traced_repeat_equal": true
+    }
+  }
+}

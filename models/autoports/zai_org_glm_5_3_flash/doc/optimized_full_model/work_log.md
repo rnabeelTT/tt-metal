@@ -45,3 +45,78 @@ units. Logs in `~/glm53-flash-bringup/logs/`, probe records in `~/glm53-flash-br
 - 23:31 final S=8 (`s7_final_s8.log`, skip on): 83.9 / 95.7 / 114.2 ms at 1 / 4 / 8 active; repeats identical.
 - Defaults: GLM53_HEAD=norm_sharded, GLM53_PREFILL_LENGTHS=128,512,2048, GLM53_PREFILL_PLAN=cost,
   GLM53_MOE_SPLIT_AUTO=1, GLM53_SKIP_INACTIVE=1 (>= 2 slots), GLM53_PREFILL_TRACE=none. Not committed (instructions).
+
+## Commits
+
+- ac03689d2bb (2026-10-18): stages 6 + 7, the 2026-10-17 build above.
+- de9852c604d (2026-10-20): stage-6/7 review #1 rework (code, evidence, docs).
+- b3270061cca (2026-10-20): HF chunk-plan control, `autoregressive/VERDICT.md`, rescored `hf_scores_tt_trajectory.json`.
+
+## 2026-10-18 .. 20: stage-6/7 review #1 rework
+
+The full rework log is in `doc/full_model/work_log.md` ("stage-6 review #1 / stage-7 review #1 rework"). It records
+the root cause of the decode corruption (the logits-pad deallocate) and the defects fixed in order. Jobs, all run from
+the pinned snapshot `~/glm53-flash-bringup/s67r_final` (HEAD 656c998e3df + rework files), with md5 stamps at start and
+end. Logs: `~/glm53-flash-bringup/logs/s67r/`. One-line results: `logs/s67r/status`.
+
+- **Gate:**
+  - trace-allocation tracker at 8 slots, replicated / sharded / adapter smoke: 0 violations;
+  - reduced probe S = 1 / 8 with `GLM53_DEALLOC_CHECK=1`: pass;
+  - press B3 (65,536 tokens + 480 MB ballast): teacher forcing 91 / 100 / 100.
+- **j2_s1_default** (default build, 280,576 tokens):
+  - readiness 91 / 100 / 100 and 91 / 100 / 100; autoregressive check;
+  - TTFT 128 .. 8,192 tokens; page-table change; alternating sampler; chunk plans 513 .. 10,001; decode;
+  - deep 32,768 / 100,000 tokens: copy 1.0.
+  - Record: `runs/s67r/j2_s1_default.json`.
+- **j2b_s1_16k:** the same code at 16,384 tokens. Token-out 51.10 ms and 8K TTFT 4,408 ms, against 56.24 / 6,444 at
+  the default: the context-size cost.
+- **j3_s8 / j3b_s8_noskip / j4_s32:** batch correctness, bit-identical in every comparison. Skip on vs off: all logits
+  bit-identical. Timings are in the README.
+- **j6_s1_shard:** block-sharded, `GLM53_PRECISION=none`, 131,072 tokens: teacher forcing 92 / 100 / 100, deep copy
+  1.0, sink headroom 65.7 nats.
+- **Watcher set:** 5 runs, rc 0, 0 suspicious lines (ETH cores not watched).
+- **HF last-row control:** 513 / 600 tokens (`runs/s67r/j2_hf_lastrow.json`).
+- **HF rescoring of the AR trajectory:** `autoregressive/hf_scores_tt_trajectory.json`.
+
+## 2026-10-20: stage-7 review #2
+
+Jobs: `~/glm53-flash-bringup/scripts/s7r2_{jobs,agp1,verify}.sh`. Logs: `~/glm53-flash-bringup/logs/s7r2/` (`status` has
+one line per job). Records: `runs/s7r2/` and `~/glm53-flash-bringup/artifacts/s7r2/`. Code is pinned to snapshots:
+`s7r2_snap` = `git archive b3270061cca`; `s7r2_v` = HEAD 24be34c7cbe + this agent's hunks.
+
+- **P2-1, ag_persistent** (s7r2_snap, `GLM53_PRECISION` unset):
+  - det0 / det1 (reduced 0 / 3 / 4, 8 slots, `s7_probe --do ptcheck --ptcheck 100,300`): equal, and repeatable
+    with both settings.
+  - agp (`scripts/s7r2_agp.py`, full model, 1 slot, 16,384, three AIME24 references), `ag_persistent=0`:
+    TF 91 / 96 / 91 (top-5 / top-100 100 %), token-out 50.40 ms.
+  - The `=1` build in the same process ran out of DRAM (the first generator's memory was not released). agp1 ran it
+    alone: identical TF / prefill check, token-out 49.96 ms.
+  - The earlier failure was the logits-pad bug. Coordinator decision: not adopted (capacity re-probe cost); available via MCOpts. The capacity impact is unmeasured, and
+    the G9 probes ran without it.
+- **P2-3, sharded first-run gap:**
+  - cache: reduced, 16,384 tokens, sharded + replicated.
+  - cachefull: full model, sharded, 131,072 tokens, bf16.
+  - Both: two fresh 10,001-token prompts and one 2,600-token prompt after the capture, with a traced decode replay
+    after each (tracker on). No program compiled after the capture (889 / 890 entries), 0 tracker allocations, first
+    run = second run. The j6 gap did not reproduce; not a compile.
+  - Added the standalone guard `Glm53Generator.guard_programs` (prefill_forward and the s67r_checks records) as
+    protection.
+- **Stage-6 review #2 code items** (`tt/generator.py`, `tt/weight_cache.py`, `tools/s67r_checks.py`,
+  `tests/test_model_probe.py`, two `tt/moe_opt.py` guard lines):
+  - standalone reserve: an explicit `GLM53_DRAM_RESERVE_MIB` wins, else max(data reserve, 1,200 MiB). The
+    coordinator's decision keeps the TTFT-favouring standalone default (294,912 on HEAD's profile data); v1 checked
+    the serving-workspace sizing (311,296);
+  - budget per call;
+  - unverified manifest adoption refused when a shard is newer than the cache;
+  - flat-distribution seed check;
+  - the shared-free check covers every autoport `tt/` module. It found two benign `moe_opt.py` view frees, now
+    guarded with `force=False`.
+- **Verification** on s7r2_v:
+  - v1, the default build at 311,296: TF 92 / 100 / 100, prefill check 92 / 100 / 100, token-out 55.37 ms, seeds
+    honoured, 0 programs after capture.
+  - v2, reduced 8-slot probe with `GLM53_DEALLOC_CHECK=1`: 7 passed. The first v2 failed on the snapshot's missing
+    root `conftest.py`; the second found the two `moe_opt.py` sites.
+- **Docs:**
+  - README headline = j2 (final default) + j2b (16,384); the 2026-10-17 table is labelled superseded;
+  - `perf_summary.json` rebuilt from j2;
+  - Tracy and MTP labels; watcher scope; HF reference noise; qualitative scope.

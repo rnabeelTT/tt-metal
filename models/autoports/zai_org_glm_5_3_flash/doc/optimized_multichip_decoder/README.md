@@ -372,7 +372,10 @@ Records: `records/ab{1,2,3,5,6}.jsonl`, `records/pf{2,5,6}.jsonl`, review #2 / #
   "use synchronize barrier semaphore" = `barrier_semaphore && !using_persistent_buffers`). Nothing then orders a remote
   write into a buffer after its last reader on the receiving die.
 - The one-layer tests rewrite each buffer at the same distance as the stack, so reuse distance does not explain the
-  difference. The root cause is not established. The final default keeps the barrier (non-persistent outputs).
+  difference. Resolved by stage-7 review #2 (2026-10-21): the failures were the logits-pad lifetime bug (fixed in
+  46b2a5a601d). On b3270061cca, `ag_persistent=1` gives teacher forcing and the prefill check identical to `=0` on 3
+  references, reduced 8-slot runs repeat, and token-out drops 50.40 -> 49.96 ms. Decision: not adopted (capacity re-probe cost); available via MCOpts. The persistent
+  outputs hold DRAM, and the stage-9 serving capacity probes were measured without them; capacity impact unmeasured.
 
 ## Matmul geometry per role (review #1 P1-2)
 
@@ -555,7 +558,7 @@ Results:
 | review #3, tickets 1 / 4 | stage-7 precision | 92 / 100 / 100 (ticket 1) | 91 / 100 / 100 | sparse regime, 1 slot, tail on vs off: equal |
 | review #4 (s5r4 snapshot, HEAD 8e9efeb7dd7) | `DEFAULT_MC`, combo_a_kv | 91 / 100 / 100 | 91 / 100 / 100 | 8 slots: full model repeats; tail 1 vs 0 at 8 slots, sparse regime: equal; layers 0, 3-7: not repeated on this snapshot; repeated with every deallocate off and on s5r4c (tt/model.py lifetime fixes, see the work log) |
 | review #3, `dsa_idx_rep` in the default (ticket 4) | stage-7 precision | 14 / 32 / 90 | 91 / 100 / 100 | the stage-6 logits-pad lifetime bug (ledger) |
-| stage 7, `ag_persistent` | round-6 default | 14 / 32 / 90 | - | 8 slots do not repeat |
+| stage 7, `ag_persistent` | round-6 default | 14 / 32 / 90 | - | 8 slots do not repeat: the stage-6 logits-pad lifetime bug (same signature). Re-tested on b3270061cca (stage-7 review #2): 91 / 96 / 91 on 3 references, identical to off; reduced 8 slots repeat; token-out 49.96 vs 50.40 ms |
 
 ## Inter-layer residual contract (for the full model)
 
@@ -689,7 +692,7 @@ These are measured costs that stay. None is a deferred option of this stage.
 - 32-user MoE glue: sub-tile expert groups (kernel work in the grouped sparse-matmul factory).
 - Long-context decode: +561 µs per DSA layer at position 130,000 (sparse_sdpa over 2,048 gathered tokens, top-512
   selection over ~32.5K pooled keys); profiled, not optimized here.
-- `ag_persistent`: the root cause of the stacked-model failure is not established.
+- `ag_persistent`: the stacked-model failure was the logits-pad lifetime bug. On the fixed code it passes and saves 0.44 ms per token (`doc/optimized_full_model/README.md`, "Persistent all-gather"); not adopted (capacity re-probe cost); available via MCOpts.
 
 ## Artifacts
 

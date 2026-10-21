@@ -39,6 +39,13 @@ Run: `j2_s1_default` (`tools/s67r_checks.py --slots 1 --do ...,ar,...`, log
   - Every TT token after position 146 (109 tokens, the whole loop) is HF's own top-1, by at least 0.25 logits. Given
     the same context, HF loops the same way.
 
+Reference noise (stage-7 review #2): HF's CPU logits are not run-to-run reproducible at this resolution. Stage 8's r1
+scoring (8 threads) and this one (12 threads) score the same bit-identical trajectory with the same checkpoint and
+versions. They differ on all 256 rows, by up to 0.875 logits, and reorder near-ties at positions 4, 6, 25, 36 and 41.
+So the per-position ranks above, and margins under about 1 logit (such as the 0.375 at token 0), are within the
+reference's own noise. The aggregate result is the same in both scorings: every emitted token is in HF's top-5, and the
+loop tokens are HF's top-1.
+
 ## Verdict
 
 **Pass.** There is no decode-loop bug: no doubled tokens, the output is deterministic, every emitted token is in HF's

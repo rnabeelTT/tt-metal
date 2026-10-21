@@ -848,7 +848,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             x_rm = ttnn.to_layout(x4, RM, memory_config=dram)  # [1,1,T,H]
             x_rows = ttnn.reshape(x_rm, (1, T, 1, H))
             x_rep = ttnn.repeat(x_rows, ttnn.Shape([1, 1, k, 1]), memory_config=dram)  # [1,T,k,H]: row t repeated k
-            ttnn.deallocate(x_rm)
+            # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+            ttnn.deallocate(x_rm, force=False)  # x_rows is a view of x_rm
             x_pairs = ttnn.to_layout(ttnn.reshape(x_rep, (1, G, 1, H)), ttnn.TILE_LAYOUT, memory_config=dram)
             ttnn.deallocate(x_rep)
         # ids [1,1,T,k] -> one uint16 stick [1,G]: the data-moving reshape takes uint32 (not uint16), the final
@@ -904,7 +905,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         rows = weighted.shape[-2]
         per_tok = ttnn.reshape(weighted, (T, k, rows, H))  # batch-dim split, no data movement
         acc = ttnn.sum(per_tok, dim=1, keepdim=True, compute_kernel_config=self.routed_ckc)  # [T,1,1,H]
-        ttnn.deallocate(weighted)
+        # force=False: frees only when no view of this buffer is alive (stage-6/7 rework lifetime guard)
+        ttnn.deallocate(weighted, force=False)  # per_tok is a view of weighted
         if acc.shape[-2] != 1:  # the NC reduction keeps the tile-padded row count: keep the one logical row
             acc_t = ttnn.slice(acc, [0, 0, 0, 0], [T, 1, 1, H], memory_config=dram)
             ttnn.deallocate(acc)

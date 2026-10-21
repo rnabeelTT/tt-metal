@@ -1,0 +1,122 @@
+{
+ "provenance_start": {
+  "git_head": "24be34c7cbe190e2b8a180c3b5f39b40b8d1e7ac",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "096051734773c9bfd3cfc5ade971e916",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "5fee3c6742a766fd9fdf01913bae7e38",
+   "moe.py": "6e6482118b1b2eef44b8ecaa552cd335",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "cb2026a5d2e737ba5be4ea4df124eb87",
+   "multichip_decoder.py": "6a83d8937bce691167969f960f7e5fd9",
+   "optimized_decoder.py": "3bda6fd3efeec9bc16caf6b2de3ebfda",
+   "precision.py": "b7f5e2eafe66826b4006516b876adf81",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "07b7a1bed27004d976a9bb33e8010ac1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+   "GLM53_PRECISION": "none"
+  }
+ },
+ "runs": {
+  "sharded": {
+   "plan": {
+    "layout": "sharded",
+    "dsa_shard": true,
+    "max_seq_len": 131072,
+    "slots": 1,
+    "blocks_needed": 1025,
+    "pool_blocks_budget": 1534,
+    "max_seq_len_per_layout": {
+     "replicated": 59392,
+     "sharded": 194560
+    }
+   },
+   "after_capture": 890,
+   "prompts": [
+    {
+     "L": 10001,
+     "programs_before": 890,
+     "programs_after": 890,
+     "prefill_ms": 7825.5,
+     "layers_with_new_programs": [],
+     "per_chunk_ms": {
+      "None": 7754.9
+     }
+    },
+    {
+     "L": 10001,
+     "programs_before": 890,
+     "programs_after": 890,
+     "prefill_ms": 7821.4,
+     "layers_with_new_programs": [],
+     "per_chunk_ms": {
+      "None": 7747.8
+     }
+    },
+    {
+     "L": 2600,
+     "programs_before": 890,
+     "programs_after": 890,
+     "prefill_ms": 2162.3,
+     "layers_with_new_programs": [],
+     "per_chunk_ms": {
+      "None": 2121.2
+     }
+    }
+   ]
+  }
+ },
+ "provenance_end": {
+  "git_head": "24be34c7cbe190e2b8a180c3b5f39b40b8d1e7ac",
+  "tt_dirty": [],
+  "tt_md5": {
+   "__init__.py": "53fbca0cafb2411040165520a35a3537",
+   "ckpt.py": "daa701ea8bbd25979f06737bb11dc173",
+   "decode_inputs.py": "b6d033397b4ba991bae572324d19b882",
+   "dsa.py": "b721bd51cf2a1f9544e8e7aef8c9a3e4",
+   "dsa_shard.py": "a24a4337c9c160b8987a846b7637c23c",
+   "functional_decoder.py": "e6b204abc32736574fad8b00b1ca71f7",
+   "fused_decoder.py": "9950ff43360f1cb6f78ca85a7bec8923",
+   "generator.py": "096051734773c9bfd3cfc5ade971e916",
+   "generator_vllm.py": "6714e98bd0cacf5cb4e554e4e8efd945",
+   "kda.py": "2e7dde09ee2af3f2c701eb2f712c430b",
+   "mhc.py": "6acd0fb3c3ad4c3f7370ddf8b5e14de6",
+   "mlp.py": "952a9a2ad222304455d797cae94a5b50",
+   "model.py": "5fee3c6742a766fd9fdf01913bae7e38",
+   "moe.py": "6e6482118b1b2eef44b8ecaa552cd335",
+   "moe_dispatch.py": "f1bc95c39a49d1abe5030e48fdf447f0",
+   "moe_opt.py": "cb2026a5d2e737ba5be4ea4df124eb87",
+   "multichip_decoder.py": "6a83d8937bce691167969f960f7e5fd9",
+   "optimized_decoder.py": "3bda6fd3efeec9bc16caf6b2de3ebfda",
+   "precision.py": "b7f5e2eafe66826b4006516b876adf81",
+   "serving_profiles.py": "efc886f9706685daec5e75049791ea15",
+   "serving_state.py": "446ac30d4ad54640d96c43e37d80a3ab",
+   "synthetic.py": "5c661837e53588a78ad78c86f49ddd6f",
+   "weight_cache.py": "07b7a1bed27004d976a9bb33e8010ac1"
+  },
+  "env": {
+   "GLM53_TP": "4",
+   "GLM53_CACHE_DIR": "/home/raahem/.cache/glm53_flash",
+   "GLM53_CKPT": "/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8",
+   "GLM53_PRECISION": "none",
+   "GLM53_MOE_SORTED_ROWS": "0"
+  }
+ }
+}
