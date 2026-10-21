@@ -490,7 +490,7 @@ bool Devices::launch_relay(
         uint32_t zero_words[2 * kernel_profiler::kRelayCtrlWordStride / sizeof(uint32_t)] = {};
         cluster.write_core(zero_words, sizeof(zero_words), drisc, relay_noc_addr(l1_.done));
 
-        auto program = std::make_unique<Program>(CreateProgram());
+        auto program = std::make_unique<Program>(CreateProgram(*mesh_device));
         const std::unordered_map<std::string, uint32_t> cargs = {
             {"stage_base", l1_.stage_base},
             {"n_stage", l1_.n_stage},
