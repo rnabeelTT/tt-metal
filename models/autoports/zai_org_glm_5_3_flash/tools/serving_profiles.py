@@ -124,6 +124,9 @@ def cmd_refresh(data, a):
         if p.get("max_model_len_cap"):
             L = min(L, int(p["max_model_len_cap"]))
         st = "measured" if sp._measured(data, S, lay) else "estimate"
+        # derived_from: the same mesh and numbers as another profile, not run on this profile's hardware
+        if st == "measured" and p.get("derived_from"):
+            st = "derived"
         if (int(p["max_model_len"]), p.get("status")) != (L, st):
             print(f"{p['name']}: max_model_len {p['max_model_len']} -> {L}, status {p.get('status')} -> {st}")
         p["max_model_len"], p["status"] = L, st
@@ -135,7 +138,10 @@ def cmd_refresh(data, a):
 
 def _profile_yaml(p: dict, default: dict, data: dict) -> list[str]:
     out = [f"  - name: {p['name']}"]
-    status = "measured" if p.get("status") == "measured" else "ESTIMATE, pending the G9 capacity probe"
+    status = {
+        "measured": "measured",
+        "derived": f"derived from the {p.get('derived_from')} measurement; not run on {p['hardware']}",
+    }.get(p.get("status"), "ESTIMATE, pending the G9 capacity probe")
     out.append(f"    description: {p['description']} {p['max_num_seqs']} x {p['max_model_len']} tokens ({status}).")
     out.append(f"    hardware: {p['hardware']}")
     out.append(f"    mesh_device: {p['mesh_device']}")
@@ -154,7 +160,9 @@ def _card_lines(data: dict) -> list[str]:
         S, L = int(p["max_num_seqs"]), int(p["max_model_len"])
         lay = sp.profile_layout(data, p)
         tag = " (default)" if p["name"] == data["default_profile"] else ""
-        est = "" if p.get("status") == "measured" else " [estimate, pending measurement]"
+        est = {"measured": "", "derived": f" [derived from `{p.get('derived_from')}`, not run on {p['hardware']}]"}.get(
+            p.get("status"), " [estimate, pending measurement]"
+        )
         lay_txt = "" if lay == sp.default_layout(data) else f" ({lay} DSA cache)"
         out.append(
             f"- `{p['name']}`{tag}: {S} sequence{'s' if S > 1 else ''}, {L:,d}-token context, DSA pool "

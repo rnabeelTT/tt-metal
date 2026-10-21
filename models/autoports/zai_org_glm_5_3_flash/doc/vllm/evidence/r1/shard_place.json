@@ -1,0 +1,72 @@
+{
+ "layers": "0,3,4",
+ "prompt_len": 6001,
+ "blocks": 47,
+ "steps": 8,
+ "cases": {
+  "repeat": {
+   "first_block": 1,
+   "bit_identical": true,
+   "max_abs_diff": 0.0,
+   "max_abs_diff_per_step": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tokens_equal": true
+  },
+  "aligned": {
+   "first_block": 5,
+   "bit_identical": true,
+   "max_abs_diff": 0.0,
+   "max_abs_diff_per_step": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tokens_equal": true
+  },
+  "shift1": {
+   "first_block": 2,
+   "bit_identical": false,
+   "max_abs_diff": 0.52734375,
+   "max_abs_diff_per_step": [
+    0.09375,
+    0.078125,
+    0.0859375,
+    0.09375,
+    0.0703125,
+    0.091796875,
+    0.1015625,
+    0.52734375,
+    0.078125
+   ],
+   "tokens_equal": true
+  }
+ },
+ "base_tokens": [
+  67404,
+  91886,
+  67404,
+  91886,
+  52420,
+  67404,
+  67404,
+  67404,
+  67404
+ ],
+ "seconds": 2.8,
+ "verdict": "placement-only numerics"
+}

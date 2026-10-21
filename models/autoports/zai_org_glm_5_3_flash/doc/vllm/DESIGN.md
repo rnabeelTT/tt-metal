@@ -1,9 +1,8 @@
 # GLM-5.3-Flash (E192): vLLM integration design (stage 9)
 
-Status (2026-10-18): design and code complete on the host; no device job ran yet. The generator serving API of
-section 9 exists in `tt/generator.py` and the adapter uses it. Host tests: `tests/test_generator_vllm_host.py`, 19 passed.
-The serving profiles are data: `serving_profiles.json` (section 6). Device steps that remain:
-`doc/tti_release/RELEASE_CHECKLIST.md` part A.
+Status (2026-10-21): implemented and served on p300x2 (stage 9). Results and evidence:
+`doc/vllm_integration/README.md` and `work_log.md`. This file records the design; where it and the README differ, the
+README holds the measured state.
 
 Decisions (coordinator, 2026-10-17): bundle weights = parent `zai-org/GLM-5.3-Flash` + shipped `tt/e192_mask.json`;
 keep `serve_overlay`; supported context = the 1-slot value, per-profile limits as evidence; default profile after the
@@ -18,7 +17,7 @@ Autoport: `models/autoports/zai_org_glm_5_3_flash`. Workspace: `~/glm53-flash-br
 |---|---|
 | Adapter | `tt/generator_vllm.py`, class `Glm5NextForConditionalGeneration`. It only translates the plugin interface. It calls `Glm53Generator` (`tt/generator.py`). |
 | Registration | Bundle file `vllm_bundle/glm_5_3_flash/vllm_metadata.json` (`EXTRA_MODELS_DIR`). The plugin registers `TTGlm5NextForConditionalGeneration`. The server starts with `--hf-overrides '{"architectures": ["TTGlm5NextForConditionalGeneration"]}'`. No plugin source change. |
-| Precision | The stage-8 policy `combo_a_kv` (`doc/datatype_sweep/selected_precision_config.json`). The adapter sets `GLM53_PRECISION` to it when unset. fp8 e4m3 DSA latent: 6,336 B per token per die. |
+| Precision | The stage-8 policy `combo_a_kv_dense4_g4` (`doc/datatype_sweep/selected_precision_config.json`). The adapter sets `GLM53_PRECISION` to it when unset and refuses a policy with another KV latent dtype. fp8 e4m3 DSA latent: 6,336 B per token per die (replicated), 2,288 B (block-sharded). |
 | Block size | 128 tokens. The DSA pool keys of one block are one tile row. The adapter refuses other values. |
 | Cache ownership | vLLM owns the block allocation (block ids, block tables, `num_blocks`). The model allocates the DSA pools for exactly that `num_blocks` in `allocate_kv_cache` and returns them. vLLM passes that object back on every call. |
 | KDA state | Model-owned, constant size, one row per decode slot (as the Qwen3.5 GDN state). No vLLM KV spec. |
@@ -27,9 +26,9 @@ Autoport: `models/autoports/zai_org_glm_5_3_flash`. Workspace: `~/glm53-flash-br
 | Sampling | The generator's split sampling: model trace, then sampler trace. The sampler writes the token into the persistent token buffer. Per-request parameters go to slot rows. Multi-die lockstep is required (section 7.3). |
 | Host sampling | Compatibility mode only. The plugin selects it for logprobs (4 dies), `min_p`, `logit_bias`, bad words, structured output. |
 | Prefill | Whole prompts. No vLLM chunked prefill and no prefix caching in stage 9. The model chunks internally (128 / 2048). Any prompt length is valid. |
-| Async decode | Implemented in the adapter (split submit / read / host format). `supports_async_decode` stays `False` until the device stale-input tests pass (`GLM53_VLLM_ASYNC_DECODE=1` turns it on for those tests). |
-| Context | DRAM limits it. `serving_profiles.json` holds the numbers (section 6); estimate with the stage-8 policy: 364,544 tokens at 1 slot, 282,624 at 16, 190,464 at 32 (G9 measures them). |
-| Bundle | `tt-model.yaml` from the GLM-4.5-Air template. Four profiles, rendered from `serving_profiles.json`. Weights: the parent `zai-org/GLM-5.3-Flash` at the pinned commit + `tt/e192_mask.json` (section 3.2). Weight cache on (`GLM53_CACHE_DIR`). |
+| Async decode | `supports_async_decode` True by default (the split submit / read / host format path). The stale-input device tests of 8.4 passed (`GLM53_VLLM_ASYNC_DECODE=0` turns it off). |
+| Context | DRAM limits it per DSA cache layout. `serving_profiles.json` holds the measured numbers (section 6): replicated 325,632 tokens at 1 slot, 243,712 at 16, 151,552 at 32; block-sharded (`p300x2-1m`) 1,048,576 at 1 slot, the advertised context. |
+| Bundle | `tt-model.yaml` from the GLM-4.5-Air template. Five profiles, rendered from `serving_profiles.json` (a profile of a non-default layout carries the layout env). Weights: the parent `zai-org/GLM-5.3-Flash` at the pinned commit + `tt/e192_mask.json` (section 3.2). Weight cache on (`GLM53_CACHE_DIR`). |
 
 ## 2. Host environment (checked 2026-10-17)
 
@@ -183,38 +182,21 @@ model context T  = max_model_len rounded up to 128, then to context_granularity 
 `kda_slots(S) = S + S % 2` (MultichipKDA pads an odd batch). `free_after_load` is measured with 2 KDA slots (a 1-slot
 build pads to 2).
 
-Budget now (2026-10-18; status PARTIAL, `serving_profiles.json` `budget`):
-
-| Item | Value | Source |
-|---|---:|---|
-| free DRAM per die after load (64 MiB trace region, 2 KDA slots) | 3,047,399,936 B | combo_a_kv 1-slot capacity probe, bind stage |
-| DSA bytes per 128-token block, 11 layers | 811,008 B (6,336 B per token) | same probe |
-| KDA state per slot | 35,651,584 B | stage-6 memory budget |
-| reserve (prefill / warm-up / decode workspace) | 734,003,200 B (700 MiB) | stage-6 rule: 551 MB measured + margin; not re-measured for combo_a_kv |
-
-Profiles (ESTIMATES until G9 ingests a completed probe per slot count):
-
-| Profile | max_num_seqs | pool blocks | max_model_len |
-|---|---:|---:|---:|
-| `p300x2-long` | 1 | 2,852 | 364,544 |
-| `p300x2` (default), `p150x4` | 16 | 2,237 | 282,624 |
-| `p300x2-wide` | 32 | 1,533 | 190,464 |
+DSA layouts: the top-level `budget` / `measured` belong to the default (replicated) layout. A non-default layout has
+an entry in `layouts` (`budget` merged over the top-level one, `measured`, `env`). The process env selects the layout
+(`GLM53_DSA_SHARD=1` -> `sharded`); `serving_profiles.layout_from_env`. The profiles and their measured values:
+`serving_profiles.json` and `doc/vllm_integration/README.md` (no copies here: the data file is the only source).
 
 G9 (device, `RELEASE_CHECKLIST.md` A2): `scripts/09-g9-probe.sh S` runs `tools/memory_probe.py capacity` at S slots on
 the current tree with the selected policy, then `tools/serving_profiles.py ingest` + `refresh` + `render-yaml`. A
 measured entry wins over the rule for its slot count.
 
-The adapter builds the generator with `budget_check=False` and `dsa_layout=serving_profiles.json dsa_layout`: its own
-check (`serving_profiles.check_fit`) uses the measured data. `tt/generator.BUDGET` still holds the stage-7 constants
-(bf16 latent: 1,531,904 B per block, 1,984,045,568 B free) and would refuse or mis-route the stage-8 contexts (request
-R1, `doc/tti_release/RELEASE_CHECKLIST.md` part C).
+The adapter builds the generator with `budget_check=False` and the process layout (`serving_layout`): its own check
+(`serving_profiles.check_fit`) uses the measured data of that layout.
 
-Context contract: the advertised context is 1,048,576. The supported context is the 1-slot value of the data file
-(`serving_profiles.supported_context`). `doc/context_contract.json` still says 104,448 (stage-6 bf16 latent); the
-adapter logs a warning while they differ. Update the contract from the G9 1-slot probe (request R2, same file).
-
-Ways to more context (not stage 9 or 10): the block-sharded latent (`GLM53_DSA_SHARD=1`, bf16 only today: fp8 + shard
-is not implemented), sharded pool keys, a smaller KDA state.
+Context contract: the advertised context is 1,048,576 and the supported context is the same
+(`doc/context_contract.json`, `serving_profiles.supported_context` = the largest 1-slot limit over the layouts). The
+adapter logs a warning while they differ. Further context per die (not stage 9): sharded pool keys, a smaller KDA state.
 
 ## 7. Sampling
 
@@ -227,7 +209,8 @@ is not implemented), sharded pool keys, a smaller KDA state.
 - Prefill: the model returns the last row's logits on the device, copied to all S rows. The sampler samples with the
   request's params broadcast to all rows. The generator reads row `slot`. The sampler writes a new tensor, never
   `tok_buf` (it holds the live slots' tokens).
-- The device sampler supports `top_k <= 32` (`max_top_k=32`).
+- The device sampler keeps at most 32 candidates: `models/common/sampling/generator.format_sampling_params` sets
+  `top_k` to 32 when it is below 1 (unset) or above 32.
 
 ### 7.2 Host path
 
@@ -252,7 +235,7 @@ context (`ttnn.get_device_tensors`) and compare.
 
 1. Apply `slot_remap` to the slot map.
 2. Rows -> model slots. Page table (padded) -> generator (compare; copy on change).
-3. If `reload_inputs`: positions and tokens come from the host, merged with the device values (8.2).
+3. If `reload_inputs`: positions and tokens come from the host (8.2 for the one async case that keeps a device pair).
 4. Sampler state (7.1).
 5. Replay the model trace and the sampler trace with `blocking=False`.
 6. `read_from_device=False`: return the device token buffer. `read_decode_output(async_read=True)`: non-blocking copy
@@ -260,10 +243,13 @@ context (`ttnn.get_device_tensors`) and compare.
 
 ### 8.2 Host-authoritative reload with a device that is one step ahead
 
-Under async scheduling the host's last token and position of a running request can lag the device by one step. On a
-reload, `merge_async_ahead` keeps the device pair of a slot when the device position equals the host position or the
-host position + 1, unless the slot was prefilled since the last decode. This is the same rule as
-`tt_transformers` `Generator.decode_forward`. It costs two small blocking reads, only on reload steps.
+The plugin (decode-input contract 1) drains every pending async step before a step with `reload_inputs`, so the host
+pair is normally authoritative. The generator keeps the device pair of a slot (`merge_async_ahead`: device position =
+host position or host position + 1) only when ALL of these hold: async decode is on (`async_merge`, the adapter passes
+`supports_async_decode`), the step samples on device, it does not reset the sampling state, and the slot's latest token
+was sampled on device (`Glm53Generator._dev_sampled`). A host-sampled step (logprobs, `min_p`, `logit_bias`, bad words,
+structured output) or a prefill clears the flag: `tok_buf` then holds a stale token for the slot (stage-9 review #1
+P1-2; host test `test_host_sampled_step_then_device_step_reads_host_token`).
 
 ### 8.3 Page growth
 
@@ -272,9 +258,11 @@ The skill warns that older plugin revisions do not flag page growth. Revision 92
 
 ### 8.4 Enabling `supports_async_decode`
 
-Set it only after these device tests pass (section 12): changed / unchanged token, changed / unchanged position,
-changed / unchanged page table, page growth across 3 blocks with 4 concurrent requests against solo controls, a remap
-after a request finishes, a prefill between two decodes of other requests.
+Set it only after these device tests pass: changed / unchanged token, changed / unchanged position, changed /
+unchanged page table, page growth across 3 blocks with 4 concurrent requests against solo controls, a remap after a
+request finishes, a prefill between two decodes of other requests, device -> host -> device sampling switches. Test:
+`~/glm53-flash-bringup/scripts/09_async_validate.py` (the plugin's contract-1 call sequence through the adapter, overlap
+depth 1); result in `doc/vllm_integration/work_log.md`.
 
 ## 9. Required generator / model API changes
 
@@ -373,7 +361,7 @@ models/autoports/zai_org_glm_5_3_flash/
   tt/e192_mask.json                     expert mask (applied to the parent snapshot)
   tools/serving_profiles.py             ingest / refresh / render-yaml / check / get
   doc/context_contract.json             read by the adapter (advertised context, contract check)
-  doc/datatype_sweep/selected_precision_config.json   the combo_a_kv policy (GLM53_PRECISION)
+  doc/datatype_sweep/selected_precision_config.json   the combo_a_kv_dense4_g4 policy (GLM53_PRECISION)
 ```
 
 - Weights: `zai-org/GLM-5.3-Flash` at `91b69215804f2d2036a8867f6ce44848e278dcda` (about 330 GB, all 288 experts).

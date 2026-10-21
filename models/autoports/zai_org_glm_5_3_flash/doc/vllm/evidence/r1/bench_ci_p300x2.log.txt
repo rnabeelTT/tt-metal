@@ -1,0 +1,99 @@
+INFO 10-21 01:24:10 [__init__.py:52] Available plugins for group vllm.platform_plugins:
+INFO 10-21 01:24:10 [__init__.py:54] - tt -> vllm_tt_plugin.entrypoints:platform_plugin
+INFO 10-21 01:24:10 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+2026-10-21 01:24:11.714 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+INFO 10-21 01:24:11 [__init__.py:237] Platform plugin tt is activated
+INFO 10-21 01:24:14 [importing.py:53] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 01:24:14 [importing.py:88] Triton not installed or not compatible; certain GPU-related functions will not be available.
+INFO 10-21 01:24:15 [tt/platform.py:995] Registered TT model TTGlm5NextForConditionalGeneration -> models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration (from EXTRA_MODELS_DIR/glm_5_3_flash)
+INFO 10-21 01:24:15 [tt/platform.py:995] Registered TT model TTGlm5NextForConditionalGeneration -> models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration (from EXTRA_MODELS_DIR/glm_5_3_flash)
+INFO 10-21 01:24:15 [tt/platform.py:995] Registered TT model TTGlm5NextForConditionalGeneration -> models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration (from EXTRA_MODELS_DIR/glm_5_3_flash)
+INFO 10-21 01:24:15 [tt/platform.py:995] Registered TT model TTGlm5NextForConditionalGeneration -> models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration (from EXTRA_MODELS_DIR/glm_5_3_flash)
+INFO 10-21 01:24:15 [tt/platform.py:995] Registered TT model TTGlm5NextForConditionalGeneration -> models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:Glm5NextForConditionalGeneration (from EXTRA_MODELS_DIR/glm_5_3_flash)
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x787325194720>, trust_remote_code=False, seed=0, num_prompts=32, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, enable_multimodal_chat=False, disable_shuffle=False, custom_output_len=256, custom_ensure_client_side_data=False, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, timed_trace_chunk_hash_size=16, timed_trace_sec_multiplier=1, timed_trace_label_timestamp='timestamp', timed_trace_label_input_length='input_length', timed_trace_label_output_length='output_length', timed_trace_label_hash_ids='hash_ids', blazedit_min_distance=0.0, blazedit_max_distance=1.0, asr_max_audio_len_sec=inf, asr_min_audio_len_sec=0.0, random_input_len=100, random_output_len=100, random_range_ratio='0.0', random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, bfcl_categories=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, speed_bench_dataset_subset='qualitative', speed_bench_output_len=4096, speed_bench_category=None, label=None, backend='vllm', base_url='http://127.0.0.1:8131', host='127.0.0.1', port=8000, endpoint='/v1/completions', header=None, max_concurrency=None, model='/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8', input_len=None, output_len=None, tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=False, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/s9f_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json', ignore_eos=True, self_timed=None, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-68f7cd0e-', top_p=None, top_k=None, min_p=None, temperature=0.0, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, served_model_name=None, lora_modules=None, lora_assignment='random', ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=0, chat_template_kwargs=None, extra_body=None, skip_tokenizer_init=False, insecure=False, plot_timeline=False, timeline_itl_thresholds='25,50', plot_dataset_stats=False)
+INFO 10-21 01:24:16 [utils.py:90] Sampling input_len from [100, 100] and output_len from [100, 100]
+Starting initial single prompt test run...
+Skipping endpoint ready check.
+Starting main benchmark run...
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: None
+  0%|          | 0/32 [00:00<?, ?it/s]  3%|▎         | 1/32 [00:21<11:04, 21.44s/it] 53%|█████▎    | 17/32 [00:42<00:32,  2.18s/it]100%|██████████| 32/32 [00:42<00:00,  1.34s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     32
+Failed requests:                         0
+Benchmark duration (s):                  42.88
+Total input tokens:                      3200
+Total generated tokens:                  3200
+Request throughput (req/s):              0.75
+Output token throughput (tok/s):         74.63
+Peak output token throughput (tok/s):    96.00
+Peak concurrent requests:                32.00
+Total token throughput (tok/s):          149.27
+---------------Time to First Token----------------
+Mean TTFT (ms):                          14374.42
+Median TTFT (ms):                        14485.21
+P99 TTFT (ms):                           25190.13
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          179.64
+Median TPOT (ms):                        178.63
+P99 TPOT (ms):                           203.17
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           179.64
+Median ITL (ms):                         177.96
+P99 ITL (ms):                            181.59
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          32158.79
+Median E2EL (ms):                        32159.01
+P99 E2EL (ms):                           42874.16
+==================================================
+nanobind: leaked 102 instances!
+ - leaked instance 0x7873a5d4df98 of type "ttnn._ttnn.program_descriptor.VectorUInt32"
+ - leaked instance 0x787351827468 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x787351595088 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x78735184a2c8 of type "ttnn._ttnn.tensor.Tile"
+ - leaked instance 0x78735174cc78 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x787351825b48 of type "ttnn._ttnn.operations.normalization.SoftmaxDefaultProgramConfig"
+ - leaked instance 0x47f3a840 of type "ttnn._ttnn.operations.unary.relu_t"
+ - leaked instance 0x4834eab0 of type "ttnn._ttnn.operations.unary.log_sigmoid_t"
+ - leaked instance 0x47e21420 of type "ttnn._ttnn.operations.unary.signbit_t"
+ - leaked instance 0x45ba8250 of type "ttnn._ttnn.operations.unary.floor_t"
+ - leaked instance 0x47e21470 of type "ttnn._ttnn.operations.unary.relu6_t"
+ - leaked instance 0x47eb7320 of type "ttnn._ttnn.operations.unary.tanh_t"
+ - leaked instance 0x47c8d9e0 of type "ttnn._ttnn.operations.unary.nez_t"
+ - leaked instance 0x478e2310 of type "ttnn._ttnn.operations.unary.tan_t"
+ - leaked instance 0x787351826048 of type "ttnn._ttnn.operations.normalization.SoftmaxDefaultProgramConfig"
+ - leaked instance 0x787351824548 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x78735174d098 of type "ttnn._ttnn.tensor.CoreCoord"
+ - leaked instance 0x47a05c80 of type "ttnn._ttnn.operations.unary.hardmish_t"
+ - leaked instance 0x78735192ebb8 of type "ttnn._ttnn.multi_device.MeshCoordinate"
+ - leaked instance 0x481dc820 of type "ttnn._ttnn.operations.unary.erf_t"
+ - ... skipped remainder
+nanobind: leaked 1006 types!
+ - leaked type "SocketEndpoint"
+ - leaked type "ttnn._ttnn.operations.experimental.quasar.gt__t"
+ - leaked type "ttnn._ttnn.operations.experimental.attn_res_gather_softmax_t"
+ - leaked type "ttnn._ttnn.d2d_stream_service.D2DStreamServiceSender"
+ - leaked type "ttnn._ttnn.operations.experimental.quasar.SliceDeviceOperation"
+ - leaked type "ttnn._ttnn.operations.experimental.quasar.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "ttnn._ttnn.operations.binary.lt__t"
+ - leaked type "ttnn._ttnn.operations.binary_backward.xlogy_bw_t"
+ - leaked type "ttnn._ttnn.operations.experimental.insert_t"
+ - leaked type "ttnn._ttnn.operations.experimental.quasar.isclose_t"
+ - ... skipped remainder
+nanobind: leaked 4603 functions!
+ - leaked function "__init__"
+ - leaked function "__repr__"
+ - leaked function "__call__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__eq__"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function "__iter__"
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html

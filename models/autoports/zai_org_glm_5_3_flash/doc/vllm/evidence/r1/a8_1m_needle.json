@@ -1,0 +1,32 @@
+[
+ {
+  "case": "1040000:0.1",
+  "passkey": 8197047,
+  "files": 299,
+  "depth_tokens": 0.0824,
+  "prompt_tokens_rendered": 1038965,
+  "prompt_tokens_served": 1038965,
+  "completion_tokens": 21,
+  "ttft_s": 2307.1,
+  "wall_s": 2307.1,
+  "finish_reason": "stop",
+  "content": "8197047",
+  "reasoning": "The user says the secret code is 8197047.",
+  "pass": true
+ },
+ {
+  "case": "300000:0.5",
+  "passkey": 1983584,
+  "files": 110,
+  "depth_tokens": 0.3628,
+  "prompt_tokens_rendered": 297730,
+  "prompt_tokens_served": 297730,
+  "completion_tokens": 26,
+  "ttft_s": 661.2,
+  "wall_s": 661.2,
+  "finish_reason": "stop",
+  "content": "1983584",
+  "reasoning": "The user asked for the secret code mentioned in the text. It's 1983584.",
+  "pass": true
+ }
+]

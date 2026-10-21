@@ -252,6 +252,31 @@ env, max_seq_len 16,384, a 6,001-token prompt in 47 blocks, host-logits mode, pr
 Verdict: placement-only numerics of the block-sharded layout. The same die placement gives bit-identical logits. The
 A8-1M burst divergence (gap 0.5625 after a block-id change) is this effect, not stale state.
 
+## Review #1 P1-2 / P1-1: stale token after a host-sampled step; async decode (2026-10-21)
+
+- P1-2 (commit 3f5b9df1474): a host-sampled decode step advances the device position but skips the device sampler, so
+  `tok_buf` keeps the step's input token. The next device-sampled step merged with that stale token. Fix:
+  `Glm53Generator._dev_sampled` per slot (cleared by a host-sampled step and by a prefill). The merge runs only under
+  async decode, never on `reset_sampling_state`, and only for slots whose latest token was device-sampled. Host test
+  `test_host_sampled_step_then_device_step_reads_host_token` (fails on the old code in both modes, passes now).
+- P1-1 device test: `scripts/09_async_validate.py` on snapshot s9i (HEAD 0bd45f315e1 + the P1-2 hunks), reduced model
+  (layers 0, 3, 4), replicated layout, `GLM53_VLLM_ASYNC_DECODE=1`, the plugin's contract-1 call sequence through the
+  adapter. Evidence: `doc/vllm/evidence/r1/async_validate.json`.
+
+| request | prompt | tokens | blocks | events | equal to solo control |
+| --- | ---: | ---: | ---: | --- | --- |
+| A | 37 | 121 | 2 | finishes at step 120 (drain, slot_remap condense) | yes |
+| B | 300 | 421 | 6 | page growth, remap, host steps | yes |
+| C | 1,000 | 421 | 12 | page growth, remap, host steps | yes |
+| D | 2,051 | 421 | 20 | page growth, remap, host steps | yes |
+| E | 129 | 300 | 4 | prefilled into A's freed slot between decodes | yes |
+
+  - 413 overlapped steady steps (reload_inputs False; step N+1 submitted before step N is read), 13 of them with
+    reload_page_table only (block growth), 7 host-authoritative reloads, 3 host-sampled steps (device -> host -> device).
+  - The solo controls: each request alone, synchronous, in the same physical slot on the same block ids.
+  - Program guard: no program compiled after the capture.
+  - Result: PASS. `supports_async_decode` is now True by default (`GLM53_VLLM_ASYNC_DECODE=0` turns it off).
+
 ## Notes
 
 - Indexer cost: the sparse DSA indexer selects over all pools of the model context, not over the filled prefix. The

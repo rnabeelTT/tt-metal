@@ -148,12 +148,13 @@
   },
   {
    "name": "p150x4",
-   "description": "Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 hardware (the identical (1, 4) mesh).",
+   "description": "Four p150 boards (4 dies), the same (1, 4) mesh and numbers as p300x2 (sizing rule); not run on p150 hardware.",
    "hardware": "p150x4",
    "mesh_device": "P150x4",
    "max_num_seqs": 16,
    "max_model_len": 243712,
-   "status": "measured"
+   "status": "derived",
+   "derived_from": "p300x2"
   }
  ],
  "default_profile": "p300x2",

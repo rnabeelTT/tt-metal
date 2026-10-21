@@ -717,3 +717,21 @@ def test_host_sampled_step_then_device_step_reads_host_token(async_merge):
         dsa_buckets.replay_decode = orig
     read_at = {p: tok for _, p, tok in consumed}
     assert read_at[13] == t_host, (read_at, t_host)
+
+
+def test_async_decode_on_by_default():
+    """Stage-9 review #1 P1-1: supports_async_decode is the shipped default (GLM53_VLLM_ASYNC_DECODE unset or 1), off
+    only with GLM53_VLLM_ASYNC_DECODE=0. Read at import: checked in a fresh interpreter."""
+    import subprocess
+    import sys
+
+    code = (
+        "import models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm as g; "
+        "print(g.Glm5NextForConditionalGeneration.model_capabilities['supports_async_decode'])"
+    )
+    for env_val, want in ((None, "True"), ("1", "True"), ("0", "False")):
+        env = {k: v for k, v in os.environ.items() if k != "GLM53_VLLM_ASYNC_DECODE"}
+        if env_val is not None:
+            env["GLM53_VLLM_ASYNC_DECODE"] = env_val
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=300)
+        assert out.stdout.strip().splitlines()[-1] == want, (env_val, out.stdout[-300:], out.stderr[-300:])

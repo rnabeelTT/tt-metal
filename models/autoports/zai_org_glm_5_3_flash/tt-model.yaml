@@ -108,7 +108,7 @@ serve_profiles:
     max_num_seqs: 32
     max_model_len: 151552
   - name: p150x4
-    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 hardware (the identical (1, 4) mesh). 16 x 243712 tokens (measured).
+    description: Four p150 boards (4 dies), the same (1, 4) mesh and numbers as p300x2 (sizing rule); not run on p150 hardware. 16 x 243712 tokens (derived from the p300x2 measurement; not run on p150x4).
     hardware: p150x4
     mesh_device: P150x4
     max_num_seqs: 16
@@ -160,7 +160,7 @@ card:
     - `p300x2-long`: 1 sequence, 325,632-token context, DSA pool 325,760 tokens shared by all sequences.
     - `p300x2-1m`: 1 sequence, 1,048,576-token context, DSA pool 1,048,704 tokens shared by all sequences (sharded DSA cache).
     - `p300x2-wide`: 32 sequences, 151,552-token context, DSA pool 157,184 tokens shared by all sequences.
-    - `p150x4`: 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
+    - `p150x4`: 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences [derived from `p300x2`, not run on p150x4].
     <!-- END profiles: serving_profiles.json -->
     The advertised context of the checkpoint is 1,048,576 tokens. The profile `p300x2-1m` serves it (one sequence,
     block-sharded DSA cache, slower decode than `p300x2-long`).
@@ -183,16 +183,27 @@ card:
     | AIME24 #1 | 0.95 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
     | AIME24 #2 | 0.92 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
 
-    vLLM sampling-parameter conformance (vllm-tt-plugin suite, 16 sequences): 69 passed, 4 failed, 4 skipped; the 4
-    are test-format and model-property failures of the always-thinking template (details in the autoport's
-    doc/vllm/README.md). Long-context retrieval through vLLM: a passkey at 1,038,965 tokens is found.
-    TODO(stage 8): long-context TT-vs-TT gate. TODO(stage 11): TTI release evals (meta_ifeval, meta_gpqa_cot, ...). The accuracy of E192 against the full
-    288-expert GLM-5.3-Flash was not measured here.
+    vLLM sampling-parameter conformance (vllm-tt-plugin suite, 16 sequences): 69 passed, 4 failed, 4 skipped. Two
+    failures are a property of the test prompt (the model's top-token margin, 2.25, is larger than the largest presence
+    penalty, 2.0); two are prompt-format failures of the always-thinking template (a small token budget ends inside the
+    reasoning). Details: doc/vllm_integration/README.md in the autoport. Long-context retrieval through vLLM: a passkey
+    at 1,038,965 tokens is found. TTI release evals (meta_ifeval, meta_gpqa_cot, ...): stage 11. The accuracy of E192
+    against the full 288-expert GLM-5.3-Flash was not measured here.
 
     ### Performance
-    TODO(stages 9-10): served numbers (vLLM 0.26, this bundle). Measured so far outside vLLM, one slot: 49.9 ms per
-    decode token (20.0 tokens/s, model + sampler trace replays with device token feedback); time to first token
-    0.23 s / 0.38 s / 1.02 s at 128 / 161 / 2048 prompt tokens (warm). Source: stage 8 final_default_h9.
+    Served through vLLM 0.26 on p300x2, greedy, random-token prompts. TTFT: time to first token. TPOT: time per output
+    token at one active request (128 input / 128 output tokens, `vllm bench serve`):
+
+    | profile | TTFT | TPOT | decode tokens/s |
+    | --- | ---: | ---: | ---: |
+    | `p300x2-long` | 236 ms | 56.5 ms | 17.7 |
+    | `p300x2-1m` | 235 ms | 73.5 ms | 13.6 |
+    | `p300x2` (default) | 263 ms | 119.3 ms | 8.4 |
+    | `p300x2-wide` | 294 ms | 120.9 ms | 8.3 |
+
+    Long prompts (one request): about 1,000 prompt tokens per second (`p300x2-long`: 325,376 tokens in 324 s);
+    `p300x2-1m`: 1,038,965 tokens in 2,307 s. More users: `p300x2-wide` reaches 140 output tokens/s at 32 users
+    (168.7 ms per token per user). Per-profile tables: doc/vllm_integration/README.md in the autoport.
 
     ### Limitations
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
@@ -202,8 +213,10 @@ card:
       from the same request on other blocks (bounded numerics; the same blocks give bit-identical logits).
     - One decode trace width for all slots: a profile with more sequences decodes slower per user, also with one
       active request.
-    - The device sampler supports `top_k` up to 32; requests with logprobs, `min_p`, `logit_bias` or structured output
+    - The device sampler keeps at most the 32 most likely tokens: a sampled request without `top_k`, or with `top_k`
+      above 32, samples from the top 32. Requests with logprobs, `min_p`, `logit_bias`, bad words or structured output
       sample on the host (slower).
     - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
     - No multi-token prediction (the MTP layer is not served).
-    - The p150x4 profile runs the same (1, 4) mesh as p300x2 but was not run on p150 boards.
+    - The p150x4 profile is derived by the sizing rule for the same (1, 4) mesh as p300x2; it was not run on p150
+      boards.
