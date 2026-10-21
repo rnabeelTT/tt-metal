@@ -29,6 +29,7 @@ from pathlib import Path
 import torch
 
 import ttnn
+from models.autoports.zai_org_glm_5_3_flash.tt import dsa_buckets  # stage 10: decode replay (maybe segmented)
 
 try:
     from tracy import signpost
@@ -165,14 +166,14 @@ def run_decode(g, actives, steps, rec, p0=300):
         r = {}
         # warm one of each
         _set_active(g, A, p0)
-        ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+        dsa_buckets.replay_decode(g)
         sm.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
         _sync(mesh)
 
         _set_active(g, A, p0)
         t0 = time.perf_counter()
         for _ in range(steps):
-            ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+            dsa_buckets.replay_decode(g)
         t1 = time.perf_counter()
         _sync(mesh)
         r["model_ms"] = (time.perf_counter() - t0) * 1e3 / steps
@@ -187,7 +188,7 @@ def run_decode(g, actives, steps, rec, p0=300):
         _set_active(g, A, p0)
         t0 = time.perf_counter()
         for _ in range(steps):
-            ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+            dsa_buckets.replay_decode(g)
             sm.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
         _sync(mesh)
         r["tokenout_ms"] = (time.perf_counter() - t0) * 1e3 / steps
@@ -217,14 +218,14 @@ def _flush_profiler(mesh):
 
 def run_tracy(g, prefill_rows, rec):
     m, mesh = g.model, g.mesh
-    _set_active(g, g.max_batch_size, 300)
+    _set_active(g, int(os.environ.get("S7_TRACY_ACTIVE", g.max_batch_size)), 300)  # stage 10: 1 of S active
     for _ in range(2):  # warm
-        ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+        dsa_buckets.replay_decode(g)
         m.sampling.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
     _flush_profiler(mesh)
     signpost("PERF_DECODE")
     t0 = time.perf_counter()
-    ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+    dsa_buckets.replay_decode(g)
     m.sampling.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
     _sync(mesh)
     dt = time.perf_counter() - t0

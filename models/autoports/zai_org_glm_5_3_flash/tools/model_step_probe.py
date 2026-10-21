@@ -14,6 +14,7 @@ import torch
 
 import ttnn
 from models.autoports.zai_org_glm_5_3_flash.tests.harness import close_mesh
+from models.autoports.zai_org_glm_5_3_flash.tt import dsa_buckets
 from models.autoports.zai_org_glm_5_3_flash.tt.generator import L1_SMALL_SIZE, Glm53Generator
 
 
@@ -64,7 +65,8 @@ def main():
         ttnn.deallocate(lg)
         m.inputs.set_positions(pos)  # the eager step advanced the device positions
         g._write_tokens([first])
-        ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=True)
+        dsa_buckets.replay_decode(g)  # stage 10: one trace, or the DSA-bucket segments
+        ttnn.synchronize_device(mesh)
         ok(mesh, "model trace replay", t0)
         host = m.logits_to_host(g.logits_out)[0, 0, 0, : m.vocab]
         print(f"traced argmax {int(torch.argmax(host))}", flush=True)
@@ -72,7 +74,7 @@ def main():
         ok(mesh, f"eager sampler -> {int(g._read_tokens()[0])}", t0)
         m.sampling.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
         ok(mesh, f"sampler trace capture + replay -> {int(g._read_tokens()[0])}", t0)
-        ttnn.execute_trace(mesh, g.trace_id, cq_id=0, blocking=False)
+        dsa_buckets.replay_decode(g)
         m.sampling.sample(g.logits_out, tt_out_tok=g.tok_buf, enable_trace=True)
         ok(mesh, f"replay with device feedback -> {int(g._read_tokens()[0])}", t0)
         g.teardown()

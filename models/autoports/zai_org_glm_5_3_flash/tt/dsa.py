@@ -215,6 +215,19 @@ class GlmDSA(LightweightModule):
                 )
             # pool keys: >= NB blocks of 32 keys, sized as a whole number of P_alloc-long indexer views
             self.KB = -(-self.NB * 32 // self.P_alloc)  # indexer view batch
+            # stage 10: a vLLM pool at the context cap (NB - 1 = k * MB blocks, vLLM's null block 0 included, + the
+            # dummy) would round KB up by a whole P_alloc of pool keys (20.8 MB per layer at 325,632 tokens). Then
+            # the dummy block's POOL-KEY tile aliases null block 0 (never a block of a request; the dummy only takes
+            # padding writes and overrun reads, both masked by the indexer limit). The latent keeps the dummy; the
+            # host table (page_table_host) and the decode-input table keep it too. Standalone pools never alias.
+            kb_alias = -(-(self.NB - 1) * 32 // self.P_alloc)
+            self.pool_alias = (
+                kb_alias < self.KB
+                and self.NB - 1 > self.S * (self.T // BLOCK)
+                and os.environ.get("GLM53_POOL_ALIAS", "1") == "1"  # 0: A/B only
+            )
+            if self.pool_alias:
+                self.KB = kb_alias
             self.pooled = ttnn.zeros(
                 (self.KB * self.P_alloc // 32, 1, 32, self.ID),
                 dtype=ttnn.bfloat16,
@@ -229,7 +242,7 @@ class GlmDSA(LightweightModule):
                 if fits
                 else self.complete_page_table(torch.zeros(self.S, 0, dtype=torch.int32))
             )
-            self.page_table = self._dev(pt0, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
+            self.page_table = self._dev(self._pool_pt(pt0), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
             self.page_table_host = pt0
             z = lambda: ttnn.zeros(
                 (1, 1, S, self.ID), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=DRAM
@@ -258,9 +271,16 @@ class GlmDSA(LightweightModule):
         full = self.complete_page_table(pt)
         self.page_table_host = full
         ttnn.copy_host_to_device_tensor(
-            ttnn.from_torch(full, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self._rep),
+            ttnn.from_torch(self._pool_pt(full), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self._rep),
             self.page_table,
         )
+
+    def _pool_pt(self, full: torch.Tensor) -> torch.Tensor:
+        """The device page table (pool keys; latent reads never touch a dummy column) and prefill chunk_pt: the
+        dummy block -> block 0 when pool_alias (allocate_decode_state)."""
+        if not getattr(self, "pool_alias", False):
+            return full
+        return torch.where(full == self.dummy_block, torch.zeros_like(full), full)
 
     def _phys_rows(self, slot_of_row: torch.Tensor, pos: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
         """Physical latent rows of logical (slot, position) pairs. Every position written / attended must sit in a block
@@ -615,7 +635,7 @@ class GlmDSA(LightweightModule):
             "row_idx": self._dev(rows.to(torch.int64), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
             "vmask": self._dev((ar < length).float().reshape(1, 1, n, 1)),
             "chunk_pt": self._dev(
-                self.page_table_host[slot : slot + 1, first_blk : first_blk + nblk].contiguous(),
+                self._pool_pt(self.page_table_host[slot : slot + 1, first_blk : first_blk + nblk].contiguous()),
                 ttnn.int32,
                 ttnn.ROW_MAJOR_LAYOUT,
             ),
@@ -633,6 +653,11 @@ class GlmDSA(LightweightModule):
                 torch.where(col <= pos.reshape(n, 1), col, torch.full_like(col, SENTINEL_F)).reshape(1, 1, n, IDX_WIDTH)
             )
         if inp["path"] == "sparse":
+            if getattr(self, "score_widths", None):  # stage 10 (tt/dsa_buckets.py): score the filled bucket only
+                need = (start + length) // KPOOL
+                inp["score_width"] = self.__dict__.get("_force_score_width") or next(
+                    (W for W in self.score_widths if W >= need), self.P_alloc
+                )
             inp["pos"] = self._dev(pos)
             inp["limit"] = self._dev(torch.floor((pos + 1) / KPOOL))
             inp["is_dense"] = self._dev((pos <= DENSE_MAX_POSITION).float())
@@ -750,14 +775,20 @@ class GlmDSA(LightweightModule):
                     qi = sl(qi_all, self.IH * self.ID)
                     qi = self._split_heads(qi, rb, self.IH, self.ID)
                     wi = sl(wi_all, self.IH)
+                    W = inputs.get("score_width") or self.P_alloc
                     scores = ttnn.experimental.indexer_score_dsa(
                         qi,
                         self.pooled_view(),
                         wi,
-                        chunk_start_idx=self.P,
+                        chunk_start_idx=W - 32,  # = T_b / 4: the causal start of a T_b-token build
                         cache_batch_idx=slot,
                         page_table=self.page_table,
-                    )  # [1,1,rb,P_alloc] bf16 ROW_MAJOR
+                        **({} if W == self.P_alloc else {"kv_len": W}),
+                    )  # [1,1,rb,P_alloc] bf16 ROW_MAJOR (kv_len: only columns < W written)
+                    if W < self.P_alloc:  # stage 10: rank the bucket's columns only
+                        sw = ttnn.slice(scores, (0, 0, 0, 0), (1, 1, rb, W))
+                        ttnn.deallocate(scores)
+                        scores = sw
                     ids = self._select_pools(scores, sl(inputs["limit"], 1))
                     parts.append(self._sparse_rows(ids, sl(inputs["pos"], 1), rb))
                     for t in (qi, scores, ids):
@@ -874,13 +905,18 @@ class GlmDSA(LightweightModule):
         # ---- selection: paged indexer scores of every slot over its own pools, masked, top-512
         qi = ttnn.reshape(self._mm(qr, self.w_iq), (1, 1, S * self.IH, self.ID))  # [1,1,S*32,128]
         wi = self._mm(x, self.w_iw, dtype=ttnn.float32)  # [1,1,S,32]
-        sc = ttnn.experimental.dsa_decode_scores(
-            qi, wi, self.pooled, self.page_table, inputs["limit_u32"], self.MB
-        )  # [1,1,S,P_alloc] fp32, blocks past each slot's limit -inf
-        ids = self._select_pools(sc, inputs["limit"])
+        hook = self.__dict__.get("decode_select")  # stage 10 (tt/dsa_buckets.py): bucketed width, persistent ids
+        if hook is not None:
+            ids = hook(self, qi, wi, inputs)
+        else:
+            sc = ttnn.experimental.dsa_decode_scores(
+                qi, wi, self.pooled, self.page_table, inputs["limit_u32"], self.MB
+            )  # [1,1,S,P_alloc] fp32, blocks past each slot's limit -inf
+            ids = self._select_pools(sc, inputs["limit"])
+            ttnn.deallocate(sc)
         sparse = self._sparse_rows(ids, inputs["pos"], S)
         index = ttnn.where(inputs["dense"], inputs["dense_idx"], sparse)
-        for t in (qi, wi, sc, ids, sparse):
+        for t in (qi, wi, sparse) if hook is not None else (qi, wi, ids, sparse):
             ttnn.deallocate(t)
         o_lat = self._sparse_attend(q_abs, index, latent_rows=c)
         ttnn.deallocate(c)

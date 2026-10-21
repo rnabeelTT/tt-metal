@@ -25,6 +25,7 @@ import torch
 from loguru import logger
 
 import ttnn
+from models.autoports.zai_org_glm_5_3_flash.tt import dsa_buckets
 from models.autoports.zai_org_glm_5_3_flash.tt.model import Glm53Model, model_from_env
 
 try:
@@ -408,6 +409,7 @@ class Glm53Generator(Generator):
         for L, sizes in self._warm_plans():
             self.model.prefill(torch.zeros(L, dtype=torch.int64), 0, sizes=sizes)
         self._warm_extra()
+        dsa_buckets.install(self)  # stage 10: bucket programs compiled before any capture
         self.model.reset_state()
         self.model.prepare_prefill_traces()  # persistent inputs before any capture
         self.model.inputs.set_positions([-1] * self.max_batch_size)
@@ -418,11 +420,8 @@ class Glm53Generator(Generator):
         ttnn.synchronize_device(self.mesh)
         if os.environ.get("GLM53_POISON_PRECAPTURE") == "1":  # diagnostic: freed-but-referenced buffers read NaN
             poison_free_dram(self.mesh)
-        self.trace_id = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        try:
-            self.logits_out = self.model.decode_step(self._tok_view())
-        finally:
-            ttnn.end_trace_capture(self.mesh, self.trace_id, cq_id=0)
+        step = lambda: self.model.decode_step(self._tok_view())  # noqa: E731
+        self.trace_id, self.logits_out = dsa_buckets.capture_decode(self, step)  # stage 10: maybe segmented
         # capture the sampler traces on the model trace's logits buffer now: a first capture inside decode_forward,
         # right after a non-blocking model replay, hung the probe test (2026-10-16). Writes a junk token into
         # tok_buf; the first decode step after a prefill always reloads the tokens.
@@ -664,6 +663,7 @@ class Glm53Generator(Generator):
         for L, sizes in self._warm_plans():
             self.model.prefill(torch.zeros(L, dtype=torch.int64), 0, sizes=sizes)
         self._warm_extra()
+        dsa_buckets.install(self)  # stage 10: bucket programs compiled before any capture
         logits = None
         if self.model.sampling is not None:
             from models.common.sampling.generator import format_sampling_params
@@ -697,11 +697,8 @@ class Glm53Generator(Generator):
             return
         self.warm_programs()
         ttnn.synchronize_device(self.mesh)
-        self.trace_id = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        try:
-            self.logits_out = self.model.decode_step(self._tok_view())
-        finally:
-            ttnn.end_trace_capture(self.mesh, self.trace_id, cq_id=0)
+        step = lambda: self.model.decode_step(self._tok_view())  # noqa: E731
+        self.trace_id, self.logits_out = dsa_buckets.capture_decode(self, step)  # stage 10: maybe segmented
         self._capture_sampler()
         ttnn.synchronize_device(self.mesh)
         self.model.capture_prefill_traces()  # last (see _warm)
@@ -772,7 +769,7 @@ class Glm53Generator(Generator):
                 output_tokens_slots=output_tokens,
             )
         if enable_trace:
-            ttnn.execute_trace(self.mesh, self.trace_id, cq_id=0, blocking=False)
+            dsa_buckets.replay_decode(self)  # stage 10: one trace, or the DSA-bucket segments
             logits = self.logits_out
         else:
             logits = self.model.decode_step(self._tok_view())
@@ -963,7 +960,7 @@ class Glm53Generator(Generator):
         else:  # the device advanced the positions itself; the host mirror (host_advance) must still be in range
             self._check_positions(self.model.inputs.positions)
         if enable_trace:
-            ttnn.execute_trace(self.mesh, self.trace_id, cq_id=0, blocking=False)
+            dsa_buckets.replay_decode(self)  # stage 10: one trace, or the DSA-bucket segments
             logits = self.logits_out
         else:
             logits = self.model.decode_step(self._tok_view())
@@ -1027,7 +1024,7 @@ class Glm53Generator(Generator):
     def teardown(self):
         self.model.release_prefill_traces()
         if self.trace_id is not None:
-            ttnn.release_trace(self.mesh, self.trace_id)
+            dsa_buckets.release_decode(self)
             self.trace_id = None
 
 
