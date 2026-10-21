@@ -480,6 +480,7 @@ jobs:
               "sim_bh_p150"
               "sim_bh_galaxy"
               "sim_quasar"
+              "sim_qsr"
             )
             sanity_skus+=("${sim_skus[@]}")
           fi

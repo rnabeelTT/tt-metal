@@ -86,7 +86,7 @@ ttnn:
     wh_llmbox_civ2: 40
     sim_wh_n150: 695
     sim_bh_p150: 680
-    sim_quasar: 40  # #61750: four Quasar ttsim groups (resnet50 ops, llama32_1b graph ops, qwen3_vl ops, yolo ops), 10 each
+    sim_qsr: 40  # #61750: four Quasar ttsim groups (resnet50 ops, llama32_1b graph ops, qwen3_vl ops, yolo ops), 10 each
   unit:
     wh_llmbox: 50
     wh_galaxy: 125

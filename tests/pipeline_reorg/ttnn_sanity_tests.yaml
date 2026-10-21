@@ -364,7 +364,8 @@
   owner_id: U0976495SLU # Nikola Ostojic
 
 # ---------------------------------------------------------------------------------------------
-# Quasar simulator coverage (#61750). sim_quasar -> libttsim_qsr.so on ubuntu-latest (sku_config.yaml);
+# Quasar simulator coverage (#61750). sim_qsr (alias of sim_quasar) -> libttsim_qsr.so on ubuntu-latest
+# (sku_config.yaml);
 # setup-ttsim exports TT_METAL_SIMULATOR, TT_METAL_SLOW_DISPATCH_MODE=1, TT_METAL_DISABLE_SFPLOADMACRO=1 and
 # TT_METAL_QUASAR_NOC_API_VERSION=1. Every entry pins the two-compute-node grid the issue asks for with
 # TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" (an inclusive end coordinate: workers (2,2)-(3,2)).
@@ -392,7 +393,7 @@
     TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" pytest --timeout 600 -v --forked models/demos/vision/classification/resnet50/quasar/tests/ops/test_reshape_tiled.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_padded_slice.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_reallocate.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_reshape.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_sharded_to_interleaved.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_slice_write.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_tilize.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_layout.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_memory_config.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_untilize_with_unpadding.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_add.py
     --deselect=models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_memory_config.py::test_quasar_to_memory_config_sharded_to_interleaved[quasar-device_params0]
   skus:
-    sim_quasar:
+    sim_qsr:
       timeout: 10
   team: ttnn
   budget_type: sanity
@@ -410,7 +411,7 @@
     --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_paged_scaled_dot_product_attention_decode_small_grid.py::test_paged_scaled_dot_product_attention_decode_split_small_grid[2core-ttnn_mesh_device0]
     --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_paged_update_cache.py::test_paged_update_cache[00_128x8x32x64_bf8_int-dram-ttnn_mesh_device0]
   skus:
-    sim_quasar:
+    sim_qsr:
       timeout: 10
   team: ttnn
   budget_type: sanity
@@ -437,7 +438,7 @@
     --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_argmax.py::test_argmax[00_32x151936_bf16_int-dram-ttnn_mesh_device0]
     --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_untilize.py::test_untilize[00_32x37984_bf8_int-dram-ttnn_mesh_device0]
   skus:
-    sim_quasar:
+    sim_qsr:
       timeout: 10
   team: ttnn
   budget_type: sanity
@@ -465,7 +466,7 @@
     --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_permute.py::test_permute_detect[dfl_transpose-ttnn_mesh_device0]
     --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_permute.py::test_permute_detect[dfl_nhwc_to_nchw-ttnn_mesh_device0]
   skus:
-    sim_quasar:
+    sim_qsr:
       timeout: 10
   team: ttnn
   budget_type: sanity

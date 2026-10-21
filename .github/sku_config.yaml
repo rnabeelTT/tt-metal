@@ -270,6 +270,12 @@ skus:
     runs_on:
       - ubuntu-latest
     ttsim_lib: libttsim_qsr.so
+  # Alias of sim_quasar for the ttnn Quasar sanity groups (#61750): same runner, same binary; the short
+  # name matches libttsim_qsr.so. The ttsim team's own entries keep using sim_quasar.
+  sim_qsr:
+    runs_on:
+      - ubuntu-latest
+    ttsim_lib: libttsim_qsr.so
 
   # _xl variants: same simulator binary as their base SKU, but on a bigger runner for
   # pipelines whose suite is too large for ubuntu-latest (e.g. the full LLK regression,
