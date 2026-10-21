@@ -373,6 +373,9 @@ class Glm53Generator(Generator):
         self.num_blocks = None
         self._fresh = set()  # slots prefilled since the last serving decode (their host token is authoritative)
         self._serving_decoded = False
+        # per slot: the latest token of the slot was sampled on device (the sampler wrote it into tok_buf); a
+        # host-sampled step or a prefill clears it (tok_buf then holds a stale token for that slot)
+        self._dev_sampled = [False] * self.max_batch_size
         self._sstate = None
         self._warmed_programs = False
         self._program_cache_after_capture = None
@@ -783,6 +786,7 @@ class Glm53Generator(Generator):
         prompt_tokens=None,
         output_tokens=None,
         read_from_device=True,
+        async_merge=False,
         **_,
     ):
         """vLLM decode step (decode_forward(..., serving=True)). Rows -> model slots via `slots`; sampling_params,
@@ -798,14 +802,20 @@ class Glm53Generator(Generator):
             self._set_page_rows(page_table, slots)  # host compare; device copy only on change
         device = sampling_params is not None and self.model.sampling is not None
         fresh = set(int(s) for s in fresh_slots) | self._fresh
+        for s in fresh:
+            self._dev_sampled[s] = False
         if reload_inputs:
             pos = torch.full((S,), -1, dtype=torch.int64)
             tok = torch.zeros(S, dtype=torch.int64)
             for r, s in enumerate(slots):
                 pos[s] = int(start_pos[r])
                 tok[s] = int(tokens[r])
-            if device and enable_trace and self._serving_decoded:
-                tok, pos = merge_async_ahead(tok, pos, self._read_tokens(), self._read_positions(), fresh)
+            # async decode only (async_merge): a continuing slot may hold a device-sampled token the host has not
+            # read yet. Never on reset_sampling_state (host authoritative) and never for a slot whose latest token was
+            # host-sampled or prefilled (tok_buf holds a stale token for it)
+            if device and enable_trace and async_merge and not reset_sampling_state and self._serving_decoded:
+                host_only = fresh | {s for s in range(S) if not self._dev_sampled[s]}
+                tok, pos = merge_async_ahead(tok, pos, self._read_tokens(), self._read_positions(), host_only)
             pos_l = [int(p) for p in pos.tolist()]
             self._check_positions(pos_l)
             if pos_l != self.model.inputs.positions:
@@ -829,6 +839,8 @@ class Glm53Generator(Generator):
         self.model.inputs.host_advance()
         self._fresh.clear()
         self._serving_decoded = True
+        for s in slots:
+            self._dev_sampled[s] = device
         if device:
             self.model.sampling.sample(logits, tt_out_tok=self.tok_buf, enable_trace=enable_trace)
             if not enable_trace:

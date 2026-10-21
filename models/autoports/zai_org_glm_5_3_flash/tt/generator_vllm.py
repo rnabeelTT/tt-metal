@@ -572,6 +572,8 @@ class Glm5NextForConditionalGeneration:
             prompt_tokens=rows_to_slots_tokens(kwargs.get("prompt_tokens"), slots, S) if sp is not None else None,
             output_tokens=rows_to_slots_tokens(kwargs.get("output_tokens"), slots, S) if sp is not None else None,
             read_from_device=bool(kwargs.get("read_from_device", True)) or sp is None,
+            # merge with the device-resident token / position only under async decode (DESIGN.md 8.2)
+            async_merge=bool(self.model_capabilities.get("supports_async_decode", False)),
             serving=True,
         )
         self._fresh.clear()

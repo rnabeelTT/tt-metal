@@ -296,7 +296,8 @@ def test_selected_precision_policy_loads():
 def test_default_precision_uses_serving_budget(monkeypatch):
     """Stage-8 review #4 P1: the generator's DRAM budget must come from serving_profiles.json for the default precision
     (GLM53_PRECISION unset). If the default policy id and the data file's precision id differ, the generator falls
-    back to the stage-7 built-in budget and the default 1-slot context drops (112,640 instead of 280,576)."""
+    back to the stage-7 built-in budget and the default 1-slot context drops (about 112K instead of 272,384 with the
+    no-split reserve floor, tt/generator.NOSPLIT_MARGIN_MIB)."""
     from models.autoports.zai_org_glm_5_3_flash.tt.precision import PrecisionOverrides
 
     for k in ("GLM53_PRECISION", "GLM53_DRAM_RESERVE_MIB", "GLM53_BUDGET_FREE_BYTES", "GLM53_DSA_SHARD"):
@@ -308,7 +309,7 @@ def test_default_precision_uses_serving_budget(monkeypatch):
     assert budget["latent_dtype"] == d["precision"]["kv_latent_dtype"]
     monkeypatch.setattr(gen_mod, "BUDGET", budget)
     plan = gen_mod.plan_context(1)  # the standalone default (1,200 MiB reserve)
-    assert plan["layout"] == "replicated" and plan["max_seq_len"] >= 280576, plan
+    assert plan["layout"] == "replicated" and plan["max_seq_len"] >= 262144, plan
     # one sizing rule: at the serving reserve, the generator accepts the data file's 1-slot value
     monkeypatch.setenv("GLM53_DRAM_RESERVE_MIB", str(int(d["budget"]["reserve_bytes"]) >> 20))
     monkeypatch.setattr(gen_mod, "BUDGET", gen_mod._budget())
@@ -610,12 +611,27 @@ def test_decode_serving_reload_merge_and_order(monkeypatch):
     g._read_tokens = lambda: torch.tensor([0, 0, 77, 0])
     g._read_positions = lambda: torch.tensor([0, -1, 11, -1])
     g._fresh = {0}
+    g._dev_sampled = [False, False, True, False]  # slot 2's latest token came from the device sampler
     out = g._decode_serving(
-        torch.tensor([5, 9]), torch.tensor([30, 10]), slots=[0, 2], sampling_params=object(), read_from_device=False
+        torch.tensor([5, 9]),
+        torch.tensor([30, 10]),
+        slots=[0, 2],
+        sampling_params=object(),
+        read_from_device=False,
+        async_merge=True,
     )
     assert out == "tok_buf" and sampled  # device handle returned, sampler replayed
     assert written["tok"] == [5, 0, 77, 0]  # slot 2 keeps the device's token / position (host lags one step)
     assert g.model.inputs.positions == [31, -1, 12, -1]  # after host_advance
+    assert g._dev_sampled == [True, False, True, False]
+    # async off (the default): the host pair is authoritative, no merge
+    written.clear()
+    g.model.inputs = _Inputs(S)
+    g._dev_sampled = [False, False, True, False]
+    g._decode_serving(
+        torch.tensor([5, 9]), torch.tensor([30, 10]), slots=[0, 2], sampling_params=object(), read_from_device=False
+    )
+    assert written["tok"] == [5, 0, 9, 0]
 
     class _Host:  # read / process: die-0 row, slot -> row order
         pass
@@ -623,3 +639,81 @@ def test_decode_serving_reload_merge_and_order(monkeypatch):
     monkeypatch.setattr(ttnn, "get_device_tensors", lambda h: [h])
     monkeypatch.setattr(ttnn, "to_torch", lambda h: torch.tensor([100, 101, 102, 103]))
     assert g.process_decode_output_host(_Host(), [2, 0]).tolist() == [102, 100]
+
+
+@pytest.mark.parametrize("async_merge", [False, True])
+def test_host_sampled_step_then_device_step_reads_host_token(async_merge):
+    """Stage-9 review #1 P1-2 (the reviewer's sim): a host-sampled decode step advances the device position but does
+    not run the device sampler, so tok_buf keeps that step's INPUT token. The next device-sampled step must feed the
+    host-sampled token (host-authoritative reload), in sync mode and under async decode."""
+    from models.autoports.zai_org_glm_5_3_flash.tt import dsa_buckets
+
+    S = 2
+    dev = {"tok": [0] * S, "pos": [-1] * S}
+    consumed = []
+
+    class Inputs:
+        def __init__(self):
+            self.positions = [-1] * S
+
+        def set_positions(self, p):
+            self.positions = list(p)
+            dev["pos"] = list(p)
+
+        def host_advance(self, n=1):
+            self.positions = [x + n if x >= 0 else x for x in self.positions]
+
+    def replay(g):  # the model trace reads tok_buf at the device positions and advances them
+        for s in range(S):
+            if dev["pos"][s] >= 0:
+                consumed.append((s, dev["pos"][s], dev["tok"][s]))
+                dev["pos"][s] += 1
+
+    next_tok = iter(range(1000, 2000))
+
+    def sample(logits, tt_out_tok=None, enable_trace=True):  # the device sampler writes into tok_buf
+        for s in range(S):
+            if dev["pos"][s] >= 0:
+                dev["tok"][s] = next(next_tok)
+
+    g = object.__new__(gen_mod.Glm53Generator)
+    g.max_batch_size, g.max_seq_len, g.num_blocks = S, 8192, 100
+    g.model = SimpleNamespace(
+        inputs=Inputs(),
+        sampling=SimpleNamespace(sample=sample),
+        vocab=8,
+        SR=32,
+        logits_to_host=lambda lg: torch.zeros(1, 1, S, 8),
+    )
+    g.mesh, g.trace_id, g.logits_out, g.tok_buf = None, 1, "logits", "tok_buf"
+    g._fresh, g._serving_decoded, g._sstate, g.page_table = set(), False, None, None
+    g._dev_sampled = [False] * S
+    g._write_tokens = lambda toks: dev.__setitem__("tok", list(toks[:S]))
+    g._read_tokens = lambda: torch.tensor(dev["tok"])
+    g._read_positions = lambda: torch.tensor(dev["pos"])
+    g._check_positions = lambda p: None
+    orig = dsa_buckets.replay_decode
+    dsa_buckets.replay_decode = replay
+    try:
+
+        def step(host_tok, host_pos, device_mode, fresh=()):
+            g._decode_serving(
+                torch.tensor([host_tok]),
+                torch.tensor([host_pos]),
+                slots=[0],
+                sampling_params=(object() if device_mode else None),
+                reload_inputs=True,
+                fresh_slots=fresh,
+                read_from_device=False,
+                async_merge=async_merge,
+            )
+            return dev["tok"][0] if device_mode else 555 + host_pos
+
+        t = step(42, 10, True, fresh=[0])  # first decode after the prefill
+        t = step(t, 11, True)
+        t_host = step(t, 12, False)  # one host-sampled step (logprobs / min_p / bad_words / structured ...)
+        step(t_host, 13, True)  # back to device sampling
+    finally:
+        dsa_buckets.replay_decode = orig
+    read_at = {p: tok for _, p, tok in consumed}
+    assert read_at[13] == t_host, (read_at, t_host)
