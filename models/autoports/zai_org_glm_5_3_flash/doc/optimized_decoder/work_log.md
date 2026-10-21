@@ -173,7 +173,10 @@ kda8_exp4_lofi_pc 12111 µs.
 - Device rules: one decisive case per run-locked ticket, QPRIO unset, `systemd-run --user`. Each ticket runs on its own
   snapshot (git archive of HEAD + the stage-3 files of the live tree; md5s in `logs_r4/s3r4.status.log`). Script
   `~/glm53-flash-bringup/scripts/s3r4_one.sh`. HEAD moved several times during the work (other stages committed);
-  only stage 6-10 files changed, so each snapshot base is logged per ticket.
+  only stage 6-10 files changed, so each snapshot base is logged per ticket. Shared-file bases of the final gate:
+  suite and watcher subset 0bd45f315e1, B=1 watcher decode 7b3ffd7ec65, prefill Tracy 044dbeaa3fda.
+- Review #5 (more work, P2): stage 10 (0a2663d0b6b) changed the shared `GlmDSA` after those runs. Rerun on a pure git
+  archive of the stage-10 fix HEAD: below.
 - `dsa_q_mm` on one die: the program was built for 32 rows (TP4 Hq). `SingleDieDSA` (in `tt/optimized_decoder.py`)
   builds it for Hq = 64 rows. The first A/B run then hit a segfault in tilize: `MultichipDSA._sparse_attend` frees the
   op output after a full-range slice, which on one die is the same tensor. `SingleDieDSA._sparse_attend` handles the
@@ -186,3 +189,6 @@ kda8_exp4_lofi_pc 12111 µs.
   `candidates_r4/t_r4/`).
 - KDA prefill HiFi2 per layer kind taken (KDA + MoE only).
 - 128-row prefill Tracy cases were dropped to save device time on the shared queue (stage 9 had priority).
+- 2026-10-21: review #5 rerun on a pure git archive of 0bcf89f7fd6 (one ticket, `s3r5_gate.sh`): suite 48 / 48,
+  watcher subset 24 / 24 and B=1 watcher decode 3 / 3, 0 suspicious lines. The first attempt was killed by the host
+  OOM killer (another job), requeued unchanged. Review #5 doc P3s done (README).

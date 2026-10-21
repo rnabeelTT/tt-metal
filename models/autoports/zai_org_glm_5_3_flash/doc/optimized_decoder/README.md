@@ -260,7 +260,7 @@ real shapes, the sparse sweep on real layer-4 weights at the `opt` policy.
 | Routed sparse matmuls, B=1 gather (default 767.4 µs, 64 cores, in0 32) | in0 16 -6.9 (noise), in0 64 / 128 +4 / +18, 32 cores +24 .. +47, 128 cores invalid; down variants +2 .. +26; pairs path +687 / +1421 | default kept (all variants bit-identical) |
 | B=32 grouped (default 8161.7 µs, in0 4, subblock 4) | gate/up in0 2 +697, down in0 2 +308, subblock 2 / 1 +105 / +637, in0 8 / 16 overflow L1 (2.11 / 3.32 MB); pairs 16748 | default kept |
 | Prefill 2048 sorted / grouped (default 52151 µs with the 1024-row split) | in0 2 +1073 .. +2832, subblock 2 +583, in0 8 overflows; the stage-6 1024-row split (committed in 08bac32f4c1) costs 7.8 ms per MoE layer (44373 µs unsplit, bit-identical) | default kept; the split is a stage-6 / 7 memory decision |
-| DSA per-head matmul at 2048 prefill rows (default 1900 / 2090 µs) | reuse config per_core_M 2 / 4 / 8: 1426 / 941 / **765** (q_abs), 1335 / 873 / 665 (o_uv), PCC 0.999999, no hang (the stage-3 hang was per_core_M = Mt = 64) | **not taken**: the probe is fast and accurate on one chunk, but in the decoder the DSA continuation chunks (prompts over 2048) read 11-22 % low with it on W_UK and non-finite on W_UV (`logs/s3r_bisect_pf.log`, `logs/s3r_final_suite.bmm_wuk.log`); not diagnosed. Knob kept off (`GLM53_PF_OFF=bmm_on` turns it on) |
+| DSA per-head matmul at 2048 prefill rows (default 1900 / 2090 µs) | reuse config per_core_M 2 / 4 / 8: 1426 / 941 / **765** (q_abs), 1335 / 873 / 665 (o_uv), PCC 0.999999, no hang (the stage-3 hang was per_core_M = Mt = 64) | **not taken**: the probe is fast and accurate on one chunk, but in the decoder the DSA continuation chunks (prompts over 2048) read 11-22 % low with it on W_UK and non-finite on W_UV (`logs/s3r_bisect_pf.log`, `logs/s3r_final_suite.bmm_wuk.log`). Diagnosed in review #3: out-of-bounds batch-stride writes of the batched reuse matmul with per_core_M < Mt ("Review #2: prefill and sparse-decode items", `logs_r3/s3r3_bmm_oob.log`). Knob kept off (`GLM53_PF_OFF=bmm_on` turns it on) |
 | `flash_mla_prefill` 2048 rows (default 22852 µs) | q128 / k128 **6654**, q128 / k64 6753, q64 / k64 11625; PCC 0.99996 vs default; k256 / k512 / q256 overflow L1 | **taken** |
 | Large prefill matmuls (bfp8) | explicit 2D config on the full grid, bit-exact: DSA o_proj 7707 -> **3708**, MLP down 5792 -> **2778**; KDA in / MLP gate-up overflow L1 at in0 4 on that grid. HiFi2: KDA in 10115 -> 7951, gate/up 7094 -> 5594 (precision change) | 2D configs **taken** for o_proj and MLP down; HiFi2 prefill: review #1 did not take it; review #2 trialled it on real weights and **took** it for DSA o_proj and the dense MLP (`t_pf_hifi2`); review #3 rejected it for the KDA in / out projections (`t_kda_pf_hifi2`); review #4 took it for the KDA + MoE layers |
 
@@ -505,7 +505,9 @@ quantization-aware reference; bound 1 +- 0.01):
 | L0 (KDA + dense), review #3 trial | 0.9927 .. 0.9939 | 0.9869 .. 0.9897 (with the MLP prefill HiFi2) | not applied to L0 |
 
 The headroom is small: the LoFi routed bias already uses about 0.4 %. Only L4 is tested at layer level. About 31 of the
-34 KDA layers are KDA + MoE. Stage 8 owns the model-level check; `t_kda_pf_hifi2_moe` is the candidate name.
+34 KDA layers are KDA + MoE. A stage-8 model-level check does not apply to this single-die decoder: the full model
+builds `MultichipDecoder`, which does not read `kda_prefill_kinds`. A TP4 or full-model use would need its own trial.
+`t_kda_pf_hifi2_moe` is the candidate name.
 Prefill time: below.
 
 ### Final default and evidence
@@ -534,7 +536,12 @@ The faces kernel changes prefill too (sinkhorn 186 -> 168 µs per layer at 2048 
 "prefill unchanged" claim is corrected above.
 
 Correctness and stability of the final default (snapshots with the final `tt/optimized_decoder.py`, md5
-9b551ef2ab7292212500dbedf5b72e86):
+9b551ef2ab7292212500dbedf5b72e86). Base commit of the shared files (`tt/dsa.py`, `tt/moe*.py`,
+`tt/multichip_decoder.py`, ...): **0bd45f315e1** for the suite and the watcher subset, **7b3ffd7ec65** for the B=1
+watcher decode, **044dbeaa3fda** for the prefill Tracy (bases per ticket in `logs_r4/s3r4.status.log`). Stage 10
+changed the shared `GlmDSA` later (0a2663d0b6b: pool-key allocation, device page-table width, sparse prefill views).
+Review #5 asked for a rerun of the suite and the watcher runs on a pure git archive of the stage-10 fix HEAD. That rerun
+(base 0bcf89f7fd6) passed: "Review #5 rerun" below.
 
 - Full suite **48 / 48** (`logs_r4/s3r4_suite.log`, third run in the file), including `test_single_slot_decode` and
   the new `test_single_slot_sparse_decode` (L3 1 slot, prefill 4000: scale 0.9953; decode at 4000 .. 4002: update PCC
@@ -542,6 +549,11 @@ Correctness and stability of the final default (snapshots with the final `tt/opt
 - Watcher suite subset (with the 1-slot and sparse 1-slot cases) **24 / 24**, B=1 traced decode per kind **3 / 3**,
   both with `TT_METAL_LOGGER_LEVEL=Warning` and **0 suspicious lines** (`watcher_correctness_r4/`).
 - One-die conv op at B = 1 / 2 / 8 / 9 / 16 / 32: 6 / 6.
+- The kda_dense 1-user decode Tracy ran on the pre-final `tt/optimized_decoder.py` (md5 6b7fc11e). It differs from
+  the final file only in the default `dsa_q_mm_ib` (64 vs 0), which acts on DSA layers at 1 slot only. Every other
+  final Tracy case ran on the final file.
+- There is no same-session review #3 control at position 128. The position-128 comparisons use the review #3 runs of
+  another day; the only same-session A/B is at position 16384.
 - The first default (with `dsa_q_mm`) also passed: suite 48 / 48, watcher 24 / 24 + 3 / 3, 0 suspicious lines
   (`logs_r4/*_qmm.log`, `watcher_correctness_r4_qmm/`).
 
@@ -549,6 +561,30 @@ TP4 is not changed. `tt/multichip_decoder.py`, `tt/dsa.py` and `tt/moe.py` are n
 `MultichipDecoder`, which skips the single-die block of `OptimizedDecoder.from_state_dict` (`not issubclass(cls,
 MultichipDecoder)`). The new `OptConfig` fields are read only in that block. The weight-cache key (policy name and
 weight dtypes) does not change.
+
+Known latent hazard in shared code (not edited; owner stage 5): `MultichipDSA._sparse_attend`
+(`tt/multichip_decoder.py:943-944`) slices the sparse_sdpa output to H heads and then frees the op output. When the
+heads per die are a multiple of 32 (TP1: 64, TP2: 32) the slice is the same tensor, so the next op reads a freed
+buffer (the review #4 segfault, `logs_r4/s3r4_ab_run1_segv.log`). TP4 (16 heads, padded to 32) takes a real copy, so
+it is not reachable there. The single-die decoder avoids the path (`SingleDieDSA._sparse_attend`).
+
+### Review #5 rerun (shared files at the stage-10 fix HEAD)
+
+One run-locked ticket (`~/glm53-flash-bringup/scripts/s3r5_gate.sh`, copy in `logs_r5/`) on a **pure git archive of
+0bcf89f7fd6** (the stage-10 fix HEAD; no live-tree files). md5s of that snapshot: `tt/optimized_decoder.py` 9b551ef2,
+`tt/dsa.py` a4c9f4d0, `tt/multichip_decoder.py` 15aae97d, `tt/moe.py` 6e648211, `tt/moe_opt.py` 31fdc53c,
+`tests/test_optimized_decoder.py` c11bee17 (`logs_r5/s3r5.status.log`). The first attempt was killed by the host OOM
+killer (another job's CPU HF scoring, not this ticket; `logs_r5/s3r5_gate_oomkilled.log`) and was requeued unchanged.
+
+- Full `tests/test_optimized_decoder.py`: **48 / 48**. The 1-slot sparse-regime case (head split with the stage-10
+  page-table width) gives the same check lines as in review #4: prefill 4000 scale 0.9953; decode at 4000 .. 4002
+  update PCC 0.999958 / 0.999951 / 0.999491, scale 0.9940 / 0.9870 / 0.9915. y_swap 3 of 307 (cap 9).
+- Watcher subset (same `-k`, `TT_METAL_LOGGER_LEVEL=Warning`): **24 / 24, 0 suspicious lines**.
+- B=1 traced decode per kind under the watcher: **3 / 3, 0 suspicious lines**.
+- Logs `logs_r5/s3r5_gate.log`; watcher logs `watcher_correctness_r5/`.
+
+No fix was needed: the head split passes the wider stage-10 page table with `cache_batch_idx=0`, which selects the
+slot's row.
 
 ### TTNN blockers (not on the TP4 path)
 
@@ -568,6 +604,7 @@ kernel work (owner stage 5).
 | Advice | Where | Disposition |
 |---|---|---|
 | "Try a DRAM-sharded program config" | KDA out, DSA o_proj, wq_b | measured: slower at HiFi4 (DRAM-sharded table) |
+| "Try a DRAM-sharded program config" | dense-MLP gate / up decode (32 x 4096 x 24576 bfp8, HiFi4, 310 µs, 64 % of DRAM) | not measured at this shape on one die. The nearest one-die measurement is the KDA in-proj (same K = 4096, N 32960): DRAM-sharded at HiFi4 was compute bound and slower (484 .. 502 vs 401 µs); it wins only at HiFi2, where the multi-reader form trips the watcher race and 1 reader is 2.3x slower. Deferred (review #4 P3-5) |
 | "Place input 0 in L1" | every matmul | rejected except producer-sharded (audit) |
 | "HiFi2 may also work" | BFP8 HiFi4 matmuls | decode rows are DRAM bound (no gain at HiFi4 -> HiFi2 interleaved: KDA in 401 -> 398 µs); prefill: **taken** for DSA o_proj and dense MLP (review #2, real-weight trial), KDA in / out projections: **taken for the KDA + MoE layers** (review #4), not for L0 (KDA + dense: L0 prefill scale 0.987 .. 0.990) |
 | "HiFi2 is sufficient for BFP8" | indexer prefill fp32 matmuls (59 µs x 2) | rejected: fp32 indexer scores, 0.1 % |
@@ -636,9 +673,14 @@ The 2026-10-16 16:10 stall is classified as infrastructure (work log).
   grouped path uses the expert id list (`indices=`). The sorted / masked paths pass `nnz=None`: the expert count is
   data dependent, and a wrong static `nnz` deadlocks the device (`tt/moe.py` docstring). tt-perf-report has no DRAM %
   for these rows. The accounting computes their bytes by hand (8 experts at 1 user, about 178 at 32).
-- Not done in review #4 (P3 items that need new sweeps): the dense-MLP gate / up one-die geometry table (P3-5), the
-  indexer `wq_b` bfp8 trial (P3-6), the N-halved 1-reader KDA in-proj split (P3-2), repeated runs of the review #4
-  default (P3-11). The KDA in-proj split into two weights (qkv + rest; -642 µs per KDA layer at 2048 prefill rows,
+- Deferred review #4 P3 items (each needs new device sweeps on the shared queue, where stages 9-11 had priority):
+  - P3-5: the dense-MLP gate / up one-die geometry table (DRAM-sharded and 1D in0 / core sweep at K = 4096);
+  - P3-6: the indexer `wq_b` bfp8 trial (precision change; about -12 µs per DSA layer expected);
+  - P3-2: the N-halved 1-reader KDA in-proj split (two DRAM-sharded matmuls of 64 tiles per bank);
+  - P3-11: repeated runs of the review #4 default (the options are bit-identical or a prefill fidelity change);
+  - 128-row prefill Tracy of the review #4 default (dropped for device time; review #2 runs are cited).
+- The review #3 report is not on disk (`~/glm53-flash-bringup/artifacts/` has `stage3_review_{1,2,4}.md`); only the
+  `PLAN.md` summary exists. The KDA in-proj split into two weights (qkv + rest; -642 µs per KDA layer at 2048 prefill rows,
   -12 µs decode, bit-exact; audit) is still unowned (P3-8). It changes the packed weight layout that stage 5 (TP4
   grouping), stage 6 (weight cache) and the deepseek KDA prefill kernels share.
 
