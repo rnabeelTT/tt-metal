@@ -25,13 +25,13 @@ on the (1, 4) mesh of a p300x2 (4 Blackhole dies, FABRIC_1D, TP4). The decoder l
 | MoE prefill split | off: largest free block 1,234,298,880 B at warm-up (160 MB above the 1 GiB threshold) |
 | TTFT, 2,048 / 8,192-token prompt | **1,022 / 4,386 ms** |
 | Decode, model trace / token-out / `generate()` loop, 1 slot | 49.71 / **50.10** / 50.21 ms (**19.9 t/s/u**) |
-| Teacher forcing top-1, references p0 / p1 / p2 (top-5, top-100: 100 %) | **92 / 95 / 92 %** |
+| Teacher forcing top-1, references p0 / p1 / p2 (prompts 161 / 153 / 131 tokens; top-5, top-100: 100 %) | **92 / 95 / 92 %** |
 | Prefill check top-1, p0 / p1 / p2 (top-5, top-100: 100 %) | 92 / 95 / 91 % |
 | Autoregressive (stock prompt, 256 tokens) | two runs bit-identical; `check_degenerate_output.py` exit 0 (adjacent duplication 0.0) |
 | Page-table change between traced steps (segmented replay) | traced == eager on 12 of 12 steps (PCC 1.0); one device copy |
 | Sampler alternation (greedy / top-k / penalties) | pass; dies agree; seeds take effect |
 | Programs compiled after the capture | 0; the address guard covers 26 `buckets.*` tensors |
-| Teardown + second build in one process | 2.68 MB per bank after `teardown()` (before `del`); the second default build works |
+| Teardown + second build in one process | 2.68 MB per bank after `teardown()` (before `del`); the second default build was built, captured and generated 8 tokens |
 
 `v4_default` (52aff54486a + the coupled floor, before stage 10's MoE buckets and views) was the floor / split check:
 MoE split off (1,181,530,112 B largest block), TTFT 2,048 / 8,192 = 1,023 / 5,772 ms, token-out 50.08 ms, TF p0
@@ -243,11 +243,14 @@ HEAD's precision (`combo_a_kv_dense4_g4` + ten bfp4-tuned decode programs), othe
 - On the standalone default build: `v3_default` (`runs/s7r2/v3_default.json`; pure `git archive 237ec3b8438`, `GLM53_PRECISION` unset, default budget) gives the same teacher forcing (92 / 95 / 92) and prefill check (92 / 95 / 91)
   at 294,912 tokens, token-out 55.04 ms.
 
-Free-running checks on the same build:
-- **Autoregressive** (`autoregressive/VERDICT.md`): the stock prompt, 256 tokens.
-  - Two runs are bit-identical.
-  - `check_degenerate_output.py` exits 0.
-  - HF scored over TT's tokens: top-1 93.75 %, top-5 100 %; the phrase loop is HF's own top-1.
+Free-running checks:
+- **Autoregressive, final default** (`runs/s7r2/v4b_ar/`): the stock prompt, 256 tokens.
+  - The output is a sentence loop; two runs are bit-identical; `check_degenerate_output.py` exits 0.
+  - It is token-identical to stage 8's `final_default_h9` trajectory. HF's scoring of that trajectory
+    (`doc/datatype_sweep/runs/final_default_h9/checks/autoregressive/hf_scores_tt_trajectory.json`) applies: HF
+    top-1 agrees at 94.9 %, top-5 at 99.2 %; HF's top-1 is TT's token at every position from 100 to 255 (the loop);
+    the worst rank is 21, at position 24.
+- **Autoregressive, j2 (history):** `autoregressive/VERDICT.md` (top-1 93.75 %, top-5 100 %).
 - **Qualitative suite:** HEAD's default ran it in stage 8's gate
   (`doc/datatype_sweep/runs/final_default_h9/checks/qualitative/`). `qualitative/VERDICT.md` covers the 2026-10-17
   build and points there.

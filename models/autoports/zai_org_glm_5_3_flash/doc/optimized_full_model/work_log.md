@@ -176,4 +176,19 @@ one line per job). Records: `runs/s7r2/` and `~/glm53-flash-bringup/artifacts/s7
   - ptchange traced = eager 12 / 12; sampler alternation passes with seeds taking effect.
   - TTFT 2,048 / 8,192 = 1,022 / 4,386 ms; token-out 50.10 ms.
   - 0 post-capture programs; 26 `buckets.*` tensors under the address guard.
-  - Teardown leaves 2.68 MB per bank (read before `del`), and a second full default build in the same process works.
+  - Teardown leaves 2.68 MB per bank (read before `del`); a second full default build in the same process was built,
+    captured and generated 8 tokens.
+
+## 2026-10-21: stage-6 review #5 P3s
+
+- AR docs: v4b's trajectory is token-identical to `final_default_h9`, whose HF scoring applies (top-1 94.9 %, top-5
+  99.2 %, HF top-1 at positions 100-255, worst rank 21 at position 24).
+- Multi-slot: decode is segmented for every DSA build (views always on); at S >= 2 the MoE active-count buckets add
+  point traces (freeze-code evidence: stage 10's t15b, 16 slots, 57.9 MiB of decode trace). 32 slots were not re-run
+  standalone with MoE buckets (wide serving: stage 9's `s9_final`).
+- The leak control is worded as "built, captured and generated 8 tokens". The watcher and tracker sections are scoped
+  to pre-stage-10 code (freeze-code tracker: t13 / t14). Prompt lengths p1 / p2: 153 / 131.
+- Freeze-code probe (`logs/s7r2/v5_probe_s8.log`; pure 0a2663d0b6b, 8 slots, `GLM53_DEALLOC_CHECK=1`): 6 passed, 1
+  failed. `test_no_shared_buffer_frees` reports `moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387` (8 calls), an
+  MoE-bucket force-free of a view-held buffer. Found defect; stage 10 owns the fix; the probe is re-run on the fixed
+  HEAD.

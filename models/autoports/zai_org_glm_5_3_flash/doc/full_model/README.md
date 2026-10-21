@@ -20,14 +20,14 @@ Source run: `v4b_default` (`doc/optimized_full_model/runs/s7r2/v4b_default.json`
 | Batch-1 decode, model trace only | 49.71 ms per step | position 300, 20 replays, no host sync between |
 | Batch-1 decode, token-out (model + sampler, token fed back on device) | **50.10 ms per step, 20.0 t/s/u** | same; sampler 0.39 ms |
 | Batch-1 decode, `generate()` loop (host reads each token) | 50.21 ms per step, 19.9 t/s/u | same |
-| Teacher forcing top-1, AIME24 references p0 / p1 / p2 (top-5 / top-100 100 %) | 92 / 95 / 92 % | 161 + 100 tokens each |
+| Teacher forcing top-1, AIME24 references p0 / p1 / p2 (top-5 / top-100 100 %) | 92 / 95 / 92 % | prompts 161 / 153 / 131 tokens + 100 generated |
 | Prefill check top-1, p0 / p1 / p2 (top-5 / top-100 100 %) | 92 / 95 / 91 % | same |
-| Autoregressive, stock prompt, 256 tokens | two runs bit-identical; degenerate check exit 0 | `runs/s7r2/v4b_ar/` |
+| Autoregressive, stock prompt, 256 tokens | a sentence loop; two runs bit-identical; degenerate check exit 0. Token-identical to stage 8's `final_default_h9`, whose HF scoring applies: top-1 94.9 %, top-5 99.2 %, HF top-1 at every position 100-255, worst rank 21 (position 24) | `runs/s7r2/v4b_ar/`; `doc/datatype_sweep/runs/final_default_h9/checks/autoregressive/hf_scores_tt_trajectory.json` |
 | Page-table change between traced (segmented) steps | traced == eager, 12 of 12 steps | slot 0, block change at 256 |
 | Sampler alternation greedy / top-k / penalties | pass, dies agree, seeds take effect | 12 steps |
 | Plan / fit / MoE split | 2,129 of 2,133 blocks, 1.19 GB free per die, split off (1,234,298,880 B largest block) | |
 | Programs compiled after the capture | 0 (address guard incl. 26 `buckets.*` tensors) | |
-| Teardown, then a second default build in one process | 2.68 MB per bank after `teardown()`; second build works | |
+| Teardown, then a second default build in one process | 2.68 MB per bank after `teardown()`; the second build was built, captured and generated 8 tokens | |
 
 `v4_default` (52aff54486a + the coupled floor) was the floor / split check: split off, TTFT 1,023 / 5,772 ms, token-out
 50.08 ms, TF p0 92 / 100 / 100.
@@ -40,7 +40,9 @@ Gates of HEAD's precision at other sizes:
 - the explicit-override case `v1_default` (24be34c7cbe + review-#2 hunks, reserve 1,024 MiB, 311,296): TF
   92 / 100 / 100, token-out 55.37 ms. The same build today needs `GLM53_DRAM_RESERVE_MIB=1024`.
 
-Largest full-model batch tested: 32 slots (`j4_s32`, see "Batch > 1"). Limitations: see the last section.
+Largest full-model batch tested: 32 slots (`j4_s32`, before stage 10). The freeze code was tested at 16 slots (stage 10's
+t15b, MoE active-count buckets). 32 slots were not re-run standalone with MoE buckets; wide serving (32 slots) is covered
+by stage 9's `s9_final`. Limitations: see the last section.
 
 History: `j2_s1_default` (2026-10-18; 656c998e3df + rework files, combo_a_kv without kda_in, 280,576, single decode
 trace) is the run the sections below cite where they say j2:
@@ -63,9 +65,16 @@ removed.
   logits rows to `SR = ceil32(S)`.
 - Prefill: one user per call, in chunks of the constructed lengths (128, 512, 2048; stage-7 cost plan). KDA layers
   carry their state from chunk to chunk. DSA layers write the paged latent cache.
-- Decode: all S slots in one traced step. For `max_seq_len` >= 65,536 (the default build), the step is a segmented
-  trace (stage 10, `tt/dsa_buckets.py`): main segments plus, per DSA layer, one selection trace per bucket width; the
-  host picks the bucket from its positions mirror each step. Below 65,536 it is one trace. The per-step DSA / KDA
+- Decode: all S slots in one traced step, captured as a segmented trace (stage 10, `tt/dsa_buckets.py`). The
+  prefill pool-key views are always on, so the bucket controller (`DsaBuckets`) is installed for every DSA build.
+  - At `max_seq_len` >= 65,536 (the default), each DSA layer's selection has one trace per bucket width.
+  - At S >= 2 slots, the MoE active-count row buckets add a point trace per MoE layer and bucket.
+  - The host picks the buckets from its positions mirror each step (no device read).
+  - The 1-slot default has the DSA buckets and views, with MoE buckets off.
+
+  Freeze-code multi-slot evidence: stage 10's t15b (full model, 16 slots, 16,384; 57.9 MiB of decode trace). It
+  showed active rows bit-identical to buckets off at 1 / 5 / 16 active, and a constant program cache
+  (`doc/optimized_vllm/README.md`). The per-step DSA / KDA
   inputs come from the position tensor on the device (`tt/decode_inputs.py`), and the trace advances the positions. The sampler trace writes the token into the buffer that
   the model trace reads, so steady-state decode needs no host input. A position at or past `max_seq_len` raises on the
   host and is treated as inactive on the device (no cache row written).
@@ -117,7 +126,9 @@ contexts. `GLM53_DRAM_RESERVE_MIB=1024` gives the standalone generator the same 
 ## Warm-up order
 
 `_warm` compiles everything before it captures a trace. After the capture, nothing may allocate in the trace region
-(checked with tt-metal's allocation tracker, `TT_METAL_TRACE_ALLOC_TRACKING=1`).
+(checked with tt-metal's allocation tracker, `TT_METAL_TRACE_ALLOC_TRACKING=1`). Scope: the runs below are on pre-stage-10
+code (single decode trace); the freeze-code tracker evidence is stage 10's t13 (reduced, 16 slots) and t14 (full model,
+1 slot, 243,712), both clean (`doc/optimized_vllm/README.md`).
 - On the final rework snapshot: 0 live post-capture allocations at 8 slots, for both DSA layouts (`tracker3_rep`,
   `tracker3_shard`) and the stage-9 adapter smoke (`tracker3_adapter`).
 - The 1- and 32-slot tracker runs (`tracker4_*`) ran on the morning code (cdab692b0ec), before the final fixes.
@@ -173,10 +184,13 @@ within the expected range. The original stage-6 build (bfp8, 4 slots) gave 93 / 
 
 Free-running checks:
 
-- Autoregressive (stock prompt, 256 tokens, `doc/optimized_full_model/autoregressive/`):
-  - `check_degenerate_output.py` exits 0;
-  - two runs give bit-identical tokens;
-  - HF scoring of TT's trajectory is in `doc/optimized_full_model/autoregressive/VERDICT.md`.
+- Autoregressive (stock prompt, 256 tokens), final default `v4b_default` (`doc/optimized_full_model/runs/s7r2/v4b_ar/`):
+  - the output is a sentence loop ("She sat beneath the oak tree, watching the bird struggle to fly.");
+  - `check_degenerate_output.py` exits 0 (adjacent duplication 0.0); two runs give bit-identical tokens;
+  - the trajectory is token-identical to stage 8's `final_default_h9` run, whose HF scoring (`doc/datatype_sweep/runs/final_default_h9/checks/autoregressive/hf_scores_tt_trajectory.json`) applies: HF top-1
+    agrees at 94.9 % and top-5 at 99.2 %; the loop is HF's own top-1 at every position from 100 to 255; the worst
+    rank is 21 (position 24);
+  - the earlier stage-7 trajectory (j2) is in `doc/optimized_full_model/autoregressive/VERDICT.md`.
 - Qualitative (6 chat prompts, up to 2,048 tokens): `qualitative/VERDICT.md`. HF scored over TT's q1 and q5 tokens
   covers the spiral window and the "shouldn" token.
 
@@ -187,7 +201,8 @@ Free-running checks:
 | `j3_s8` | 8 (prompts 161 / 1,153 / 517 in slots 0, 3, 6) | 32 traced greedy steps, token fed back on device. Each slot is compared with its own solo run. The same prompt runs in slots 0 and 6. Slot 6 is prefilled at step 10 while the others decode. | bit-identical in every comparison, all 32 steps |
 | `j3b_s8_noskip` | 8, inactive-row MoE skip off | the same logits rows as j3 | all 200 saved logits / token tensors bit-identical to j3 (skip on); same batch checks pass |
 | `j4_s32` | 32 (slots 0, 17, 31; prompts 161 / 300 / 517) | the same checks as j3 | bit-identical in every comparison, all 32 steps (late slot 22 steps); default context at 32 slots: 2,048 |
-| reduced probe | 1 / 8 | `tests/test_model_probe.py` (`GLM53_PROBE_SLOTS`), 3 layers, all slot paths, final snapshot with `GLM53_DEALLOC_CHECK=1` | 6 passed + 1 skipped / 7 passed (`probe_dchk_s{1,8}.log`); the 32-slot probe (6 passed, `j1_probe_s32.log`) ran on earlier code (d48b7fd06ad) |
+| reduced probe | 1 / 8 | `tests/test_model_probe.py` (`GLM53_PROBE_SLOTS`), 3 layers, all slot paths, `GLM53_DEALLOC_CHECK=1` | rework snapshot (2026-10-18): 6 passed + 1 skipped / 7 passed (`probe_dchk_s{1,8}.log`). Freeze code 0a2663d0b6b, 8 slots (`~/glm53-flash-bringup/logs/s7r2/v5_probe_s8.log`): 6 passed, 1 failed. `test_no_shared_buffer_frees` found an MoE-bucket force-free of a buffer that a view still holds (`moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387`, 8 calls): a found defect, owned by stage 10; the probe is re-run after its fix. The 32-slot probe (6 passed, `j1_probe_s32.log`) ran on earlier code (d48b7fd06ad) |
+| stage 10 t15b | 16 (full model, 16,384) | freeze-code multi-slot decode: segmented trace with MoE active-count buckets (57.9 MiB of decode trace) | active rows bit-identical to buckets off at 1 / 5 / 16 active; program cache constant (`doc/optimized_vllm/README.md`) |
 
 ## Page table and sampling
 
@@ -233,7 +248,7 @@ it. The sampler is 0.39 ms of a 56 ms step, so neither has a performance case.
 | Prefill, all layers, LM head | device | chunked, cost plan |
 | Prefill token in `generate()` | **host** argmax over the last logits row (one vocab row read, about 20 ms of TTFT) | the serving path samples the prefill token on the device (`_prefill_sampled`) |
 | `prefill_forward(return_all_logits=True)` / `prefill_logits` | **host**: every row is read back | readiness prefill check only. The all-logits head is warmed only for chunks of <= 512 rows (a 2048-row head holds 158 MB of logits per die, kept out of the warm-up peak). A prompt whose plan has a 2048-row chunk compiles that head after the capture; the post-capture program guard (`Glm53Generator.guard_programs`) reports it. Not a serving path |
-| Decode, model step | device, traced: one trace below `max_seq_len` 65,536; at or above it (the default build) a segmented trace (main segments + per-bucket DSA selection traces, stage 10), the bucket chosen on the host from the positions mirror (no device read) | |
+| Decode, model step | device, traced as a segmented trace for every DSA build (stage 10: views always on): per-bucket DSA selection traces at `max_seq_len` >= 65,536 and MoE active-count point traces at S >= 2; buckets chosen on the host from the positions mirror (no device read) | |
 | Decode sampling | device, traced, every variant | `on_device_sampling=False` is a host-sampling compatibility mode (host argmax of the logits row); readiness tools only |
 | Token feedback | device (`tt_out_tok`) | `generate()` reads one token per step back to the host for its return value |
 | Page table | host compares the row; device copy only when it changed | |
@@ -243,7 +258,9 @@ it. The sampler is 0.39 ms of a 56 ms step, so neither has a performance case.
 
 ## Watcher
 
-`TT_METAL_WATCHER` on the rework snapshot: every run rc 0 with 0 suspicious lines (`~/glm53-flash-bringup/logs/s67r/status`).
+`TT_METAL_WATCHER` on the rework snapshot (2026-10-18, pre-stage-10 code: single decode trace, no buckets or views):
+every run rc 0 with 0 suspicious lines (`~/glm53-flash-bringup/logs/s67r/status`). The freeze code was not re-run under the
+watcher here.
 The Ethernet cores were not watched (`TT_METAL_WATCHER_DISABLE_ETH=1`). Earlier runs with them watched aborted at
 teardown with "Timed out while waiting for active ethernet core 29-25"; that is a scoped limitation, not a pass on the
 ETH cores.
@@ -292,6 +309,10 @@ it is faster. The byte math and the evidence are in `doc/context_contract.json` 
 `doc/multichip_decoder/README.md` ("fp8 rows").
 
 ## Limitations
+
+- Open defect (found by the freeze-code probe, stage 10 fixing): at S >= 2 the MoE active-count bucket path force-frees a
+  buffer that a view still holds (`moe_opt.py:895`, reached from `dsa_buckets.py:387`). The same bug class corrupted
+  decode in this stage (the logits pad). It was not seen in the 16-slot t15b exactness runs.
 
 - E192 expert pruning: the model cannot finish some French translations (q5). HF with the same E192 set does the same
   ("shouldn" is HF's top-1), so it is a pruning property, not a TT defect.
