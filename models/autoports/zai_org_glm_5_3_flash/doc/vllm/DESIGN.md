@@ -261,8 +261,8 @@ The skill warns that older plugin revisions do not flag page growth. Revision 92
 Set it only after these device tests pass: changed / unchanged token, changed / unchanged position, changed /
 unchanged page table, page growth across 3 blocks with 4 concurrent requests against solo controls, a remap after a
 request finishes, a prefill between two decodes of other requests, device -> host -> device sampling switches. Test:
-`~/glm53-flash-bringup/scripts/09_async_validate.py` (the plugin's contract-1 call sequence through the adapter, overlap
-depth 1); result in `doc/vllm_integration/work_log.md`.
+`tools/vllm_async_validate.py` (pytest: `tests/test_vllm_async_validate.py`; the plugin's contract-1 call sequence
+through the adapter, overlap depth 1); result in `doc/vllm_integration/work_log.md`.
 
 ## 9. Required generator / model API changes
 

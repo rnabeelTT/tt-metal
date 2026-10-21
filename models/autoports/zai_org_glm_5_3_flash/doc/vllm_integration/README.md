@@ -1,6 +1,6 @@
 # Stage 9: vLLM integration of GLM-5.3-Flash (E192) on p300x2
 
-Details, commands and every run: `work_log.md`. Design: `DESIGN.md`. Gate artifact: `../../readiness_vllm/` (from the
+Details, commands and every run: `work_log.md`. Design: `../vllm/DESIGN.md`. Gate artifact: `../../readiness_vllm/` (from the
 p300x2-1m server). All performance numbers are the baseline before the stage-10 work.
 
 ## Summary
@@ -10,7 +10,7 @@ p300x2-1m server). All performance numbers are the baseline before the stage-10 
 | Supported context | 1,048,576 tokens (the advertised context), profile `p300x2-1m`, measured (G9 probe, copy 1.0) |
 | Long-context retrieval through vLLM | passkey needle PASS at 1,038,965 tokens (depth 0.08) and at 297,730 tokens (depth 0.36) |
 | Plugin sampling suite, p300x2 (16 sequences) | 69 passed, 4 failed, 4 skipped. The 4 are known test-format and model-property failures (see Known failures). |
-| Plugin sampling suite, p300x2-1m (1 sequence) | 64 passed, 9 failed, 4 skipped. The same 4, plus 5 tests that need 2 or more requests and pass at 16 and 32 sequences. |
+| Plugin sampling suite, p300x2-1m (1 sequence) | 64 passed, 9 failed, 4 skipped. The same 4, plus 5 tests that need 2 or more requests and pass at 16 sequences. |
 | Qualitative (6 prompts, greedy and sampled) | coherent and on topic on every profile. The degenerate-output check is clean. |
 | Shipped mode (max reasoning effort) | 2 control prompts finish the reasoning and give correct content on every profile |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
@@ -48,15 +48,15 @@ The CI serving burst (100/100/32) and the sweeps are in `work_log.md`.
 ## Serving profiles and context
 
 One data file, `serving_profiles.json`, holds every serving number. Each profile is measured with the G9 capacity
-probe (`capacity/`): load, pool, warm-up and capture, one prompt near the pool top, then a traced decode that must
+probe (`../vllm/capacity/`): load, pool, warm-up and capture, one prompt near the pool top, then a traced decode that must
 copy the passage.
 
 | profile | sequences | max_model_len | DSA cache layout | evidence |
 | --- | ---: | ---: | --- | --- |
-| p300x2-1m | 1 | 1,048,576 | block-sharded fp8 | `capacity/s1_p300x2-1m` |
-| p300x2-long | 1 | 325,632 | replicated fp8 | `capacity/s1` |
-| p300x2 (default), p150x4 | 16 | 243,712 | replicated fp8 | `capacity/s16` |
-| p300x2-wide | 32 | 151,552 | replicated fp8 | `capacity/s32` |
+| p300x2-1m | 1 | 1,048,576 | block-sharded fp8 | `../vllm/capacity/s1_p300x2-1m` |
+| p300x2-long | 1 | 325,632 | replicated fp8 | `../vllm/capacity/s1` |
+| p300x2 (default), p150x4 | 16 | 243,712 | replicated fp8 | `../vllm/capacity/s16` |
+| p300x2-wide | 32 | 151,552 | replicated fp8 | `../vllm/capacity/s32` |
 
 - The supported context is the advertised 1,048,576 tokens (`doc/context_contract.json`). The profile `p300x2-1m`
   serves it.
@@ -85,14 +85,14 @@ Decode speed per user (TPOT) and total output throughput at a 128-token input, g
 
 ## Known failures (plugin sampling suite)
 
-Evidence: `evidence/diag-p300x2.json` (`scripts/09-diag.py` on the A6 server).
+Evidence: `../vllm/evidence/diag-p300x2.json` (`scripts/09-diag.py` on the A6 server).
 
 | test | class | evidence |
 | --- | --- | --- |
 | `TestPresencePenalty::test_different_presence_penalties`, `::test_presence_penalty_mixed_batch` | model property of the test prompt | On "a b c a b c a b c" the smallest top-1/top-2 gap on an already-generated token is 2.25. The test's largest penalty is 2.0. Positive control (gap 0.375): presence 2.0 changes the greedy output. Mixed batch of 16: 8/8 rows match the solo output at each penalty. |
 | `TestHostOnlyParameters::test_bad_words` | prompt format (always-thinking template) | A 100-token budget ends inside the reasoning, so `content` is None. With room to finish, the content has no banned word. |
 | `test_dp1_full_capacity_mixes_structured_and_plain_requests` | prompt format (always-thinking template) | An 8-token budget ends inside the reasoning. With room to finish, the choice is "blue". |
-| at 1 sequence only: `test_uniform_noseed_varied`, `TestRepetitionPenalty::*`, `TestFrequencyPenalty::*` | harness limit at max_num_seqs 1 | The tests build their request list from `max_batch_size`, so they send one request and cannot show variation. They pass at 16 and 32 sequences. |
+| at 1 sequence only: `test_uniform_noseed_varied`, `TestRepetitionPenalty::*`, `TestFrequencyPenalty::*` | harness limit at max_num_seqs 1 | The tests build their request list from `max_batch_size`, so they send one request and cannot show variation. They pass at 16 sequences (A5); the full suite at 32 sequences runs in the final serving run. |
 
 The chat template has no switch to turn thinking off. `reasoning_effort` accepts low, high or max only. An empty
 think block prefilled per request does not help: the reasoning parser then puts the answer in `reasoning`.
@@ -114,8 +114,8 @@ block, and with it the reduction order. Evidence:
 | 4-block-aligned shift (same die per block) | [5..51] | True | 0 |
 | 1-block shift (other die per block) | [2..48] | False | 0.527 |
 
-Records: `evidence/shard_place.json` (controlled check), `evidence/burstdiag-p300x2-1m.json` (live server),
-`evidence/needle-p300x2-1m.json` (needle retrieval), `evidence/sweep_p300x2*.json` (per-profile sweeps).
+Records: `../vllm/evidence/shard_place.json` (controlled check), `../vllm/evidence/burstdiag-p300x2-1m.json` (live server),
+`../vllm/evidence/needle-p300x2-1m.json` (needle retrieval), `../vllm/evidence/sweep_p300x2*.json` (per-profile sweeps).
 
 Verdict: placement-only numerics, not a state bug. The same placement gives bit-identical logits. Only a different die
 placement changes them, by a bounded amount. A near-tie greedy token can flip with the block allocation on

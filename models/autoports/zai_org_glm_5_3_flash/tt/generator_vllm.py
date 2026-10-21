@@ -272,8 +272,9 @@ class Glm5NextForConditionalGeneration:
 
     # supports_async_decode: the decode trace keeps tokens (sampler -> persistent token buffer) and positions
     # (DeviceDecodeInputs.advance inside the trace) on device; the split submit / read / host-format path is below.
-    # On by default since the stale-input device tests passed (DESIGN.md 8.4: ~/glm53-flash-bringup/scripts/
-    # 09_async_validate.py, doc/vllm_integration/work_log.md). GLM53_VLLM_ASYNC_DECODE=0 turns it off (A/B).
+    # On by default since the stale-input device test passed (doc/vllm/DESIGN.md 8.4: tools/vllm_async_validate.py,
+    # tests/test_vllm_async_validate.py; result in doc/vllm_integration/work_log.md). GLM53_VLLM_ASYNC_DECODE=0 turns it
+    # off (A/B).
     model_capabilities = {
         "supports_prefix_caching": False,
         "supports_async_decode": os.environ.get("GLM53_VLLM_ASYNC_DECODE", "1") == "1",

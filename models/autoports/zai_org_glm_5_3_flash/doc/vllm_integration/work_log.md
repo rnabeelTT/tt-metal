@@ -210,7 +210,7 @@ by default for this profile, low reasoning effort for the readiness stages). Ser
   - 4 failures are the known ones (A5/A6 classification).
   - The other 5 need at least 2 requests: `test_uniform_noseed_varied`, the repetition- and frequency-penalty
     variety and mixed-batch tests. They build the request list from `max_batch_size` and get one request at 1
-    sequence ("Only 1/1 were varied"). They pass at 16 sequences (A5) and 32 sequences (A7).
+    sequence ("Only 1/1 were varied"). They pass at 16 sequences (A5). (A7 ran the smoke profile only; the full suite at 32 runs in the final serving run.)
 - Qualitative and benchmark ran on the same server after the needles (`status/needle_post.sh`).
   - Qualitative: coherent; no degenerate output. French q5 is the known E192 behaviour.
   - Primary 128/128/1: TTFT median 234.5 ms; TPOT mean 73.5 ms (13.6 t/s/u); ITL median 72.7 ms (P99 76.4 ms);
@@ -261,7 +261,7 @@ A8-1M burst divergence (gap 0.5625 after a block-id change) is this effect, not 
   `test_host_sampled_step_then_device_step_reads_host_token` (fails on the old code in both modes, passes now).
 - P1-1 device test: `scripts/09_async_validate.py` on snapshot s9i (HEAD 0bd45f315e1 + the P1-2 hunks), reduced model
   (layers 0, 3, 4), replicated layout, `GLM53_VLLM_ASYNC_DECODE=1`, the plugin's contract-1 call sequence through the
-  adapter. Evidence: `doc/vllm/evidence/r1/async_validate.json`.
+  adapter. Evidence: `doc/vllm/evidence/async_validate.json`.
 
 | request | prompt | tokens | blocks | events | equal to solo control |
 | --- | ---: | ---: | ---: | --- | --- |
@@ -276,6 +276,26 @@ A8-1M burst divergence (gap 0.5625 after a block-id change) is this effect, not 
   - The solo controls: each request alone, synchronous, in the same physical slot on the same block ids.
   - Program guard: no program compiled after the capture.
   - Result: PASS. `supports_async_decode` is now True by default (`GLM53_VLLM_ASYNC_DECODE=0` turns it off).
+
+## Review #1 P3: decode result vs the build's slot count (2026-10-21, snapshot s9i)
+
+`~/glm53-flash-bringup/scripts/s9_slot_width.sh` (one ticket; `09_slot_width_check.py` per build): reduced model (layers
+0, 3, 4), replicated layout, one 600-token request, host-logits prefill + 16 traced decode steps, logits saved per build.
+Evidence: `doc/vllm/evidence/slot_width_compare.txt`.
+
+| build (slots) | request slot | logits vs the 1-slot build | max abs diff | tokens |
+| ---: | ---: | --- | ---: | --- |
+| 8 | 0 | bit-identical | 0 | equal |
+| 16 | 0 | bit-identical | 0 | equal |
+| 16 | 15 | bit-identical | 0 | equal |
+| 32 | 0 | differ from decode step 1 | 0.0625 | equal |
+| 32 | 31 | differ (bit-identical to slot 0 of the same build) | 0.0625 | equal |
+
+- The 32-slot build changes about 76% of the vocab logits by 1 to 2 bf16 ULPs (logits of magnitude 4 to 8). Prefill is
+  identical, so the difference is in the decode path above 16 rows (the unfused KDA conv path, multichip_decoder.py).
+- All rows of one build give the same result for the same request (slot 0 = slot 31). The size is bf16 rounding of a
+  different reduction order, not a defect; no fix. A near-tie greedy token can differ between a 32-slot and a smaller
+  build.
 
 ## Notes
 
