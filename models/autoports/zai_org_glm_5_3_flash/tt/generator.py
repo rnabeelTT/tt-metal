@@ -144,7 +144,7 @@ def _trace_region_default() -> int:
 
 
 TRACE_REGION_SIZE = int(os.environ.get("GLM53_TRACE_REGION", _trace_region_default()))  # decode needs ~46 MiB
-LAYOUTS = ("replicated", "sharded")  # fastest first (sharded: +~4.6 ms per decode token, tt/dsa_shard.py)
+LAYOUTS = ("replicated", "sharded")  # fastest first (sharded: +~2.9 ms per decode token, tf_shard; tt/dsa_shard.py)
 
 
 def _kda_slots(S: int) -> int:

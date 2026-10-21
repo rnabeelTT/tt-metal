@@ -40,9 +40,26 @@ def test_moe_row_buckets_and_paths(monkeypatch):
     assert B.moe_row_buckets(1) is None
     assert B.moe_row_buckets(16) == [1, 2, 4, 8, 16]
     assert B.moe_row_buckets(32) == [1, 2, 4, 8, 16, 32]
-    assert B.moe_bucket_paths([1, 2, 4, 8]) == {1: "pairs", 2: "pairs", 4: "pairs", 8: "pairs"}
+    assert B.moe_bucket_paths([1, 2, 4, 8, 16]) == {t: "pairs" for t in (1, 2, 4, 8, 16)}
     monkeypatch.setenv("GLM53_MOE_BUCKET_PATH", "8:sorted")
-    assert B.moe_bucket_paths([1, 2, 4, 8])[8] == "sorted"
+    assert B.moe_bucket_paths([1, 2, 4, 8, 16])[8] == "sorted"
+
+
+class _Moe:
+    def _decode_sorted(self, T):  # Qwen35MoEOptimized default: expert-sorted from 32 decode rows
+        return T >= 32
+
+
+@pytest.mark.parametrize("S", [2, 4, 8, 16, 32])
+def test_all_buckets_share_the_s_bucket_family(monkeypatch, S):
+    """Batch invariance rule: every row bucket, the S bucket included, runs the routed-path family of the S bucket
+    (stage-10 wide regression: pairs below S and sorted at S = 32 gave 4/32 burst identity)."""
+    monkeypatch.delenv("GLM53_MOE_BUCKET_PATH", raising=False)
+    tbs = B.moe_row_buckets(S)
+    fam = B.moe_family(_Moe(), S)
+    paths = B.moe_bucket_paths(tbs, fam)
+    assert set(paths) == set(tbs) and set(paths.values()) == {fam}
+    assert fam == ("sorted" if S >= 32 else "pairs")
     monkeypatch.setenv("GLM53_MOE_BUCKETS", "0")
     assert B.moe_row_buckets(16) is None
 

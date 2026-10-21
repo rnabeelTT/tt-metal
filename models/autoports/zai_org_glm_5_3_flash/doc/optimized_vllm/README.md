@@ -6,24 +6,26 @@ Workload: `vllm bench serve`, random dataset, 128 input / 128 output tokens, 1 r
 `--ignore-eos`, `sample_on_device_mode=all`, mesh (1, 4) P300x2, served profile p300x2 (max-num-seqs 16,
 max-model-len 243,712, replicated DSA cache). Before: the stage-9 A6 readiness benchmark on p300x2
 (`doc/vllm/evidence/bench_p300x2.log.txt`). After: the same command and profile on the stage-10 HEAD in the combined
-stage-9 ticket (AFTER = to fill).
+stage-9 ticket (`~/glm53-flash-bringup/logs/09/final/readiness-p300x2/vllm_benchmark.json`, HEAD 0a2663d0b6b +
+the slot-aware fit; the p300x2 max-model-len after the G9 re-probe is 239,616).
 
 | Metric | Before | After |
 |---|---|---|
-| TTFT (median) | 263.0 ms | AFTER |
-| TPOT (mean) | 119.27 ms | AFTER |
-| ITL (median) | 119.04 ms | AFTER |
-| Decode t/s/u (1000 / TPOT) | 8.38 | AFTER |
-| Output throughput | 8.31 tok/s | AFTER |
+| TTFT (median) | 263.0 ms | **265.3 ms** |
+| TPOT (mean) | 119.27 ms | **69.91 ms** |
+| ITL (median) | 119.04 ms | **69.90 ms** |
+| Decode t/s/u (1000 / TPOT) | 8.38 | **14.30** |
+| Output throughput | 8.31 tok/s | **14.0 tok/s** |
 
 Secondary, the CI serving burst on p300x2 (100 input / 100 output tokens, 32 prompts; capacity and nightly parity, not
 the decode headline). Before (`doc/vllm/evidence/bench_ci_p300x2.log.txt`): TTFT median 14,485 ms, TPOT mean 179.6 ms,
-output 74.6 tok/s. After: AFTER.
+output 74.6 tok/s. After (`~/glm53-flash-bringup/logs/09/final/readiness-p300x2/vllm_ci_serving_benchmark.json`): TTFT
+median 14,164 ms, TPOT mean 172.5 ms, output 76.8 tok/s.
 
 Separate row, profile p300x2-1m (1 slot, 1,048,576, block-sharded DSA cache). The DSA and MoE buckets are off there by
 design (sharded layout, 1 slot), so the after value reflects async decode / stage-9 changes only.
 - Before (`readiness_vllm/vllm_benchmark.json`): TPOT 73.54 ms, TTFT 234.5 ms.
-- After: AFTER.
+- After: not re-measured in the combined ticket (the 1m path is unchanged by stage 10).
 
 Full-model comparison for comparable work (standalone traced decode, token-out):
 - 1 slot: 50.10 ms (280,576);
@@ -32,11 +34,11 @@ The served TPOT of the same build should match these within the host overhead:
 
 | Comparable work | Standalone traced token-out | Served TPOT, 1 user |
 |---|---|---|
-| p300x2 (16 slots, 243,712), 1 active | 72.9 ms (t15b, 16 slots at 16,384; DSA width bucket 4,096 at short positions) | AFTER |
-| p300x2-long (1 slot, 325,632) | 50.10 ms (t5, 280,576, position 300) | AFTER |
+| p300x2 (16 slots, 243,712), 1 active | 72.9 ms (t15b, 16 slots at 16,384; DSA width bucket 4,096 at short positions) | **69.91 ms** |
+| p300x2-long (1 slot, 325,632) | 50.10 ms (t5, 280,576, position 300) | **49.84 ms** (async decode on) |
 
 Non-aligned prompt lengths stay supported. The combined serving ticket's smokes send NONALIGNED prompts of 1 / 3 / 2,381
-/ 4,223 tokens (AFTER: cite its smoke log). The reduced adapter validator (t16) passes on this code.
+/ 4,223 tokens (`~/glm53-flash-bringup/logs/09/s9_final.log`, NONALIGNED smoke). The reduced adapter validator (t16) passes on this code.
 
 ## Problem
 
@@ -315,54 +317,69 @@ Ticket t14 (full model, 1 slot, 243,712):
 
 "Before": the stage-9 A6 sweeps on code before stage 10 (DSA, MoE and view buckets absent; 64 MiB trace region),
 `~/glm53-flash-bringup/artifacts/s10/sweep_<profile>.json`. "After": the same sweep, on the same profile, workload
-and sampling, on the stage-10 HEAD (0a2663d0b6b or later), in the combined stage-9 ticket. AFTER = to fill from that
-ticket. The p300x2 / wide / p150x4 trace region changes 64 -> 96 MiB (a TT config change, required by the MoE row
-buckets). Every other server setting is the same.
+and sampling, on the stage-10 HEAD (0a2663d0b6b + the slot-aware fit), in the combined stage-9 ticket
+(`~/glm53-flash-bringup/artifacts/s10/sweep_final-<profile>.json`).
+
+Settings that changed between the two columns:
+- The trace region changes 64 -> 96 MiB for p300x2 and p150x4, and to 160 MiB for wide in this release. The MoE row
+  buckets need it.
+- The G9 re-probe set new max-model-len values: p300x2 239,616 (was 243,712) and wide 137,216 (was 151,552). The longest
+  prompt row of each table uses the new limit.
+- Every other server setting is the same.
+- The long profile was not re-swept. Its 128/128 TPOT after is the stage-9 final run's 49.84 ms (async decode on).
+- The decode gain at 1 to 2 users comes from the MoE row buckets (106 -> 73 ms standalone). The TTFT gain at long prompts
+  comes from the prefill views. At 16 users (the S bucket) the time is unchanged.
 
 ### p300x2 (max_model_len 243,712)
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 128 / 128 | 245 ms | AFTER | 109.8 ms | AFTER | 9.10 | AFTER | 9.0 | AFTER |
-| 1 | 1,024 / 256 | 766 ms | AFTER | 111.5 ms | AFTER | 9.00 | AFTER | 8.8 | AFTER |
-| 1 | 4,096 / 256 | 2,986 ms | AFTER | 113.3 ms | AFTER | 8.80 | AFTER | 8.0 | AFTER |
-| 1 | 16,384 / 256 | 13,934 ms | AFTER | 113.7 ms | AFTER | 8.80 | AFTER | 6.0 | AFTER |
-| 1 | 65,536 / 256 | 57,759 ms | AFTER | 114.5 ms | AFTER | 8.70 | AFTER | 2.9 | AFTER |
-| 1 | 131,072 / 256 | 116,170 ms | AFTER | 114.1 ms | AFTER | 8.80 | AFTER | 1.8 | AFTER |
-| 1 | 243,456 / 256 | 216,555 ms | AFTER | 114.0 ms | AFTER | 8.80 | AFTER | 1.0 | AFTER |
-| 2 | 128 / 128 | 365 ms | AFTER | 122.4 ms | AFTER | 8.20 | AFTER | 16.1 | AFTER |
-| 4 | 128 / 128 | 964 ms | AFTER | 125.8 ms | AFTER | 7.90 | AFTER | 30.3 | AFTER |
-| 8 | 128 / 128 | 1,916 ms | AFTER | 143.6 ms | AFTER | 7.00 | AFTER | 50.7 | AFTER |
-| 16 | 128 / 128 | 3,822 ms | AFTER | 178.7 ms | AFTER | 5.60 | AFTER | 77.2 | AFTER |
-| 2 | 1,024 / 256 | 1,146 ms | AFTER | 124.7 ms | AFTER | 8.00 | AFTER | 15.5 | AFTER |
-| 4 | 1,024 / 256 | 3,046 ms | AFTER | 128.4 ms | AFTER | 7.80 | AFTER | 28.7 | AFTER |
-| 8 | 1,024 / 256 | 6,089 ms | AFTER | 144.8 ms | AFTER | 6.90 | AFTER | 47.6 | AFTER |
-| 16 | 1,024 / 256 | 12,170 ms | AFTER | 180.5 ms | AFTER | 5.50 | AFTER | 70.4 | AFTER |
+| 1 | 128 / 128 | 245 ms | 252 ms | 109.8 ms | 69.9 ms | 9.10 | 14.30 | 9.0 | 14.0 |
+| 1 | 1,024 / 256 | 766 ms | 770 ms | 111.5 ms | 71.8 ms | 9.00 | 13.90 | 8.8 | 13.4 |
+| 1 | 4,096 / 256 | 2,986 ms | 2,402 ms | 113.3 ms | 73.5 ms | 8.80 | 13.60 | 8.0 | 12.1 |
+| 1 | 16,384 / 256 | 13,934 ms | 9,956 ms | 113.7 ms | 73.9 ms | 8.80 | 13.50 | 6.0 | 8.9 |
+| 1 | 65,536 / 256 | 57,759 ms | 42,888 ms | 114.5 ms | 75.8 ms | 8.70 | 13.20 | 2.9 | 4.1 |
+| 1 | 131,072 / 256 | 116,170 ms | 98,371 ms | 114.1 ms | 77.9 ms | 8.80 | 12.80 | 1.8 | 2.2 |
+| 1 | 243,456 / 256 (after: 239,360) | 216,555 ms | 194,768 ms | 114.0 ms | 79.2 ms | 8.80 | 12.60 | 1.0 | 1.2 |
+| 2 | 128 / 128 | 365 ms | 491 ms | 122.4 ms | 74.8 ms | 8.20 | 13.40 | 16.1 | 25.6 |
+| 4 | 128 / 128 | 964 ms | 984 ms | 125.8 ms | 90.0 ms | 7.90 | 11.10 | 30.3 | 41.3 |
+| 8 | 128 / 128 | 1,916 ms | 1,928 ms | 143.6 ms | 119.9 ms | 7.00 | 8.30 | 50.7 | 59.6 |
+| 16 | 128 / 128 | 3,822 ms | 3,859 ms | 178.7 ms | 172.6 ms | 5.60 | 5.80 | 77.2 | 79.4 |
+| 2 | 1,024 / 256 | 1,146 ms | 1,534 ms | 124.7 ms | 76.5 ms | 8.00 | 13.10 | 15.5 | 24.3 |
+| 4 | 1,024 / 256 | 3,046 ms | 3,054 ms | 128.4 ms | 91.8 ms | 7.80 | 10.90 | 28.7 | 38.7 |
+| 8 | 1,024 / 256 | 6,089 ms | 6,091 ms | 144.8 ms | 121.7 ms | 6.90 | 8.20 | 47.6 | 55.2 |
+| 16 | 1,024 / 256 | 12,170 ms | 12,167 ms | 180.5 ms | 174.4 ms | 5.50 | 5.70 | 70.4 | 72.3 |
 
-### p300x2-wide (max_model_len 151,552)
+### p300x2-wide — after values PROVISIONAL (measured before the batch-invariance fix) (max_model_len 151,552)
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 128 / 128 | 256 ms | AFTER | 120.4 ms | AFTER | 8.30 | AFTER | 8.2 | AFTER |
-| 1 | 1,024 / 256 | 774 ms | AFTER | 122.3 ms | AFTER | 8.20 | AFTER | 8.0 | AFTER |
-| 1 | 16,384 / 256 | 12,306 ms | AFTER | 124.6 ms | AFTER | 8.00 | AFTER | 5.8 | AFTER |
-| 1 | 131,072 / 256 | 101,427 ms | AFTER | 125.4 ms | AFTER | 8.00 | AFTER | 1.9 | AFTER |
-| 8 | 128 / 128 | 1,995 ms | AFTER | 133.9 ms | AFTER | 7.50 | AFTER | 54.2 | AFTER |
-| 16 | 128 / 128 | 3,986 ms | AFTER | 150.7 ms | AFTER | 6.60 | AFTER | 89.2 | AFTER |
-| 32 | 128 / 128 | 7,954 ms | AFTER | 168.7 ms | AFTER | 5.90 | AFTER | 139.9 | AFTER |
-| 8 | 1,024 / 256 | 6,158 ms | AFTER | 133.5 ms | AFTER | 7.50 | AFTER | 50.8 | AFTER |
-| 16 | 1,024 / 256 | 12,305 ms | AFTER | 150.9 ms | AFTER | 6.60 | AFTER | 80.9 | AFTER |
-| 32 | 1,024 / 256 | 24,604 ms | AFTER | 166.3 ms | AFTER | 6.00 | AFTER | 122.6 | AFTER |
+| 1 | 128 / 128 | 256 ms | 268 ms | 120.4 ms | 76.0 ms | 8.30 | 13.20 | 8.2 | 12.9 |
+| 1 | 1,024 / 256 | 774 ms | 811 ms | 122.3 ms | 77.9 ms | 8.20 | 12.80 | 8.0 | 12.4 |
+| 1 | 16,384 / 256 | 12,306 ms | 9,934 ms | 124.6 ms | 80.2 ms | 8.00 | 12.50 | 5.8 | 8.4 |
+| 1 | 131,072 / 256 | 101,427 ms | 92,778 ms | 125.4 ms | 83.9 ms | 8.00 | 11.90 | 1.9 | 2.2 |
+| 8 | 128 / 128 | 1,995 ms | 2,016 ms | 133.9 ms | 125.9 ms | 7.50 | 7.90 | 54.2 | 56.8 |
+| 16 | 128 / 128 | 3,986 ms | 3,987 ms | 150.7 ms | 182.0 ms | 6.60 | 5.50 | 89.2 | 75.5 |
+| 32 | 128 / 128 | 7,954 ms | 7,974 ms | 168.7 ms | 163.3 ms | 5.90 | 6.10 | 139.9 | 142.7 |
+| 8 | 1,024 / 256 | 6,158 ms | 6,198 ms | 133.5 ms | 127.7 ms | 7.50 | 7.80 | 50.8 | 52.8 |
+| 16 | 1,024 / 256 | 12,305 ms | 12,318 ms | 150.9 ms | 183.8 ms | 6.60 | 5.40 | 80.9 | 69.2 |
+| 32 | 1,024 / 256 | 24,604 ms | 24,638 ms | 166.3 ms | 160.9 ms | 6.00 | 6.20 | 122.6 | 124.7 |
+
+These wide after values were measured before the batch-invariance fix (row buckets 1 / 2 / 4 / 8 / 16 on the pairs
+path, the 32 bucket on the sorted path). That is the defect below: burst identity was 4 of 32 streams. With the fix,
+every wide bucket runs the sorted path. Standalone full model, 32 slots (t18): 1 active 118.6 ms (73.7 ms on the pairs
+buckets, 164.4 ms with buckets off), 8 active 123.8 ms, 32 active 147.4 ms (buckets off: 145.9 ms). The wide sweep must
+be re-run on the fixed code.
 
 ### p300x2-long (max_model_len 325,632)
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 128 / 128 | 236 ms | AFTER | 56.5 ms | AFTER | 17.70 | AFTER | 17.3 | AFTER |
-| 1 | 4,096 / 256 | 3,201 ms | AFTER | 60.2 ms | AFTER | 16.60 | AFTER | 13.8 | AFTER |
-| 1 | 65,536 / 256 | 64,592 ms | AFTER | 60.0 ms | AFTER | 16.70 | AFTER | 3.2 | AFTER |
-| 1 | 262,144 / 256 | 260,888 ms | AFTER | 60.1 ms | AFTER | 16.60 | AFTER | 0.9 | AFTER |
-| 1 | 325,376 / 256 | 324,233 ms | AFTER | 60.0 ms | AFTER | 16.70 | AFTER | 0.8 | AFTER |
+| 1 | 128 / 128 | 236 ms | - | 56.5 ms | 49.84 ms (async on) | 17.70 | 20.06 | 17.3 | - |
+| 1 | 4,096 / 256 | 3,201 ms | - | 60.2 ms | - | 16.60 | - | 13.8 | - |
+| 1 | 65,536 / 256 | 64,592 ms | - | 60.0 ms | - | 16.70 | - | 3.2 | - |
+| 1 | 262,144 / 256 | 260,888 ms | - | 60.1 ms | - | 16.60 | - | 0.9 | - |
+| 1 | 325,376 / 256 | 324,233 ms | - | 60.0 ms | - | 16.70 | - | 0.8 | - |
 
 Expected from the standalone measurements: single-user TPOT on p300x2 about 106 -> 73 ms (MoE row buckets, t15b);
 long-prompt TTFT about 0.8x (views, t14: 8K 5.6 -> 4.4 s at 243,712). Long context and wide: DSA buckets plus views.
@@ -375,6 +392,31 @@ layers = about 5.7 ms per token. The fix: compact the active slots' KDA state in
 (gather the recurrent / conv state of the active slots, run the T_b-row update, scatter back), with its own
 exactness evidence. Expected 16 slots / 1 active: about 73 -> 67 ms (1-slot build: 49.95 ms). Deferred to after
 this release, so the v4b evidence and the combined serving ticket stay valid.
+
+## Batch invariance: one routed-path family per build (wide regression, ticket t18)
+
+At 32 slots the build's own MoE path for 32 rows is the expert-sorted path (QWEN35_DECODE_SORTED_MIN_ROWS 32). The row
+buckets below 32 ran the pairs path. A request's routed math therefore depended on how many slots were active. The two
+paths are each row-exact but differ in the last bits. Served wide burst: 4 of 32 greedy streams matched solo (32 of 32
+before stage 10).
+
+Rule (`moe_family`, `moe_bucket_paths`, `GLM53_MOE_BUCKET_PATH=family`, the default): every row bucket, the S bucket
+included, runs the family of the S bucket's own path. That is sorted at 32 slots and pairs at 16 slots and below (no
+change there). A host test pins the rule (`test_all_buckets_share_the_s_bucket_family`).
+
+t18 measured a target request in slot 0 with 1 / 5 / 16 / 32 active slots, and at 32 active with two different filler
+prompt sets. Bit-identical means the target row matched its A = 1 run exactly.
+
+| 32-slot configuration | Target row bit-identical (reduced / full model) | Token-out, full model, 1 / 8 / 32 active | Teacher forcing (1 ref) |
+|---|---|---|---|
+| Buckets off | yes / yes | 164.4 / 164.3 / 145.9 ms | 93 / 100 / 100 |
+| Before the fix (pairs below 32, sorted at 32) | **no at 32 active** (max delta 0.06 / 0.87) | 73.7 / 123.5 / 147.4 ms | - |
+| **Family = sorted everywhere (shipped)** | yes / yes | 118.6 / 123.8 / 147.4 ms | **93 / 100 / 100** |
+| Pairs everywhere (the 32 bucket on pairs too) | yes / yes | 73.7 / 123.5 / **284.3** ms | 92 / 100 / 100 |
+
+Pairs everywhere is faster at 1 active but doubles the full-occupancy step (284 vs 147 ms). The wide profile exists for
+high concurrency, so it ships the sorted family. It is invariant, matches buckets off at 32 active, and is 46 ms faster
+than buckets off at 1 active.
 
 ## Trace region (part of the optimization)
 
@@ -399,7 +441,8 @@ model, 16 slots): at 2 / 4 / 8 active, 117.5 / 126.7 / 141.9 ms with 64 MiB (1-r
 - Async decode and stale inputs: the stage-9 evidence (`tools/vllm_async_validate.py`,
   `tests/test_vllm_async_validate.py`, 4678d8fccf4) covers changed tokens / positions and changed / unchanged page
   tables. Ticket t17 runs the same test on 0a2663d0b6b (4 slots), so the MoE row buckets and the views are active under
-  async decode and the compaction inputs change with the active set (AFTER: result).
+  async decode and the compaction inputs change with the active set: **PASS** (`~/glm53-flash-bringup/logs/s10/t17.log`,
+  ASYNC_RESULT PASS).
 - Tilize / untilize in the trace: the MoE compaction converts the S-row activation to row-major for the row gather
   (`ttnn.embedding`) and back. It is necessary for an exact row copy. Its cost is in the measured win (106.3 -> 72.9 ms
   at 1 active). Host tensors (`from_torch`) are built only when the active set changes.
@@ -417,6 +460,13 @@ model, 16 slots): at 2 / 4 / 8 active, 117.5 / 126.7 / 141.9 ms with 64 MiB (1-r
 
 ## Limitations
 
+- A trace-capture out-of-memory is fatal: there is no retry with fewer row buckets. `fit_row_buckets` uses a slot-aware
+  estimate of the segmented decode (`decode_trace_estimate`, calibrated on the 16-slot t15b and G9 captures and on the
+  32-slot G9 out-of-memory). It selects lists that fit for every measured configuration. The 0a2663d0b6b fixed estimate
+  over-selected at 32 slots (wide at 96 MiB: out of memory). The retry is deferred: the mesh state after a failed
+  `end_trace_capture` is undocumented, so it needs its own device test.
+- The wide profile ships with a 160 MiB trace region in this release (MoE buckets 1/2/4/8/16/32). Both the old and the
+  slot-aware rule choose that list at 160 MiB (estimate 108.9 MiB).
 - Segment replays cost about 0.4 ms (1 slot, full DSA width) and about 1.7 ms (16 slots, the S bucket) per token where
   no bucket narrows the work.
 - A 64 MiB trace region holds only the 1-row MoE bucket: the multi-slot profiles take 96 MiB.

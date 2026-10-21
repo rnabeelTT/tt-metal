@@ -892,7 +892,9 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         for t in tmp_ids:
             if id(t) not in seen:
                 seen.add(id(t))
-                ttnn.deallocate(t)
+                # force=False: at one row (the stage-10 1-row MoE bucket) the [1,1,1,k] -> [1,1,1,G] reshape of ids_rm
+                # returns a VIEW (ids_row): free the storage only when no view is alive (GLM53_DEALLOC_CHECK)
+                ttnn.deallocate(t, force=False)
         # routing weights: [1,1,T,k] -> one value per pair batch [1,G,1,1]
         sc_rm = ttnn.to_layout(scores, RM, memory_config=dram)
         sc_g = ttnn.to_layout(ttnn.reshape(sc_rm, (1, G, 1, 1)), ttnn.TILE_LAYOUT, memory_config=dram)

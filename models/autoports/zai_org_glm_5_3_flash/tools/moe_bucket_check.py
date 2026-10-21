@@ -83,6 +83,8 @@ def record(a):
             print(f"ACTIVE {A} slots {slots} tokens {tok.tolist()}", flush=True)
             runs.append({"A": A, "slots": slots, "prefill": pre, "steps": steps})
         rec["runs"] = runs
+        if a.invariance:
+            rec["invariance"] = _invariance(g, a, ctl)
         rec["programs_after_checks"] = g.program_cache_entries()
         # ---- decode time per step by active count (position 300; tokens fed back on the device)
         times = {}
@@ -120,6 +122,58 @@ def record(a):
         close_mesh(mesh)
     print(f"RECORD DONE program cache stable: {ok}", flush=True)
     return 0 if ok else 3
+
+
+def _invariance(g, a, ctl):
+    """Batch invariance: one fixed request in slot 0, decoded with A active slots (fillers in spread slots, filler
+    prompts by seed). Its prefill + traced decode logits must not depend on A or on the fillers' content."""
+    V, S = g.model.vocab, a.slots
+    target = torch.randint(100, V - 100, (a.prompt_len + 13,), generator=torch.Generator().manual_seed(777))
+    out, ref = [], None
+    for spec in a.invariance.split(","):
+        A, fs = (int(x) for x in spec.split(":")) if ":" in spec else (int(spec), 0)
+        others = [s for s in _slots(A - 1, S - 1)] if A > 1 else []
+        slots = [0] + [s + 1 for s in others]
+        g.reset()
+        pre = None
+        for s in slots:
+            ids = (
+                target
+                if s == 0
+                else torch.randint(
+                    100,
+                    V - 100,
+                    (a.prompt_len + 5 * s,),
+                    generator=torch.Generator().manual_seed(fs * 100000 + 100 * A + s),
+                )
+            )
+            lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[len(ids)], slots=[s])
+            if s == 0:
+                pre = lg.reshape(-1)[:V].to(torch.bfloat16)
+        pos = torch.tensor([len(target) if s == 0 else a.prompt_len + 5 * s for s in slots])
+        tok = None
+        steps = []
+        for i in range(a.steps):
+            if tok is None:
+                tok = torch.tensor([int(torch.argmax(pre.float()))] + [1000] * (len(slots) - 1))
+            o = g.decode_forward(tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True)[
+                :, :V
+            ]
+            steps.append(o[0].to(torch.bfloat16))
+            tok = torch.argmax(o.float(), dim=-1)
+            pos = pos + 1
+        bucket = ctl.moe_bucket([0] * len(slots) + [-1] * (S - len(slots))) if ctl is not None and ctl.tbs else None
+        cur = {"A": A, "filler_seed": fs, "bucket": bucket, "prefill": pre, "steps": steps}
+        if ref is None:
+            ref = cur
+        same = torch.equal(pre, ref["prefill"]) and all(torch.equal(x, y) for x, y in zip(steps, ref["steps"]))
+        dmax = max(float((x.float() - y.float()).abs().max()) for x, y in zip(steps, ref["steps"]))
+        print(
+            f"INVARIANCE A {A} fillers {fs} bucket {bucket}: identical to A={ref['A']}: {same} max|d| {dmax}",
+            flush=True,
+        )
+        out.append({"A": A, "filler_seed": fs, "bucket": bucket, "identical": bool(same), "max_abs_d": dmax})
+    return out
 
 
 def compare(a):
@@ -167,6 +221,7 @@ def main():
     r.add_argument("--slots", type=int, default=16)
     r.add_argument("--seq-len", type=int, default=16384)
     r.add_argument("--actives", default="1,2,3,5,8,16")
+    r.add_argument("--invariance", default="", help="A[:filler_seed],...: target-row batch invariance (slot 0)")
     r.add_argument("--prompt-len", type=int, default=300)
     r.add_argument("--steps", type=int, default=6)
     r.add_argument("--time-actives", default="1,2,4,8,16")

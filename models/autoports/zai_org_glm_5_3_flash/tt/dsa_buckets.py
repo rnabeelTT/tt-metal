@@ -166,18 +166,29 @@ def fit_row_buckets(tbs, n_layers: int, region: int, with_dsa: bool = False):
     return tbs[:k] + [tbs[-1]] if k else None
 
 
-def moe_bucket_paths(tbs):
-    """Routed path of each row bucket below S: "pairs" (default: the S-row build's own path, row-exact), "sorted"
-    (expert-sorted dispatch) or "auto" (the row count's natural path). GLM53_MOE_BUCKET_PATH: one name for all, or
-    "1:pairs,8:sorted,...". The S bucket always runs the build's own path on the uncompacted rows."""
-    env = os.environ.get("GLM53_MOE_BUCKET_PATH", "pairs").strip().lower()
-    paths = {t: env for t in tbs} if ":" not in env else {}
-    if ":" in env:
-        for kv in env.split(","):
-            k, v = kv.split(":")
-            paths[int(k)] = v.strip()
-        paths = {t: paths.get(t, "pairs") for t in tbs}
-    return paths
+def moe_family(moe, S: int) -> str:
+    """The routed-path family of an S-row decode step (Qwen35MoEOptimized: expert-sorted from
+    QWEN35_DECODE_SORTED_MIN_ROWS rows, 32 by default; the pairs path below)."""
+    return "sorted" if moe is not None and hasattr(moe, "_decode_sorted") and moe._decode_sorted(S) else "pairs"
+
+
+def moe_bucket_paths(tbs, family: str = "pairs"):
+    """Routed path of every row bucket, the S bucket (tbs[-1]) included. GLM53_MOE_BUCKET_PATH:
+      "family" (default): every bucket takes the family of the S bucket's own path (moe_family): a request's routed
+                          math is then the same whatever the number of active slots (batch invariance; the pairs and
+                          sorted paths are each row-exact but differ from each other in the last bits);
+      one name ("pairs" / "sorted" / "auto"): every bucket, the S bucket included;
+      "1:pairs,8:sorted,32:pairs": per bucket; an unnamed bucket takes the family.
+    The S bucket's value "build" runs the build's own path (the code before stage 10)."""
+    env = os.environ.get("GLM53_MOE_BUCKET_PATH", "family").strip().lower()
+    if ":" not in env:
+        v = family if env == "family" else env
+        return {t: v for t in tbs}
+    named = {}
+    for kv in env.split(","):
+        k, v = kv.split(":")
+        named[int(k)] = v.strip()
+    return {t: named.get(t, family) for t in tbs}
 
 
 class DsaBuckets:
@@ -196,7 +207,9 @@ class DsaBuckets:
         self.view_ds = list(getattr(layers[0], "view_ds", None) or []) if layers else []
         self.moe_layers = list(moe_layers) if tbs else []
         self.tbs = tbs
-        self.paths = moe_bucket_paths(tbs[:-1]) if tbs else {}
+        self.paths = (
+            moe_bucket_paths(tbs, moe_family(self.moe_layers[0] if self.moe_layers else None, S)) if tbs else {}
+        )
         self.S = S
         self.max_context = max_context
         self.mode = None  # "warm" | "capture" while the hooks are installed
@@ -350,9 +363,18 @@ class DsaBuckets:
             ttnn.deallocate(out)
 
         bodies = [lambda T_b=T_b: into(self._compact_routed(moe, x4, scores, ids, T_b)) for T_b in self.tbs[:-1]]
-        bodies.append(lambda: into(full()))
+        bodies.append(lambda: into(self._full_routed(moe, x4, scores, ids, full)))
         self._point("moe", bodies)
         return ttnn.clone(bufs["out"], memory_config=DRAM)
+
+    def _full_routed(self, moe, x4, scores, ids, full):
+        """The S bucket (every slot row, no compaction) on its configured path."""
+        path, S = self.paths.get(self.S, "build"), self.S
+        if path == "pairs":
+            return moe._routed_pairs(x4, scores, ids, S)  # the inactive-row skip applies (T == S)
+        if path == "sorted":
+            return moe._routed_sorted(x4, scores, ids, S)
+        return full()  # "build" / "auto": the build's own path
 
     def _compact_routed(self, moe, x4, scores, ids, T_b):
         """The routed experts of the first T_b compacted rows (active slots first; padding rows repeat the first active

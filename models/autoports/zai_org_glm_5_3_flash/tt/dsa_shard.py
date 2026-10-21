@@ -408,6 +408,7 @@ class ShardedDSAMixin:
             page_block_size=BLOCK,
         )  # [1, tp*H, rows, 544] bf16 ROW_MAJOR
         ttnn.deallocate(idx)
+        del q_rm  # a reshape VIEW of q_rm0, unused after sparse_sdpa: drop it so the free below is not shared
         ttnn.deallocate(q_rm0)
         # 3. per-die partials in the common sink unit, reduce-scatter over the head groups: the numerator T = o / w
         # ([1,tp,n,544], columns >= 512 unused) and the softmax mass / w (one 32-column tile, column 0)

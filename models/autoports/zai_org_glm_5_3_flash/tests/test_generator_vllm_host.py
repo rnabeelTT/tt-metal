@@ -149,7 +149,10 @@ def test_shipped_data_file_consistent_and_yaml_in_sync():
         if sp.trace_region(d, p) != tr:
             assert y_p["additional_config"]["tt"]["trace_region_size"] == sp.trace_region(d, p)
             assert int(y_p["env"]["GLM53_TRACE_REGION"]) == sp.trace_region(d, p)
-        assert sp.trace_region(d, p) == (96 << 20 if int(p["max_num_seqs"]) >= 2 else 64 << 20)
+        if int(p["max_num_seqs"]) >= 2:  # the MoE row buckets need >= 96 MiB (wide: 160 MiB in this release)
+            assert sp.trace_region(d, p) >= 96 << 20
+        else:
+            assert sp.trace_region(d, p) == 64 << 20
     assert m["weights"]["revision"] == d["weights_revision"] == m["serve"]["env"]["GLM53_WEIGHTS_REVISION"]
     assert d["weights_revision"] in m["serve"]["args"]
     assert m["serve"]["block_size"] == d["block_size"] == gv.BLOCK_SIZE
