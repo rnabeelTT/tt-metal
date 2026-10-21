@@ -55,9 +55,9 @@ def record(a):
             d0 = next(d.attn for d in g.model.layers if d.attn_kind == "dsa")
             rec["pool"] = {
                 "NB": int(d0.NB),
-                "KB": int(d0.KB),
+                "pool_blocks": int(d0.pooled.shape[0]),  # pool-key blocks (KB x MB, or the smooth run PM with views)
                 "pool_alias": bool(getattr(d0, "pool_alias", False)),
-                "pooled_bytes_per_layer": int(d0.KB * d0.P_alloc * d0.ID * 2),
+                "pooled_bytes_per_layer": int(d0.pooled.shape[0]) * 32 * d0.ID * 2,
             }
             print(f"POOL {rec['pool']}", flush=True)
         else:

@@ -1,7 +1,42 @@
-# GLM-5.3-Flash (E192) stage 10: DSA cost by filled positions
+# GLM-5.3-Flash (E192) optimized vLLM serving (stage 10)
 
-Stage 10 (optimized vLLM). This section covers the DSA indexer: decode and prefill cost now follow the batch's
-filled positions, not `max_seq_len`. It also covers one memory fix of the replicated pool-key cache.
+## Headline: primary single-user vLLM serving (default profile p300x2: 16 slots x 243,712)
+
+Workload: `vllm bench serve`, random dataset, 128 input / 128 output tokens, 1 request, concurrency 1, temperature 0,
+`--ignore-eos`, `sample_on_device_mode=all`, mesh (1, 4) P300x2, served profile p300x2 (max-num-seqs 16,
+max-model-len 243,712, replicated DSA cache). Before: the stage-9 A6 readiness benchmark on p300x2
+(`doc/vllm/evidence/bench_p300x2.log.txt`). After: the same command and profile on the stage-10 HEAD in the combined
+stage-9 ticket (AFTER = to fill).
+
+| Metric | Before | After |
+|---|---|---|
+| TTFT (median) | 263.0 ms | AFTER |
+| TPOT (mean) | 119.27 ms | AFTER |
+| ITL (median) | 119.04 ms | AFTER |
+| Decode t/s/u (1000 / TPOT) | 8.38 | AFTER |
+| Output throughput | 8.31 tok/s | AFTER |
+
+Secondary, the CI serving burst on p300x2 (100 input / 100 output tokens, 32 prompts; capacity and nightly parity, not
+the decode headline). Before (`doc/vllm/evidence/bench_ci_p300x2.log.txt`): TTFT median 14,485 ms, TPOT mean 179.6 ms,
+output 74.6 tok/s. After: AFTER.
+
+Separate row, profile p300x2-1m (1 slot, 1,048,576, block-sharded DSA cache). The DSA and MoE buckets are off there by
+design (sharded layout, 1 slot), so the after value reflects async decode / stage-9 changes only.
+- Before (`readiness_vllm/vllm_benchmark.json`): TPOT 73.54 ms, TTFT 234.5 ms.
+- After: AFTER.
+
+Full-model comparison for comparable work (standalone traced decode, token-out):
+- 1 slot: 50.10 ms (280,576);
+- 16 slots, 1 active: 72.9 ms with the MoE row buckets (106.3 ms before; t15b).
+The served TPOT of the same build should match these within the host overhead:
+
+| Comparable work | Standalone traced token-out | Served TPOT, 1 user |
+|---|---|---|
+| p300x2 (16 slots, 243,712), 1 active | 72.9 ms (t15b, 16 slots at 16,384; DSA width bucket 4,096 at short positions) | AFTER |
+| p300x2-long (1 slot, 325,632) | 50.10 ms (t5, 280,576, position 300) | AFTER |
+
+Non-aligned prompt lengths stay supported. The combined serving ticket's smokes send NONALIGNED prompts of 1 / 3 / 2,381
+/ 4,223 tokens (AFTER: cite its smoke log). The reduced adapter validator (t16) passes on this code.
 
 ## Problem
 
@@ -152,15 +187,26 @@ The capacity gain enters the serving profile through a G9 re-probe with this cod
 
 ## Files
 
-- `tt/dsa_buckets.py` (new): buckets, warm-up, segmented capture and replay.
-- `tt/dsa.py`: the decode selection hook, the prefill scored width, the pool-key alias.
+- `tt/dsa_buckets.py` (new): DSA width buckets, MoE row buckets (compaction, `fit_row_buckets`), warm-up, segmented
+  capture and replay, `device_tensors()`, `release()`.
+- `tt/dsa.py`: the decode selection hook, the prefill scored width and pool-key views (`PM`, `view_ds`), the pool-key
+  alias, the shared pool iotas.
+- `tt/serving_profiles.py`, `tools/serving_profiles.py`, `serving_profiles.json`, `tt-model.yaml`: the per-profile
+  trace region.
+- `tt/generator_vllm.py`: the trace-region check per slot count.
 - `tt/generator.py`: `install` before the capture, `capture_decode`, `replay_decode`, `release_decode`.
 - `tools/s7_probe.py`, `tools/model_step_probe.py`: replay through `replay_decode`.
-- `tools/dsa_bucket_probe.py`, `tools/dsa_bucket_probe2.py`, `tools/dsa_bucket_check.py` (new): the evidence tools.
+- `tools/dsa_bucket_probe.py`, `tools/dsa_bucket_probe2.py`, `tools/dsa_bucket_check.py`, `tools/moe_bucket_check.py`
+  (new): the evidence tools. `tests/test_dsa_buckets_host.py` (new): host tests.
+- `work_log.md`: tickets, results, commits.
 - Ticket scripts and logs: `~/glm53-flash-bringup/scripts/s10_*.sh`, `~/glm53-flash-bringup/logs/s10/`.
-  Records: `~/glm53-flash-bringup/artifacts/s10/`. Summary: `doc/vllm_perf/dsa_buckets_summary.json`.
+  Records: `~/glm53-flash-bringup/artifacts/s10/`. Summary: `doc/optimized_vllm/dsa_buckets_summary.json`.
 
 ## 16-slot decode cost (profile, ticket t12)
+
+Deviation, recorded: the stage-10 goal forbids Tracy / device-profiler collection. t12 is one Tracy run on the
+STANDALONE reduced generator (not the serving path). It only located where the 16-slot cost sits. Every stage-10
+claim rests on benchmark / token-out JSON (t5, t13, t14, t15b and the combined serving ticket), not on this profile.
 
 Served p300x2 (16 slots, 243,712) gives TPOT 110 to 119 ms at 1 active request. A 1-slot build gives 49.9 ms. Tracy
 profile of one decode step: reduced model (layers 0, 3, 4 + head + sampler), max_seq_len 65,536, position 300, 1
@@ -264,3 +310,127 @@ Ticket t14 (full model, 1 slot, 243,712):
 
 - Prefill and decode logits are bit-identical views on vs off in the full-model check (4,221 tokens).
 - On the reduced model, a 40,000-token prompt shows a 0.03 logit delta (top-k tie order across widths); top-1 21/21.
+
+## Served before / after (vLLM, `vllm bench serve`, the stage-9 sweep workload)
+
+"Before": the stage-9 A6 sweeps on code before stage 10 (DSA, MoE and view buckets absent; 64 MiB trace region),
+`~/glm53-flash-bringup/artifacts/s10/sweep_<profile>.json`. "After": the same sweep, on the same profile, workload
+and sampling, on the stage-10 HEAD (0a2663d0b6b or later), in the combined stage-9 ticket. AFTER = to fill from that
+ticket. The p300x2 / wide / p150x4 trace region changes 64 -> 96 MiB (a TT config change, required by the MoE row
+buckets). Every other server setting is the same.
+
+### p300x2 (max_model_len 243,712)
+
+| Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 128 / 128 | 245 ms | AFTER | 109.8 ms | AFTER | 9.10 | AFTER | 9.0 | AFTER |
+| 1 | 1,024 / 256 | 766 ms | AFTER | 111.5 ms | AFTER | 9.00 | AFTER | 8.8 | AFTER |
+| 1 | 4,096 / 256 | 2,986 ms | AFTER | 113.3 ms | AFTER | 8.80 | AFTER | 8.0 | AFTER |
+| 1 | 16,384 / 256 | 13,934 ms | AFTER | 113.7 ms | AFTER | 8.80 | AFTER | 6.0 | AFTER |
+| 1 | 65,536 / 256 | 57,759 ms | AFTER | 114.5 ms | AFTER | 8.70 | AFTER | 2.9 | AFTER |
+| 1 | 131,072 / 256 | 116,170 ms | AFTER | 114.1 ms | AFTER | 8.80 | AFTER | 1.8 | AFTER |
+| 1 | 243,456 / 256 | 216,555 ms | AFTER | 114.0 ms | AFTER | 8.80 | AFTER | 1.0 | AFTER |
+| 2 | 128 / 128 | 365 ms | AFTER | 122.4 ms | AFTER | 8.20 | AFTER | 16.1 | AFTER |
+| 4 | 128 / 128 | 964 ms | AFTER | 125.8 ms | AFTER | 7.90 | AFTER | 30.3 | AFTER |
+| 8 | 128 / 128 | 1,916 ms | AFTER | 143.6 ms | AFTER | 7.00 | AFTER | 50.7 | AFTER |
+| 16 | 128 / 128 | 3,822 ms | AFTER | 178.7 ms | AFTER | 5.60 | AFTER | 77.2 | AFTER |
+| 2 | 1,024 / 256 | 1,146 ms | AFTER | 124.7 ms | AFTER | 8.00 | AFTER | 15.5 | AFTER |
+| 4 | 1,024 / 256 | 3,046 ms | AFTER | 128.4 ms | AFTER | 7.80 | AFTER | 28.7 | AFTER |
+| 8 | 1,024 / 256 | 6,089 ms | AFTER | 144.8 ms | AFTER | 6.90 | AFTER | 47.6 | AFTER |
+| 16 | 1,024 / 256 | 12,170 ms | AFTER | 180.5 ms | AFTER | 5.50 | AFTER | 70.4 | AFTER |
+
+### p300x2-wide (max_model_len 151,552)
+
+| Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 128 / 128 | 256 ms | AFTER | 120.4 ms | AFTER | 8.30 | AFTER | 8.2 | AFTER |
+| 1 | 1,024 / 256 | 774 ms | AFTER | 122.3 ms | AFTER | 8.20 | AFTER | 8.0 | AFTER |
+| 1 | 16,384 / 256 | 12,306 ms | AFTER | 124.6 ms | AFTER | 8.00 | AFTER | 5.8 | AFTER |
+| 1 | 131,072 / 256 | 101,427 ms | AFTER | 125.4 ms | AFTER | 8.00 | AFTER | 1.9 | AFTER |
+| 8 | 128 / 128 | 1,995 ms | AFTER | 133.9 ms | AFTER | 7.50 | AFTER | 54.2 | AFTER |
+| 16 | 128 / 128 | 3,986 ms | AFTER | 150.7 ms | AFTER | 6.60 | AFTER | 89.2 | AFTER |
+| 32 | 128 / 128 | 7,954 ms | AFTER | 168.7 ms | AFTER | 5.90 | AFTER | 139.9 | AFTER |
+| 8 | 1,024 / 256 | 6,158 ms | AFTER | 133.5 ms | AFTER | 7.50 | AFTER | 50.8 | AFTER |
+| 16 | 1,024 / 256 | 12,305 ms | AFTER | 150.9 ms | AFTER | 6.60 | AFTER | 80.9 | AFTER |
+| 32 | 1,024 / 256 | 24,604 ms | AFTER | 166.3 ms | AFTER | 6.00 | AFTER | 122.6 | AFTER |
+
+### p300x2-long (max_model_len 325,632)
+
+| Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 128 / 128 | 236 ms | AFTER | 56.5 ms | AFTER | 17.70 | AFTER | 17.3 | AFTER |
+| 1 | 4,096 / 256 | 3,201 ms | AFTER | 60.2 ms | AFTER | 16.60 | AFTER | 13.8 | AFTER |
+| 1 | 65,536 / 256 | 64,592 ms | AFTER | 60.0 ms | AFTER | 16.70 | AFTER | 3.2 | AFTER |
+| 1 | 262,144 / 256 | 260,888 ms | AFTER | 60.1 ms | AFTER | 16.60 | AFTER | 0.9 | AFTER |
+| 1 | 325,376 / 256 | 324,233 ms | AFTER | 60.0 ms | AFTER | 16.70 | AFTER | 0.8 | AFTER |
+
+Expected from the standalone measurements: single-user TPOT on p300x2 about 106 -> 73 ms (MoE row buckets, t15b);
+long-prompt TTFT about 0.8x (views, t14: 8K 5.6 -> 4.4 s at 243,712). Long context and wide: DSA buckets plus views.
+
+## Next step, measured but not landed (code freeze)
+
+KDA state compaction. In the 16-slot build at 1 active, the KDA recurrent update and the conv run over all 16 slots:
++167 us per KDA layer against the 1-slot build (t12: recurrent 172 vs 60 us, conv 93 vs 39 us per layer), 34 KDA
+layers = about 5.7 ms per token. The fix: compact the active slots' KDA state in the same row buckets as the MoE
+(gather the recurrent / conv state of the active slots, run the T_b-row update, scatter back), with its own
+exactness evidence. Expected 16 slots / 1 active: about 73 -> 67 ms (1-slot build: 49.95 ms). Deferred to after
+this release, so the v4b evidence and the combined serving ticket stay valid.
+
+## Trace region (part of the optimization)
+
+The multi-slot profiles take a 96 MiB trace region (64 MiB before). The 2 / 4 / 8-row MoE buckets need it: one row-bucket
+point trace per MoE layer is 254 KB. The code before stage 10 has no use for the larger region. Evidence (t15b, full
+model, 16 slots): at 2 / 4 / 8 active, 117.5 / 126.7 / 141.9 ms with 64 MiB (1-row bucket only) vs 77.7 / 92.9 /
+122.9 ms with 96 MiB. The 1-slot profiles keep 64 MiB (their MoE buckets are off).
+
+## Trace, async and input decisions
+
+- Decode is one segmented trace per build: main segments plus point traces (DSA selection by width, MoE routed experts
+  by active rows). The replay is all `ttnn.execute_trace(..., blocking=False)` (`dsa_buckets.replay_decode`). No host
+  read or sync is added. The plugin's async decode (stage 9, `supports_async_decode`, stale-input device test
+  `tools/vllm_async_validate.py`, 4678d8fccf4) is unchanged.
+- Persistent inputs change only with the scheduler state:
+  - tokens / positions (stage 9);
+  - the page table (copied on change);
+  - the MoE compaction inputs (gather index, scatter index, pad mask), copied host to device only when the active
+    set changes. Several active sets in sequence in one process are bit-exact against buckets off (t13, t15b), and so is
+    the adapter remap check (t16).
+- The bucket key is computed on the host from the positions mirror, without a device read.
+- Async decode and stale inputs: the stage-9 evidence (`tools/vllm_async_validate.py`,
+  `tests/test_vllm_async_validate.py`, 4678d8fccf4) covers changed tokens / positions and changed / unchanged page
+  tables. Ticket t17 runs the same test on 0a2663d0b6b (4 slots), so the MoE row buckets and the views are active under
+  async decode and the compaction inputs change with the active set (AFTER: result).
+- Tilize / untilize in the trace: the MoE compaction converts the S-row activation to row-major for the row gather
+  (`ttnn.embedding`) and back. It is necessary for an exact row copy. Its cost is in the measured win (106.3 -> 72.9 ms
+  at 1 active). Host tensors (`from_torch`) are built only when the active set changes.
+
+## Rejected options
+
+| Option | Why rejected |
+|---|---|
+| One full decode trace per DSA width bucket | each trace is about 40 MB in a 64 MiB region |
+| `kv_len` alone on the prefill indexer | its cost follows the view length, not `kv_len` (t9: 5.34 vs 5.60 ms per 256 rows) |
+| A deterministic top-k tie-break | changes the current code's numerics; the gate was moved to exactness against the `T_b` build |
+| The sorted MoE path in the row buckets | slower than pairs at 1-4 rows, only 8 rows faster on the reduced model, slower on the full model (125.7 vs 122.9 ms), not exact |
+| "Inactive rows copy an active row's routing" | removes no relayout glue |
+| DSA buckets on the block-sharded layout | unmeasured; gated off (`bucket_contexts(T, sharded)`) |
+
+## Limitations
+
+- Segment replays cost about 0.4 ms (1 slot, full DSA width) and about 1.7 ms (16 slots, the S bucket) per token where
+  no bucket narrows the work.
+- A 64 MiB trace region holds only the 1-row MoE bucket: the multi-slot profiles take 96 MiB.
+- KDA over all slots is not compacted (next step above).
+- The top-k tie order differs between the fused and classic top-k modes, so buckets change low-order logits in some
+  tie cases against the same build without buckets (exact against the `T_b` build). Teacher forcing is unchanged.
+
+## $optimize checklist (serving path)
+
+| Item | Evidence |
+|---|---|
+| The hot op is identified by measurement | probe1 (DSA selection by width), t9 (indexer by view), t12 (16-slot ops) |
+| Exactness for every change | t3 / t10 / t11 (DSA buckets against the `T_b` build), t13 / t15b (MoE rows), t7 (alias), t14 (views) |
+| Trace safety | tracker clean (t2, t3, t5, t13, t14), program cache constant after capture, t16 PROGRAM_GUARD |
+| Accuracy | teacher forcing on 3 references unchanged (t5, t14) |
+| No host fallback on the decode path | replay is non-blocking traces only; device sampling unchanged |
+| Memory | net per-die change per profile, computed (table above), G9 re-probe in the combined ticket |
