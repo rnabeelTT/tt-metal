@@ -362,3 +362,111 @@
   team: ttnn
   budget_type: sanity
   owner_id: U0976495SLU # Nikola Ostojic
+
+# ---------------------------------------------------------------------------------------------
+# Quasar simulator coverage (#61750). sim_quasar -> libttsim_qsr.so on ubuntu-latest (sku_config.yaml);
+# setup-ttsim exports TT_METAL_SIMULATOR, TT_METAL_SLOW_DISPATCH_MODE=1, TT_METAL_DISABLE_SFPLOADMACRO=1 and
+# TT_METAL_QUASAR_NOC_API_VERSION=1. Every entry pins the two-compute-node grid the issue asks for with
+# TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" (an inclusive end coordinate: workers (2,2)-(3,2)).
+#
+# --forked is mandatory on this simulator: closing and re-opening a device in one process leaves the next
+# kernel launch spinning forever (reproducer: pytest -n 0 .../ops/test_reshape_tiled.py, 2 cases, hangs on the
+# second; the same two pass with --forked). The sim step of ttnn-sanity-tests-impl.yaml must therefore install
+# pytest-forked next to pytest-xdist. -n 0 is given on the command line for the three model-op suites because
+# their conftest's tt_device_lock (one flock for the whole module-scoped device) makes xdist workers error with
+# DeviceLockTimeout after 60 s; command-line -n 0 beats the -n 4 the impl exports via PYTEST_ADDOPTS. The
+# resnet entry has no such lock and keeps the impl's -n 4.
+#
+# The deselect lists are the cases that do not pass on main @ baeea9796bc + ttsim v1.12.1 (sweep of all 515
+# cases, one process each, 20-min cap; details and per-case lists in #61750). Each family has or needs its own issue.
+# ---------------------------------------------------------------------------------------------
+
+
+# 11 of the 18 resnet50/quasar per-op files from #61750 item 1 (41 cases). Dropped: test_linear.py,
+# test_conv2d_layer3_downsample_split.py, test_conv2d_layer_conv2_modelcfg.py (libttsim_qsr.so v1.12.1
+# aborts with 'UnimplementedFunctionality: noc_cmd_ctrl: multicast'); test_avg_pool2d.py,
+# test_global_avgpool.py, test_max_pool2d_1x3.py, test_max_pool2d_strided_reduce.py and the
+# sharded_to_interleaved case of test_to_memory_config.py (no result after 20 min on the simulator).
+- name: "ttnn quasar resnet50 ops"
+  cmd: >-
+    TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" pytest --timeout 600 -v --forked models/demos/vision/classification/resnet50/quasar/tests/ops/test_reshape_tiled.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_padded_slice.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_reallocate.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_reshape.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_sharded_to_interleaved.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_slice_write.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_tilize.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_layout.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_memory_config.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_untilize_with_unpadding.py models/demos/vision/classification/resnet50/quasar/tests/ops/test_add.py
+    --deselect=models/demos/vision/classification/resnet50/quasar/tests/ops/test_to_memory_config.py::test_quasar_to_memory_config_sharded_to_interleaved[quasar-device_params0]
+  skus:
+    sim_quasar:
+      timeout: 10
+  team: ttnn
+  budget_type: sanity
+  owner_id: U084B1CES7M # Borys Bradel
+
+# #61750 item 2, `-m emulator` subset (the suite's own 2-node-emulator slice). Deselected: linear_small_grid
+# (ttsim multicast abort), rms_norm (eltwise chain kernel lib does not compile on Quasar since #60306),
+# paged_sdpa_decode_small_grid x2 and paged_update_cache (no result after 20 min on the simulator).
+- name: "ttnn quasar llama32_1b graph ops"
+  cmd: >-
+    TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" MESH_DEVICE=N150 pytest --timeout 600 -v -n 0 --forked -m emulator models/experimental/llama32_1b_quasar/tests/graph_ops/
+    --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_linear_small_grid.py::test_linear_small_grid[ttnn_mesh_device0]
+    --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_rms_norm.py::test_rms_norm[03_32x2048_bf16_int-dram-ttnn_mesh_device0]
+    --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_paged_scaled_dot_product_attention_decode_small_grid.py::test_paged_scaled_dot_product_attention_decode_split_small_grid[1core-ttnn_mesh_device0]
+    --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_paged_scaled_dot_product_attention_decode_small_grid.py::test_paged_scaled_dot_product_attention_decode_split_small_grid[2core-ttnn_mesh_device0]
+    --deselect=models/experimental/llama32_1b_quasar/tests/graph_ops/test_paged_update_cache.py::test_paged_update_cache[00_128x8x32x64_bf8_int-dram-ttnn_mesh_device0]
+  skus:
+    sim_quasar:
+      timeout: 10
+  team: ttnn
+  budget_type: sanity
+  owner_id: U084B1CES7M # Borys Bradel
+
+# #61750 item 3, `-m emulator` subset. Deselected: rms_norm x3 / rotary_embedding_llama x2 (chain kernel
+# lib compile error, #60306), argmax (ttsim multicast abort), plus_one x2 (UInt32 DFB / self-looped DFB),
+# split / to_layout / untilize (bfp8 cases: unsupported on Quasar), concat 32x26720 bf8 (same),
+# nlp_concat_heads_decode (captured grid larger than the 2-core device; fails instead of skipping).
+- name: "ttnn quasar qwen3_vl ops"
+  cmd: >-
+    TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" pytest --timeout 600 -v -n 0 --forked -m emulator models/experimental/ops/quasar/tests/qwen3_vl_ops/
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_concat.py::test_concat[00_32x26720_bf8_int-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_nlp_concat_heads_decode.py::test_nlp_concat_heads_decode[00_32x128_bf16_hs-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_plus_one.py::test_plus_one[00_1_i32_int-dram-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_plus_one.py::test_plus_one[01_1_u32_int-dram-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_rms_norm.py::test_rms_norm[01_32x128_bf16_int-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_rms_norm.py::test_rms_norm[02_8x128_bf16_int-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_rms_norm.py::test_rms_norm[07_32x2560_bf16_int-dram-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_rotary_embedding_llama.py::test_rotary_embedding_llama[01_8x128_bf16_hs-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_rotary_embedding_llama.py::test_rotary_embedding_llama[00_32x128_bf16_hs-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_split.py::test_split[00_32x151936_bf8_int-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_to_layout.py::test_to_layout[03_32x151936_bf8_int-l1-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_argmax.py::test_argmax[00_32x151936_bf16_int-dram-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/qwen3_vl_ops/test_untilize.py::test_untilize[00_32x37984_bf8_int-dram-ttnn_mesh_device0]
+  skus:
+    sim_quasar:
+      timeout: 10
+  team: ttnn
+  budget_type: sanity
+  owner_id: U084B1CES7M # Borys Bradel
+
+# #61750 item 4, `-m emulator` subset. test_conv2d.py is ignored whole (every case aborts in ttsim on NoC
+# multicast or gives no result in 20 min). Deselected: max_pool2d x2 and softmax (chain kernel lib compile
+# error, #60306), concat x4 (implicit-sync DFB descriptor overflow / no result in 20 min), permute x3 (no
+# result in 20 min), to_layout bf8 x2 and to_memory_config dtype_cast x2 (bfp8 unsupported on Quasar).
+- name: "ttnn quasar yolo ops"
+  cmd: >-
+    TT_METAL_CORE_GRID_OVERRIDE_TODEPRECATE="3,2" pytest --timeout 600 -v -n 0 --forked -m emulator models/experimental/ops/quasar/tests/yolo_ops/ --ignore=models/experimental/ops/quasar/tests/yolo_ops/test_conv2d.py
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_concat.py::test_concat_channel[dist2bbox-640-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_concat.py::test_concat_channel[detect_out-640-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_max_pool2d.py::test_max_pool2d[yolov8l-sppf-256x20x20-mesh]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_max_pool2d.py::test_max_pool2d[yolov8s-sppf-256x20x20-mesh]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_concat.py::test_concat_detect_cv2cv3[hw40-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_concat.py::test_concat_detect_cv2cv3[hw20-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_softmax.py::test_softmax[l_s-640-dfl-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_to_layout.py::test_to_layout_rowmajor_to_tile_bf8[l_p5_20x512-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_to_layout.py::test_to_layout_rowmajor_to_tile_bf8[s_p4_40x256-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_to_memory_config.py::test_to_memory_config_dtype_cast[anchors-640-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_to_memory_config.py::test_to_memory_config_dtype_cast[strides-640-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_permute.py::test_permute_nchw_to_nhwc[20-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_permute.py::test_permute_detect[dfl_transpose-ttnn_mesh_device0]
+    --deselect=models/experimental/ops/quasar/tests/yolo_ops/test_permute.py::test_permute_detect[dfl_nhwc_to_nchw-ttnn_mesh_device0]
+  skus:
+    sim_quasar:
+      timeout: 10
+  team: ttnn
+  budget_type: sanity
+  owner_id: U084B1CES7M # Borys Bradel

@@ -417,9 +417,9 @@ jobs:
           sku: ${{ matrix.leg.sku }}
           root: ${{ matrix.leg.gate_packages && '/usr/libexec/tt-metalium' || '/work' }}
 
-      - name: Install pytest-xdist (sim parallel execution)
+      - name: Install pytest-xdist and pytest-forked (sim parallel execution; per-test process isolation on Quasar)
         if: ${{ startsWith(matrix.leg.sku, 'sim_') && !matrix.leg.gate_packages }}
-        run: uv pip install pytest-xdist
+        run: uv pip install pytest-xdist pytest-forked
 
       - name: Apply ttsim wormhole workaround patches
         if: ${{ startsWith(matrix.leg.sku, 'sim_wh') }}
