@@ -431,6 +431,37 @@ Command: `~/glm53-flash-bringup/scripts/s9_wide_rerun.sh <snapshot>` with REPROB
     16 users 146.3 / 82.2, 32 users 163.5 / 123.6.
   - leftover processes after the probe and the server: none.
 
+## Request lifecycle and device memory (review #2 P3)
+
+The serving runs never re-measured device memory per request (the plugin exposes no counter). The evidence that
+requests do not retain device memory or programs:
+
+- PROGRAM_GUARD: every server ran with `GLM53_PROGRAM_GUARD=1`. It raises on the first program compiled after the
+  trace capture. No server logged a trip (final run, every profile; `server-final-*.log`): the program cache stays
+  constant across all requests, shapes and lengths.
+- Headroom consumed by requests: on p300x2-1m the G9 probe leaves 274 MB free per die at the 1M prefill peak. The 1m
+  server answered 89 requests (sampling smoke, qualitative, benchmarks, served smokes) before its first ~1M-token
+  prompt, then served the 1,048,000-token prompt and the 1,038,965-token needle. Any per-request device allocation that
+  outlives its request would have accumulated over those requests and broken the 1M prefill.
+- p300x2: the 197,077-token needle ran after 1,044 requests on the same server (the full plugin suite at 16 sequences,
+  qualitative, benchmarks and served smokes) and passed; the sweep then served prompts up to 239,360 tokens.
+- The KDA / DSA per-slot state is constant size and overwritten by each prefill (slot reuse test,
+  `tests/test_slot_reuse.py`); the DSA pool is vLLM's block allocation.
+
+## Async decode with the stage-10 buckets (stage-10 t17)
+
+`tools/vllm_async_validate.py` on 0a2663d0b6b (the stage-10 DSA / MoE decode buckets and pool-key views active),
+`logs/s10/t17.log` (copied to `doc/vllm/evidence/t17_async_validate_buckets.txt`): all 5 streams equal to their solo
+controls, 413 steady / 7 reload / 13 page-table-only / 3 host steps, `ASYNC_RESULT PASS`.
+
+## Scripts
+
+The device runs used workspace scripts (`~/glm53-flash-bringup/scripts/`). Copies of the ones the evidence names most
+are in `doc/vllm/scripts/` for reference (paths assume that workspace): `09-serve.sh` (server + readiness + smokes +
+needle + sweep), `09-smoke.py` (served smokes), `09-needle.py` (passkey retrieval), `10-perf-sweep.py` (sweeps).
+The others (`s9_final.sh`, `s9_wide_rerun.sh`, `09-g9-probe.sh`, `09-diag.py`, `09-burst-diag.py`,
+`09_shard_place.py`, `09_slot_width_check.py`, `09-qcapture.py`, `09_standalone_q.py`) are workspace-only.
+
 ## Notes
 
 - Indexer cost: the sparse DSA indexer selects over all pools of the model context, not over the filled prefix. The

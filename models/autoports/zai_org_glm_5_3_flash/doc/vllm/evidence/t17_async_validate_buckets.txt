@@ -1,0 +1,10 @@
+=== start Wed Oct 21 02:16:09 PM UTC 2026 : timeout -k 60 3600 /home/raahem/glm53-flash-bringup/scripts/s10_t17.sh
+0a2663d0b6b
+CHECK A: 121 tokens, 2 blocks, phys slot 0, equal to solo: True (first divergence None)
+CHECK B: 421 tokens, 6 blocks, phys slot 1, equal to solo: True (first divergence None)
+CHECK C: 421 tokens, 12 blocks, phys slot 2, equal to solo: True (first divergence None)
+CHECK D: 421 tokens, 20 blocks, phys slot 3, equal to solo: True (first divergence None)
+CHECK E: 300 tokens, 4 blocks, phys slot 0, equal to solo: True (first divergence None)
+ASYNC_STATS {'steady': 413, 'reload': 7, 'pt_reload_only': 13, 'host_steps': 3}
+ASYNC_RESULT PASS /tmp/pytest-of-raahem/pytest-175/test_async_decode_matches_solo0/async_validate.json
+======================== 1 passed, 2 warnings in 29.56s ========================

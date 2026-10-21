@@ -163,8 +163,7 @@
   }
  ],
  "default_profile": "p300x2",
- "default_profile_note": "PENDING stage 10: choose the default from the measured decode speed of the 16-slot build (one decode trace width for all slots) against the 1-slot build.",
- "pending": [
-  "Trace region: re-confirm 64 MiB covers the model trace and every sampler variant at 16 and 32 slots (capacity probe trace_allocated)"
- ]
+ "default_profile_note": "p300x2 (16 slots) stays the default: single-user decode 69.9 ms per token and 79 output tokens/s at 16 users. p300x2-long for the fastest single-user decode, p300x2-wide for 32 users, p300x2-1m for the full 1,048,576-token context (doc/vllm_integration/README.md, Serving profile choice).",
+ "pending": [],
+ "trace_region_note": "Per-profile trace regions (stage 10) are measured by the G9 probes: 64 MiB at 1 slot (capture about 47 MB), 96 MiB at 16 slots (97.7 MB), 160 MiB at 32 slots (107.3 MiB); doc/vllm/capacity/s1, s16, s32."
 }

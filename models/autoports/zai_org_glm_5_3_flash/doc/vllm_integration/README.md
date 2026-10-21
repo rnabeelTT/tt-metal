@@ -1,9 +1,13 @@
 # Stage 9: vLLM integration of GLM-5.3-Flash (E192) on p300x2
 
 Details, commands and every run: `work_log.md`. Design: `../vllm/DESIGN.md`. Gate artifact: `../../readiness_vllm/` (from the
-p300x2-1m server). The numbers below come from the final serving run on the code-freeze commit 0a2663d0b6b (stage-10
-decode buckets, async decode on); the p300x2-wide rows come from its re-run on 0bcf89f7fd6 (the stage-10 MoE-bucket
-fix). Evidence: `../vllm/evidence/final/` (`wide-r2_*` for the wide re-run).
+p300x2-1m server). The release code freeze is 0bcf89f7fd6 (stage-10 decode buckets with the MoE-bucket fix, async
+decode on). Each row names the commit it was measured on:
+- [0a2663d0b6b]: the final serving run (`../vllm/evidence/final/`), on the freeze before the stage-10 fix. The fix
+  changes the MoE path of the 32-slot build only (and frees two buffers), so the p300x2-long, p300x2 and p300x2-1m rows
+  stand for the freeze.
+- [0bcf89f7fd6]: the p300x2-wide re-run (`../vllm/evidence/final/wide-r2_*`).
+- Rows marked "pre-fix wide build" describe the 32-slot build of 0a2663d0b6b and are kept as history.
 
 ## Summary
 
@@ -11,11 +15,11 @@ fix). Evidence: `../vllm/evidence/final/` (`wide-r2_*` for the wide re-run).
 | --- | --- |
 | Supported context | 1,048,576 tokens (the advertised context), profile `p300x2-1m`, measured (G9 probe, copy 1.0) |
 | Long-context retrieval through vLLM | passkey needle PASS at 1,038,965 tokens (p300x2-1m, depth 0.08) and at 197,077 tokens (p300x2: replicated layout, DSA and MoE buckets active, depth 0.36) |
-| Plugin sampling suite, full profile | p300x2 (16 sequences): 69 passed, 4 failed, 4 skipped. p300x2-wide (32 sequences): 70 passed, 3 failed, 4 skipped. All failures are known test-format and model-property failures (Known failures). |
+| Plugin sampling suite, full profile | p300x2 (16 sequences) [0a2663d0b6b]: 69 passed, 4 failed, 4 skipped. p300x2-wide (32 sequences) [0a2663d0b6b, pre-fix wide build]: 70 passed, 3 failed, 4 skipped. All failures are known test-format and model-property failures (Known failures). The wide sampling smoke and qualitative on the fixed build run in the stage-11 verification. |
 | Plugin sampling suite, smoke profile, p300x2-1m | 3 passed, 1 skipped |
-| Qualitative (6 prompts, greedy and sampled) | coherent and on topic on every profile; the degenerate-output check is clean |
+| Qualitative (6 prompts, greedy and sampled) | coherent and on topic on every profile [0a2663d0b6b; for wide: pre-fix wide build]; the degenerate-output check is clean |
 | Shipped mode (max reasoning effort) | 2 control prompts finish the reasoning and give correct content on every profile |
-| Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`); -1.05 ms per token on p300x2-long |
+| Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`: on 0bd45f315e1 + the P1-2 fix, on 4678d8fccf4, and with the stage-10 buckets on 0a2663d0b6b, stage-10 t17); -1.05 ms per token on p300x2-long |
 | Served = standalone | the 6 qualitative prompts give the same tokens through vLLM and through the standalone generator (p300x2-long build) |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
 | Concurrency determinism | a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2 |
@@ -26,19 +30,27 @@ fix). Evidence: `../vllm/evidence/final/` (`wide-r2_*` for the wide re-run).
 
 | profile | slots | TTFT | TPOT | ITL | t/s/u (1000 / TPOT) | output tok/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| p300x2-long | 1 | 288 ms | 49.84 ms | 49.9 / 50.7 ms | 20.1 | 19.3 |
-| p300x2-1m (gate artifact) | 1 | 290 ms | 71.52 ms | 71.5 / 72.6 ms | 14.0 | 13.7 |
-| p300x2 (default) | 16 | 265 ms | 69.91 ms | 69.9 / 70.8 ms | 14.3 | 14.0 |
-| p300x2-wide | 32 | 278 ms | 120.89 ms | 120.9 / 121.9 ms | 8.3 | 8.2 |
+| p300x2-long [0a2663d0b6b] | 1 | 288 ms | 49.84 ms | 49.9 / 50.7 ms | 20.1 | 19.3 |
+| p300x2-1m (gate artifact) [0a2663d0b6b] | 1 | 290 ms | 71.52 ms | 71.5 / 72.6 ms | 14.0 | 13.7 |
+| p300x2 (default) [0a2663d0b6b] | 16 | 265 ms | 69.91 ms | 69.9 / 70.8 ms | 14.3 | 14.0 |
+| p300x2-wide [0bcf89f7fd6] | 32 | 278 ms | 120.89 ms | 120.9 / 121.9 ms | 8.3 | 8.2 |
 
 CI serving burst, 32 prompts of 100 input / 100 output tokens, no concurrency limit (queued on 1-slot profiles):
 
 | profile | TTFT median / P99 | TPOT mean / P99 | output tok/s |
 | --- | ---: | ---: | ---: |
-| p300x2-long | 80.3 s / - (queueing) | 49.8 ms | 19.4 |
+| p300x2-long | 80.3 s / 158.8 s (queueing) | 49.8 ms | 19.4 |
 | p300x2-1m | 113.6 s / 224.7 s (queueing) | 71.4 / 71.5 ms | 13.7 |
 | p300x2 | 14.2 s / 24.6 s | 172.5 / 172.6 ms | 76.8 |
 | p300x2-wide | 7.8 s / 7.8 s | 161.1 / 161.5 ms | 134.6 |
+
+Served vs standalone (the same build, one active request; TPOT): the serving overhead is small or negative.
+
+| profile | served TPOT (vLLM, 128/128/1) | standalone TPOT (generator token-out, stage 10) |
+| --- | ---: | ---: |
+| p300x2-long [0a2663d0b6b] | 49.84 ms | 50.10 ms |
+| p300x2 [0a2663d0b6b] | 69.91 ms | 72.9 ms (t15b) |
+| p300x2-wide [0bcf89f7fd6] | 120.89 ms | 118.6 ms |
 
 Async decode on vs off, p300x2-long, same build and flags (`GLM53_VLLM_ASYNC_DECODE` 1 / 0): TPOT 49.84 / 50.89 ms,
 ITL P99 50.7 / 54.5 ms, CI TPOT 49.8 / 51.1 ms.
@@ -155,7 +167,7 @@ placement changes them, by a bounded amount. A near-tie greedy token can flip wi
 
 ## Slot count and decode numerics
 
-The same request in builds with 1, 8, 16 and 32 slots (reduced model, `../vllm/evidence/slot_width_compare.txt`): 8 and
+Measured on 0bd45f315e1 (before the stage-10 buckets), reduced model. The same request in builds with 1, 8, 16 and 32 slots (reduced model, `../vllm/evidence/slot_width_compare.txt`): 8 and
 16 slots are bit-identical to 1 slot; 32 slots differ by 1 to 2 bf16 ULPs from the first decode step (tokens equal),
 and all rows of one build agree. Bounded numerics of the decode path above 16 rows; no fix.
 
