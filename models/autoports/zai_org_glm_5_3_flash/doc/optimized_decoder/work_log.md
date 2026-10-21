@@ -192,3 +192,8 @@ kda8_exp4_lofi_pc 12111 µs.
 - 2026-10-21: review #5 rerun on a pure git archive of 0bcf89f7fd6 (one ticket, `s3r5_gate.sh`): suite 48 / 48,
   watcher subset 24 / 24 and B=1 watcher decode 3 / 3, 0 suspicious lines. The first attempt was killed by the host
   OOM killer (another job), requeued unchanged. Review #5 doc P3s done (README).
+- Commits: review #4 rework 9722bfa892e, its run logs 0a002c55601, review #5 rerun and docs 9bf44858cbc.
+- Review #6: clean pass. P3 docs: the B=1 watcher log scope (one log path for three tests: only the last case is
+  kept; one `TT_METAL_LOGS_PATH` per case from now on), the repeated-run evidence (review #4 and #5 suites: 873 / 873
+  identical check lines on different shared bases), the per-ticket Tracy bases, and the `optimized_decoder` entry in
+  `doc/context_contract.json` (context check: OK).

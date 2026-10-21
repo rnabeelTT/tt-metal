@@ -12,14 +12,19 @@ as a summary in `PLAN.md`):
 - Review #2 added more single-die options, the fidelity trials of the bfp8 projections and the P2 items.
 - Review #3 added the sinkhorn faces kernel, the stage-5 decode role specs, the watcher diagnosis of the KDA in-proj
   split and the batched-reuse matmul diagnosis.
-- Review #4 made `dsa_q_mm` legal on one die (measured, not taken), added the sparse_sdpa head split, two row-major reshapes, the per-kind KDA prefill
-  fidelity and the refreshed accounting ("Review #4").
+- Review #4 made `dsa_q_mm` legal on one die (measured, not taken), added the sparse_sdpa head split, two row-major
+  reshapes, the per-kind KDA prefill fidelity and the refreshed accounting ("Review #4"; commits 9722bfa892e,
+  0a002c55601).
+- Review #5 asked for the gate to be rerun on the stage-10 shared files. The rerun on a pure archive of 0bcf89f7fd6
+  passed ("Review #5 rerun"; commit 9bf44858cbc; `logs_r5/`).
+- Review #6: clean pass. Its P3 doc items are in this text (watcher-log scope, repeated-run evidence, per-ticket
+  bases, `doc/context_contract.json` entry).
 
 The name `opt_s5_pf` has held four one-die policies: `opt_s5_pf_r1` (review #1), `opt_s5_pf_r2` (review #2),
 `opt_s5_pf_r3` (review #3) and the review #4 default (below). The TP4 path and the weight-cache key never changed.
 `GLM53_PRECISION` (the stage-8 policy override) applies only to `MultichipDecoder` / `Glm53Model`. The earlier text of
 this README is in git history (commits 21dc7532f26, d48b7fd06ad, 656c998e3df, ea27eda6b7e). The work log has the
-failures and the order of events. Logs of `~/glm53-flash-bringup/logs/` are copied per review to `logs_r1/` .. `logs_r4/`.
+failures and the order of events. Logs of `~/glm53-flash-bringup/logs/` are copied per review to `logs_r1/` .. `logs_r5/`.
 Tracy runs are in `candidates_r1/` .. `candidates_r4/`.
 
 ## Selected policy (`SELECTED` = `opt_s5_pf`, review #4 contents)
@@ -516,15 +521,18 @@ Final review #4 default `opt_s5_pf` = review #3 default + sparse_sdpa head split
 HiFi2 on the KDA + MoE layers. `dsa_q_mm` is off.
 
 Tracy, final default (`candidates_r4/final/`), against the review #3 runs (`candidates_r3/t_r3_specs`, `final`; same
-seed, another day) and, at position 16384, against the review #3 default in the same session
-(`candidates_r4/opt_s5_pf_r3/`):
+seed, another day) and, at position 16384, against the review #3 default run 4 minutes later
+(`candidates_r4/opt_s5_pf_r3/`). Each Tracy ticket ran on its own snapshot base (shared files from git; per ticket in
+`logs_r4/s3r4.status.log`): decode 1 user kda_dense / dsa_moe 73c0029ee79, kda_moe c31e99c9a4f; decode 32 users
+kda_dense 52aff54486a, kda_moe 3f5b9df1474, dsa_moe 4678d8fccf4; position 16384 final 4678d8fccf4, control
+0a2663d0b6b; prefill kda_dense 0a2663d0b6b, kda_moe and dsa_moe 044dbeaa3fd.
 
 | Case | Review #3 | **Review #4** | Change from the review #4 options (per-op diff) |
 |---|---|---|---|
 | decode kda_dense 1 user | 1696 | **1705** | none (no op moved > 1.5 µs: session drift, about +0.5 %) |
 | decode kda_moe 1 user | 1939 | **1951** | none at 1 row (`route_rm` acts at 32 rows) |
 | decode dsa_moe 1 user, pos 128 | 2013 | **2024** | sparse SDPA 50.7 -> 34.0, indexer reshape 19.1 -> 14.9 (untilize 2.8, row-major view 10.1, tilize 2.0); about -21 µs. The rest of the +11 is drift in small element-wise rows |
-| decode dsa_moe 1 user, pos 16384 (same session) | 2587 | **2374** | **-213 µs (-8.2 %)**: sparse SDPA 560.6 -> 354.3, indexer reshape -4 |
+| decode dsa_moe 1 user, pos 16384 (same session; final on 4678d8fccf4, control on 0a2663d0b6b) | 2587 | **2374** | **-213 µs (-8.2 %)**. The per-op diff moves only SparseSDPA (560.6 -> 354.3, -206 µs) and ReshapeView (-9 µs; the qi path nets -4 µs with its new untilize / tilize rows). No other op moves by more than 3 µs, so the stage-10 change between the two bases does not show here |
 | decode kda_dense 32 users | 2689 | **2705** | none |
 | decode kda_moe 32 users | 11519 | **11515** | routing reshape 35.5 -> 13.6 (untilize 4.1, view 5.7, tilize 3.8): -22 µs |
 | decode dsa_moe 32 users | 11193 | **11210** | routing reshape -22 µs, indexer reshape 42.6 -> 18.4 (-24 µs); SparseMatmul +27 µs drift |
@@ -537,8 +545,9 @@ The faces kernel changes prefill too (sinkhorn 186 -> 168 µs per layer at 2048 
 
 Correctness and stability of the final default (snapshots with the final `tt/optimized_decoder.py`, md5
 9b551ef2ab7292212500dbedf5b72e86). Base commit of the shared files (`tt/dsa.py`, `tt/moe*.py`,
-`tt/multichip_decoder.py`, ...): **0bd45f315e1** for the suite and the watcher subset, **7b3ffd7ec65** for the B=1
-watcher decode, **044dbeaa3fda** for the prefill Tracy (bases per ticket in `logs_r4/s3r4.status.log`). Stage 10
+`tt/multichip_decoder.py`, ...): **c31e99c9a4f** for the suite (06:12), **0bd45f315e1** for the watcher subset,
+**7b3ffd7ec65** for the B=1 watcher decode; the Tracy bases are listed above (bases per ticket in
+`logs_r4/s3r4.status.log`). Stage 10
 changed the shared `GlmDSA` later (0a2663d0b6b: pool-key allocation, device page-table width, sparse prefill views).
 Review #5 asked for a rerun of the suite and the watcher runs on a pure git archive of the stage-10 fix HEAD. That rerun
 (base 0bcf89f7fd6) passed: "Review #5 rerun" below.
@@ -547,7 +556,10 @@ Review #5 asked for a rerun of the suite and the watcher runs on a pure git arch
   the new `test_single_slot_sparse_decode` (L3 1 slot, prefill 4000: scale 0.9953; decode at 4000 .. 4002: update PCC
   >= 0.999491, scale 0.9870 .. 0.9940). y_swap 3 of 307 (cap 9).
 - Watcher suite subset (with the 1-slot and sparse 1-slot cases) **24 / 24**, B=1 traced decode per kind **3 / 3**,
-  both with `TT_METAL_LOGGER_LEVEL=Warning` and **0 suspicious lines** (`watcher_correctness_r4/`).
+  both with `TT_METAL_LOGGER_LEVEL=Warning` and **0 suspicious lines** (`watcher_correctness_r4/`). The three B=1 cases
+  ran as separate tests with one `TT_METAL_LOGS_PATH`, and each test rewrites the same `watcher.log`: the saved B=1
+  watcher log covers only the last case (dsa_moe 1 user). All three tests passed with the watcher on. Future runs use
+  one `TT_METAL_LOGS_PATH` per case.
 - One-die conv op at B = 1 / 2 / 8 / 9 / 16 / 32: 6 / 6.
 - The kda_dense 1-user decode Tracy ran on the pre-final `tt/optimized_decoder.py` (md5 6b7fc11e). It differs from
   the final file only in the default `dsa_q_mm_ib` (64 vs 0), which acts on DSA layers at 1 slot only. Every other
@@ -580,7 +592,11 @@ killer (another job's CPU HF scoring, not this ticket; `logs_r5/s3r5_gate_oomkil
   page-table width) gives the same check lines as in review #4: prefill 4000 scale 0.9953; decode at 4000 .. 4002
   update PCC 0.999958 / 0.999951 / 0.999491, scale 0.9940 / 0.9870 / 0.9915. y_swap 3 of 307 (cap 9).
 - Watcher subset (same `-k`, `TT_METAL_LOGGER_LEVEL=Warning`): **24 / 24, 0 suspicious lines**.
-- B=1 traced decode per kind under the watcher: **3 / 3, 0 suspicious lines**.
+- B=1 traced decode per kind under the watcher: **3 / 3, 0 suspicious lines**. The saved watcher log covers only the
+  last case (dsa_moe 1 user): each test rewrites the same file. Future runs use one `TT_METAL_LOGS_PATH` per case.
+- Repeated-run evidence: the review #4 suite (06:12, shared base c31e99c9a4f) and this suite (21:24, base 0bcf89f7fd6)
+  print **873 / 873 identical check lines** (912 / 912 with the y_swap and decode-mean lines; `logs_r4/s3r4_suite.log`
+  third run, `logs_r5/s3r5_gate.log`), on different shared-file bases.
 - Logs `logs_r5/s3r5_gate.log`; watcher logs `watcher_correctness_r5/`.
 
 No fix was needed: the head split passes the wider stage-10 page table with `cache_batch_idx=0`, which selects the
@@ -621,7 +637,8 @@ kernel work (owner stage 5).
 |---|---|---|
 | `opt_s5` (pre-final): suite twice | 44 / 44 twice, identical | `logs/s3r_opt_suite.log`, `logs/s3r_suite_opt_s5_b.log` |
 | **Review #4 default: full suite (incl. `test_single_slot_decode`, `test_single_slot_sparse_decode`)** | **48 / 48** | `logs_r4/s3r4_suite.log` |
-| **Review #4 default: watcher** suite subset + B=1 traced decode per kind | **24 / 24 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r4/`, `logs_r4/s3r4_watcher_*.log` |
+| **Review #4 default: watcher** suite subset + B=1 traced decode per kind | **24 / 24 + 3 / 3, 0 suspicious lines** (the saved B=1 watcher log covers the last case, dsa_moe, only) | `watcher_correctness_r4/`, `logs_r4/s3r4_watcher_*.log` |
+| **Review #5 rerun** (pure archive of 0bcf89f7fd6): suite, watcher subset, B=1 watcher decode | **48 / 48, 24 / 24 + 3 / 3, 0 suspicious lines**; 873 / 873 check lines identical to the review #4 suite | `logs_r5/`, `watcher_correctness_r5/` |
 | `kda_decode_conv` at the one-die width, B 1 / 2 / 8 / 9 / 16 / 32 | 6 / 6 | `logs_r4/s3r4_conv_one_die.log` |
 | Review #3 default: full suite (incl. `test_single_slot_decode`) | 47 / 47 | `logs/s3r3_suite.log` |
 | Review #3 default: watcher suite subset (incl. B=32 dsa_moe, decode-only, 1-slot) + B=1 traced decode per kind | **23 / 23 + 3 / 3, 0 suspicious lines** | `watcher_correctness_r3/`, `logs/s3r3_watcher_*.log` |
@@ -677,7 +694,6 @@ The 2026-10-16 16:10 stall is classified as infrastructure (work log).
   - P3-5: the dense-MLP gate / up one-die geometry table (DRAM-sharded and 1D in0 / core sweep at K = 4096);
   - P3-6: the indexer `wq_b` bfp8 trial (precision change; about -12 µs per DSA layer expected);
   - P3-2: the N-halved 1-reader KDA in-proj split (two DRAM-sharded matmuls of 64 tiles per bank);
-  - P3-11: repeated runs of the review #4 default (the options are bit-identical or a prefill fidelity change);
   - 128-row prefill Tracy of the review #4 default (dropped for device time; review #2 runs are cited).
 - The review #3 report is not on disk (`~/glm53-flash-bringup/artifacts/` has `stage3_review_{1,2,4}.md`); only the
   `PLAN.md` summary exists. The KDA in-proj split into two weights (qkv + rest; -642 µs per KDA layer at 2048 prefill rows,

@@ -51,6 +51,14 @@
     "tested": "tests/test_fused_decoder.py lengths up to 4000 tokens (incl. 2049 / 2051 / 2177 chunk boundaries); no fused 1M-token run (tests/test_long_context.py runs the functional decoder)",
     "capability_reduction": null
   },
+  "optimized_decoder": {
+    "hardware": "one Blackhole die (mesh 1x1)",
+    "supported_context": 1048576,
+    "status": "unchanged from fused_decoder",
+    "reason": "tt/optimized_decoder.py changes weight dtypes, compute fidelities and program configs and adds bit-identical one-die decode overrides; it adds no persistent state and keeps the cache, KDA state and page-table contract of the fused decoder. The stage-10 PM pool sizing in the shared GlmDSA adds <= ~5 % to the pool keys",
+    "tested": "tests/test_optimized_decoder.py lengths up to 4000 tokens and the 1-slot sparse-regime case (prefill 4000, decode 4000 .. 4002)",
+    "capability_reduction": null
+  },
   "full_model": {
     "status": "stage-6/7 reworks 2026-10-18 .. 21 (see doc/full_model/README.md)",
     "hardware": "p300x2, mesh (1,4), TP4",
