@@ -371,10 +371,9 @@ class Glm5NextForConditionalGeneration:
         if not reduced:
             serving_profiles.check_fit(data, B, max_seq_len, _extra_reserve_bytes(), layout)
         tr = os.environ.get("GLM53_TRACE_REGION")
-        if tr and int(tr) != int(data["trace_region_bytes"]):
-            logger.warning(
-                f"GLM53_TRACE_REGION {tr} != serving_profiles.json trace_region_bytes {data['trace_region_bytes']}"
-            )
+        want = serving_profiles.trace_region_for_slots(data, B)  # per profile (stage 10: 96 MiB for >= 2 slots)
+        if tr and int(tr) != want:
+            logger.warning(f"GLM53_TRACE_REGION {tr} != serving_profiles.json trace region {want} for {B} slots")
         _check_mesh(mesh_device)  # trace region and l1_small_size of the opened mesh
         apply_precision_default(data)
         _check_weight_cache()

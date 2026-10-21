@@ -6,7 +6,8 @@ Data: `serving_profiles.json` next to `tt-model.yaml` (GLM53_SERVING_PROFILES ov
 (tools/memory_probe.py capacity) measures the numbers; tools/serving_profiles.py records them in the file and renders
 the `serve` / `serve_profiles` sections of tt-model.yaml from it. Readers:
 
-  tt/generator_vllm.py        get_max_tokens_all_users (vLLM block count), max_model_len check, trace region, layout
+  tt/generator_vllm.py        get_max_tokens_all_users (vLLM block count), max_model_len check, trace region
+                              (per profile: trace_region / trace_region_for_slots), layout
   tools/serving_profiles.py   ingest / refresh / render-yaml / check
   ~/glm53-flash-bringup/scripts/09-serve.sh, 09-g9-probe.sh   (profile -> max_num_seqs, max_model_len, trace region)
   tests/test_generator_vllm_host.py
@@ -213,6 +214,22 @@ def profile(data: dict, name: str | None = None) -> dict:
         if p["name"] == name:
             return p
     raise KeyError(f"no serving profile {name!r} in {path()} (have {[p['name'] for p in profiles(data)]})")
+
+
+def trace_region(data: dict, prof: dict | str | None = None) -> int:
+    """Trace region (bytes) of a profile: its own trace_region_bytes, else the file's. Stage 10: the multi-slot
+    profiles take 96 MiB (the MoE row buckets of tt/dsa_buckets.py: 2 / 4 / 8 active rows need one point trace per MoE
+    layer each); the 1-slot profiles keep 64 MiB."""
+    p = prof if isinstance(prof, dict) else profile(data, prof)
+    return int(p.get("trace_region_bytes", data["trace_region_bytes"]))
+
+
+def trace_region_for_slots(data: dict, S: int) -> int:
+    """Trace region of the first profile with S slots (the vLLM adapter knows max_num_seqs only), else the file's."""
+    for p in profiles(data):
+        if int(p["max_num_seqs"]) == int(S):
+            return trace_region(data, p)
+    return int(data["trace_region_bytes"])
 
 
 def supported_context(data: dict) -> int:

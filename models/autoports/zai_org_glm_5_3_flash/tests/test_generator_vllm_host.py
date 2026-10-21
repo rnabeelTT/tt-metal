@@ -141,8 +141,15 @@ def test_shipped_data_file_consistent_and_yaml_in_sync():
         default["max_num_seqs"],
         default["max_model_len"],
     )
-    assert m["serve"]["additional_config"]["tt"]["trace_region_size"] == d["trace_region_bytes"]
-    assert int(m["serve"]["env"]["GLM53_TRACE_REGION"]) == d["trace_region_bytes"]
+    tr = sp.trace_region(d, default)  # the serve section: the default profile's region
+    assert m["serve"]["additional_config"]["tt"]["trace_region_size"] == tr
+    assert int(m["serve"]["env"]["GLM53_TRACE_REGION"]) == tr
+    for p in sp.profiles(d):  # a profile with another region overrides both (stage 10: 96 MiB >= 2 slots)
+        y_p = next(q for q in m["serve_profiles"] if q["name"] == p["name"])
+        if sp.trace_region(d, p) != tr:
+            assert y_p["additional_config"]["tt"]["trace_region_size"] == sp.trace_region(d, p)
+            assert int(y_p["env"]["GLM53_TRACE_REGION"]) == sp.trace_region(d, p)
+        assert sp.trace_region(d, p) == (96 << 20 if int(p["max_num_seqs"]) >= 2 else 64 << 20)
     assert m["weights"]["revision"] == d["weights_revision"] == m["serve"]["env"]["GLM53_WEIGHTS_REVISION"]
     assert d["weights_revision"] in m["serve"]["args"]
     assert m["serve"]["block_size"] == d["block_size"] == gv.BLOCK_SIZE
@@ -177,7 +184,7 @@ def test_tool_ingest_refresh(monkeypatch, tmp_path, expect_error):
         "max_seq_len": 290816,
         "num_blocks": 2200,
         "capped_by_max_seq_len": False,
-        "trace_region_bytes": d["trace_region_bytes"],
+        "trace_region_bytes": sp.trace_region_for_slots(d, 16),  # the 16-slot profile's region (stage 10: 96 MiB)
         "free_after_load_bytes": 2_500_000_000,
         "dsa_bytes_per_block_all_layers": 811_008,
         "prompt_len": 281_000,
@@ -226,8 +233,12 @@ def test_dsa_layouts_rule_and_env(monkeypatch, expect_error):
 
     m = yaml.safe_load(tool.render_yaml(d, tool.YAML.read_text()))
     by_name = {p["name"]: p for p in m["serve_profiles"]}
+    base_tr = sp.trace_region(d, sp.profile(d))
     for p in sp.profiles(d):
-        assert by_name[p["name"]].get("env", {}) == sp.layout_env(d, sp.profile_layout(d, p)), p["name"]
+        want = dict(sp.layout_env(d, sp.profile_layout(d, p)))
+        if sp.trace_region(d, p) != base_tr:  # stage 10: a profile's own trace region rides in its env as well
+            want["GLM53_TRACE_REGION"] = str(sp.trace_region(d, p))
+        assert by_name[p["name"]].get("env", {}) == want, p["name"]
     # validate: a profile above the advertised context, an unknown layout
     bad = sp.load()
     bad["profiles"][0] = {**bad["profiles"][0], "dsa_layout": "nope"}

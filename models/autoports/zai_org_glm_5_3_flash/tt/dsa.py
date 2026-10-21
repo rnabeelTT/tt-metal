@@ -52,6 +52,7 @@ TOPK_POOLS = 512
 IDX_WIDTH = 2080  # >= 2048 + 3 tail entries, multiple of the sparse_sdpa k chunk
 SENTINEL_F = 4294967296.0  # fp32 -> uint32 typecast saturates this to 0xFFFFFFFF
 NEG = -1.0e30
+_SHARED_IOTA = {}  # (id(mesh), W) -> (mesh, [1,1,1,W] fp32 iota): GlmDSA.shared_iota
 
 
 class GlmDSA(LightweightModule):
@@ -216,20 +217,33 @@ class GlmDSA(LightweightModule):
             # pool keys: >= NB blocks of 32 keys, sized as a whole number of P_alloc-long indexer views
             self.KB = -(-self.NB * 32 // self.P_alloc)  # indexer view batch
             # stage 10: a vLLM pool at the context cap (NB - 1 = k * MB blocks, vLLM's null block 0 included, + the
-            # dummy) would round KB up by a whole P_alloc of pool keys (20.8 MB per layer at 325,632 tokens). Then
+            # dummy) would round the pool up by a whole view of pool keys (20.8 MB per layer at 325,632 tokens). Then
             # the dummy block's POOL-KEY tile aliases null block 0 (never a block of a request; the dummy only takes
             # padding writes and overrun reads, both masked by the indexer limit). The latent keeps the dummy; the
             # host table (page_table_host) and the decode-input table keep it too. Standalone pools never alias.
-            kb_alias = -(-(self.NB - 1) * 32 // self.P_alloc)
-            self.pool_alias = (
-                kb_alias < self.KB
-                and self.NB - 1 > self.S * (self.T // BLOCK)
-                and os.environ.get("GLM53_POOL_ALIAS", "1") == "1"  # 0: A/B only
-            )
-            if self.pool_alias:
-                self.KB = kb_alias
+            serving_cap = self.NB - 1 > self.S * (self.T // BLOCK) and os.environ.get("GLM53_POOL_ALIAS", "1") == "1"
+            self.VX = self.MB  # device page-table width (blocks)
+            if os.environ.get("GLM53_DSA_VIEWS", "1") == "1":
+                # stage 10 (GLM53_DSA_VIEWS): the prefill indexer's cost follows the length of its pool-key view, not
+                # kv_len. The pool takes PM = 64 x (5-smooth) >= NB blocks (one flat run, not KB x P_alloc), so that a
+                # chunk scores a view [PM/d, 1, 32 d, 128] of d | PM blocks just above its filled prefix
+                # (_view_blocks). The device page table grows to the largest view (dummy columns).
+                pm = _smooth64(max(self.NB, self.MB))
+                pm_alias = _smooth64(max(self.NB - 1, self.MB))
+                self.pool_alias = serving_cap and pm_alias < pm
+                self.PM = pm_alias if self.pool_alias else pm
+                self.view_ds = _view_blocks(self.PM, self.MB, self.T)
+                self.VX = self.view_ds[-1]
+                self.KB = None  # no P_alloc views (pooled_view)
+                pool_blocks = self.PM
+            else:
+                kb_alias = -(-(self.NB - 1) * 32 // self.P_alloc)
+                self.pool_alias = serving_cap and kb_alias < self.KB
+                if self.pool_alias:
+                    self.KB = kb_alias
+                pool_blocks = self.KB * self.P_alloc // 32
             self.pooled = ttnn.zeros(
-                (self.KB * self.P_alloc // 32, 1, 32, self.ID),
+                (pool_blocks, 1, 32, self.ID),
                 dtype=ttnn.bfloat16,
                 layout=ttnn.TILE_LAYOUT,
                 device=self.mesh,
@@ -242,7 +256,7 @@ class GlmDSA(LightweightModule):
                 if fits
                 else self.complete_page_table(torch.zeros(self.S, 0, dtype=torch.int32))
             )
-            self.page_table = self._dev(self._pool_pt(pt0), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
+            self.page_table = self._dev(self._dev_pt(pt0), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
             self.page_table_host = pt0
             z = lambda: ttnn.zeros(
                 (1, 1, S, self.ID), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=DRAM
@@ -271,9 +285,18 @@ class GlmDSA(LightweightModule):
         full = self.complete_page_table(pt)
         self.page_table_host = full
         ttnn.copy_host_to_device_tensor(
-            ttnn.from_torch(self._pool_pt(full), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self._rep),
+            ttnn.from_torch(self._dev_pt(full), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self._rep),
             self.page_table,
         )
+
+    def _dev_pt(self, full: torch.Tensor) -> torch.Tensor:
+        """The device page table: _pool_pt, widened to VX columns (dummy / aliased) for the prefill pool-key views."""
+        t = self._pool_pt(full)
+        vx = getattr(self, "VX", self.MB)
+        if vx > t.shape[1]:
+            fill = 0 if getattr(self, "pool_alias", False) else self.dummy_block
+            t = torch.cat([t, torch.full((t.shape[0], vx - t.shape[1]), fill, dtype=t.dtype)], dim=1)
+        return t
 
     def _pool_pt(self, full: torch.Tensor) -> torch.Tensor:
         """The device page table (pool keys; latent reads never touch a dummy column) and prefill chunk_pt: the
@@ -290,6 +313,14 @@ class GlmDSA(LightweightModule):
             (valid & (blk == self.dummy_block)).any()
         ), "a cache position maps to the dummy block (page table)"
         return blk * BLOCK + pos % BLOCK
+
+    def shared_iota(self, W: int):
+        """[1,1,1,W] fp32 iota, one tensor per (mesh, W) for every DSA layer."""
+        ent = _SHARED_IOTA.get((id(self.mesh), W))
+        if ent is None or ent[0] is not self.mesh:
+            ent = (self.mesh, self._dev(torch.arange(W).float().reshape(1, 1, 1, W)))
+            _SHARED_IOTA[(id(self.mesh), W)] = ent
+        return ent[1]
 
     def _const(self, key, fn=None):
         t = self._const_cache.get(key)
@@ -574,7 +605,7 @@ class GlmDSA(LightweightModule):
         prefill's DRAM peak (stage-6 memory: 128 MB blocks peaked 409 MiB per die at max_context 131072, the full
         model's largest prefill transient). Every row's selection is independent of the block: bit-identical."""
         target = int(float(os.environ.get("GLM53_DSA_INDEX_BLOCK_MB", "64")) * (1 << 20))
-        rb = max(32, min(n, target // (2 * self.P_alloc) // 32 * 32))
+        rb = max(32, min(n, target // (2 * max(self.P_alloc, 32 * getattr(self, "VX", self.MB))) // 32 * 32))
         while n % rb:
             rb -= 32
         return rb
@@ -595,9 +626,11 @@ class GlmDSA(LightweightModule):
         self._const(
             ("tail_j", tail_cols), lambda: self._dev(torch.arange(tail_cols).float().reshape(1, 1, 1, tail_cols))
         )
-        self._const(
-            ("iota", self.P_alloc), lambda: self._dev(torch.arange(self.P_alloc).float().reshape(1, 1, 1, self.P_alloc))
-        )
+        # the pool iotas ([1,1,1,W] fp32 TILE: 128 B per pool) are the same tensor in every DSA layer: one copy per mesh
+        # (stage 10; the per-layer copies took 11 x 9 MB per die at 280,576)
+        for W in [self.P_alloc] + [32 * d for d in (getattr(self, "view_ds", None) or [])]:
+            if ("iota", W) not in self._const_cache:
+                self._const_cache[("iota", W)] = self.shared_iota(W)
         for n in prefill_lengths:
             npool = n // KPOOL
             self._const(
@@ -653,7 +686,12 @@ class GlmDSA(LightweightModule):
                 torch.where(col <= pos.reshape(n, 1), col, torch.full_like(col, SENTINEL_F)).reshape(1, 1, n, IDX_WIDTH)
             )
         if inp["path"] == "sparse":
-            if getattr(self, "score_widths", None):  # stage 10 (tt/dsa_buckets.py): score the filled bucket only
+            if getattr(self, "view_ds", None):  # stage 10: a pool-key view of d blocks just above the filled prefix
+                need = (start + length) // KPOOL
+                inp["view_d"] = self.__dict__.get("_force_view_d") or next(
+                    (d for d in self.view_ds if 32 * (d - 1) >= need), self.view_ds[-1]
+                )
+            elif getattr(self, "score_widths", None):  # stage 10 (tt/dsa_buckets.py): score the filled bucket only
                 need = (start + length) // KPOOL
                 inp["score_width"] = self.__dict__.get("_force_score_width") or next(
                     (W for W in self.score_widths if W >= need), self.P_alloc
@@ -775,20 +813,32 @@ class GlmDSA(LightweightModule):
                     qi = sl(qi_all, self.IH * self.ID)
                     qi = self._split_heads(qi, rb, self.IH, self.ID)
                     wi = sl(wi_all, self.IH)
-                    W = inputs.get("score_width") or self.P_alloc
-                    scores = ttnn.experimental.indexer_score_dsa(
-                        qi,
-                        self.pooled_view(),
-                        wi,
-                        chunk_start_idx=W - 32,  # = T_b / 4: the causal start of a T_b-token build
-                        cache_batch_idx=slot,
-                        page_table=self.page_table,
-                        **({} if W == self.P_alloc else {"kv_len": W}),
-                    )  # [1,1,rb,P_alloc] bf16 ROW_MAJOR (kv_len: only columns < W written)
-                    if W < self.P_alloc:  # stage 10: rank the bucket's columns only
-                        sw = ttnn.slice(scores, (0, 0, 0, 0), (1, 1, rb, W))
-                        ttnn.deallocate(scores)
-                        scores = sw
+                    vd = inputs.get("view_d")
+                    if vd:  # stage 10: a view of vd pool-key blocks (32 vd keys, causal start 32 (vd - 1))
+                        W = 32 * vd
+                        scores = ttnn.experimental.indexer_score_dsa(
+                            qi,
+                            ttnn.reshape(self.pooled, (self.PM // vd, 1, W, self.ID)),
+                            wi,
+                            chunk_start_idx=W - 32,
+                            cache_batch_idx=slot,
+                            page_table=self.page_table,
+                        )  # [1,1,rb,W] bf16 ROW_MAJOR
+                    else:
+                        W = inputs.get("score_width") or self.P_alloc
+                        scores = ttnn.experimental.indexer_score_dsa(
+                            qi,
+                            self.pooled_view(),
+                            wi,
+                            chunk_start_idx=W - 32,  # = T_b / 4: the causal start of a T_b-token build
+                            cache_batch_idx=slot,
+                            page_table=self.page_table,
+                            **({} if W == self.P_alloc else {"kv_len": W}),
+                        )  # [1,1,rb,P_alloc] bf16 ROW_MAJOR (kv_len: only columns < W written)
+                        if W < self.P_alloc:  # stage 10: rank the bucket's columns only
+                            sw = ttnn.slice(scores, (0, 0, 0, 0), (1, 1, rb, W))
+                            ttnn.deallocate(scores)
+                            scores = sw
                     ids = self._select_pools(scores, sl(inputs["limit"], 1))
                     parts.append(self._sparse_rows(ids, sl(inputs["pos"], 1), rb))
                     for t in (qi, scores, ids):
@@ -941,3 +991,39 @@ def _write_row(buf, src, idx: int):
     new = ttnn.concat(parts, dim=-2)
     ttnn.copy(new, buf)
     ttnn.deallocate(new)
+
+
+def release_shared_iotas(mesh):
+    """Drop the shared pool iotas of a mesh (generator teardown; the layers' own constant caches keep theirs)."""
+    for key in [k for k, v in _SHARED_IOTA.items() if k[0] == id(mesh) or v[0] is mesh]:
+        del _SHARED_IOTA[key]
+
+
+def _smooth64(mb: int) -> int:
+    """Smallest 64 x m >= mb blocks with m 5-smooth (2^a 3^b 5^c): many divisors, < 25 % (mostly < 6 %) above mb."""
+    m = -(-mb // 64)
+    while True:
+        r = m
+        for p in (2, 3, 5):
+            while r % p == 0:
+                r //= p
+        if r == 1:
+            return 64 * m
+        m += 1
+
+
+def _view_blocks(nblk: int, mb: int, T: int) -> list[int]:
+    """Prefill pool-key view lengths (blocks), ascending: for each bucket context 4096 * 2^k < T and T itself, the
+    smallest divisor d of nblk with 32 (d - 1) >= its pools (the T_b-build's causal start); the last one covers MB."""
+    divs = [d for d in range(2, nblk + 1) if nblk % d == 0]
+    out, t = [], 4096
+    needs = []
+    while t < T:
+        needs.append(t // KPOOL)
+        t *= 2
+    needs.append(32 * (mb - 1))
+    for need in needs:
+        d = next(d for d in divs if 32 * (d - 1) >= need)
+        if d not in out:
+            out.append(d)
+    return sorted(out)

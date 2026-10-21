@@ -63,7 +63,7 @@ serve:
   additional_config:
     tt:
       sample_on_device_mode: all
-      trace_region_size: 67108864   # @profiles:trace_region_bytes
+      trace_region_size: 100663296   # @profiles:trace_region_bytes
       l1_small_size: 24576
       fabric_config: FABRIC_1D
   env:
@@ -75,7 +75,7 @@ serve:
     GLM53_CACHE_DIR: /weight-cache/glm53_flash
     # parent snapshot + tt/e192_mask.json overlay (symlinks + the mask; a few KB)
     GLM53_CKPT_OVERLAY_DIR: /weight-cache/glm53_ckpt_overlay
-    GLM53_TRACE_REGION: "67108864"   # @profiles:trace_region_env
+    GLM53_TRACE_REGION: "100663296"   # @profiles:trace_region_env
     GLM53_PROGRAM_GUARD: "1"
     VLLM_ENGINE_READY_TIMEOUT_S: "7200"   # cold first boot: weight conversion + kernel compile + warm-up
   # the architecture is unknown to vLLM 0.26: name the TT class directly (doc/vllm/DESIGN.md 3.1); --revision keeps
@@ -94,13 +94,16 @@ serve_profiles:
     mesh_device: P300x2
     max_num_seqs: 1
     max_model_len: 325632
+    additional_config: {tt: {trace_region_size: 67108864}}
+    env: {GLM53_TRACE_REGION: "67108864"}
   - name: p300x2-1m
     description: Two p300 boards, one sequence, the advertised 1,048,576-token context with the block-sharded fp8 DSA cache (slower decode than p300x2-long). 1 x 1048576 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 1
     max_model_len: 1048576
-    env: {GLM53_DSA_SHARD: "1", GLM53_MOE_SORTED_ROWS: "512", GLM53_DSA_INDEX_BLOCK_MB: "32"}
+    additional_config: {tt: {trace_region_size: 67108864}}
+    env: {GLM53_DSA_SHARD: "1", GLM53_MOE_SORTED_ROWS: "512", GLM53_DSA_INDEX_BLOCK_MB: "32", GLM53_TRACE_REGION: "67108864"}
   - name: p300x2-wide
     description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 151552 tokens (measured).
     hardware: p300x2

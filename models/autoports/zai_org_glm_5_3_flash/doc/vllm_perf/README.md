@@ -159,3 +159,108 @@ The capacity gain enters the serving profile through a G9 re-probe with this cod
 - `tools/dsa_bucket_probe.py`, `tools/dsa_bucket_probe2.py`, `tools/dsa_bucket_check.py` (new): the evidence tools.
 - Ticket scripts and logs: `~/glm53-flash-bringup/scripts/s10_*.sh`, `~/glm53-flash-bringup/logs/s10/`.
   Records: `~/glm53-flash-bringup/artifacts/s10/`. Summary: `doc/vllm_perf/dsa_buckets_summary.json`.
+
+## 16-slot decode cost (profile, ticket t12)
+
+Served p300x2 (16 slots, 243,712) gives TPOT 110 to 119 ms at 1 active request. A 1-slot build gives 49.9 ms. Tracy
+profile of one decode step: reduced model (layers 0, 3, 4 + head + sampler), max_seq_len 65,536, position 300, 1
+active slot. Compared: a 1-slot build and a 16-slot build (`GLM53_SKIP_INACTIVE` on). Device time:
+- 1-slot build: 4.20 ms (host wall 4.70);
+- 16-slot build: 7.36 ms (host wall 7.82).
+
+Evidence: `~/glm53-flash-bringup/artifacts/s10/tracy_s{1,16}/`.
+
+| Source (reduced model) | 1 slot | 16 slots | Delta | Per layer | Full model (count) |
+|---|---|---|---|---|---|
+| Routed MoE: pairs path (sparse matmuls, tilize of 128 one-row pair tiles, fill-pad, k-sum, untilize) | 545 us | 2,560 us | +2,015 us | +1,008 us | 42 MoE layers: +42 ms |
+| Element-wise / slice / reshape (mostly the pairs glue: weights, SwiGLU on padded pairs) | 695 us | 1,454 us | +759 us | about +330 us (MoE) | +14 ms |
+| KDA recurrent update + conv over 16 slots | 199 us | 532 us | +333 us | +167 us | 34 KDA layers: +5.7 ms |
+| DSA, head, sampler | - | - | < +30 us | - | < 1 ms |
+
+The estimate (+61 ms) matches the served gap (110 - 50 ms). The pairs path makes one tile-padded row per (row, expert)
+pair: 16 x 8 = 128 groups of 32 padded rows. `GLM53_SKIP_INACTIVE` skips the expert weight reads of inactive rows, but
+the relayout and element-wise glue still runs on all 128 padded groups.
+
+## MoE row buckets (`tt/dsa_buckets.py`, `GLM53_MOE_BUCKETS`)
+
+The decode trace also takes one segment point per MoE layer, keyed by the number of active slots: buckets of 1, 2, 4
+and 8 rows, then all S rows (`GLM53_MOE_BUCKETS=auto`, builds of 2 or more slots; `0` = off).
+
+How a bucket below S works:
+- It gathers the active rows: active slots first, and the padding rows repeat the first active slot.
+- It runs the routed experts on those rows (the pairs path by default, `GLM53_MOE_BUCKET_PATH`).
+- It scatters the result back to the slot rows; inactive rows get zeros.
+- Every move is an exact row copy (`ttnn.embedding`). The routing weights and expert ids move as one bf16 table
+  (ids < 256 are exact in bf16).
+- Pairs padding rows take expert id 65535 and are skipped.
+- The router and the shared expert stay on all S rows.
+- The S bucket runs the build's own path.
+- The host refreshes the three compaction inputs (gather index, scatter index, pad mask) only when the active set
+  changes. There is no device sync.
+
+Ticket t13 (reduced model, 16 slots, 16,384):
+- The active rows are **bit-identical** to buckets off at 1 / 2 / 3 / 5 / 8 / 16 active (prefill + 6 traced steps).
+- The tracker is clean, and the program cache is constant after capture.
+
+| Token-out (reduced model, 2 MoE layers) | 1 active | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| Buckets off | 7.01 ms | 7.46 | 7.90 | 8.62 | 10.22 |
+| Pairs buckets (default) | **5.42 ms** | 5.63 | 6.37 | 7.79 | 10.30 |
+| Sorted buckets (not exact) | 7.57 ms | 7.56 | 7.56 | 7.57 | 10.30 |
+
+Ticket t15b (full model, 16 slots, max_seq_len 16,384, default precision):
+- Active rows are bit-identical to buckets off at 1 / 5 / 16 active, with both a 64 MiB and a 96 MiB trace region.
+- The program cache is constant.
+
+| Token-out, 16-slot build | 1 active | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| Buckets off | 106.3 ms | 115.8 | 125.0 | 140.1 | 173.8 |
+| 64 MiB region: buckets 1, 16 | **72.9 ms** | 117.5 | 126.7 | 141.9 | 175.5 |
+| 96 MiB region: buckets 1, 2, 4, 8, 16 | **72.9 ms** | **77.7** | **92.9** | **122.9** | 175.6 |
+| 96 MiB, 8-row bucket on the sorted path (not exact) | 72.9 ms | 77.7 | 92.9 | 125.7 | 175.6 |
+
+- The 1-slot build is 49.95 ms. The rest of the 16-slot cost at 1 active is the KDA update over 16 slots (about 5.7 ms,
+  profile above) plus about 1.7 ms of segment replays. That 1.7 ms is also the cost at the S bucket (16 active).
+- One row-bucket point trace is 254 KB of trace region, so each bucket below S costs about 10.7 MB for 42 MoE layers.
+  `fit_row_buckets` keeps only the buckets the trace region holds: 64 MiB keeps the 1-row bucket, 96 MiB keeps 1 / 2 / 4 / 8.
+- An explicit `GLM53_MOE_BUCKETS` list is taken as given.
+- The multi-slot serving profiles (p300x2, p300x2-wide, p150x4) take a 96 MiB trace region: `trace_region_bytes` per
+  profile in `serving_profiles.json`, read by `tt/serving_profiles.trace_region` and rendered into `tt-model.yaml`. The
+  1-slot profiles keep 64 MiB.
+- The standalone generator uses the region its mesh was opened with: 1-row bucket at 64 MiB.
+
+## Prefill pool-key views (`tt/dsa.py`, `GLM53_DSA_VIEWS`)
+
+The indexer cost follows the length of its pool-key view (ticket t9). The replicated pool-key cache is now one run of
+`PM` blocks, where `PM` = 64 x a 5-smooth count >= the blocks needed. A sparse chunk scores the view
+`[PM/d, 1, 32 d, 128]`, where `d` is the smallest of about 7 divisors of `PM` with `32 (d - 1)` >= the chunk's filled
+pools. The causal start is `32 (d - 1)`. There is no `kv_len` and no slice.
+
+The device page table is padded to the largest view with dummy columns. The host table and the decode-input table
+keep `MB` columns. The block-sharded layout is unchanged; it also takes no DSA decode buckets
+(`bucket_contexts(T, sharded)`).
+
+Memory: the pool iotas are one tensor per mesh, not one per layer. Net change per die, computed on the host:
+
+| Profile | Pool keys + iotas | Trace region | Net |
+|---|---|---|---|
+| p300x2 16 x 243,712 | -210 MiB | +32 MiB (96 MiB) | **-178 MiB** |
+| p300x2-long 325,632 | -78 MiB | 0 (64 MiB) | **-78 MiB** |
+| p300x2-wide 32 x 151,552 | -130 MiB | +32 MiB (96 MiB) | **-98 MiB** |
+| p150x4 16 x 243,712 | -210 MiB | +32 MiB (96 MiB) | **-178 MiB** |
+
+The block-sharded `p300x2-1m` profile is unchanged. Every multi-slot measurement in `serving_profiles.json` was taken
+with a 64 MiB region. The G9 capacity re-probe of the combined stage-9 ticket replaces them.
+
+Ticket t14 (full model, 1 slot, 243,712):
+
+| | views off | views on |
+|---|---|---|
+| TTFT 2,048 | 1,026 ms | 1,027 ms |
+| TTFT 8,192 | 5,611 ms | **4,376 ms** (16K build: 4,410) |
+| TTFT 32,768 | 24,171 ms | **18,486 ms** |
+| Token-out, positions 300 / 5,000 / 70,000 / 200,000 | 50.10 / 53.54 / 56.01 / 58.20 ms | 50.10 / 53.52 / 55.99 / 58.20 ms |
+| Teacher forcing, 3 references | 92 / 95 / 92 (prefill 92 / 95 / 91) | identical (tracker on: clean) |
+
+- Prefill and decode logits are bit-identical views on vs off in the full-model check (4,221 tokens).
+- On the reduced model, a 40,000-token prompt shows a 0.03 logit delta (top-k tie order across widths); top-1 21/21.

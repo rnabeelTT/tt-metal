@@ -116,7 +116,8 @@
    "mesh_device": "P300x2",
    "max_num_seqs": 16,
    "max_model_len": 243712,
-   "status": "measured"
+   "status": "measured",
+   "trace_region_bytes": 100663296
   },
   {
    "name": "p300x2-long",
@@ -144,7 +145,8 @@
    "mesh_device": "P300x2",
    "max_num_seqs": 32,
    "max_model_len": 151552,
-   "status": "measured"
+   "status": "measured",
+   "trace_region_bytes": 100663296
   },
   {
    "name": "p150x4",
@@ -154,7 +156,8 @@
    "max_num_seqs": 16,
    "max_model_len": 243712,
    "status": "derived",
-   "derived_from": "p300x2"
+   "derived_from": "p300x2",
+   "trace_region_bytes": 100663296
   }
  ],
  "default_profile": "p300x2",

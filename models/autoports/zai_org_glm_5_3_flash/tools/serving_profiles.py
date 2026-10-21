@@ -67,11 +67,12 @@ def cmd_ingest(data, a):
         sys.exit(f"{a.capacity_json}: probe not complete (missing {missing}); only a completed probe is evidence")
     if float(c["copy_accuracy"]) < 1.0:
         print(f"WARNING: copy_accuracy {c['copy_accuracy']} < 1.0: check the probe before using it as evidence")
-    if int(c["trace_region_bytes"]) != int(data["trace_region_bytes"]):
-        sys.exit(
-            f"probe trace region {c['trace_region_bytes']} != serving trace_region_bytes {data['trace_region_bytes']}"
-        )
     S = int(c["S"])
+    if int(c["trace_region_bytes"]) != sp.trace_region_for_slots(data, S):
+        sys.exit(
+            f"probe trace region {c['trace_region_bytes']} != serving trace region "
+            f"{sp.trace_region_for_slots(data, S)} of the {S}-slot profile"
+        )
     lay = "sharded" if c.get("dsa_shard") else sp.default_layout(data)
     if lay not in sp.layouts(data):
         sys.exit(f"{a.capacity_json}: DSA layout {lay!r} has no entry in serving_profiles.json layouts")
@@ -148,7 +149,11 @@ def _profile_yaml(p: dict, default: dict, data: dict) -> list[str]:
     if p is not default:
         out.append(f"    max_num_seqs: {p['max_num_seqs']}")
         out.append(f"    max_model_len: {p['max_model_len']}")
-    env = sp.layout_env(data, sp.profile_layout(data, p))
+    env = dict(sp.layout_env(data, sp.profile_layout(data, p)))
+    tr, base = sp.trace_region(data, p), sp.trace_region(data, default)
+    if tr != base:  # a profile's own trace region (stage 10: 96 MiB multi-slot, 64 MiB 1-slot)
+        out.append("    additional_config: {tt: {trace_region_size: %d}}" % tr)
+        env["GLM53_TRACE_REGION"] = str(tr)
     if env:  # deep-merged over serve.env by tt-model (dicts merge)
         out.append("    env: {" + ", ".join(f'{k}: "{v}"' for k, v in env.items()) + "}")
     return out
@@ -173,7 +178,7 @@ def _card_lines(data: dict) -> list[str]:
 
 def render_yaml(data: dict, text: str) -> str:
     default = sp.profile(data)
-    tr = int(data["trace_region_bytes"])
+    tr = sp.trace_region(data, default)  # the serve section takes the default profile's region
     marks = {
         "default.max_num_seqs": str(default["max_num_seqs"]),
         "default.max_model_len": str(default["max_model_len"]),
@@ -238,7 +243,7 @@ def cmd_check(data, _a):
 
 def cmd_get(data, a):
     if a.key == "trace_region_bytes":
-        print(data["trace_region_bytes"])
+        print(sp.trace_region(data, sp.profile(data, a.profile)))
     elif a.key == "weights_revision":
         print(data["weights_revision"])
     elif a.key == "supported_context":
