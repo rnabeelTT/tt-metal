@@ -91,10 +91,11 @@
     }
   },
   "multichip_decoder": {
-    "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py; stage-4 path MCOpts(), code default DEFAULT_MC)",
-    "status": "measured (stage 4, review #1 rework 2026-10-17)",
+    "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py; stage-4 runs: DEFAULT_MC with 10 fields off via GLM53_MC, not MCOpts() (doc/multichip_decoder/README.md); code default DEFAULT_MC)",
+    "status": "measured (stage 4, review #1 rework 2026-10-17; review #3 rework 2026-10-21: fp8 rows, watcher and committed-code re-runs; review #4 CLEAN PASS)",
     "dsa_cache_layouts": {
-      "replicated (default)": "latent [NB x 128, 512] bf16 + pool keys replicated on every die: 11 x (1024 + 64) = 11,968 B per token per die",
+      "replicated (default)": "latent [NB x 128, 512] bf16 + pool keys replicated on every die: 11 x (1024 + 64) = 11,968 B per token per die (GLM53_PRECISION=none, stage-7 policy)",
+      "replicated fp8 (default precision, combo_a_kv_dense4_g4)": "latent [NB x 128, 512] fp8 e4m3 + bf16 pool keys replicated on every die: 11 x (512 + 64) = 6,336 B per token per die (replicated_default_layout)",
       "block-sharded (MCOpts.dsa_shard / GLM53_DSA_SHARD=1, tt/dsa_shard.py)": "global block b on die b % 4 (local block b // 4), rows 544 wide (latent + 32 control columns); pool keys, indexer and selection replicated: 11 x (544 x 2 / 4 + 64) = 3,696 B per token per die",
       "block-sharded fp8 (GLM53_DSA_SHARD=1 + kv_latent_dtype fp8_e4m3)": "rows 576 wide in fp8 e4m3 (512 latent + 64 control columns, 576 B: sparse_sdpa needs 64 B aligned K rows): 11 x (576 / 4 + 64) = 2,288 B per token per die (dsa_block_sharded_fp8)"
     },
@@ -106,6 +107,7 @@
       "reserve_note": "workspace kept free besides the pool: 700 MiB (replicated probe), 900 MiB (sharded probe; 335 MB still free at its prefill peak)"
     },
     "supported_context_per_slot_profile": {
+      "precision": "GLM53_PRECISION=none (stage-7 policy, bf16 latent). Default precision: replicated_default_layout (325,632 at 1 slot) and dsa_block_sharded_fp8 (1,048,576 at 1 slot)",
       "replicated": {
         "1": 104448,
         "4": 94208,
@@ -141,7 +143,7 @@
       "from": 1048576,
       "to_replicated": 104448,
       "to_block_sharded": 281344,
-      "reason": "device DRAM per die after weights (32.13 GB of 34.11 GB allocatable, stage-7 policy). Block-sharded is the largest measured bf16 layout; 1,048,576 tokens need 3.9 GB of DSA cache per die even sharded (3,696 B x 1M) vs ~1.25 GB available. Further steps: top-level capability_reduction.path_to_advertised (pool-key sharding 3,168 B/token, +16.7 %, not implemented; an fp8 e4m3 latent, done since: dsa_block_sharded_fp8 -- bfp8 is a tile format sparse_sdpa cannot read).",
+      "reason": "device DRAM per die after weights (32.13 GB of 34.11 GB allocatable, stage-7 policy). Block-sharded is the largest measured bf16 layout; 1,048,576 tokens need 3.9 GB of DSA cache per die even sharded (3,696 B x 1M) vs ~1.25 GB available. Further steps: stage7_policy_GLM53_PRECISION_none.capability_reduction.path_to_advertised (pool-key sharding 3,168 B/token, +16.7 %, not implemented; an fp8 e4m3 latent, done since: dsa_block_sharded_fp8 -- bfp8 is a tile format sparse_sdpa cannot read).",
       "to_block_sharded_note": "281,344 measured with a 900 MiB workspace (335 MB free at the prefill peak); ~338K estimated at 700 MiB, not re-probed (superseded by the fp8 block-sharded layout, dsa_block_sharded_fp8: 1,048,576 at 1 slot; the fp8 replicated default holds 325,632)"
     },
     "doc": "doc/multichip_decoder/README.md (Memory, Block-sharded DSA cache)"

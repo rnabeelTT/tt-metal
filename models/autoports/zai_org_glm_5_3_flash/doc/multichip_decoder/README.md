@@ -246,8 +246,8 @@ Cost (A/B wall time, one layer, host-synchronized traced replay): decode 1 slot 
 slots 3154 -> 3563 µs (+409 µs) per DSA layer per step. The first estimate from these numbers was about 4.6 ms per
 token over 11 DSA layers. The measured full-model cost is lower: +2.88 ms per token (fp8 rows, 1 slot, 16K:
 52.82 ms in `dsa_shard/fp8/tf_shard/record.json` vs 49.94 ms replicated in
-`doc/datatype_sweep/runs/final_default_h9/record.json`, `tokenout_ms`; "fp8 rows" below). The comment at `tt/generator.py:147`
-(`LAYOUTS`) still says "+~4.6 ms"; the code is frozen, and the measured value is the one in this README.
+`doc/datatype_sweep/runs/final_default_h9/record.json`, `tokenout_ms`; "fp8 rows" below). The comment at
+`tt/generator.py:147` (`LAYOUTS`) said "+~4.6 ms"; 0bcf89f7fd6 changed it to "+~2.9 ms".
 The added work per DSA layer: an all-gather of the 16 local heads' extended queries, `sparse_sdpa` on
 64 heads instead of 32 (padded), two reduce-scatters and ~25 small element-wise / layout ops. Prefill (wall incl. host
 I/O, first-use compiles on both sides): 9001 tokens 3.25 -> 2.93 s, 6001 tokens 1.72 -> 1.75 s: within noise at these
@@ -498,3 +498,9 @@ TP; stage 5 cuts the replicated projections and norms (`DEFAULT_MC`: dsa_moe 1 u
   nats, no underflow). A prefill sink underflow (w = 0 in bf16 on a die whose share of the selected keys dominates)
   is not measured. The prefill checks in `tests/test_dsa_shard.py` (attention output PCC >= 0.999 per prefill
   sequence) and the teacher-forcing run (91 / 95 / 91) show no symptom, but they do not measure w.
+- Decoder-level HF validation covers the stage-7 policy only. `tests/test_multichip_decoder.py` (and
+  `tests/test_dsa_shard.py`) pin `GLM53_PRECISION=none` unless it is set (stage-8 review #1 P2-4). The HF bars and the
+  quantization-aware reference of `test_multichip_decoder.py` model that policy. The shipping stage-8 policy (bfp4 DSA / shared-expert projections,
+  fp8 latent) is validated at the full-model level (teacher forcing 92 / 95 / 92 replicated, 91 / 95 / 91 sharded) and
+  by the fp8 sharded-vs-replicated A/B (`test_dsa_shard.py` with `GLM53_PRECISION` set). With the stage-8 policy, the
+  32-slot layer-3 decode moves +2 to 5 % in update rms against HF (`shard_fp8_batch32_dsa_moe`, Watcher).

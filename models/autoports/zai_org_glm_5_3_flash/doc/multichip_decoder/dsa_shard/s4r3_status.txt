@@ -8,3 +8,6 @@ d_watch_fp8_batch32 rc=1 Wed Oct 21 01:46:41 PM UTC 2026
 watcher shard_fp8_batch32_dsa_moe suspicious_lines=0
 NA
 ALLDONE Wed Oct 21 01:47:24 PM UTC 2026
+# Note (stage-4 review #4 P3-5): the two "NA" lines are an artifact of wl() in s4r3_job.sh. `grep -c` exits 1 when it
+# counts 0 matches, so `|| echo NA` also printed NA after "suspicious_lines=0". The counts are correct: 0 suspicious
+# lines in both watcher logs (../watcher/shard_fp8_b1/watcher.log.gz, ../watcher/shard_fp8_batch32_dsa_moe/watcher.log.gz).

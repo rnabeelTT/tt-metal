@@ -142,3 +142,13 @@ See the README sections "Review #1 corrections", "Block-sharded DSA cache" and "
     the re-run of the c steps.
   - (d) `shard_fp8_batch32_dsa_moe` watcher: 0 suspicious lines, no tripped assert; the test failed its HF bars,
     which are for the stage-7 policy (README Watcher).
+
+## Review #4 P3s (2026-10-21)
+
+- Review #4: CLEAN PASS, six P3s. Docs: README (the `generator.py:147` comment was corrected in 0bcf89f7fd6; a
+  Limitations bullet: decoder-level HF validation covers the stage-7 policy only), `doc/context_contract.json`
+  `multichip_decoder` (stage-4 runs = `DEFAULT_MC` with 10 fields off; `GLM53_PRECISION=none` labels and the fp8
+  6,336 B line; `reason` repointed to `stage7_policy_GLM53_PRECISION_none`; status), a note on the NA lines in
+  `dsa_shard/s4r3_status.txt`, and `doc/optimized_full_model/watcher/w_full_s8_shard/watcher.log.gz`.
+- P3-3: the replicated-fp8 control of `test_batch32_all_active[dsa_moe]` (`scripts/s4r4_ctrl.sh`, unit
+  `glm53-s4r4-ctrl`, pure `git archive HEAD` snapshot of 3872b583092) is queued.
