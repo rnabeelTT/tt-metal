@@ -125,3 +125,31 @@ Review #3 rework (this entry's kit; logs `~/glm53-flash-bringup/logs/s7r2/`):
     build in one process; the reduced leak check is in `~/glm53-flash-bringup/artifacts/s7r2/leak.json`);
   - `WeightCache.get` re-raises a device OOM instead of rebuilding;
   - a read-only cache root reuses a verified legacy cache, or loads uncached.
+
+## 2026-10-21: stage-6 / stage-7 review #4
+
+- **MoE split margin:** the standalone replicated reserve is now coupled to the no-split threshold:
+  `GLM53_MOE_NOSPLIT_FREE_MIB` (1024) + `NOSPLIT_MARGIN_MIB` (320) = 1,344 MiB. Defaults are 272,384 / 28,672 /
+  10,240 / 2,048 at 1 / 8 / 16 / 32 slots (host-tested).
+- **`v4_default`** (`doc/optimized_full_model/runs/s7r2/v4_default.json`; pure `git archive 52aff54486a` + the floor):
+  - plan 272,384, 1.13 GB free;
+  - MoE split OFF (largest free block 1,181,530,112 B);
+  - TTFT 2,048 / 8,192 = 1,023 / 5,772 ms; token-out 50.08 ms;
+  - TF p0 92 / 100 / 100;
+  - 0 post-capture programs.
+
+  It is the headline now; j2 and v3 are history.
+- **Code:**
+  - `teardown()` pops `_dsa_buckets` after its release and drops `_ballast`;
+  - the sharded layout settings are applied via `apply_layout_env` (`GLM53_DSA_SHARD` not exported; prior values
+    recorded) and restored by `teardown()`;
+  - `_trace_tensors` includes the bucket tensors (`device_tensors()`);
+  - `s67r_checks.provenance()` records the snapshot base (`BASE.txt`) as `code_base`.
+- **Host tests** (`tests/test_standalone_host.py`): plan_context at 1 / 8 / 16 / 32 slots, the reserve coupling, layout
+  env apply / restore, an automatic MoE split choice replaced by the layout's value, and an explicit setting kept.
+  `test_generator_vllm_host.py::test_default_precision_uses_serving_budget` now asserts >= 262,144.
+- **Docs:** segmented decode (stage 10) in both READMEs, the fallback audit and the contract (`context_size_cost`
+  resolved, trace-region note); `full_model.supported_context` = 1,048,576 with a per-layout split.
+- **Pending:** v4b (the final code with stage 10's next commit) runs TF on 3 references with the prefill check, an
+  autoregressive run, ptchange, sampler alternation, TTFT / token-out, the program guard and the rebinding leak
+  check. Script: `~/glm53-flash-bringup/scripts/s7r2_v4b.{py,sh}`.

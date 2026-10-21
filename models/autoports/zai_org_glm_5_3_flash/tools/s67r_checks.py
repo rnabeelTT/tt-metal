@@ -51,13 +51,21 @@ TEXT_FILES = (
 
 # ------------------------------------------------------------------------------------------------ provenance
 def provenance() -> dict:
+    """Code identity of a run. A pinned snapshot (models/autoports/... under a directory holding BASE.txt, written when
+    the snapshot is made from `git archive <commit>`) records that commit as `code_base`; `git_head` is the live repo's
+    HEAD at run time, which a snapshot run does not execute."""
     root = Path(os.environ.get("TT_METAL_HOME", MODEL_DIR.parents[2]))
     sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    snap_root = MODEL_DIR.parents[2]
+    base = snap_root / "BASE.txt"
+    code_base = base.read_text().strip() if base.exists() else None
     dirty = subprocess.run(
         ["git", "-C", str(root), "status", "--short", "--", str(MODEL_DIR / "tt")], capture_output=True, text=True
     ).stdout.split("\n")
     md5 = {p.name: hashlib.md5(p.read_bytes()).hexdigest() for p in sorted((MODEL_DIR / "tt").glob("*.py"))}
     return {
+        "code_base": code_base or sha,
+        "code_dir": str(MODEL_DIR),
         "git_head": sha,
         "tt_dirty": [d for d in dirty if d],
         "tt_md5": md5,

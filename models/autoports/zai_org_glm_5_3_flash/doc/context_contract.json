@@ -54,19 +54,19 @@
   "full_model": {
     "status": "stage-6/7 reworks 2026-10-18 .. 21 (see doc/full_model/README.md)",
     "hardware": "p300x2, mesh (1,4), TP4",
-    "supported_context": 311296,
+    "supported_context": 1048576,
     "per_slot_profiles_max_model_len": "serving_profiles.json (stage 9: the single sizing rule, tt/serving_profiles.py)",
-    "budget": "tt/generator.budget(): serving_profiles.json when its precision id is the build's (per layout: the replicated top-level budget, the sharded layouts.sharded.budget), else the built-in stage-7 numbers. Reserve: GLM53_DRAM_RESERVE_MIB when set, else replicated max(data reserve, 1,200 MiB) and sharded the layout's measured 600 MiB workspace. No layout plans above its measured maximum (serving_profiles.max_model_len_for: replicated 325,632, sharded 1,048,576 at 1 slot)",
+    "budget": "tt/generator.budget(): serving_profiles.json when its precision id is the build's (per layout: the replicated top-level budget, the sharded layouts.sharded.budget), else the built-in stage-7 numbers. Reserve: GLM53_DRAM_RESERVE_MIB when set, else replicated max(data reserve, MoE no-split threshold + 320 MiB = 1,344 MiB) and sharded the layout's measured 600 MiB workspace. No layout plans above its measured maximum (serving_profiles.max_model_len_for: replicated 325,632, sharded 1,048,576 at 1 slot)",
     "dsa_cache": "replicated paged pool of 128-token blocks: 6,336 B per token per die (fp8 latent, default) / 11,968 B (bf16, GLM53_PRECISION=none); block-sharded 2,288 B (fp8 latent) / 3,696 B (bf16); KDA state 35.65 MB per slot per die",
     "trace_region_bytes_needed": 47972352,
     "dram_budget_note": "Build-time layout choice (tt/generator.plan_context): the fastest DSA layout whose pool holds the requested (slots, max_seq_len), block-sharded with either latent dtype (fp8: 2,288 B per token; the default T keeps the replicated fp8 layout whenever it fits); a request that fits no layout raises ValueError before any weight loads; the standalone generator re-checks against the measured free DRAM after load. Decode overrun guard: positions >= max_seq_len raise on the host and are inactive on the device (no cache write).",
     "standalone_generator_defaults": {
       "combo_a_kv_dense4_g4 (default)": {
-        "1": 294912,
-        "8": 32768,
-        "16": 12288,
+        "1": 272384,
+        "8": 28672,
+        "16": 10240,
         "32": 2048,
-        "note": "tt/generator.plan_context on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B), replicated, 1,200 MiB reserve; max_seq_len=1048576 at 1 slot plans the block-sharded layout"
+        "note": "tt/generator.plan_context on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B), replicated, reserve = MoE no-split threshold + 320 MiB = 1,344 MiB (v4_default: split off, 1,181,530,112 B largest free block); max_seq_len=1048576 at 1 slot plans the block-sharded layout"
       },
       "combo_a_kv (j2-j4 evidence, earlier profile data)": {
         "1": 280576,
@@ -74,14 +74,21 @@
         "32": 2048
       },
       "GLM53_PRECISION=none": {
-        "1": "59,392 replicated / 194,560 block-sharded",
-        "8": "4,096 / 16,384",
+        "1": "47,104 replicated / 153,600 block-sharded",
+        "8": "2,048 / 10,240",
         "32": "does not fit"
       },
       "evidence": "j2_s1_default (1 slot, 280,576: TF 91/100/100, copy 1.0 at 32,768 and 100,000 tokens), j3_s8, j4_s32 (doc/optimized_full_model/runs/s67r/)"
     },
-    "context_size_cost": "the sparse DSA indexer scores every allocated pool slot of the user (P_alloc from max_seq_len): 1 slot, same code, 16,384 vs 280,576: token-out decode 51.10 vs 56.24 ms, TTFT at 8,192 tokens 4,408 vs 6,444 ms (j2b_s1_16k vs j2_s1_default); TTFT <= 2,048 tokens unchanged",
-    "supported_context_label": "the largest supported context of the full model at 1 slot under the default precision: 311,296 = the replicated stage-8 capacity probe at the 1,024 MiB serving workspace (the long replicated profile p300x2-long measures 325,632 in G9). The advertised 1,048,576 is supported with the block-sharded fp8 layout (top-level supported_context; serving profile p300x2-1m; standalone Glm53Generator(mesh, max_seq_len=1048576))"
+    "context_size_cost": "resolved by stage 10 (86403d19830, tt/dsa_buckets.py): for max_seq_len >= 65,536 the decode trace is segmented (one selection trace per indexer bucket width) and sparse prefill chunks score only the bucket width their last position needs. Before it, 16,384 vs 280,576 gave token-out 51.10 vs 56.24 ms and 8K TTFT 4,408 vs 6,444 ms (j2b vs j2); stage 10 measured 55.07 -> 50.10 ms and 6.46 -> 5.83 s at 280,576",
+    "supported_context_label": "1,048,576 = the advertised context, supported at 1 slot by the block-sharded fp8 layout (serving profile p300x2-1m; standalone max_seq_len=1048576). The faster replicated layout is capped at its measured 325,632 (p300x2-long); the standalone default is 272,384 (replicated, no-split reserve: TTFT-favouring)",
+    "trace_region_note": "47,972,352 B = the 2026-10-17 single decode trace (45 layers + greedy sampler). The default build (max_seq_len >= 65,536) captures the segmented decode (main segments + per-bucket selection traces, stage 10) plus every sampler variant in the 64 MiB region (serving_profiles.json trace_region_bytes)",
+    "supported_context_by_layout": {
+      "block_sharded_fp8": "1,048,576 (serving profile p300x2-1m, G9 measured; standalone Glm53Generator(mesh, max_seq_len=1048576))",
+      "replicated_measured_cap": 325632,
+      "replicated_serving_profile": "325,632 (p300x2-long, G9)",
+      "standalone_default": 272384
+    }
   },
   "multichip_decoder": {
     "hardware": "p300x2, mesh (1, 4), FABRIC_1D, TP4 (tt/multichip_decoder.py; stage-4 path MCOpts(), code default DEFAULT_MC)",
@@ -197,12 +204,12 @@
     "supported_context_1slot_note": "stage-8 standalone capacity probe on the final weights (capacity_evidence at the top level). It is evidence of the largest feasible value of the replicated fp8 layout; it does not set the served max_model_len (see context_sizing).",
     "context_sizing": {
       "rule": "one rule for the replicated layout, in tt/serving_profiles.py (data serving_profiles.json) and tt/generator.plan_context (which reads the serving_profiles.json budget when its precision.id is the build's policy id): pool_blocks = measured[S].pool_blocks if serving_profiles.json has a probe for S slots, else floor((free_after_load - (kda_slots(S) - 2) x 35,651,584 B - reserve) / 811,008 B); max_model_len = the largest multiple of 2,048 with ceil(L / 128) + (S - 1) + 2 <= pool_blocks",
-      "reserve": "serving (vLLM, serving_profiles.json budget.reserve_bytes): 1,024 MiB (replicated), 600 MiB (block-sharded). Standalone Glm53Generator: GLM53_DRAM_RESERVE_MIB when set, else replicated max(1,024 MiB, 1,200 MiB) = 1,200 MiB (TTFT: keeps the MoE prefill unsplit) and sharded the layout's 600 MiB",
+      "reserve": "serving (vLLM, serving_profiles.json budget.reserve_bytes): 1,024 MiB (replicated), 600 MiB (block-sharded). Standalone Glm53Generator: GLM53_DRAM_RESERVE_MIB when set, else replicated max(1,024 MiB, MoE no-split threshold + 320 MiB) = 1,344 MiB (keeps the MoE prefill unsplit; v3's 1,200 MiB did not) and sharded the layout's 600 MiB",
       "values_1slot_final_weights": {
         "stage8_standalone_probe_measured": 325632,
         "rule_at_1024MiB_reserve_computed": 325632,
-        "standalone_generator_default_code": 294912,
-        "standalone_generator_default_note": "tt/generator.plan_context(1) on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B) with the 1,200 MiB replicated reserve; 280,576 on the earlier combo_a_kv profile data (j2, stage-10 t5)",
+        "standalone_generator_default_code": 272384,
+        "standalone_generator_default_note": "tt/generator.plan_context(1) on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B) with the 1,344 MiB no-split reserve (v4_default); 294,912 with the earlier 1,200 MiB floor (v3: MoE split engaged); 280,576 on the earlier combo_a_kv profile data (j2)",
         "stage9_serving_probe_measured": "325,632 (G9, doc/vllm/capacity/s1, 1,024 MiB workspace; serving profile p300x2-long)"
       },
       "governs_serving": "the stage-9 serving probes. tools/serving_profiles.py ingest wrote them to serving_profiles.json measured['1' / '16' / '32'] (G9, combo_a_kv_dense4_g4) and layouts.sharded.measured['1'] (p300x2-1m); a measured entry wins over the rule",

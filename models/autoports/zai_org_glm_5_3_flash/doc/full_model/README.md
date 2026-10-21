@@ -3,60 +3,54 @@
 Stage 6 of the tt-model-bringup flow. `tt/model.py` (`Glm53Model`) runs the full text model on the (1, 4) mesh of a
 p300x2. `tt/generator.py` (`Glm53Generator`, `build_generator`) is the readiness and serving contract.
 
-## Headline (stage-6/7 rework, 2026-10-18)
+## Headline (final default, `v4_default`, 2026-10-21)
 
-Source run: `j2_s1_default` (`tools/s67r_checks.py --slots 1`, log `~/glm53-flash-bringup/logs/s67r/j2_s1_default.log`,
-record `doc/optimized_full_model/runs/s67r/j2_s1_default.json`). Code: HEAD 656c998e3df plus this rework's files,
-run from a pinned snapshot; git HEAD and the md5 of every `tt/*.py` were logged at the start and end and did not
-change. Build: `Glm53Generator(mesh)` with no arguments and no `GLM53_*` setting, i.e. the snapshot's defaults: 1 slot,
-replicated DSA cache, `max_seq_len` 280,576, trace region 64 MiB.
-
-Precision: **the snapshot default, combo_a_kv before the stage-8 kda_in program**. The snapshot's `tt/precision.py`
-(md5 109284f4) predates stage-8 commit aa104284595. That commit added a KDA input-projection decode program
-(`1d:c29:ib4`, layers 1-43) and kept `packer_l1_acc` on the LoFi LM head. Stage 8 measured that delta on the earlier
-wrapper (`doc/datatype_sweep/runs/combo_a_kv_g4_kdain_r2`: teacher forcing 91 / 100 / 100). HEAD's exact default is gated by stage 8 (`doc/datatype_sweep/runs/final_default_h9`). That run uses precision
-`combo_a_kv_dense4_g4` (the default since d16e6b9c2f0), 1 slot, `max_seq_len` 16,384:
-- teacher-forcing top-1 92 / 95 / 92 % on the 3 AIME24 chat references, top-5 and top-100 100 % on all three;
-- prefill check 92 / 100 / 100;
-- token-out decode 49.94 ms.
-
-The j2 numbers below are the snapshot default at 280,576 tokens. The standalone default keeps the 1,200 MiB reserve,
-which favours TTFT (see "Defaults and sizing"). Stage 10's t5 ran the full model at 280,576 (teacher forcing
-92 / 100 / 100).
-
-Explicit-override case, `v1_default` (`doc/optimized_full_model/runs/s7r2/v1_default.json`): the reserve was lowered to
-the 1,024 MiB serving workspace. Code: HEAD 24be34c7cbe plus this agent's review-#2 hunks, from a step where that was
-the rule; precision `combo_a_kv_dense4_g4`. Build: `Glm53Generator(mesh)` sized 311,296 tokens (2,433 blocks), 0.90 GB
-free per die after the build. The same build today needs `GLM53_DRAM_RESERVE_MIB=1024`.
-- Teacher forcing 92 / 100 / 100; prefill check 92 / 100 / 100.
-- Token-out decode 55.37 ms (18.0 t/s/u).
-- TTFT 128 / 161 / 512 / 2,048 / 8,192 tokens: 225 / 374 / 376 / 1,149 / 7,173 ms.
-- 0 programs compiled after the capture (incl. a 10,001-token chunk plan: 9,196 vs 9,194 ms).
-
-With less than 1 GiB free, `choose_moe_split` keeps the MoE prefill row split. That costs +120 ms per 2048-row chunk
-(2,048 tokens: 1,149 vs 1,026 ms at 280,576), on top of the context-size cost below. This is why the standalone
-default keeps the 1,200 MiB floor; long contexts belong to the serving profiles (`p300x2-long`, `p300x2-1m`).
+Source run: `v4_default` (`doc/optimized_full_model/runs/s7r2/v4_default.json`, log
+`~/glm53-flash-bringup/logs/s7r2/v4_default.log`).
+- Code: pure `git archive 52aff54486a` plus the coupled no-split reserve floor (stage-6/7 review #4 kit).
+- Build: `Glm53Generator(mesh)` with no arguments and no `GLM53_*` setting: 1 slot, replicated DSA cache,
+  `max_seq_len` 272,384, trace region 64 MiB.
+- Precision: HEAD's default, `combo_a_kv_dense4_g4` plus ten bfp4-tuned decode programs.
+- Decode: the stage-10 segmented bucketed trace (86403d19830, on for `max_seq_len` >= 65,536).
 
 | Metric | Value | Workload |
 |---|---|---|
-| TTFT, 161-token prompt | **377 ms** (397 ms with the host logits row `generate()` reads) | warm, one 512-row chunk |
-| TTFT, 128 / 512 / 2,048 / 8,192 tokens | 228 / 376 / 1,026 / 6,444 ms | warm, cost chunk plan |
-| Batch-1 decode, model trace only | 55.85 ms per step (17.9 t/s/u) | position 300, 20 replays, no host sync between |
-| Batch-1 decode, token-out (model + sampler trace, token fed back on device) | **56.24 ms per step, 17.8 t/s/u** | same; sampler 0.39 ms |
-| Batch-1 decode, `generate()` loop (host reads each token) | 56.51 ms per step, 17.7 t/s/u | same |
-| Teacher forcing (host feeds the reference token every step) | 17.8 t/s/u decode, top-1 91 %, top-5 100 %, top-100 100 % | AIME24 #0 chat prompt, 161 + 100 tokens |
-| Prefill check | top-1 91 %, top-5 100 %, top-100 100 % | same |
-| Long prompt, 32,768 / 100,000 tokens | TTFT 28.0 / 87.3 s; decode 59.8 / 59.9 ms per token; copy accuracy 32 / 32 both | copy task, traced token-out decode at the deep position |
-| Model build with the weight cache | 132 s | |
+| TTFT, 2,048 / 8,192 tokens | **1,023 / 5,772 ms** | warm, cost chunk plan, MoE prefill unsplit |
+| Batch-1 decode, model trace only | 49.69 ms per step | position 300, 20 replays, no host sync between |
+| Batch-1 decode, token-out (model + sampler, token fed back on device) | **50.08 ms per step, 20.0 t/s/u** | same; sampler 0.39 ms |
+| Batch-1 decode, `generate()` loop (host reads each token) | 50.17 ms per step, 19.9 t/s/u | same |
+| Teacher forcing / prefill check (AIME24 #0) | 92 / 100 / 100 % each | 161 + 100 tokens |
+| Plan / fit / MoE split | 2,129 of 2,133 blocks, 1.13 GB free per die, split off (1,181,530,112 B largest block) | |
+| Programs compiled after the capture | 0 | |
+
+Evidence still pending, in v4b (on the HEAD with stage 10's next commit: MoE buckets, pool-key views):
+- teacher forcing on all 3 references and the prefill check;
+- one autoregressive run;
+- the page-table change and sampler alternation under the segmented replay;
+- the program guard, token-out and TTFT;
+- the rebinding leak check.
+
+not run yet (script `~/glm53-flash-bringup/scripts/s7r2_v4b.{py,sh}`, queued when that commit lands)
+
+Gates of HEAD's precision at other sizes:
+- stage 8 `doc/datatype_sweep/runs/final_default_h9` (16,384 tokens, single trace): teacher-forcing top-1 92 / 95 / 92
+  on 3 references, top-5 / top-100 100 %, token-out 49.94 ms;
+- `v3_default` (237ec3b8438, 294,912, before the coupled floor): the same TF, prefill check 92 / 95 / 91, token-out
+  55.04 ms, MoE split engaged (TTFT 2,048 / 8,192 = 1,144 / 7,034 ms);
+- the explicit-override case `v1_default` (24be34c7cbe + review-#2 hunks, reserve 1,024 MiB, 311,296): TF
+  92 / 100 / 100, token-out 55.37 ms. The same build today needs `GLM53_DRAM_RESERVE_MIB=1024`.
 
 Largest full-model batch tested: 32 slots (`j4_s32`, see "Batch > 1"). Limitations: see the last section.
 
-The default context has a cost. The sparse DSA indexer scores every pool slot allocated to the user (`[rows,
-P_alloc]`, sized by `max_seq_len`), not only the filled prefix. The same code at `max_seq_len` 16,384 (`j2b_s1_16k`)
-gives 51.10 ms token-out decode (19.6 t/s/u) and 4,408 ms TTFT at 8,192 tokens. At 280,576 (the j2 default) these are
-56.24 ms and 6,444 ms. The planned fix (stage 10) scores only the filled
-prefix. Short-context deployments should pass `max_seq_len`. The TTFT up to 2,048 tokens does not
-change (no sparse chunk).
+History: `j2_s1_default` (2026-10-18; 656c998e3df + rework files, combo_a_kv without kda_in, 280,576, single decode
+trace) is the run the sections below cite where they say j2:
+- TTFT 128 / 161 / 512 / 2,048 / 8,192 = 228 / 377 / 376 / 1,026 / 6,444 ms;
+- token-out 56.24 ms;
+- TF 91 / 100 / 100;
+- 32,768 / 100,000-token copy runs: copy 1.0, decode 59.8 / 59.9 ms.
+
+Its 8K TTFT and decode carried the indexer's context-size cost (16,384: 4,408 ms, 51.10 ms), which stage 10's buckets
+removed.
 
 ## Structure
 
@@ -69,8 +63,10 @@ change (no sparse chunk).
   logits rows to `SR = ceil32(S)`.
 - Prefill: one user per call, in chunks of the constructed lengths (128, 512, 2048; stage-7 cost plan). KDA layers
   carry their state from chunk to chunk. DSA layers write the paged latent cache.
-- Decode: all S slots in one traced step. The per-step DSA / KDA inputs come from the position tensor on the device
-  (`tt/decode_inputs.py`), and the trace advances the positions. The sampler trace writes the token into the buffer that
+- Decode: all S slots in one traced step. For `max_seq_len` >= 65,536 (the default build), the step is a segmented
+  trace (stage 10, `tt/dsa_buckets.py`): main segments plus, per DSA layer, one selection trace per bucket width; the
+  host picks the bucket from its positions mirror each step. Below 65,536 it is one trace. The per-step DSA / KDA
+  inputs come from the position tensor on the device (`tt/decode_inputs.py`), and the trace advances the positions. The sampler trace writes the token into the buffer that
   the model trace reads, so steady-state decode needs no host input. A position at or past `max_seq_len` raises on the
   host and is treated as inactive on the device (no cache row written).
 
@@ -82,16 +78,17 @@ change (no sparse chunk).
   budget;
 - the budget comes from `serving_profiles.json` (stage 9) when its precision id is the build's, else from the
   built-in stage-7 numbers; DSA bytes per 128-token block follow the latent dtype;
-- the reserve is `GLM53_DRAM_RESERVE_MIB` when set, else max(data reserve, 1,200 MiB). The data reserve is
-  `serving_profiles.json`'s 1,024 MiB serving workspace, so the 1,200 MiB floor wins. On HEAD's profile data that is not
-  enough to keep the MoE prefill unsplit: `v3_default` measured a 1,030,724,608 B largest free block at warm-up,
-  under the 1 GiB no-split threshold, so the split engaged (TTFT 2,048 tokens 1,144 ms);
+- the replicated reserve is `GLM53_DRAM_RESERVE_MIB` when set, else max(data reserve, no-split floor). The no-split
+  floor is the MoE no-split threshold (`GLM53_MOE_NOSPLIT_FREE_MIB`, default 1024) + 320 MiB
+  (`tt/generator.NOSPLIT_MARGIN_MIB`) = 1,344 MiB, so the standalone default runs the unsplit (faster) MoE prefill.
+  `v4_default` measured a 1,181,530,112 B largest free block at warm-up: no split. The earlier 1,200 MiB floor left
+  1,030,724,608 B in `v3_default`, under the threshold (split engaged, TTFT 2,048 tokens 1,144 ms);
 - the budget is computed at each plan (`tt/generator.budget()`), so a `GLM53_PRECISION` or reserve set after import
   applies;
 - a request above the replicated capacity selects the block-sharded DSA layout automatically, with either latent
   dtype (fp8 rows: 2,288 B per token per die), up to that layout's budget. With a matching `serving_profiles.json`,
   that budget is the layout's own measured one (`layouts.sharded.budget`: 600 MiB workspace, 292,864 B per block),
-  not the replicated 1,200 MiB floor. Without a `max_seq_len`, an fp8 build keeps the replicated layout;
+  not the replicated no-split floor. Without a `max_seq_len`, an fp8 build keeps the replicated layout;
 - when the plan selects the sharded layout, the generator sets that layout's measured process settings before the
   build (`serving_profiles.layout_env`: `GLM53_MOE_SORTED_ROWS=512`, `GLM53_DSA_INDEX_BLOCK_MB=32`; `setdefault`, as
   the vLLM adapter does);
@@ -103,17 +100,17 @@ change (no sparse chunk).
 
 | Precision | Slots | Default `max_seq_len` | Source |
 |---|---|---|---|
-| combo_a_kv_dense4_g4 (default since d16e6b9c2f0) | 1 | 294,912 (replicated) | planner on HEAD's `serving_profiles.json` (G9 free-after-load 3,139,928,064 B), 1,200 MiB reserve. Built in `v3_default` (237ec3b8438): teacher forcing 92 / 95 / 92, token-out 55.04 ms, MoE split engaged |
-| combo_a_kv_dense4_g4 | 8 | 32,768 (replicated) | planner |
-| combo_a_kv_dense4_g4 | 32 | 2,048 (replicated) | planner |
+| combo_a_kv_dense4_g4 (default since d16e6b9c2f0) | 1 | 272,384 (replicated) | planner on HEAD's `serving_profiles.json` (G9 free-after-load 3,139,928,064 B), 1,344 MiB reserve. Built in `v4_default`: TF 92 / 100 / 100, token-out 50.08 ms, MoE split off |
+| combo_a_kv_dense4_g4 | 8 / 16 / 32 | 28,672 / 10,240 / 2,048 (replicated) | planner (host test `tests/test_standalone_host.py`) |
+| combo_a_kv_dense4_g4, 1,200 MiB reserve (v3, 237ec3b8438) | 1 | 294,912 | `v3_default`: MoE split engaged |
 | combo_a_kv_dense4_g4, `max_seq_len=1048576` | 1 | 1,048,576 (block-sharded, selected automatically) | planner, `layouts.sharded.budget`; the serving probe of the same layout is G9 p300x2-1m |
 | combo_a_kv_dense4_g4, `GLM53_DRAM_RESERVE_MIB=1024` | 1 / 8 / 32 | 325,632 / 34,816 / 4,096 | planner; `v1_default` built 311,296 on the earlier profile data |
 | combo_a_kv (the j2-j4 evidence, before review #2) | 1 / 8 / 32 | 280,576 / 30,720 / 2,048 | j2 / j3 / j4 plans, 1,200 MiB reserve |
-| none (bf16 latent) | 1 | 59,392 replicated; 194,560 block-sharded (selected automatically above 59,392) | planner |
-| none (bf16 latent) | 8 / 32 | 4,096 replicated, 16,384 sharded / does not fit | planner |
+| none (bf16 latent) | 1 | 47,104 replicated; 153,600 block-sharded (selected automatically above 47,104) | planner, built-in budget, 1,344 MiB reserve |
+| none (bf16 latent) | 8 / 32 | 2,048 replicated, 10,240 sharded / does not fit | planner |
 
-The standalone default trades about 9 % of the serving context for TTFT. On HEAD's profile data the trade is incomplete:
-the split still engages (`v3_default`), by about 43 MB of free DRAM. The vLLM serving profiles size with the
+The standalone default trades about 16 % of the serving context (272,384 vs 325,632) for TTFT: the unsplit MoE
+prefill, with about 108 MB of margin over the threshold in `v4_default`. The vLLM serving profiles size with the
 measured 1,024 MiB workspace (the stage-8 capacity probe completed with it and failed at 832 MiB) and own the long
 contexts. `GLM53_DRAM_RESERVE_MIB=1024` gives the standalone generator the same sizing.
 
@@ -236,7 +233,7 @@ it. The sampler is 0.39 ms of a 56 ms step, so neither has a performance case.
 | Prefill, all layers, LM head | device | chunked, cost plan |
 | Prefill token in `generate()` | **host** argmax over the last logits row (one vocab row read, about 20 ms of TTFT) | the serving path samples the prefill token on the device (`_prefill_sampled`) |
 | `prefill_forward(return_all_logits=True)` / `prefill_logits` | **host**: every row is read back | readiness prefill check only. The all-logits head is warmed only for chunks of <= 512 rows (a 2048-row head holds 158 MB of logits per die, kept out of the warm-up peak). A prompt whose plan has a 2048-row chunk compiles that head after the capture; the post-capture program guard (`Glm53Generator.guard_programs`) reports it. Not a serving path |
-| Decode, model step | device, traced | |
+| Decode, model step | device, traced: one trace below `max_seq_len` 65,536; at or above it (the default build) a segmented trace (main segments + per-bucket DSA selection traces, stage 10), the bucket chosen on the host from the positions mirror (no device read) | |
 | Decode sampling | device, traced, every variant | `on_device_sampling=False` is a host-sampling compatibility mode (host argmax of the logits row); readiness tools only |
 | Token feedback | device (`tt_out_tok`) | `generate()` reads one token per step back to the host for its return value |
 | Page table | host compares the row; device copy only when it changed | |
@@ -285,8 +282,8 @@ Context per layout (1 slot):
 
 | Layout | Precision | Context | Evidence |
 |---|---|---|---|
-| replicated | combo_a_kv_dense4_g4 (default) | 325,632 (serving profile `p300x2-long`, 1,024 MiB workspace, G9); standalone default 294,912 (1,200 MiB reserve); j2 ran 280,576 (combo_a_kv) | G9 `doc/vllm/capacity/s1`; stage-8 capacity probe; j2 deep runs at 32,768 and 100,000 (copy 1.0) |
-| block-sharded | none (bf16) | 281,344 measured in stage 4 (stage-7 policy, bf16); 194,560 planned with the 1,200 MiB reserve | `doc/multichip_decoder/dsa_shard/capacity/`; `j6_s1_shard` at 131,072: TF 92 / 100 / 100, copy 1.0 at 100,000 tokens |
+| replicated | combo_a_kv_dense4_g4 (default) | 325,632 (serving profile `p300x2-long`, 1,024 MiB workspace, G9); standalone default 272,384 (1,344 MiB no-split reserve); j2 ran 280,576 (combo_a_kv) | G9 `doc/vllm/capacity/s1`; stage-8 capacity probe; j2 deep runs at 32,768 and 100,000 (copy 1.0) |
+| block-sharded | none (bf16) | 281,344 measured in stage 4 (stage-7 policy, bf16); 153,600 planned with the built-in budget and the 1,344 MiB reserve | `doc/multichip_decoder/dsa_shard/capacity/`; `j6_s1_shard` at 131,072: TF 92 / 100 / 100, copy 1.0 at 100,000 tokens |
 | replicated | none (bf16) | 104,448 (stage-6 probe) | `memory/capacity_probe_1slot.json` |
 | block-sharded | combo_a_kv_dense4_g4 (fp8 latent) | **1,048,576** (advertised; serving profile `p300x2-1m`; standalone `Glm53Generator(mesh, max_seq_len=1048576)`, which selects this layout and its settings; 600 MiB workspace) | `doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/`: copy 1.0 at 1,048,515 tokens; TF 91 / 95 / 91 at 16,384; +2.9 ms per token |
 
@@ -300,7 +297,7 @@ it is faster. The byte math and the evidence are in `doc/context_contract.json` 
   ("shouldn" is HF's top-1), so it is a pruning property, not a TT defect.
 - Context: the advertised 1,048,576 tokens are supported at 1 slot with the block-sharded fp8 layout (serving profile
   `p300x2-1m`, G9 measured; standalone `max_seq_len=1048576`), at about +2.9 ms per decode token. The faster replicated
-  layout holds 325,632 (`p300x2-long`); the standalone default is 294,912 (TTFT-favouring reserve).
+  layout holds 325,632 (`p300x2-long`); the standalone default is 272,384 (TTFT-favouring no-split reserve).
 - Largest batch tested on the full model: 32 slots (at 32 slots the default context is short; see
   `serving_profiles.json`).
 - Sampler variant capture: the "Cannot load new binaries during trace capture" defect is fixed (`_warm_sampler`).
@@ -311,7 +308,7 @@ it is faster. The byte math and the evidence are in `doc/context_contract.json` 
 ## Commands
 
 ```
-export GLM53_TP=4      # defaults: 1 slot, 294,912 tokens (replicated), precision combo_a_kv_dense4_g4
+export GLM53_TP=4      # defaults: 1 slot, 272,384 tokens (replicated), precision combo_a_kv_dense4_g4
 python -m models.autoports.zai_org_glm_5_3_flash.tools.readiness teacher-forcing \
   --reference models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt
 python -m models.autoports.zai_org_glm_5_3_flash.tools.readiness prefill-check \

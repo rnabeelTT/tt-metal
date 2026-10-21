@@ -1,25 +1,23 @@
 {
- "source": "runs/s67r/j2_s1_default.json (final default: Glm53Generator(mesh), 1 slot, combo_a_kv without the stage-8 kda_in decode program, max_seq_len 280,576); short-context row runs/s67r/j2b_s1_16k.json (same code, max_seq_len 16,384); multi-slot runs/s67r/j3_s8.json, j4_s32.json",
+ "source": "runs/s7r2/v4_default.json (final default: pure git archive 52aff54486a + the coupled no-split reserve floor; Glm53Generator(mesh), 1 slot, 272,384 tokens, combo_a_kv_dense4_g4 + ten bfp4 decode programs, stage-10 segmented bucketed decode). History: runs/s67r/j2_s1_default.json (280,576, combo_a_kv without kda_in, single decode trace), j2b_s1_16k, j3_s8, j4_s32; runs/s7r2/v3_default.json",
  "workload": {
   "profile": "single_user_decode",
   "prompt": "real text (tools/s67r_checks.text_ids)",
   "decode_position": 300,
   "decode_replays": 20,
   "batch": 1,
-  "max_seq_len": 280576,
-  "precision": "combo_a_kv (no kda_in decode program)"
+  "max_seq_len": 272384,
+  "precision": "combo_a_kv_dense4_g4 + ten bfp4-tuned decode programs",
+  "decode": "segmented bucketed trace (stage 10, max_seq_len >= 65,536)"
  },
- "ttft_ms": 228.4,
+ "ttft_ms": 1023.3,
  "ttft_ms_by_prompt": {
-  "128": 228.4,
-  "161": 376.8,
-  "512": 375.9,
-  "2048": 1025.9,
-  "8192": 6444.1
+  "2048": 1023.3,
+  "8192": 5772.4
  },
- "decode_ms_per_token_e2e": 56.51,
- "decode_ms_per_token_token_out": 56.24,
- "decode_ms_per_token_model_trace": 55.85,
+ "decode_ms_per_token_e2e": 50.17,
+ "decode_ms_per_token_token_out": 50.08,
+ "decode_ms_per_token_model_trace": 49.69,
  "decode_ms_per_token_sampler": 0.39,
  "short_context_16384": {
   "ttft_ms_by_prompt": {
@@ -50,7 +48,7 @@
   "32": 114.24
  },
  "named_limitations": [
-  "context-size cost: the sparse DSA indexer scores every allocated pool slot (P_alloc from max_seq_len), not the filled prefix: 16,384 vs 280,576 -> token-out 51.10 vs 56.24 ms (+10 %), TTFT at 8,192 tokens 4,408 vs 6,444 ms (+46 %); planned fix (stage 10, PLAN.md 'cap at max position'): score the filled prefix, bucketed",
+  "context-size cost: resolved by stage 10 (86403d19830, segmented bucketed decode and bucketed sparse prefill for max_seq_len >= 65,536). Before it the sparse DSA indexer scored every allocated pool slot: 16,384 vs 280,576 -> token-out 51.10 vs 56.24 ms, 8K TTFT 4,408 vs 6,444 ms; stage 10 measured 55.07 -> 50.10 ms and 6.46 -> 5.83 s at 280,576",
   "decoder layers are ~97 % of the step; terminal path (LM head 471 us, sampler 0.39 ms, glue ~0.25 ms) ~1.1 ms",
   "LM head 471 us (measured 2026-10-17: interleaved bfp8, stage-7 precision, 168 MB per die); HEAD's default runs a bfp4 LM head with its own decode program (decode_specs.lm_head), not profiled here; DRAM-sharded column splits were slower (10 x 66 us)",
   "128-row prefill chunk is device-bound (~5 ms per layer): prefill traces save 10 ms only",
@@ -60,12 +58,11 @@
  ],
  "records": "runs/s67r/{j2_s1_default,j2b_s1_16k,j3_s8,j3b_s8_noskip,j4_s32}.json; superseded 2026-10-17 build: ~/glm53-flash-bringup/logs/s7_final_s{1,8}.log (no JSON record)",
  "roofline_gap": {
-  "ratio_e2e_over_roofline": 7.0,
+  "ratio_e2e_over_roofline": 6.2,
   "owners": [
    "Sinkhorn on one core: ~7.7 ms per token (stage 5)",
    "element-wise / mHC glue between the matmuls (stage 5)",
    "matmuls at 41-64 % of DRAM bandwidth (stage 5)",
-   "context-size indexer cost: ~5.1 ms at 280,576 (stage 10)",
    "8-slot builds: MoE pairs glue on all 64 (row, expert) groups (stage 5)"
   ]
  },
@@ -98,5 +95,39 @@
   "decode_ms_per_token_e2e": 55.13,
   "program_cache_growth": [],
   "seed_changes_draws": true
+ },
+ "moe_prefill_split": "off (largest free block 1,181,530,112 B >= 1 GiB threshold; reserve 1,344 MiB = threshold + 320 MiB)",
+ "teacher_forcing_p0": "92 / 100 / 100 (prefill check 92 / 100 / 100); 3 references + AR in v4b (pending)",
+ "history_j2": {
+  "workload": {
+   "profile": "single_user_decode",
+   "prompt": "real text (tools/s67r_checks.text_ids)",
+   "decode_position": 300,
+   "decode_replays": 20,
+   "batch": 1,
+   "max_seq_len": 280576,
+   "precision": "combo_a_kv (no kda_in decode program)"
+  },
+  "ttft_ms": 228.4,
+  "ttft_ms_by_prompt": {
+   "128": 228.4,
+   "161": 376.8,
+   "512": 375.9,
+   "2048": 1025.9,
+   "8192": 6444.1
+  },
+  "decode_ms_per_token_e2e": 56.51,
+  "decode_ms_per_token_token_out": 56.24,
+  "decode_ms_per_token_model_trace": 55.85,
+  "eight_slot_build_ms_per_step": {
+   "1": 81.65,
+   "4": 93.5,
+   "8": 112.24
+  },
+  "thirty_two_slot_build_ms_per_step": {
+   "1": 115.29,
+   "8": 117.16,
+   "32": 114.24
+  }
  }
 }

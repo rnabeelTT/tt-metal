@@ -658,7 +658,7 @@ reaches the advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/
 | fused MoE gate op | - | bf16 scores |
 | `sigmoid_gated_rms_norm` (KDA) | +28 to +228 µs | slower; wrong on kda_moe |
 | `dsa_o_mm` | -12 µs / +33 µs | +2 MB per layer per die |
-| `ag_persistent` | -9 to -71 µs per layer | breaks the stacked model |
+| `ag_persistent` | -9 to -71 µs per layer | passes on the fixed code (stage-7 review #2); off: barrier / buffer-reuse race risk |
 | pairs / masked MoE at 32 users | +2.4 ms / +19 µs | slower |
 | 1024-row KDA prefill chunks | +1.0 to 1.5 ms per 2048 tokens | slower |
 | `dsa_idx_rep` | full-model logits change (max 8.7 decode, 9.9 prefill) | not exact |
@@ -669,7 +669,7 @@ reaches the advertised context is the stage-4 rework's `MCOpts.dsa_shard`. `doc/
 
 | Anomaly | Evidence | Status |
 |---|---|---|
-| `ag_persistent` breaks the stacked model; every 1-layer gate passes | `records/s7_det_reduced_s8.log`; TF 14 / 32 / 90 | controlled: off; cause not established |
+| `ag_persistent` broke the stacked model (2026-10-17); every 1-layer gate passes | `records/s7_det_reduced_s8.log`; TF 14 / 32 / 90 | resolved: the logits-pad lifetime bug; on the fixed code it passes (stage-7 review #2); kept off for the barrier / buffer-reuse race risk |
 | first `dsa_tail_shared`: TF 10 / 48 / 100 | `records/s5r2_tf_cand.log` | fixed in review #2 (one persistent buffer) |
 | review-2 `dsa_tail_shared` under the stage-6/7 DRAM-pressure config: TF 10 / 48 / 100 | `~/glm53-flash-bringup/logs/s67r/press_B3.log` | unclassified: seen only under that config, which fails without the option (press_B1 / B2, b7_E); review-3 build-time buffer is a hardening |
 | baseline compare: one kda_moe decode row on a router near-tie | `records/baseline8_rows.txt` | controlled: capped allowance |

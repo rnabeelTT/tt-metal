@@ -20,7 +20,13 @@ from models.autoports.zai_org_glm_5_3_flash.tt import weight_cache as W
 
 @pytest.fixture
 def default_env(monkeypatch):
-    for k in ("GLM53_PRECISION", "GLM53_DRAM_RESERVE_MIB", "GLM53_DSA_SHARD", "GLM53_BUDGET_FREE_BYTES"):
+    for k in (
+        "GLM53_PRECISION",
+        "GLM53_DRAM_RESERVE_MIB",
+        "GLM53_DSA_SHARD",
+        "GLM53_BUDGET_FREE_BYTES",
+        "GLM53_MOE_NOSPLIT_FREE_MIB",
+    ):
         monkeypatch.delenv(k, raising=False)
     G.budget()
     if G.BUDGET["source"].startswith("built-in"):
@@ -29,20 +35,34 @@ def default_env(monkeypatch):
     G.budget()
 
 
-def _replicated_default(data):
-    """The documented rule: replicated, reserve max(serving workspace, 1,200 MiB), 1 slot owns T / 128 blocks + 1."""
+def _replicated_default(data, S=1):
+    """The documented rule: replicated, reserve max(serving workspace, MoE no-split threshold + NOSPLIT_MARGIN_MIB),
+    S slots each own T / 128 blocks (+ the dummy block), KDA state of the extra slots, capped at the measured maximum.
+    """
     b = sp.layout_budget(data, "replicated")
-    reserve = max(int(b["reserve_bytes"]), 1200 << 20)
-    blocks = (int(b["free_after_load_bytes"]) - reserve) // G.BUDGET["block_bytes"]["replicated"]
-    t = (blocks - 1) * 128
-    t = min(t, sp.max_model_len_for(data, 1, layout="replicated"))
-    return t // 2048 * 2048
+    nosplit = float(os.environ.get("GLM53_MOE_NOSPLIT_FREE_MIB", "1024"))
+    reserve = max(int(b["reserve_bytes"]), int((nosplit + G.NOSPLIT_MARGIN_MIB) * (1 << 20)))
+    kda = (S + S % 2 - 2) * int(b["kda_bytes_per_slot"])
+    blocks = (int(b["free_after_load_bytes"]) - kda - reserve) // G.BUDGET["block_bytes"]["replicated"]
+    t = min((blocks - 1) // S * 128, sp.max_model_len_for(data, 1, layout="replicated"))
+    g = 2048 if t >= 2048 else (512 if t >= 512 else 128)
+    return t // g * g
 
 
-def test_default_plan_is_replicated(default_env):
-    p = G.plan_context(1)
+@pytest.mark.parametrize("S", [1, 8, 16, 32])
+def test_default_plan_is_replicated(default_env, S):
+    p = G.plan_context(S)
     assert p["layout"] == "replicated"
-    assert p["max_seq_len"] == _replicated_default(sp.load())
+    assert p["max_seq_len"] == _replicated_default(sp.load(), S)
+
+
+def test_reserve_follows_the_moe_nosplit_threshold(default_env, monkeypatch):
+    base = G.budget()["reserve_bytes"]
+    assert base >= (1024 + G.NOSPLIT_MARGIN_MIB) << 20  # the default floor keeps the MoE prefill unsplit
+    monkeypatch.setenv("GLM53_MOE_NOSPLIT_FREE_MIB", "2048")
+    assert G.budget()["reserve_bytes"] == (2048 + G.NOSPLIT_MARGIN_MIB) << 20
+    monkeypatch.setenv("GLM53_DRAM_RESERVE_MIB", "1024")  # an explicit reserve wins
+    assert G.budget()["reserve_bytes"] == 1024 << 20
 
 
 def test_advertised_context_plans_sharded(default_env):
@@ -141,3 +161,42 @@ def test_device_oom_is_not_an_unreadable_cache(tmp_path, monkeypatch, expect_err
     monkeypatch.setattr(c, "load", corrupt, raising=False)
     monkeypatch.setattr(c, "store", lambda name, t: t, raising=False)
     assert c.get("x", lambda: "rebuilt") == "rebuilt"
+
+
+# ------------------------------------------------------------------------------------------------ layout settings
+def _sharded_env():
+    return {"GLM53_DSA_SHARD": "1", "GLM53_MOE_SORTED_ROWS": "512", "GLM53_DSA_INDEX_BLOCK_MB": "32"}
+
+
+def test_layout_env_applied_then_restored(default_env, monkeypatch):
+    for k in ("GLM53_MOE_SORTED_ROWS", "GLM53_DSA_INDEX_BLOCK_MB", "_GLM53_MOE_ROWS_AUTO"):
+        monkeypatch.delenv(k, raising=False)
+    before = G.plan_context(1)
+    restore = {}
+    G.apply_layout_env(_sharded_env(), restore)
+    assert "GLM53_DSA_SHARD" not in os.environ  # the plan passes dsa_shard; never exported
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "512" and os.environ["GLM53_DSA_INDEX_BLOCK_MB"] == "32"
+    G.restore_layout_env(restore)  # what Glm53Generator.teardown does
+    for k in ("GLM53_MOE_SORTED_ROWS", "GLM53_DSA_INDEX_BLOCK_MB"):
+        assert k not in os.environ
+    assert G.plan_context(1) == before  # a later default build is unaffected
+
+
+def test_layout_env_replaces_an_automatic_moe_split_choice(default_env, monkeypatch):
+    monkeypatch.setenv("GLM53_MOE_SORTED_ROWS", "0")  # written by an earlier build's choose_moe_split
+    monkeypatch.setenv("_GLM53_MOE_ROWS_AUTO", "1")
+    restore = {}
+    G.apply_layout_env(_sharded_env(), restore)
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "512" and "_GLM53_MOE_ROWS_AUTO" not in os.environ
+    G.restore_layout_env(restore)
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "0" and os.environ["_GLM53_MOE_ROWS_AUTO"] == "1"
+
+
+def test_layout_env_keeps_an_explicit_setting(default_env, monkeypatch):
+    monkeypatch.setenv("GLM53_MOE_SORTED_ROWS", "256")  # user's explicit choice (no auto marker)
+    monkeypatch.delenv("_GLM53_MOE_ROWS_AUTO", raising=False)
+    restore = {}
+    G.apply_layout_env(_sharded_env(), restore)
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "256"
+    G.restore_layout_env(restore)
+    assert os.environ["GLM53_MOE_SORTED_ROWS"] == "256"

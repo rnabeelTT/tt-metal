@@ -46,6 +46,7 @@ L1_SMALL_SIZE = 24576
 # context, and to refuse a (slots, context) build that cannot fit, before any weight is loaded; the standalone
 # generator re-checks against the free DRAM it measures after loading the weights (Glm53Generator._allocate_pool).
 DSA_LAYERS, BLOCK_TOKENS, LATENT, POOL_KEY = 11, 128, 512, 128
+NOSPLIT_MARGIN_MIB = 320  # standalone replicated reserve = MoE no-split threshold + this margin (_budget)
 
 
 def _latent_dtype() -> str:
@@ -84,11 +85,14 @@ def _budget() -> dict:
     else:
         # shipped policy, stage-7 code: s4r capacity probe 2026-10-17 (64 MiB trace region, 2 KDA slots)
         free, kda, reserve, src = 1_984_045_568, 35_651_584, 734_003_200, "built-in (shipped bf16 latent policy)"
-    # reserve: GLM53_DRAM_RESERVE_MIB when set (e.g. 1024 = the serving workspace: the 311,296-token serving context);
-    # else max(data reserve, 1,200 MiB). The 1,200 MiB floor keeps >= 1 GiB free after the build, so the standalone
-    # default runs the unsplit (faster) MoE prefill; long contexts belong to the serving profiles (serving_profiles.json)
+    # reserve: GLM53_DRAM_RESERVE_MIB when set (e.g. 1024 = the serving workspace: the serving context); else
+    # max(data reserve, the no-split floor). The floor = the MoE no-split threshold (GLM53_MOE_NOSPLIT_FREE_MIB, default
+    # 1024, Glm53Model.choose_moe_split) + 320 MiB of margin for the warm-up's fragmentation (v3: a 1,200 MiB reserve left
+    # a 1,030,724,608 B largest block, under the threshold), so the standalone default runs the unsplit (faster) MoE
+    # prefill. Long contexts belong to the serving profiles (serving_profiles.json)
     env_mib = os.environ.get("GLM53_DRAM_RESERVE_MIB")
-    reserve = int(float(env_mib) * (1 << 20)) if env_mib is not None else max(reserve, 1200 << 20)
+    nosplit_floor = int((float(os.environ.get("GLM53_MOE_NOSPLIT_FREE_MIB", "1024")) + NOSPLIT_MARGIN_MIB) * (1 << 20))
+    reserve = int(float(env_mib) * (1 << 20)) if env_mib is not None else max(reserve, nosplit_floor)
     free = int(os.environ.get("GLM53_BUDGET_FREE_BYTES", free))
     by_layout = {"replicated": {"free": free, "reserve": reserve, "block": blk_rep, "cap": None}}
     by_layout["sharded"] = {"free": free, "reserve": reserve, "block": blk_shard, "cap": None}
@@ -104,7 +108,7 @@ def _budget() -> dict:
                 continue
             ent = by_layout[L]
             if L != sp.default_layout(data):  # a measured non-default layout: its own budget (sharded: the
-                # measured 600 MiB workspace; the 1,200 MiB floor applies to the replicated default only)
+                # measured 600 MiB workspace; the no-split floor applies to the replicated default only)
                 ent["free"] = int(os.environ.get("GLM53_BUDGET_FREE_BYTES", lb["free_after_load_bytes"]))
                 ent["block"] = int(lb.get("dsa_bytes_per_block", ent["block"]))
                 if env_mib is None:
@@ -227,6 +231,31 @@ def plan_context(S: int, T: int | None = None, layout: str | None = None, servin
     )
 
 
+def apply_layout_env(env: dict, restore: dict) -> None:
+    """Apply a DSA layout's measured process settings (serving_profiles.layout_env) as defaults, recording each key's
+    prior value in `restore` (restore_layout_env undoes them). GLM53_DSA_SHARD is not exported (the plan passes
+    dsa_shard to the model). An earlier build's automatic MoE split choice (_GLM53_MOE_ROWS_AUTO) is not an explicit
+    value: the layout's GLM53_MOE_SORTED_ROWS replaces it."""
+    for k, v in env.items():
+        if k == "GLM53_DSA_SHARD":
+            continue
+        if k == "GLM53_MOE_SORTED_ROWS" and os.environ.get("_GLM53_MOE_ROWS_AUTO") == "1":
+            restore.setdefault("_GLM53_MOE_ROWS_AUTO", os.environ.pop("_GLM53_MOE_ROWS_AUTO"))
+            restore.setdefault(k, os.environ.pop(k, None))
+        if k not in os.environ:
+            restore.setdefault(k, None)
+            os.environ[k] = str(v)
+
+
+def restore_layout_env(restore: dict) -> None:
+    """Undo apply_layout_env (prior value back, or the key removed)."""
+    for k, v in restore.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
 SHARED_FREES: dict = {}  # GLM53_DEALLOC_CHECK=1: call site -> count of force-frees of a buffer another tensor shares
 
 
@@ -316,19 +345,14 @@ class Glm53Generator(Generator):
             self.plan = {"layout": dsa_layout or ("sharded" if env else "replicated"), "max_seq_len": T}
             self.plan["dsa_shard"] = self.plan["layout"] == "sharded"
         max_seq_len = self.plan["max_seq_len"]
+        self._env_restore = {}  # process settings this generator set (layout_env): restored by teardown()
         if self.plan["layout"] != "replicated":  # the process settings the layout was measured with (as the adapter)
             data = _profiles_budget()
             if data is not None:
                 from . import serving_profiles as sp
 
                 try:
-                    for k, v in sp.layout_env(data, self.plan["layout"]).items():
-                        if k == "GLM53_MOE_SORTED_ROWS" and os.environ.get("_GLM53_MOE_ROWS_AUTO") == "1":
-                            os.environ.pop(
-                                k, None
-                            )  # an earlier build's automatic split choice is not an explicit value
-                            os.environ.pop("_GLM53_MOE_ROWS_AUTO", None)
-                        os.environ.setdefault(k, str(v))
+                    apply_layout_env(sp.layout_env(data, self.plan["layout"]), self._env_restore)
                 except KeyError:
                     pass
         logger.info(f"generator plan: {self.plan}")
@@ -514,6 +538,10 @@ class Glm53Generator(Generator):
                 tail = a._shared_tail() if hasattr(a, "_shared_tail") else None  # stage-5 dsa_tail_shared step buffer
                 if tail is not None:
                     out["dsa_shared_tail"] = tail
+        ctl = self.__dict__.get("_dsa_buckets")  # stage-10 bucket buffers / iotas the segmented decode reads
+        fn = getattr(ctl, "device_tensors", None) or getattr(ctl, "bucket_tensors", None)
+        if fn is not None:
+            out.update({f"buckets.{k}": v for k, v in fn().items()})
         return {k: v for k, v in out.items() if isinstance(v, ttnn.Tensor)}
 
     def trace_addresses(self) -> dict:
@@ -1103,9 +1131,15 @@ class Glm53Generator(Generator):
         if m is None:
             return
         m.release_prefill_traces()
+        ctl = self.__dict__.pop("_dsa_buckets", None)
         if self.trace_id is not None:
-            dsa_buckets.release_decode(self)
+            dsa_buckets.release_decode(self)  # releases ctl when it is the (segmented) decode trace
+            if ctl is self.trace_id:
+                ctl = None
             self.trace_id = None
+        if ctl is not None:  # installed but not the decode trace (no capture yet)
+            ctl.release()
+        self._ballast = None
         if m.sampling is not None:
             m.sampling.reset_trace()
         ttnn.synchronize_device(self.mesh)
@@ -1113,6 +1147,8 @@ class Glm53Generator(Generator):
             if hasattr(self, name):
                 setattr(self, name, None)
         del m
+        restore_layout_env(getattr(self, "_env_restore", {}))
+        self._env_restore = {}
         gc.collect()
 
 
