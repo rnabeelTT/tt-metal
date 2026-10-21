@@ -151,4 +151,6 @@ See the README sections "Review #1 corrections", "Block-sharded DSA cache" and "
   6,336 B line; `reason` repointed to `stage7_policy_GLM53_PRECISION_none`; status), a note on the NA lines in
   `dsa_shard/s4r3_status.txt`, and `doc/optimized_full_model/watcher/w_full_s8_shard/watcher.log.gz`.
 - P3-3: the replicated-fp8 control of `test_batch32_all_active[dsa_moe]` (`scripts/s4r4_ctrl.sh`, unit
-  `glm53-s4r4-ctrl`, pure `git archive HEAD` snapshot of 3872b583092) is queued.
+  `glm53-s4r4-ctrl`, pure `git archive HEAD` snapshot of 3872b583092; `dsa_shard/s4r4_ctrl_repl_fp8_batch32.log`)
+  ran 16:37 .. 16:38. The replicated layout fails the same way as the sharded one: slot 13 pos 300 delta PCC 0.992898
+  (sharded 0.993068), rms 1.0402 (1.0399), 2 y_swap > cap 1. This confirms the bar-scope classification.

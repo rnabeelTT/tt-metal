@@ -1,0 +1,288 @@
+=== start Wed Oct 21 04:37:30 PM UTC 2026 : timeout -k 60 1800 /home/raahem/glm53-flash-bringup/scripts/s4r4_ctrl.sh
+snapshot 3872b583092322c3c83d2fb538a1c9763b6153e1 (pure git archive HEAD)
+md5check models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/generator.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/__init__.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/kda.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/mhc.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/mlp.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/model.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/moe.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/precision.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py: OK
+md5check models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json: OK
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 ff90e6d779884a5f54c5aad038aeab9e  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 6f665caa6a2e6abe1c841c2759062fdb  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 f33b9abfc24abbb5e68d8afa9871eaf7  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 31fdc53c1a0c841944e92cb553d27dd2  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 9b551ef2ab7292212500dbedf5b72e86  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+md5 d645ece94a4ac37b8359fa5af6de3f99  models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py
+md5 44fd9de04add8d260d1b9fbec67c76dd  models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json
+2026-10-21 16:37:32.174 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+imports /home/raahem/glm53-flash-bringup/s4r4_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+2026-10-21 16:37:34.471 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.0.3, pluggy-1.6.0 -- /home/raahem/tt-metal/python_env/bin/python
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /home/raahem/glm53-flash-bringup/s4r4_snap
+configfile: pytest.ini
+plugins: benchmark-5.2.3, github-actions-annotate-failures-0.3.0, timeout-2.4.0, repeat-0.9.4, dash-2.15.0, cov-7.0.0, split-0.11.0, anyio-4.15.1
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... multichip suite: quantization-aware reference {'mlp.experts.*.gate_proj.weight': 'bfp4', 'mlp.experts.*.up_proj.weight': 'bfp4', 'mlp.experts.*.down_proj.weight': 'bfp4', 'mlp.shared_experts.*.weight': 'bfp8'}
+collected 1 item
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py 2026-10-21 16:37:45.228 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/glm53-flash-bringup/s4r4_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+2026-10-21 16:38:08.366 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+L3 32-slot decode slot 0 pos 37: delta PCC 0.995471 full PCC 0.998180 update rms ratio 1.0242 (HF router margin 2.7e-03)
+L3 32-slot decode slot 0 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992601 update rms ratio 1.0230
+L3 32-slot decode slot 1 pos 37: delta PCC 0.997088 full PCC 0.999169 update rms ratio 1.0270 (HF router margin 2.0e-05)
+L3 32-slot decode slot 1 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.991744 update rms ratio 1.0265
+L3 32-slot decode slot 2 pos 37: delta PCC 0.998952 full PCC 0.999221 update rms ratio 1.0167 (HF router margin 1.8e-03)
+L3 32-slot decode slot 2 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.993605 update rms ratio 1.0289
+L3 32-slot decode slot 3 pos 37: delta PCC 0.998846 full PCC 0.999333 update rms ratio 1.0184 (HF router margin 1.6e-03)
+L3 32-slot decode slot 3 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.995414 update rms ratio 1.0251
+L3 32-slot decode slot 4 pos 37: delta PCC 0.996549 full PCC 0.998270 update rms ratio 1.0137 (HF router margin 1.9e-03)
+L3 32-slot decode slot 4 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.989511 update rms ratio 1.0155
+L3 32-slot decode slot 5 pos 37: delta PCC 0.997576 full PCC 0.998466 update rms ratio 1.0513 (HF router margin 3.1e-03)
+L3 32-slot decode slot 5 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.990692 update rms ratio 1.0764
+L3 32-slot decode slot 5 pos 37: vs y_swap (8th expert -> 9th): delta PCC 0.998270 full PCC 0.998881 update rms ratio 1.0493
+L3 32-slot decode slot 5 pos 37: matched y_swap (router near-tie)
+L3 32-slot decode slot 6 pos 37: delta PCC 0.998636 full PCC 0.999085 update rms ratio 1.0113 (HF router margin 6.2e-03)
+L3 32-slot decode slot 6 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.992125 update rms ratio 1.0395
+L3 32-slot decode slot 7 pos 37: delta PCC 0.997058 full PCC 0.998697 update rms ratio 1.0097 (HF router margin 2.0e-02)
+L3 32-slot decode slot 7 pos 37: vs checkpoint ref (quantization delta): delta PCC 0.989534 update rms ratio 1.0235
+L3 32-slot decode slot 8 pos 300: delta PCC 0.997300 full PCC 0.998554 update rms ratio 1.0865 (HF router margin 3.1e-04)
+L3 32-slot decode slot 8 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.993382 update rms ratio 1.0842
+L3 32-slot decode slot 8 pos 300: vs y_swap (8th expert -> 9th): delta PCC 0.998162 full PCC 0.999116 update rms ratio 1.0438
+L3 32-slot decode slot 8 pos 300: matched y_swap (router near-tie)
+L3 32-slot decode slot 9 pos 300: delta PCC 0.997565 full PCC 0.998864 update rms ratio 0.9890 (HF router margin 8.2e-04)
+L3 32-slot decode slot 9 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.991320 update rms ratio 0.9949
+L3 32-slot decode slot 10 pos 300: delta PCC 0.997191 full PCC 0.998856 update rms ratio 1.0494 (HF router margin 1.5e-02)
+L3 32-slot decode slot 10 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.993038 update rms ratio 1.0586
+L3 32-slot decode slot 11 pos 300: delta PCC 0.997274 full PCC 0.998649 update rms ratio 1.0122 (HF router margin 4.7e-03)
+L3 32-slot decode slot 11 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.992152 update rms ratio 1.0104
+L3 32-slot decode slot 12 pos 300: delta PCC 0.998107 full PCC 0.999164 update rms ratio 1.0342 (HF router margin 2.0e-02)
+L3 32-slot decode slot 12 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.995145 update rms ratio 1.0459
+L3 32-slot decode slot 13 pos 300: delta PCC 0.992898 full PCC 0.998388 update rms ratio 1.0402 (HF router margin 7.1e-03)
+L3 32-slot decode slot 13 pos 300: vs checkpoint ref (quantization delta): delta PCC 0.989984 update rms ratio 1.0478
+FAILEDrouter near-tie y_swap matches: 2 of 14 MoE decode tokens (cap 1); module total 2 of 14 (cap 2)
+quantization delta (port vs the checkpoint reference, 14 checks): min delta PCC 0.989511, update rms ratio 0.9949 .. 1.0842
+module y_swap matches 2 of 14 MoE decode tokens (cap 2)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] <- models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py ERROR
+
+==================================== ERRORS ====================================
+____________ ERROR at teardown of test_batch32_all_active[dsa_moe] _____________
+
+    @pytest.fixture(autouse=True)
+    def decode_scale_mean():
+        """Mean update scale over the test's decode tokens (see SEQ_RMS_TOL)."""
+        DECODE_RATIOS.clear()
+        MOE_TOKENS.clear()
+        CKPT_Y.clear()
+        n_swaps = len(SWAPS)
+        yield
+        swaps = len(SWAPS) - n_swaps
+        SUITE["swaps"] += swaps
+        SUITE["moe_tokens"] += len(MOE_TOKENS)
+        if MOE_TOKENS:
+            cap = max(1, int(SWAP_MAX_FRAC * len(MOE_TOKENS)))
+            suite_cap = max(SWAP_SUITE_MIN, int(SWAP_SUITE_FRAC * SUITE["moe_tokens"]))
+            print(
+                f"router near-tie y_swap matches: {swaps} of {len(MOE_TOKENS)} MoE decode tokens (cap {cap}); "
+                f"module total {SUITE['swaps']} of {SUITE['moe_tokens']} (cap {suite_cap})"
+            )
+>           assert swaps <= cap, f"{swaps} y_swap matches in {len(MOE_TOKENS)} MoE decode tokens > {cap}"
+                   ^^^^^^^^^^^^
+E           AssertionError: 2 y_swap matches in 14 MoE decode tokens > 1
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:133: AssertionError
+=================================== FAILURES ===================================
+_______________________ test_batch32_all_active[dsa_moe] _______________________
+
+mesh = MeshDevice(1x4 grid, 4 devices)
+rd = <models.autoports.zai_org_glm_5_3_flash.tt.ckpt.CheckpointReader object at 0x7e1306768980>
+kind = 'dsa_moe'
+
+    @pytest.mark.parametrize("kind", list(KINDS))
+    def test_batch32_all_active(mesh, rd, kind):
+        """All 32 decode slots active at mixed positions (8 sequences x 4 prompt lengths; DSA: two lengths past the
+        dense / sparse switch at 2051), real weights: 32-row decode (the MoE takes its 32-row path), eager then traced."""
+        layer = KINDS[kind]
+        for k in list(_LAYERS):  # one layer resident (DRAM)
+            del _LAYERS[k]
+        dec = build_layer(mesh, rd, layer, "real", batch=32, decoder_cls=DECODER_CLS)
+        lengths = [37, 300, 2100, 2300] if kind == "dsa_moe" else [37, 129, 300, 700]
+        steps = 3
+        rows = [n + i for n in lengths for i in range(steps)]  # the rows decoded (HF: rows of its prefill)
+        refs = {seed: reference(layer, "real", 1300 + seed, max(lengths), steps, decode_rows=rows) for seed in range(8)}
+        users = {}  # slot -> (seed, prompt length)
+        for slot in range(32):
+            users[slot] = (slot % 8, lengths[slot // 8])
+        for slot, (seed, n) in users.items():
+            x, y = refs[seed]
+            prefill_user(dec, mesh, x, n, slot)
+        runner = DecodeRunner(dec, mesh, 32)
+        worst = 1.0
+        for i in range(steps):
+            pos = [n + i for _, (_, n) in sorted(users.items())]
+            rows = {slot: refs[seed][0][n + i] for slot, (seed, n) in users.items()}
+            if i == 0:
+                got = runner.eager_step(rows, pos)
+                runner.capture({slot: refs[seed][0][n + 1] for slot, (seed, n) in users.items()}, [p + 1 for p in pos])
+            else:
+                got = runner.traced_step(rows, pos)
+            for slot, (seed, n) in users.items():
+                x, y = refs[seed]
+>               d, _ = check(
+                    f"L{layer} 32-slot decode slot {slot} pos {n + i}",
+                    got[slot],
+                    x[n + i],
+                    y[n + i],
+                    margin=refs[seed].row_margin(n + i),
+                    y_alt=refs[seed].alt(n + i),
+                )
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:642:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tag = 'L3 32-slot decode slot 13 pos 300'
+got = tensor([ 0.0194, -0.1382,  0.2047,  ...,  0.0072,  0.0119, -0.0010])
+x = tensor([ 0.0439, -0.0723,  0.1172,  ..., -0.0013,  0.0015,  0.0007])
+y = tensor([ 0.0165, -0.1387,  0.1982,  ...,  0.0061,  0.0116, -0.0018])
+delta_bar = 0.995, full_bar = 0.99, margin = 0.007063865661621094, y_alt = None
+
+    def check(tag, got, x, y, delta_bar=DELTA_BAR, full_bar=FULL_BAR, margin=None, y_alt=None):
+        """margin: the HF router margin of this (single) token, if any. y_alt: HF's output with the router's 8th expert
+        replaced by its 9th (given for margin < NEAR_TIE): the token passes the normal bars against y or against y_alt;
+        a y_alt match is recorded in SWAPS."""
+        layer = int(tag[1:].split(" ")[0]) if tag.startswith("L") else None
+        ov = BAR_OVERRIDES.get(layer)
+        if ov:  # every PCC bar of the layer moves down by the same quantization allowance
+            delta_bar -= DELTA_BAR - ov["delta"]
+        token = got.numel() == x.shape[-1]  # one decode token (else a prefill sequence)
+        tol = TOKEN_RMS_TOL if token else SEQ_RMS_TOL
+        if ov:
+            tol = ov["token"] if token else ov["seq"]
+
+        def stats(ref):
+            d = pcc(got - x, ref - x)
+            f = pcc(got, ref)
+            r = float((got - x).norm() / (ref - x).norm())  # update scale vs HF (PCC is scale-blind)
+            return d, f, r, d >= delta_bar and f >= full_bar and abs(r - 1) <= tol
+
+        note = f" (HF router margin {margin:.1e})" if margin is not None else ""
+        d, f, r, ok = stats(y)
+        print(f"{tag}: delta PCC {d:.6f} full PCC {f:.6f} update rms ratio {r:.4f}{note}")
+        yc = _ckpt_view(y) if CKPT_Y else None
+        if yc is not None:  # reported only: the quantization delta against the checkpoint reference
+            dc, _, rc, _ = stats(yc)
+            QDELTA.append((tag, dc, rc))
+            print(f"{tag}: vs checkpoint ref (quantization delta): delta PCC {dc:.6f} update rms ratio {rc:.4f}")
+        if token and margin is not None:
+            MOE_TOKENS.append(tag)
+        if not ok and token and y_alt is not None and margin is not None and margin < NEAR_TIE:
+            d2, f2, r2, ok2 = stats(y_alt)
+            print(f"{tag}: vs y_swap (8th expert -> 9th): delta PCC {d2:.6f} full PCC {f2:.6f} update rms ratio {r2:.4f}")
+            assert ok2, f"{tag}: matches neither y nor y_swap{note}"
+            SWAPS.append((tag, d2, r2, margin))
+            DECODE_RATIOS.append((layer, r2))
+            print(f"{tag}: matched y_swap (router near-tie)")
+            return d2, f2
+        assert abs(r - 1) <= tol, f"{tag}: update rms ratio {r:.4f} outside 1 +- {tol}{note}"
+>       assert d >= delta_bar, f"{tag}: delta PCC {d:.6f} < {delta_bar}{note}"
+               ^^^^^^^^^^^^^^
+E       AssertionError: L3 32-slot decode slot 13 pos 300: delta PCC 0.992898 < 0.995 (HF router margin 7.1e-03)
+
+models/autoports/zai_org_glm_5_3_flash/tests/test_functional_decoder.py:319: AssertionError
+- generated xml file: /home/raahem/glm53-flash-bringup/s4r4_snap/generated/test_reports/most_recent_tests.xml -
+============================= slowest 25 durations =============================
+53.63s call     models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+1.27s setup    models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+0.03s teardown models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe]
+=========================== short test summary info ============================
+ERROR models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] - AssertionError: 2 y_swap matches in 14 MoE decode tokens > 1
+FAILED models/autoports/zai_org_glm_5_3_flash/tests/test_multichip_decoder.py::test_batch32_all_active[dsa_moe] - AssertionError: L3 32-slot decode slot 13 pos 300: delta PCC 0.992898 < 0.995 (HF router margin 7.1e-03)
+========================= 1 failed, 1 error in 55.05s ==========================
+nanobind: leaked 16 instances!
+ - leaked instance 0x7e13065cee38 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e135a54dbe8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7e1306800e48 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7e13065c43a8 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e1306a97a98 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e13065cbbe8 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e1306dbc618 of type "ttnn._ttnn.tensor.CoreRangeSet"
+ - leaked instance 0x7e13065c4378 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e13065bfc48 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e13065c9098 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e135a54dbc8 of type "ttnn._ttnn.tensor.MemoryConfig"
+ - leaked instance 0x7e13065bfd38 of type "ttnn._ttnn.tensor.Tensor"
+ - leaked instance 0x7e13065cf258 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x7e13065bfd98 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+ - leaked instance 0x3f546500 of type "ttnn._ttnn.multi_device.MeshDevice"
+ - leaked instance 0x7e13065c5608 of type "ttnn._ttnn.operations.core.WormholeComputeKernelConfig"
+nanobind: leaked 4 keep_alive records!
+nanobind: leaked 24 types!
+ - leaked type "MathFidelity"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCast1DProgramConfig"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulInputs"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseMultiCastBatchedDRAMShardedProgramConfig"
+ - leaked type "BufferType"
+ - leaked type "UnaryOpType"
+ - leaked type "Layout"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulMultiCoreReuseOptimizedProgramFactory"
+ - leaked type "Arch"
+ - leaked type "ttnn._ttnn.operations.matmul.MatmulParams"
+ - ... skipped remainder
+nanobind: leaked 270 functions!
+ - leaked function ""
+ - leaked function ""
+ - leaked function ""
+ - leaked function "element_size"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "get_optimal_dram_bank_to_logical_worker_assignment"
+ - leaked function "extract_shard"
+ - leaked function ""
+ - leaked function ""
+ - ... skipped remainder
+nanobind: this is likely caused by a reference counting issue in the binding code.
+See https://nanobind.readthedocs.io/en/latest/refleaks.html=== exit code: 1 Wed Oct 21 04:38:31 PM UTC 2026

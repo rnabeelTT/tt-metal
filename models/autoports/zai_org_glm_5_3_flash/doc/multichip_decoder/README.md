@@ -485,8 +485,13 @@ TP; stage 5 cuts the replicated projections and norms (`DEFAULT_MC`: dsa_moe 1 u
   `test_multichip_decoder.py` HF bars and its quantization-aware reference are for the stage-7 policy (the module
   pins `GLM53_PRECISION=none` for that reason), and the stage-8 policy adds bfp4 projections and the fp8 latent (update
   rms ratios 0.994 .. 1.087 against HF in this run). The layout itself is checked at fp8 by the A/B test (same weights,
-  same precision, sharded vs replicated): passed here and in `dsa_shard/fp8/t1_test_dsa_shard_fp8.log`. Not run: the
-  same test with the replicated fp8 layout as a control.
+  same precision, sharded vs replicated): passed here and in `dsa_shard/fp8/t1_test_dsa_shard_fp8.log`.
+  Replicated-fp8 control (review #4 P3-3, 2026-10-21 16:37, pure `git archive HEAD` snapshot of 3872b583092, md5s
+  in the log; `dsa_shard/s4r4_ctrl_repl_fp8_batch32.log`, script `dsa_shard/s4r4_ctrl.sh`; the same test with
+  `GLM53_PRECISION` = the selected config and `GLM53_DSA_SHARD` unset, no watcher): the replicated layout **fails the
+  same way**. Slot 13 pos 300: delta PCC 0.992898 (sharded 0.993068), update rms ratio 1.0402 (sharded 1.0399); 2
+  y_swap matches > cap 1; update rms ratios 0.989 .. 1.087 over 37 checks (sharded 0.994 .. 1.087). So the failure
+  comes from the stage-8 precision policy against bars set for the stage-7 policy, not from the block-sharded layout.
 
 ## Limitations
 
