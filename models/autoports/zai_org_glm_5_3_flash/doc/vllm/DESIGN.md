@@ -27,7 +27,7 @@ Autoport: `models/autoports/zai_org_glm_5_3_flash`. Workspace: `~/glm53-flash-br
 | Host sampling | Compatibility mode only. The plugin selects it for logprobs (4 dies), `min_p`, `logit_bias`, bad words, structured output. |
 | Prefill | Whole prompts. No vLLM chunked prefill and no prefix caching in stage 9. The model chunks internally (128 / 2048). Any prompt length is valid. |
 | Async decode | `supports_async_decode` True by default (the split submit / read / host format path). The stale-input device tests of 8.4 passed (`GLM53_VLLM_ASYNC_DECODE=0` turns it off). |
-| Context | DRAM limits it per DSA cache layout. `serving_profiles.json` holds the measured numbers (section 6): replicated 325,632 tokens at 1 slot, 243,712 at 16, 151,552 at 32; block-sharded (`p300x2-1m`) 1,048,576 at 1 slot, the advertised context. |
+| Context | DRAM limits it per DSA cache layout. `serving_profiles.json` holds the measured numbers (section 6): replicated 325,632 tokens at 1 slot, 239,616 at 16, 137,216 at 32 (code freeze 0a2663d0b6b: per-profile trace regions 64 / 96 / 160 MiB); block-sharded (`p300x2-1m`) 1,048,576 at 1 slot, the advertised context. |
 | Bundle | `tt-model.yaml` from the GLM-4.5-Air template. Five profiles, rendered from `serving_profiles.json` (a profile of a non-default layout carries the layout env). Weights: the parent `zai-org/GLM-5.3-Flash` at the pinned commit + `tt/e192_mask.json` (section 3.2). Weight cache on (`GLM53_CACHE_DIR`). |
 
 ## 2. Host environment (checked 2026-10-17)

@@ -1,0 +1,17 @@
+[
+ {
+  "case": "1040000:0.1",
+  "passkey": 8197047,
+  "files": 299,
+  "depth_tokens": 0.0824,
+  "prompt_tokens_rendered": 1038965,
+  "prompt_tokens_served": 1038965,
+  "completion_tokens": 21,
+  "ttft_s": 2309.8,
+  "wall_s": 2309.8,
+  "finish_reason": "stop",
+  "content": "8197047",
+  "reasoning": "The user says the secret code is 8197047.",
+  "pass": true
+ }
+]

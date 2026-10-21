@@ -2,7 +2,7 @@
   "source": "vllm bench serve",
   "profile": "ci_serving_burst",
   "comparison_scope": "vLLM-nightly-style 100/100/32 serving-burst profile for CI parity and serving capacity. Do not use as headline decode t/s/u because burst admission and chunked prefill can affect TPOT.",
-  "raw_result_file": "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
+  "raw_result_file": "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
   "command": [
     "/home/raahem/tt-metal/python_env/bin/vllm",
     "bench",
@@ -28,11 +28,11 @@
     "ttft,tpot,itl,e2el",
     "--save-result",
     "--result-filename",
-    "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
+    "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
     "--temperature",
     "0.0"
   ],
-  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 100 --random-output-len 100 --num-prompts 32 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json --temperature 0.0",
+  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 100 --random-output-len 100 --num-prompts 32 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json --temperature 0.0",
   "config": {
     "prompt_len": 100,
     "output_len": 100,
@@ -43,38 +43,38 @@
     "dataset_name": "random",
     "ignore_eos": true
   },
-  "elapsed_s": 241.6223008078523,
+  "elapsed_s": 233.9977713439148,
   "completed_requests": 32,
   "total_input_tokens": 3200.0,
   "total_output_tokens": 3200.0,
   "requested_output_tokens": 3200,
   "missing_output_tokens": 0,
   "ttft_ms": {
-    "p50": 117359.58943201695,
-    "p99": 232057.0184754208,
-    "mean": 117296.18022088107
+    "p50": 113622.4977299571,
+    "p99": 224663.79085465102,
+    "mean": 113614.48034164641
   },
   "tpot_ms": {
-    "p50": 73.6863388635237,
-    "p99": 75.38702424121739,
-    "mean": 73.81188333870296
+    "p50": 71.37856528873208,
+    "p99": 71.44960288769764,
+    "mean": 71.3797363550655
   },
   "itl_ms": {
-    "p50": 72.7104569086805,
-    "p99": 77.8599881986156,
-    "mean": 73.81188629524056
+    "p50": 71.35296810884029,
+    "p99": 75.0795578304678,
+    "mean": 71.37973909413283
   },
   "e2el_ms": {
-    "p50": 124729.88961357623,
-    "p99": 239304.65191972675,
-    "mean": 124603.55667141266
+    "p50": 120688.72086599004,
+    "p99": 231729.79755309876,
+    "mean": 120681.0742407979
   },
-  "itl_p50_decode_tps": 13.753179975968704,
-  "itl_mean_decode_tps": 13.547953455627658,
-  "vllm_mean_tpot_decode_tps": 13.547953998291412,
-  "mean_per_request_decode_tps": 13.547953998291412,
+  "itl_p50_decode_tps": 14.014833951611115,
+  "itl_mean_decode_tps": 14.00957768536025,
+  "vllm_mean_tpot_decode_tps": 14.009578222952268,
+  "mean_per_request_decode_tps": 14.009578222952268,
   "mean_per_request_decode_tps_basis": "1000 / mean_tpot_ms from vllm bench serve; this is the TPOT-derived decode value. For burst-serving profiles, scheduler admission and chunked prefill can affect TPOT, so use the single-user profile for headline decode t/s/u.",
-  "output_throughput_tok_per_s": 13.243810647034472,
-  "request_throughput_per_s": 0.1324381064703447,
-  "total_token_throughput_tok_per_s": 26.487621294068944
+  "output_throughput_tok_per_s": 13.675343921531828,
+  "request_throughput_per_s": 0.1367534392153183,
+  "total_token_throughput_tok_per_s": 27.350687843063657
 }

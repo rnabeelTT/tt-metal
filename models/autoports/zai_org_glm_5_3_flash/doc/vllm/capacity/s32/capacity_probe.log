@@ -161,3 +161,403 @@ Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/
 === exit code: 0 Tue Oct 20 11:05:12 PM UTC 2026
 Resetting all PCI devices: [0, 1, 2, 3]
 [95m Re-initializing boards after reset.... [0m
+=== G9 capacity probe:  32 slots, env none, max-context 167936, workspace 1024 MiB, trace 100663296, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 2026-10-21T09:16:55+00:00
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 a12853e1449d78c62a6da08856a9c1e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 83750f1d9f44c6a244046a522024ccbc  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 db1beb810482092fd11f9b3edc3ee67c  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 9b06feb1a5fc715e1d686371fcaee5ea  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 3bda6fd3efeec9bc16caf6b2de3ebfda  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== start Wed Oct 21 09:16:55 AM UTC 2026 (NOLOCK, inside the caller's ticket) : timeout -k 60 7200 env -C /home/raahem/glm53-flash-bringup/s9k_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s9k_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: GLM53_TP=4 GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash GLM53_PRECISION=/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.memory_probe capacity --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 --trace-region 100663296 --workspace-mib 1024 --max-context 167936 --slots 32
+2026-10-21 09:16:57.401 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-21 09:16:57.454 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+2026-10-21 09:16:58.666 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:__init__:358 - generator plan: {'layout': 'replicated', 'max_seq_len': 167936, 'dsa_shard': False}
+2026-10-21 09:16:58.703 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-21 09:17:00.729 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:00.875 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 0 (kda/dense) loaded in 0.3s
+2026-10-21 09:17:01.011 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:01.287 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 1 (kda/dense) loaded in 0.4s
+2026-10-21 09:17:01.429 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:01.688 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 2 (kda/dense) loaded in 0.4s
+2026-10-21 09:17:03.583 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:03.675 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 3 (dsa/moe) loaded in 2.0s
+2026-10-21 09:17:03.814 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:05.612 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:05.704 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 4 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:05.839 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:07.900 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 5: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:08.034 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 5 (kda/moe) loaded in 2.3s
+2026-10-21 09:17:08.170 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:09.936 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 6: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:10.054 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 6 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:11.962 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 7: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:12.028 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 7 (dsa/moe) loaded in 2.0s
+2026-10-21 09:17:12.169 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:15.678 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 8: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:15.811 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 8 (kda/moe) loaded in 3.8s
+2026-10-21 09:17:15.970 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:18.165 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 9: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:18.257 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 9 (kda/moe) loaded in 2.4s
+2026-10-21 09:17:18.402 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:20.309 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 10: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:20.396 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 10 (kda/moe) loaded in 2.1s
+2026-10-21 09:17:23.596 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 11: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:23.668 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 11 (dsa/moe) loaded in 3.3s
+2026-10-21 09:17:23.812 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:25.862 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 12: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:25.985 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 12 (kda/moe) loaded in 2.3s
+2026-10-21 09:17:26.148 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:28.407 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 13: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:28.509 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 13 (kda/moe) loaded in 2.5s
+2026-10-21 09:17:28.649 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:30.487 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 14: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:30.597 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 14 (kda/moe) loaded in 2.1s
+2026-10-21 09:17:32.593 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 15: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:32.660 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 15 (dsa/moe) loaded in 2.1s
+2026-10-21 09:17:32.788 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:34.478 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 16: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:34.577 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 16 (kda/moe) loaded in 1.9s
+2026-10-21 09:17:34.716 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:36.441 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 17: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:36.542 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 17 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:36.669 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:38.489 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 18: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:38.576 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 18 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:40.449 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 19: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:40.524 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 19 (dsa/moe) loaded in 1.9s
+2026-10-21 09:17:40.658 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:42.529 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 20: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:42.797 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 20 (kda/moe) loaded in 2.3s
+2026-10-21 09:17:43.242 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:50.831 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 21: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:50.945 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 21 (kda/moe) loaded in 8.1s
+2026-10-21 09:17:51.083 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:52.843 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 22: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:52.982 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 22 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:54.939 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 23: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:55.045 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 23 (dsa/moe) loaded in 2.1s
+2026-10-21 09:17:55.183 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:57.234 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 24: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:57.323 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 24 (kda/moe) loaded in 2.3s
+2026-10-21 09:17:57.452 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:17:59.188 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 25: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:17:59.274 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 25 (kda/moe) loaded in 2.0s
+2026-10-21 09:17:59.401 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:01.082 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 26: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:01.168 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 26 (kda/moe) loaded in 1.9s
+2026-10-21 09:18:03.016 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 27: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:03.084 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 27 (dsa/moe) loaded in 1.9s
+2026-10-21 09:18:03.214 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:04.848 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 28: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:04.942 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 28 (kda/moe) loaded in 1.9s
+2026-10-21 09:18:05.068 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:06.839 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 29: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:06.958 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 29 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:07.106 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:08.842 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 30: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:08.931 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 30 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:10.817 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 31: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:10.882 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 31 (dsa/moe) loaded in 2.0s
+2026-10-21 09:18:11.018 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:12.744 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 32: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:12.841 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 32 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:12.981 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:15.329 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 33: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:15.449 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 33 (kda/moe) loaded in 2.6s
+2026-10-21 09:18:15.685 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:18.737 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 34: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:18.822 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 34 (kda/moe) loaded in 3.4s
+2026-10-21 09:18:20.607 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 35: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:20.689 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 35 (dsa/moe) loaded in 1.9s
+2026-10-21 09:18:20.820 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:22.722 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 36: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:22.826 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 36 (kda/moe) loaded in 2.1s
+2026-10-21 09:18:22.977 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:24.733 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 37: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:24.818 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 37 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:24.950 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:26.750 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 38: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:26.843 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 38 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:28.680 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 39: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:28.745 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 39 (dsa/moe) loaded in 1.9s
+2026-10-21 09:18:28.880 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:30.614 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 40: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:30.698 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 40 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:30.829 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:32.516 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 41: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:32.629 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 41 (kda/moe) loaded in 1.9s
+2026-10-21 09:18:32.788 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:34.536 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 42: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:34.622 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 42 (kda/moe) loaded in 2.0s
+2026-10-21 09:18:36.398 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 43: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:36.464 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 43 (dsa/moe) loaded in 1.8s
+2026-10-21 09:18:36.590 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 09:18:38.283 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 44: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 09:18:38.314 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 44 (kda/moe) loaded in 1.8s
+2026-10-21 09:18:38.316 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 99.6s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 918 hits, 0 stored)
+[transformers] You are using a model of type `glm5_next` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+{"mode": "capacity", "S": 32, "max_seq_len": 167936, "workspace_mib": 1024.0, "bank_size": 4259758464, "die_allocatable_bytes": 34078067712, "trace_region_bytes": 100663296, "after_open": {"allocated": 0, "free": 34078067712, "largest_free_block_per_bank": 4259758464, "trace_allocated": 0}, "plan": {"layout": "replicated", "max_seq_len": 167936, "dsa_shard": false}, "load_seconds": 104.1, "after_load": {"allocated": 32041225216, "free": 2036842496, "largest_free_block_per_bank": 253595392, "trace_allocated": 0}, "dsa_shard": false, "free_after_load_bytes": 2036842496, "dsa_bytes_per_block_all_layers": 811008, "num_blocks_fit": 1187, "num_blocks": 1187, "capped_by_max_seq_len": false}
+2026-10-21 09:18:48.159 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:_install_inactive_skip:316 - inactive-row MoE skip: True
+2026-10-21 09:18:48.218 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.serving_state:install_lockstep_sampling:80 - sampler lockstep installed on 4 dies (fresh identical seeds every draw, die-0 token broadcast)
+2026-10-21 09:18:48.295 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:622 - MoE prefill row split: {'mode': 'auto', 'rows': '1024', 'largest_free_bytes_per_die': 884340736, 'need_bytes': 1073741824}
+2026-10-21 09:37:16.514 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.dsa_buckets:warm:283 - decode buckets: DSA widths [1056, 2080, 4128, 8224, 16416, 32800, 42016] (contexts [4096, 8192, 16384, 32768, 65536, 131072, 167936]), prefill views [48, 96, 192, 384, 768, 1536] blocks; warm plans [2176, 2560, 4096]; MoE row buckets [1, 2, 4, 8, 32] paths {1: 'pairs', 2: 'pairs', 4: 'pairs', 8: 'pairs'} on 42 layers
+2026-10-21 09:38:43.846 | critical |          Always | TT_FATAL: Out of Memory: Not enough space to allocate 245760 B TRACE buffer across 8 banks, where each bank needs to store 32768 B, but bank size is 12582912 B (allocated: 12562432 B, free: 20480 B, largest free block: 20480 B) (assert.hpp:104)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 693, in <module>
+    main()
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 689, in main
+    run_capacity(a)
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tools/memory_probe.py", line 548, in run_capacity
+    g.capture_traces()
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 785, in capture_traces
+    self.trace_id, self.logits_out = dsa_buckets.capture_decode(self, step)  # stage 10: maybe segmented
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py", line 606, in capture_decode
+    return ctl, ctl.capture(fn)
+                ^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py", line 455, in capture
+    out = fn()
+          ^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/generator.py", line 784, in <lambda>
+    step = lambda: self.model.decode_step(self._tok_view())  # noqa: E731
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/model.py", line 762, in decode_step
+    Y = d.decode_forward(X, inputs=bufs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py", line 1461, in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py", line 609, in decode_forward
+    out = super().decode_forward(X, inputs=inputs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 308, in decode_forward
+    X2 = self._ffn(X1, "decode")
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py", line 232, in _ffn
+    z = self.mlp.forward(x, mode=mode)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/moe.py", line 410, in forward
+    routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py", line 229, in w
+    return self._routed(_moe, x4, scores, ids, lambda: _orig(x4, scores, ids, T, *a, **k))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py", line 334, in _routed
+    self._point("moe", bodies)
+  File "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py", line 300, in _point
+    ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+RuntimeError: TT_FATAL @ /home/raahem/tt-metal/tt_metal/impl/allocator/bank_manager.cpp:462: false
+info:
+Out of Memory: Not enough space to allocate 245760 B TRACE buffer across 8 banks, where each bank needs to store 32768 B, but bank size is 12582912 B (allocated: 12562432 B, free: 20480 B, largest free block: 20480 B)
+backtrace:
+ --- /home/raahem/tt-metal/build_Release/tt_metal/libtt_metal.so(+0x9fb3b1) [0x7a55165fb3b1]
+ --- tt::tt_metal::BankManager::allocate_buffer(unsigned long, unsigned long, bool, tt::tt_metal::CoreRangeSet const&, std::optional<unsigned int>, ttsl::StrongType<unsigned int, tt::tt_metal::AllocatorIDTag>, std::vector<std::pair<unsigned long, unsigned long>, std::allocator<std::pair<unsigned long, unsigned long> > > const&)
+ --- tt::tt_metal::AllocatorImpl::allocate_buffer(tt::tt_metal::Buffer*)
+ --- tt::tt_metal::Buffer::allocate_impl()
+ --- tt::tt_metal::Buffer::create(tt::tt_metal::IDevice*, unsigned long, unsigned long, tt::tt_metal::BufferType, tt::tt_metal::BufferShardingArgs const&, std::optional<bool>, std::optional<ttsl::StrongType<unsigned char, tt::tt_metal::SubDeviceIdTag> >)
+ --- tt::tt_metal::distributed::MeshBuffer::create(std::variant<tt::tt_metal::distributed::ReplicatedBufferConfig, tt::tt_metal::distributed::ShardedBufferConfig> const&, tt::tt_metal::distributed::DeviceLocalBufferConfig const&, tt::tt_metal::distributed::MeshDevice*, std::optional<unsigned long>)
+ --- tt::tt_metal::distributed::MeshTrace::populate_mesh_buffer(tt::tt_metal::distributed::MeshCommandQueue&, std::shared_ptr<tt::tt_metal::distributed::MeshTraceBuffer>&, unsigned long, unsigned long, unsigned long)
+ --- tt::tt_metal::distributed::MeshDeviceImpl::end_mesh_trace(unsigned char, ttsl::StrongType<unsigned int, tt::tt_metal::distributed::MeshTraceIdTag> const&)
+ --- ttnn::operations::trace::end_trace_capture(tt::tt_metal::distributed::MeshDevice*, ttsl::StrongType<unsigned int, tt::tt_metal::distributed::MeshTraceIdTag>, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >)
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x859388) [0x7a551a659388]
+ --- /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39c604) [0x7a551a19c604]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde) [0x18a54ba]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18a52d4]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x18249ff]
+ --- /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769) [0x1815c69]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x19800a2]
+ --- /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345) [0x197f985]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f61f]
+ --- /home/raahem/tt-metal/python_env/bin/python() [0x197f42c]
+ --- /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7a555ea2a1ca]
+ --- /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7a555ea2a28b]
+ --- /home/raahem/tt-metal/python_env/bin/python(_start+0x29) [0x19a78a9]
+
+=== exit code: 1 Wed Oct 21 09:38:46 AM UTC 2026
+=== G9 capacity probe:  32 slots, env none, max-context 167936, workspace 1024 MiB, trace 167772160, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 2026-10-21T10:50:47+00:00
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 a12853e1449d78c62a6da08856a9c1e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 83750f1d9f44c6a244046a522024ccbc  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 db1beb810482092fd11f9b3edc3ee67c  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 9b06feb1a5fc715e1d686371fcaee5ea  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 3bda6fd3efeec9bc16caf6b2de3ebfda  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+=== start Wed Oct 21 10:50:47 AM UTC 2026 (NOLOCK, inside the caller's ticket) : timeout -k 60 7200 env -C /home/raahem/glm53-flash-bringup/s9k_snap PYTHONPATH=/home/raahem/glm53-flash-bringup/s9k_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/glm53-flash-bringup/serve_overlay:/home/raahem/glm53-flash-bringup/s9k_snap:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime: GLM53_TP=4 GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash GLM53_PRECISION=/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.memory_probe capacity --out /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 --trace-region 167772160 --workspace-mib 1024 --max-context 167936 --slots 32
+2026-10-21 10:50:49.502 | DEBUG    | ttnn:<module>:45 - Initial ttnn.CONFIG:
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+2026-10-21 10:50:49.559 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json; GLM53_PRECISION=none for the stage-7 policy)
+2026-10-21 10:50:50.744 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:__init__:358 - generator plan: {'layout': 'replicated', 'max_seq_len': 167936, 'dsa_shard': False}
+2026-10-21 10:50:50.793 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+2026-10-21 10:50:52.643 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:50:52.794 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 0 (kda/dense) loaded in 0.3s
+2026-10-21 10:50:52.924 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:50:53.156 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 1 (kda/dense) loaded in 0.4s
+2026-10-21 10:50:53.286 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:50:53.512 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 2 (kda/dense) loaded in 0.4s
+2026-10-21 10:50:55.321 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 3: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:50:55.431 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 3 (dsa/moe) loaded in 1.9s
+2026-10-21 10:50:55.587 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:50:57.287 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 4: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:50:57.417 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 4 (kda/moe) loaded in 2.0s
+2026-10-21 10:50:57.569 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:50:59.314 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 5: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:50:59.414 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 5 (kda/moe) loaded in 2.0s
+2026-10-21 10:50:59.542 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:01.196 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 6: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:01.376 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 6 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:04.778 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 7: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:04.855 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 7 (dsa/moe) loaded in 3.5s
+2026-10-21 10:51:05.004 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:06.759 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 8: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:06.865 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 8 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:07.017 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:08.919 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 9: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:09.007 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 9 (kda/moe) loaded in 2.1s
+2026-10-21 10:51:09.142 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:11.086 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 10: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:11.236 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 10 (kda/moe) loaded in 2.2s
+2026-10-21 10:51:13.187 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 11: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:13.285 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 11 (dsa/moe) loaded in 2.0s
+2026-10-21 10:51:13.419 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:15.305 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 12: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:15.394 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 12 (kda/moe) loaded in 2.1s
+2026-10-21 10:51:15.524 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:17.276 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 13: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:17.373 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 13 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:17.513 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:19.317 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 14: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:19.454 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 14 (kda/moe) loaded in 2.1s
+2026-10-21 10:51:21.283 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 15: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:21.353 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 15 (dsa/moe) loaded in 1.9s
+2026-10-21 10:51:21.492 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:23.214 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 16: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:23.299 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 16 (kda/moe) loaded in 1.9s
+2026-10-21 10:51:23.421 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:25.103 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 17: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:25.193 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 17 (kda/moe) loaded in 1.9s
+2026-10-21 10:51:25.326 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:27.448 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 18: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:27.542 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 18 (kda/moe) loaded in 2.3s
+2026-10-21 10:51:29.646 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 19: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:29.713 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 19 (dsa/moe) loaded in 2.2s
+2026-10-21 10:51:29.847 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:32.517 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 20: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:32.608 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 20 (kda/moe) loaded in 2.9s
+2026-10-21 10:51:32.737 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:34.446 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 21: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:34.540 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 21 (kda/moe) loaded in 1.9s
+2026-10-21 10:51:34.670 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:36.427 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 22: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:36.518 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 22 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:38.502 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 23: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:38.591 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 23 (dsa/moe) loaded in 2.1s
+2026-10-21 10:51:38.747 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:40.521 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 24: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:40.630 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 24 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:40.784 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:42.676 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 25: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:42.785 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 25 (kda/moe) loaded in 2.2s
+2026-10-21 10:51:42.941 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:44.750 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 26: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:44.841 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 26 (kda/moe) loaded in 2.1s
+2026-10-21 10:51:46.816 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 27: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:46.884 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 27 (dsa/moe) loaded in 2.0s
+2026-10-21 10:51:47.012 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:48.674 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 28: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:48.763 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 28 (kda/moe) loaded in 1.9s
+2026-10-21 10:51:48.930 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:50.627 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 29: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:50.714 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 29 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:50.842 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:52.861 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 30: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:52.962 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 30 (kda/moe) loaded in 2.2s
+2026-10-21 10:51:55.755 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 31: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:55.822 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 31 (dsa/moe) loaded in 2.9s
+2026-10-21 10:51:55.954 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:57.751 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 32: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:57.855 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 32 (kda/moe) loaded in 2.0s
+2026-10-21 10:51:58.003 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:51:59.801 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 33: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:51:59.913 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 33 (kda/moe) loaded in 2.1s
+2026-10-21 10:52:00.070 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:01.986 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 34: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:02.075 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 34 (kda/moe) loaded in 2.2s
+2026-10-21 10:52:03.987 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 35: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:04.086 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 35 (dsa/moe) loaded in 2.0s
+2026-10-21 10:52:04.221 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:05.897 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 36: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:05.992 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 36 (kda/moe) loaded in 1.9s
+2026-10-21 10:52:06.118 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:07.836 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 37: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:07.927 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 37 (kda/moe) loaded in 1.9s
+2026-10-21 10:52:08.063 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:09.757 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 38: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:09.853 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 38 (kda/moe) loaded in 1.9s
+2026-10-21 10:52:11.655 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 39: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:11.721 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 39 (dsa/moe) loaded in 1.9s
+2026-10-21 10:52:11.851 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:14.227 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 40: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:14.326 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 40 (kda/moe) loaded in 2.6s
+2026-10-21 10:52:14.455 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:17.493 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 41: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:17.940 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 41 (kda/moe) loaded in 3.6s
+2026-10-21 10:52:18.608 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:20.653 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 42: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:20.758 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 42 (kda/moe) loaded in 2.8s
+2026-10-21 10:52:22.600 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 43: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:22.689 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 43 (dsa/moe) loaded in 1.9s
+2026-10-21 10:52:22.818 | WARNING  | models.demos.deepseek_v3_d_p.tt.kda.recurrence:__init__:559 - KDA chunk terms need 595 KiB per core, over the 320 KiB L1 budget; keeping them in DRAM, so chunk preparation and the scan run slower (16 heads, 2048 rows per device).
+2026-10-21 10:52:24.663 | DEBUG    | models.autoports.zai_org_glm_5_3_flash.tt.moe:__init__:390 - Qwen35MoE layer 44: E=192 k=8 N=2048 (local 512) tp=4 union~178
+2026-10-21 10:52:24.692 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:210 - layer 44 (kda/moe) loaded in 2.0s
+2026-10-21 10:52:24.694 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 93.9s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd: 918 hits, 0 stored)
+{"mode": "capacity", "S": 32, "max_seq_len": 167936, "workspace_mib": 1024.0, "bank_size": 4251369856, "die_allocatable_bytes": 34010958848, "trace_region_bytes": 167772160, "after_open": {"allocated": 0, "free": 34010958848, "largest_free_block_per_bank": 4251369856, "trace_allocated": 0}, "plan": {"layout": "replicated", "max_seq_len": 167936, "dsa_shard": false}, "load_seconds": 98.5, "after_load": {"allocated": 32041225216, "free": 1969733632, "largest_free_block_per_bank": 245206784, "trace_allocated": 0}, "dsa_shard": false, "free_after_load_bytes": 1969733632, "dsa_bytes_per_block_all_layers": 811008, "num_blocks_fit": 1104, "num_blocks": 1104, "capped_by_max_seq_len": false}
+2026-10-21 10:52:31.812 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:_install_inactive_skip:316 - inactive-row MoE skip: True
+2026-10-21 10:52:31.876 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.serving_state:install_lockstep_sampling:80 - sampler lockstep installed on 4 dies (fresh identical seeds every draw, die-0 token broadcast)
+2026-10-21 10:52:31.950 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:choose_moe_split:622 - MoE prefill row split: {'mode': 'auto', 'rows': '1024', 'largest_free_bytes_per_die': 877066240, 'need_bytes': 1073741824}
+2026-10-21 11:10:50.418 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.dsa_buckets:warm:283 - decode buckets: DSA widths [1056, 2080, 4128, 8224, 16416, 32800, 42016] (contexts [4096, 8192, 16384, 32768, 65536, 131072, 167936]), prefill views [48, 96, 192, 384, 768, 1536] blocks; warm plans [2176, 2560, 4096]; MoE row buckets [1, 2, 4, 8, 16, 32] paths {1: 'pairs', 2: 'pairs', 4: 'pairs', 8: 'pairs', 16: 'pairs'} on 42 layers
+2026-10-21 11:12:26.048 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.dsa_buckets:capture:472 - decode buckets: decode captured as 54 segments + 11 DSA x 7 + 42 MoE x 6 point traces, 107.3 MiB of trace region
+2026-10-21 11:12:27.280 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator:capture_traces:795 - serving traces captured (model + sampler variants); programs 1292
+{"after_bind": {"allocated": 33130624512, "free": 880334336, "largest_free_block_per_bank": 109633280, "trace_allocated": 0}, "after_capture": {"allocated": 33179392000, "free": 831566848, "largest_free_block_per_bank": 103631232, "trace_allocated": 113344512}, "trace_bytes_model_plus_greedy_sampler": 113344512}
+{"prompt_len": 141123, "prefill_seconds": 198.0, "copy_accuracy": 1.0, "pred_text": " are controlled by, or are under common\n      control with that entity. For the purposes of this definition,\n      \"", "expected_text": " are controlled by, or are under common\n      control with that entity. For the purposes of this definition,\n      \""}
+2026-10-21 11:15:48.424 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(383))
+2026-10-21 11:15:48.424 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=True, log_probs=False, force_argmax=False, trace_id=MeshTraceId(384))
+=== exit code: 0 Wed Oct 21 11:15:51 AM UTC 2026

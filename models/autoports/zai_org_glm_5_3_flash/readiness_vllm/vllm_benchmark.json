@@ -2,7 +2,7 @@
   "source": "vllm bench serve",
   "profile": "single_user_decode",
   "comparison_scope": "Primary batch-1 serving decode profile for headline t/s/u. TTFT is reported separately and is not blended into the TPOT-derived decode value beyond normal single-request timing.",
-  "raw_result_file": "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json",
+  "raw_result_file": "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json",
   "command": [
     "/home/raahem/tt-metal/python_env/bin/vllm",
     "bench",
@@ -28,13 +28,13 @@
     "ttft,tpot,itl,e2el",
     "--save-result",
     "--result-filename",
-    "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json",
+    "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json",
     "--max-concurrency",
     "1",
     "--temperature",
     "0.0"
   ],
-  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 128 --random-output-len 128 --num-prompts 1 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json --max-concurrency 1 --temperature 0.0",
+  "command_string": "/home/raahem/tt-metal/python_env/bin/vllm bench serve --backend vllm --model /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --base-url http://127.0.0.1:8131 --endpoint /v1/completions --dataset-name random --random-input-len 128 --random-output-len 128 --num-prompts 1 --ignore-eos --percentile-metrics ttft,tpot,itl,e2el --save-result --result-filename /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_result.json --max-concurrency 1 --temperature 0.0",
   "config": {
     "prompt_len": 128,
     "output_len": 128,
@@ -45,45 +45,45 @@
     "dataset_name": "random",
     "ignore_eos": true
   },
-  "elapsed_s": 9.574046354973689,
+  "elapsed_s": 9.373293416108936,
   "completed_requests": 1,
   "total_input_tokens": 128.0,
   "total_output_tokens": 128.0,
   "requested_output_tokens": 128,
   "missing_output_tokens": 0,
   "ttft_ms": {
-    "p50": 234.52157387509942,
-    "p99": 234.52157387509942,
-    "mean": 234.52157387509942
+    "p50": 289.9799181614071,
+    "p99": 289.9799181614071,
+    "mean": 289.9799181614071
   },
   "tpot_ms": {
-    "p50": 73.53706303140603,
-    "p99": 73.53706303140603,
-    "mean": 73.53706303140603
+    "p50": 71.51789524350461,
+    "p99": 71.51789524350461,
+    "mean": 71.51789524350461
   },
   "itl_ms": {
-    "p50": 72.65285705216229,
-    "p99": 76.41812140587717,
-    "mean": 73.5370646850536
+    "p50": 71.51128794066608,
+    "p99": 72.58848551195115,
+    "mean": 71.51789659098905
   },
   "e2el_ms": {
-    "p50": 9573.728578863665,
-    "p99": 9573.728578863665,
-    "mean": 9573.728578863665
+    "p50": 9372.752614086494,
+    "p99": 9372.752614086494,
+    "mean": 9372.752614086494
   },
-  "itl_p50_decode_tps": 13.764083624158564,
-  "itl_mean_decode_tps": 13.598584663160345,
-  "vllm_mean_tpot_decode_tps": 13.598584968955347,
-  "mean_per_request_decode_tps": 13.598584968955347,
+  "itl_p50_decode_tps": 13.98380631641978,
+  "itl_mean_decode_tps": 13.982514135154188,
+  "vllm_mean_tpot_decode_tps": 13.982514398601822,
+  "mean_per_request_decode_tps": 13.982514398601822,
   "mean_per_request_decode_tps_basis": "1000 / mean_tpot_ms from vllm bench serve; this is the TPOT-derived decode value. For burst-serving profiles, scheduler admission and chunked prefill can affect TPOT, so use the single-user profile for headline decode t/s/u.",
-  "output_throughput_tok_per_s": 13.369477779215512,
-  "request_throughput_per_s": 0.10444904515012118,
-  "total_token_throughput_tok_per_s": 26.738955558431023,
+  "output_throughput_tok_per_s": 13.65581917877651,
+  "request_throughput_per_s": 0.10668608733419148,
+  "total_token_throughput_tok_per_s": 27.31163835755302,
   "secondary_benchmarks": {
     "ci_serving_burst": {
-      "summary_file": "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_benchmark.json",
-      "raw_result_file": "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
-      "log_file": "/home/raahem/glm53-flash-bringup/s9g_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_benchmark.log",
+      "summary_file": "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_benchmark.json",
+      "raw_result_file": "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_result.json",
+      "log_file": "/home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/vllm_ci_serving_benchmark.log",
       "config": {
         "prompt_len": 100,
         "output_len": 100,
@@ -94,8 +94,8 @@
         "dataset_name": "random",
         "ignore_eos": true
       },
-      "output_throughput_tok_per_s": 13.243810647034472,
-      "vllm_mean_tpot_decode_tps": 13.547953998291412,
+      "output_throughput_tok_per_s": 13.675343921531828,
+      "vllm_mean_tpot_decode_tps": 14.009578222952268,
       "comparison_scope": "vLLM-nightly-style 100/100/32 serving-burst profile for CI parity and serving capacity. Do not use as headline decode t/s/u because burst admission and chunked prefill can affect TPOT."
     }
   }

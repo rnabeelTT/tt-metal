@@ -1,0 +1,157 @@
+=== start Wed Oct 21 08:20:11 AM UTC 2026 : timeout -k 120 64800 /home/raahem/glm53-flash-bringup/scripts/s9_final.sh /home/raahem/glm53-flash-bringup/s9k_snap
+=== s9_final snapshot /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2 async=1
+=== PART 1 G9 re-probes 2026-10-21T08:20:11+00:00
+=== G9 capacity probe:  1 slots, env none, max-context 342016, workspace 1024 MiB, trace 67108864, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1 2026-10-21T08:20:11+00:00
+probe exit=0 (log /home/raahem/glm53-flash-bringup/logs/09/g9_s1.log)
+=== exit code: 0 Wed Oct 21 08:49:16 AM UTC 2026
+LEFTOVER after probe 1: none
+=== G9 capacity probe:  16 slots, env none, max-context 260096, workspace 1024 MiB, trace 100663296, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s16 2026-10-21T08:49:59+00:00
+probe exit=0 (log /home/raahem/glm53-flash-bringup/logs/09/g9_s16.log)
+=== exit code: 0 Wed Oct 21 09:16:13 AM UTC 2026
+     The advertised context of the checkpoint is 1,048,576 tokens. The profile `p300x2-1m` serves it (one sequence,
+LEFTOVER after probe 16: none
+=== G9 capacity probe:  32 slots, env none, max-context 167936, workspace 1024 MiB, trace 100663296, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 2026-10-21T09:16:55+00:00
+probe exit=1 (log /home/raahem/glm53-flash-bringup/logs/09/g9_s32.log)
+=== exit code: 1 Wed Oct 21 09:38:46 AM UTC 2026
+LEFTOVER after probe 32: none
+=== PART 2 long async off / on 2026-10-21T09:39:29+00:00
+=== cwd /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2
+=== serve final-long-async0 seqs=1 mlen=325632 layers=all async=0 trace=67108864 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T09:39:29+00:00
+readiness final-long-async0 stage benchmark exit=0
+readiness final-long-async0 exit=0
+QCAPTURE q1: prompt 20 tokens, completion 36 tokens, finish stop
+QCAPTURE q2: prompt 27 tokens, completion 256 tokens, finish length
+QCAPTURE q3: prompt 35 tokens, completion 256 tokens, finish length
+QCAPTURE q4: prompt 21 tokens, completion 215 tokens, finish stop
+QCAPTURE q5: prompt 26 tokens, completion 256 tokens, finish length
+QCAPTURE q6: prompt 22 tokens, completion 256 tokens, finish length
+=== done 2026-10-21T09:47:10+00:00
+serve exit=0
+LEFTOVER after serve final-long-async0: none
+=== cwd /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2
+=== serve final-long-async1 seqs=1 mlen=325632 layers=all async=1 trace=67108864 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T09:47:53+00:00
+readiness final-long-async1 stage benchmark exit=0
+readiness final-long-async1 exit=0
+=== done 2026-10-21T09:54:09+00:00
+serve exit=0
+LEFTOVER after serve final-long-async1: none
+=== PART 3 standalone generator on the served prompt ids 2026-10-21T09:54:52+00:00
+STANDALONE q1: 36 served tokens, equal=True, first divergence None
+STANDALONE q2: 256 served tokens, equal=True, first divergence None
+STANDALONE q3: 256 served tokens, equal=True, first divergence None
+STANDALONE q4: 215 served tokens, equal=True, first divergence None
+STANDALONE q5: 256 served tokens, equal=True, first divergence None
+STANDALONE q6: 256 served tokens, equal=True, first divergence None
+LEFTOVER after standalone: none
+=== PART 4 p300x2 2026-10-21T09:59:10+00:00
+=== cwd /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2
+=== serve final-p300x2 seqs=16 mlen=239616 layers=all async=1 trace=100663296 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T09:59:10+00:00
+readiness final-p300x2 stage sampling exit=1
+readiness final-p300x2 stage qualitative exit=0
+readiness final-p300x2 stage benchmark exit=0
+readiness final-p300x2 exit=1
+  FAIL (pytest exit 1) — inspect /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/sampling_tests.log
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-be44ac55fe7013cf', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 8 ok, 512 tokens in 9.7s = 52.9 tok/s; 8/8 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple, so a short response is best. I could just give the haiku itself. Format: three lines, no headers needed.' | content 'Data flows like streams,\nPatterns hidden in the noise—\nThe machine awakes.'
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo 3 hours minus 25 minutes = 2 hours 35 minutes.\n\nCheck: 3:40 + 2 hours = 5:40. 5:40 + 35 minutes = 6:15. ✓' | content '**2 hours and 35 minutes**\n\n(3:40 → 6:40 would be 3 hours, but the train arrives 25 minutes earlier, at 6:15.)'
+SMOKE_RESULT PASS
+NEEDLE 200000:0.3: prompt 197077 tokens (rendered 197077), depth 0.359, TTFT 159.5 s, finish stop, passkey 8197047, content '8197047' -> PASS
+NEEDLE_RESULT PASS /home/raahem/glm53-flash-bringup/logs/09/needle-final-p300x2.json
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:8131 profile=final-p300x2 max_model_len=239616 tokenizer=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 rows=15
+=== sweep done 15 rows
+=== done 2026-10-21T10:50:05+00:00
+serve exit=1
+LEFTOVER after serve final-p300x2: none
+=== PART 5 wide 2026-10-21T10:50:47+00:00
+=== cwd /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2
+=== WIDE: 32-slot G9 probe first 2026-10-21T10:50:47+00:00
+=== G9 capacity probe:  32 slots, env none, max-context 167936, workspace 1024 MiB, trace 167772160, precision /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9k_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 2026-10-21T10:50:47+00:00
+probe exit=0 (log /home/raahem/glm53-flash-bringup/logs/09/g9_s32.log)
+=== exit code: 0 Wed Oct 21 11:15:51 AM UTC 2026
+     The advertised context of the checkpoint is 1,048,576 tokens. The profile `p300x2-1m` serves it (one sequence,
+WIDE decode buckets: DSA widths [1056, 2080, 4128, 8224, 16416, 32800, 42016] (contexts [4096, 8192, 16384, 32768, 65536, 131072, 167936]), prefill views [48, 96, 192, 384, 768, 1536] blocks; warm plans [2176, 2560, 4096]; MoE row buckets [1, 2, 4, 8, 16, 32] paths {1: 'pairs', 2: 'pairs', 4: 'pairs', 8: 'pairs', 16: 'pairs'} on 42 layers
+WIDE decode buckets: decode captured as 54 segments + 11 DSA x 7 + 42 MoE x 6 point traces, 107.3 MiB of trace region
+WIDE: probe ingested; profile now 137216 tokens
+=== serve final-wide seqs=32 mlen=137216 layers=all async=1 trace=167772160 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T11:16:34+00:00
+readiness final-wide stage sampling exit=1
+readiness final-wide stage qualitative exit=0
+readiness final-wide stage benchmark exit=0
+readiness final-wide exit=1
+  FAIL (pytest exit 1) — inspect /home/raahem/glm53-flash-bringup/s9k_snap/models/autoports/zai_org_glm_5_3_flash/readiness_vllm/sampling_tests.log
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-86436b0d192a53d9', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 32 ok, 2048 tokens in 19.1s = 107.4 tok/s; 4/32 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple, so a short response is best. I could just give the haiku itself. Format: three lines, no headers needed.' | content 'Data flows like streams,\nPatterns hidden in the noise—\nThe machine awakes.'
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo 3 hours minus 25 minutes = 2 hours 35 minutes.\n\nCheck: 3:40 + 2 hours = 5:40. 5:40 + 35 minutes = 6:15. ✓' | content '**2 hours and 35 minutes**\n\n(3:40 → 6:40 would be 3 hours, but the train arrives 25 minutes earlier, at 6:15.)'
+SMOKE_RESULT FAIL
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:8131 profile=final-wide max_model_len=137216 tokenizer=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 rows=10
+=== sweep done 10 rows
+=== done 2026-10-21T12:01:13+00:00
+serve exit=1
+LEFTOVER after serve final-wide: none
+=== PART 6 1m (gate artifact) 2026-10-21T12:01:55+00:00
+=== cwd /home/raahem/glm53-flash-bringup/s9k_snap base 0a2663d0b6bf2143b3ecf086d16617d0041741d2
+=== serve final-1m seqs=1 mlen=1048576 layers=all async=1 trace=67108864 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T12:01:55+00:00
+readiness final-1m stage sampling exit=0
+readiness final-1m stage qualitative exit=0
+readiness final-1m stage benchmark exit=0
+readiness final-1m exit=0
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\nreversed_s = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-9b2aa702264e2c78', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    """Print a Fibonacci se' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    """Print a Fibonacci series up to n."""\n   '
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    else: \n '
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef sigmoid(x):\n    return 1/('
+SMOKE_NONALIGNED 1 1 'Scoped tables for the current user. The'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry air of that high altitude, which'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 'n any of the burial-places of this city through which I\npass'
+SMOKE_BURST 2 ok, 128 tokens in 9.5s = 13.5 tok/s; 1/2 identical to solo greedy
+SMOKE_MAXEFFORT stop 942 tokens; reasoning 2850 chars: 'The user wants a haiku about machine learning. A haiku is a poem with three lines following a 5-7-5 syllable pattern.\n\nL' ... ' (1) = 7 ✓\n- "The machine awakes": The (1) ma-chine (2) a-wakes (2) = 5 ✓\n\nThat works well. I\'ll present just the haiku.' | content 'Data streams inward,\nPatterns hidden become clear—\nThe machine awakes.'
+SMOKE_MAXEFFORT stop 177 tokens; reasoning 341 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... ' 2 hours = 5:40. 5:40 + 20 minutes = 6:00. 6:00 + 15 minutes = 6:15. So 2 hours + 20 + 15 = 2 hours 35 minutes. Correct.' | content '**2 hours and 35 minutes**\n\n(3:40 → 6:40 would be 3 hours, but the train arrives 25 minutes earlier, at 6:15.)'
+SMOKE_LONG 1048000 wall 2307.6s ' infer," glancing at his hands again, "in the\nresumption of'
+SMOKE_RESULT FAIL
+NEEDLE 1040000:0.1: prompt 1038965 tokens (rendered 1038965), depth 0.082, TTFT 2309.8 s, finish stop, passkey 8197047, content '8197047' -> PASS
+NEEDLE_RESULT PASS /home/raahem/glm53-flash-bringup/logs/09/needle-final-1m.json
+=== done 2026-10-21T13:32:12+00:00
+serve exit=0
+LEFTOVER after serve final-1m: none
+09-vllm.check.sh exit=0
+=== s9_final done 2026-10-21T13:32:57+00:00
+=== exit code: 0 Wed Oct 21 01:32:57 PM UTC 2026

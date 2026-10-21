@@ -297,6 +297,118 @@ Evidence: `doc/vllm/evidence/slot_width_compare.txt`.
   different reduction order, not a defect; no fix. A near-tie greedy token can differ between a 32-slot and a smaller
   build.
 
+## Final serving run (review #1 P1-3, 2026-10-21, code freeze 0a2663d0b6b)
+
+One device ticket: `~/glm53-flash-bringup/scripts/s9_final.sh <snapshot>` (snapshot s9k = pure `git archive` of
+0a2663d0b6b; `tt-smi -r` between parts; a leftover-process check after every server and probe: none). Evidence:
+`doc/vllm/evidence/final/` (`s9_final_summary.txt` is the condensed log).
+
+1. G9 re-probes (workspace 1,024 MiB): long 2,548 blocks -> 325,632 (64 MiB region); p300x2 / p150x4 1,891 blocks ->
+   239,616 (96 MiB region, capture 97.7 MB); wide at 96 MiB: trace capture out of memory, then at 160 MiB (decision of
+   the coordinator): MoE row buckets [1, 2, 4, 8, 16, 32], capture 107.3 MiB, 1,105 blocks -> 137,216. Copy 1.0 on all.
+2. p300x2-long, async off then on: readiness benchmark (table in README); the async-off server also captured the
+   served token ids of the 6 qualitative prompts (`scripts/09-qcapture.py`).
+3. The standalone generator (`scripts/09_standalone_q.py`, the long build) on those prompt ids: equal tokens on all 6
+   prompts (36 / 256 / 256 / 215 / 256 / 256 tokens).
+4. p300x2: full plugin suite at 16 (69 / 4 / 4), qualitative, benchmark (copied to `logs/09/final/readiness-p300x2/`
+   for the stage-10 AFTER cells), served smokes PASS (burst 8/8 equal to solo), the 197,077-token needle PASS
+   ("8197047", TTFT 159.5 s), sweep 15/15 rows.
+5. p300x2-wide (provisional): full plugin suite at 32 (70 / 3 / 4), qualitative, benchmark, sweep 10/10 rows; served
+   smokes FAIL on the burst gate only: 4/32 streams equal to solo (stage-10 MoE row buckets, open item).
+6. p300x2-1m: sampling smoke (3 / 0 / 1), qualitative, benchmark -> `readiness_vllm/`; the 1,048,000-token prompt
+   answers in 2,308 s; the burst gate 1/2 (the documented block-placement numerics); the 1M needle PASS (1,038,965
+   tokens, "8197047", TTFT 2,310 s); `09-vllm.check.sh` exit 0 on the live tree.
+
+Sweep, p300x2 (1 user, input tokens: TTFT / TPOT): 128: 252 ms / 69.9 ms; 1,024: 770 ms / 71.8 ms; 4,096: 2.4 s /
+73.5 ms; 16,384: 10.0 s / 73.9 ms; 65,536: 42.9 s / 75.8 ms; 131,072: 98.4 s / 77.9 ms; 239,360: 194.8 s / 79.3 ms.
+Users at 128 input tokens (TPOT / total tok/s): 2: 74.8 / 25.6; 4: 90.0 / 41.3; 8: 119.9 / 59.6; 16: 172.6 / 79.4.
+At 1,024 input tokens: 2: 76.5 / 24.3; 4: 91.8 / 38.7; 8: 121.7 / 55.2; 16: 174.4 / 72.3.
+
+Sweep, p300x2-wide (provisional; 1 user: 128: 268 ms / 76.0 ms; 1,024: 811 ms / 77.9 ms; 16,384: 9.9 s / 80.2 ms;
+131,072: 92.8 s / 83.9 ms). Users at 128 input tokens: 8: 125.9 / 56.8; 16: 182.0 / 75.5; 32: 163.3 / 142.7. At 1,024:
+8: 127.7 / 52.8; 16: 183.8 / 69.2; 32: 160.9 / 124.7.
+
+### Exact server commands and environment (P2-4)
+
+Every server runs from a pinned snapshot (`SNAP=<dir>` in `scripts/09-serve.sh`: cwd and PYTHONPATH first), with the
+serving overlay (`serve_overlay`: transformers 5.19) on PYTHONPATH and `--additional-config` from the profile:
+`{"tt": {"sample_on_device_mode": "all", "trace_region_size": <profile region>, "l1_small_size": 24576,
+"fabric_config": "FABRIC_1D"}}`. The readiness servers add `--default-chat-template-kwargs {"reasoning_effort":"low"}`
+(the 256-token qualitative requests); the bundle does not.
+
+**p300x2-long (async on)** (`../vllm/evidence/final/long-async1_servercmd.txt`)
+
+```bash
+GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+GLM53_PROGRAM_GUARD=1
+GLM53_TRACE_REGION=67108864
+GLM53_VLLM_ASYNC_DECODE=1
+HF_MODEL=zai-org/GLM-5.3-Flash
+MESH_DEVICE=P300x2
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 1 --max-model-len 325632 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 67108864\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+```
+
+**p300x2-long (async off, A/B)** (`../vllm/evidence/final/long-async0_servercmd.txt`)
+
+```bash
+GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+GLM53_PROGRAM_GUARD=1
+GLM53_TRACE_REGION=67108864
+GLM53_VLLM_ASYNC_DECODE=0
+HF_MODEL=zai-org/GLM-5.3-Flash
+MESH_DEVICE=P300x2
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 1 --max-model-len 325632 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 67108864\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+```
+
+**p300x2** (`../vllm/evidence/final/p300x2_servercmd.txt`)
+
+```bash
+GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+GLM53_PROGRAM_GUARD=1
+GLM53_TRACE_REGION=100663296
+GLM53_VLLM_ASYNC_DECODE=1
+HF_MODEL=zai-org/GLM-5.3-Flash
+MESH_DEVICE=P300x2
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 16 --max-model-len 239616 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --enable-log-requests --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 100663296\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+```
+
+**p300x2-wide** (`../vllm/evidence/final/wide_servercmd.txt`)
+
+```bash
+GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+GLM53_PROGRAM_GUARD=1
+GLM53_TRACE_REGION=167772160
+GLM53_VLLM_ASYNC_DECODE=1
+HF_MODEL=zai-org/GLM-5.3-Flash
+MESH_DEVICE=P300x2
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 32 --max-model-len 137216 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 167772160\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+```
+
+**p300x2-1m** (`../vllm/evidence/final/1m_servercmd.txt`)
+
+```bash
+GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+GLM53_DSA_INDEX_BLOCK_MB=32
+GLM53_DSA_SHARD=1
+GLM53_MOE_SORTED_ROWS=512
+GLM53_PROGRAM_GUARD=1
+GLM53_TRACE_REGION=67108864
+GLM53_VLLM_ASYNC_DECODE=1
+HF_MODEL=zai-org/GLM-5.3-Flash
+MESH_DEVICE=P300x2
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 1 --max-model-len 1048576 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 67108864\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+```
+
 ## Notes
 
 - Indexer cost: the sparse DSA indexer selects over all pools of the model context, not over the filled prefix. The
