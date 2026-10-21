@@ -110,8 +110,36 @@ def test_release_drops_owned_tensors(monkeypatch):
     assert (id(c.mesh), 1056) not in D._SHARED_IOTA
 
 
-def test_fit_row_buckets_to_trace_region():
-    """Each row bucket below S costs one point trace per MoE layer: 64 MiB holds the 1-row bucket, 96 MiB all of them."""
-    assert B.fit_row_buckets([1, 2, 4, 8, 16], 42, 64 << 20) == [1, 16]
-    assert B.fit_row_buckets([1, 2, 4, 8, 16], 42, 96 << 20) == [1, 2, 4, 8, 16]
-    assert B.fit_row_buckets([1, 2, 4, 8, 16], 42, 40 << 20) is None
+@pytest.mark.parametrize(
+    "S,region_mib,with_dsa,n_layers,want",
+    [
+        # measured configurations: the same lists as the 0a2663d0b6b rule
+        (16, 96, True, 42, [1, 2, 4, 8, 16]),  # p300x2 / p150x4 (243,712: DSA buckets on), stage-9 G9 16-slot capture
+        (16, 96, False, 42, [1, 2, 4, 8, 16]),  # t15b pairs96
+        (16, 64, False, 42, [1, 16]),  # t15b pairs (64 MiB)
+        (16, 64, True, 42, [1, 16]),
+        (8, 64, False, 42, [1, 8]),  # standalone 8 slots
+        (8, 64, True, 42, [1, 8]),
+        (4, 64, False, 2, [1, 2, 4]),  # reduced adapter validator (t16)
+        (16, 64, False, 2, [1, 2, 4, 8, 16]),  # reduced 16-slot runs (t13)
+        # 32 slots: fit by the estimate (0a2663d0b6b picked 1/2/4/8 at 96 MiB: G9 OOM; 1 at 64 MiB: estimated 66.1 MiB)
+        (32, 96, True, 42, [1, 2, 4, 32]),
+        (32, 96, False, 42, [1, 2, 4, 32]),
+        (32, 64, False, 42, None),
+        (32, 64, True, 42, None),
+    ],
+)
+def test_fit_row_buckets_to_trace_region(S, region_mib, with_dsa, n_layers, want):
+    tbs = B.moe_row_buckets(S)
+    got = B.fit_row_buckets(tbs, n_layers, region_mib << 20, with_dsa=with_dsa)
+    assert got == want
+    k = len(got) - 1 if got else 0
+    assert B.decode_trace_estimate(S, n_layers, k, with_dsa) <= region_mib << 20 or k == 0
+
+
+def test_trace_estimate_matches_measured_captures():
+    MiB = 1 << 20
+    # 16 slots, k = 4 + DSA points: measured 93.2 MiB with the sampler (stage-9 G9) -> the estimate covers it
+    assert B.decode_trace_estimate(16, 42, 4, True) >= 93.2 * MiB
+    # 32 slots, DSA, k = 4: the G9 capture ran out of a 96 MiB region -> the estimate must exceed 96 MiB
+    assert B.decode_trace_estimate(32, 42, 4, True) > 96 * MiB

@@ -120,11 +120,29 @@ def moe_row_buckets(S: int):
     return tb + [S]
 
 
-# trace-region cost of one MoE row-bucket point trace (compaction + pairs path), measured: 253,952 B (stage-10 t15)
+# Trace-region model of the segmented decode (bytes per die), calibrated on measured captures:
+#   decode(S, k) = DECODE_BASE + DECODE_PER_SLOT * (S - 16) [+ DSA_POINTS] + k * n_moe_layers * MOE_POINT_TRACE_BYTES
+#   + SAMPLER_MARGIN, k = row buckets below S.
+#   16 slots, no DSA buckets (t15b, 16,384): k = 1 -> 57.9 MiB, k = 4 -> 89.4 MiB: 10.5 MiB per bucket (254 KB per
+#     point trace x 42) and DECODE_BASE = 47.4 MiB.
+#   16 slots, DSA buckets on (stage-9 G9 probe, 260,096, 96 MiB): k = 4 -> 92.4 MiB decode, 93.2 MiB with the sampler
+#     traces: DSA_POINTS = 3.0 MiB, sampler about 0.8 MiB.
+#   32 slots: the stage-9 single-trace capture grows 41.6 -> 46.4 MiB from 16 to 32 slots: DECODE_PER_SLOT = 0.31 MiB;
+#     a point trace is 245,760 B (G9 32-slot OOM, 96 MiB, k = 4: about 95.8 MiB allocated at the failure).
 MOE_POINT_TRACE_BYTES = 260_000
-# decode step + sampler traces without row buckets (64 MiB region: 40.4 MB, stage 7) + DSA bucket points (~4 MB) +
-# segment overhead: what the row-bucket variants must leave room for
-DECODE_TRACE_BYTES = 46 << 20
+DECODE_BASE_BYTES = int(47.4 * (1 << 20))
+DECODE_PER_SLOT_BYTES = int(0.31 * (1 << 20))
+DSA_POINTS_BYTES = 3 << 20
+SAMPLER_MARGIN_BYTES = int(1.5 * (1 << 20))
+HEADROOM_BYTES = int(
+    1.5 * (1 << 20)
+)  # kept free: the 32-slot point traces and the serving sampler variants are not all measured
+
+
+def decode_trace_estimate(S: int, n_layers: int, k: int, with_dsa: bool = False) -> int:
+    """Estimated trace-region bytes of the segmented decode + sampler traces with k MoE row buckets below S."""
+    base = DECODE_BASE_BYTES + DECODE_PER_SLOT_BYTES * (S - 16) + (DSA_POINTS_BYTES if with_dsa else 0)
+    return base + SAMPLER_MARGIN_BYTES + k * n_layers * MOE_POINT_TRACE_BYTES
 
 
 def _trace_region(mesh) -> int:
@@ -136,13 +154,15 @@ def _trace_region(mesh) -> int:
 
 
 def fit_row_buckets(tbs, n_layers: int, region: int, with_dsa: bool = False):
-    """The smallest row buckets (1, 2, 4, ...) whose extra point traces fit the trace region; None when none fits.
-    Every bucket below S adds one point trace per MoE layer (42 x 254 KB = 10.7 MB): a 64 MiB region holds the 1-row
-    bucket, 96 MiB holds 1 / 2 / 4 / 8 (16 slots)."""
+    """The smallest row buckets (1, 2, 4, ...) whose point traces fit the trace region by decode_trace_estimate (slot
+    aware); None when not even the 1-row bucket fits. 16 slots: 64 MiB -> 1, 96 MiB -> 1 / 2 / 4 / 8; 32 slots: 64 MiB ->
+    none, 96 MiB -> 1 / 2 / 4."""
     if not tbs:
         return None
-    room = region - DECODE_TRACE_BYTES - (4 << 20 if with_dsa else 0)
-    k = max(0, min(len(tbs) - 1, room // (n_layers * MOE_POINT_TRACE_BYTES)))
+    S = tbs[-1]
+    k = 0
+    while k < len(tbs) - 1 and decode_trace_estimate(S, n_layers, k + 1, with_dsa) + HEADROOM_BYTES <= region:
+        k += 1
     return tbs[:k] + [tbs[-1]] if k else None
 
 
