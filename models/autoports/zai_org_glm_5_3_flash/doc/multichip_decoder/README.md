@@ -32,8 +32,9 @@ false. Corrected in place:
 - `serving_profiles.json` selects a DSA layout per profile since 3489dfefee2.
 - New evidence: the fp8 block-sharded rows under the watcher, the bf16 `test_dsa_shard.py` on the committed code,
   and the committed sharded row check (`test_model_probe.py`, `GLM53_DSA_SHARD=1`) (Watcher; `dsa_shard/s4r3_*`).
-  The row check passes. The probe's shared-buffer-free check fails at `tt/dsa_shard.py:411` (benign, one-line fix in
-  frozen code, reported) and at a stage-10 MoE bucket site (Block-sharded DSA cache, review #3 re-runs).
+  The row check passes. On 51997a179ba the probe's shared-buffer-free check failed at `tt/dsa_shard.py:411` (benign)
+  and at a stage-10 MoE bucket site. Both are fixed in 0bcf89f7fd6. On the fixed code (stage-10 t19) the sharded
+  probe passes at 8 and 1 slots (Block-sharded DSA cache, review #3 re-runs).
 - The sink weight at prefill is not measured (Limitations).
 
 ## Review #1 corrections (2026-10-17)
@@ -366,14 +367,26 @@ another tensor still references):
 - `dsa_shard.py:411 <- dsa_shard.py:360 / 367 <- dsa.py:853 / 971` (8 slots: 38 calls, 1 slot: 34 calls). This is
   `ttnn.deallocate(q_rm0)` in `_shard_attend`, while `q_rm = ttnn.reshape(q_rm0, ...)` (a view) is still a live
   Python object. `q_rm` is not used after `sparse_sdpa`, so no op reads freed memory: the result is benign, but it
-  breaks the probe's rule. The fix is one line (for example `del q_rm` before the deallocate). It is in frozen
-  `tt/` code: reported to the lead, not changed here. This site was not found earlier because the sharded probe of
+  breaks the probe's rule. Fixed in 0bcf89f7fd6 (`del q_rm` before the deallocate, `tt/dsa_shard.py:411`). This site was not found earlier because the sharded probe of
   2026-10-18 (`~/glm53-flash-bringup/logs/s67r/j1_probe_s8_shard.log`) ran before the dealloc check existed.
 - `moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387` (8 slots only, 8 calls): the stage-10 MoE active-count
   bucket path. The same site fails the replicated stage-6 probe on 0a2663d0b6b. It is a stage-10 defect (stage 10 owns
-  the fix), not a layout defect.
+  the fix), not a layout defect. Fixed in 0bcf89f7fd6 (`moe_opt`: `force=False` on the shared free).
 
-After the stage-10 fix and the `dsa_shard.py:411` fix land, the two probe runs are to be repeated.
+Passing run on the fixed code: stage-10 ticket t19 (2026-10-21 15:17 .. 15:23, snapshot `s10_snap18` = 17f8192a391 +
+the fix; the `tt/` md5s are identical to 0bcf89f7fd6; excerpt `dsa_shard/s4r3_t19_probe_excerpt.log`, full log
+`~/glm53-flash-bringup/logs/s10/t19.log`), `tests/test_model_probe.py` with `GLM53_DEALLOC_CHECK=1`:
+
+| Layout, slots | Result |
+|---|---|
+| `GLM53_DSA_SHARD=1`, 8 slots | **7 passed** |
+| `GLM53_DSA_SHARD=1`, 1 slot | **6 passed, 1 skipped** |
+| replicated, 8 slots (control) | 7 passed |
+| replicated, 32 slots (control) | 7 passed |
+
+The only shared-buffer frees left are outside the autoport (`models/common/sampling/tt_sampling.py:1170`, 25 calls).
+The test reports them and does not fail on them (owned elsewhere). The c steps of the review #3 ticket were not
+re-run: t19 covers them.
 
 **History.** `doc/multichip_decoder/s4_suite.log` (2026-10-16, stage-4 code, pre-fp32-fix kernels, bfp4 bar shift on
 the MoE layers): 44 passed; update PCC vs single die 0.999782 .. 0.999992, rms ratio 0.99651 .. 1.00353; decode-mean

@@ -135,6 +135,10 @@ See the README sections "Review #1 corrections", "Block-sharded DSA cache" and "
     passed, 1 skipped, 1 failed. Both failures are `test_no_shared_buffer_frees`: `tt/dsa_shard.py:411` (deallocate of
     `q_rm0` with its reshape view `q_rm` alive; benign; one-line fix in frozen code, reported to the lead) and, at 8
     slots, `moe_opt.py:895 <- model.py:300 <- dsa_buckets.py:387` (stage-10 defect, the same as the stage-6 probe on
-    0a2663d0b6b). Re-run after both fixes land.
+    0a2663d0b6b). Both fixed in 0bcf89f7fd6.
+  - 15:17 .. 15:23 stage-10 t19 (snapshot `s10_snap18` = 17f8192a391 + the fix, `tt/` md5s identical to 0bcf89f7fd6;
+    `dsa_shard/s4r3_t19_probe_excerpt.log`): `test_model_probe.py` with `GLM53_DEALLOC_CHECK=1`. `GLM53_DSA_SHARD=1`:
+    8 slots 7 passed, 1 slot 6 passed + 1 skipped. Replicated controls: 8 and 32 slots, 7 passed each. This replaces
+    the re-run of the c steps.
   - (d) `shard_fp8_batch32_dsa_moe` watcher: 0 suspicious lines, no tripped assert; the test failed its HF bars,
     which are for the stage-7 policy (README Watcher).

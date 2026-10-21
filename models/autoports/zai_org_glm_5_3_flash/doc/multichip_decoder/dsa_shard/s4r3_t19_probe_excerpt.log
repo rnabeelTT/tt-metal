@@ -1,0 +1,112 @@
+=== start Wed Oct 21 03:17:51 PM UTC 2026 : timeout -k 60 14000 /home/raahem/glm53-flash-bringup/scripts/s10_t19.sh
+17f8192a3917b3330efe6ef833c5d0c1a16da7dd
+daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+ff90e6d779884a5f54c5aad038aeab9e  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+6f665caa6a2e6abe1c841c2759062fdb  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+f33b9abfc24abbb5e68d8afa9871eaf7  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+31fdc53c1a0c841944e92cb553d27dd2  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+9b551ef2ab7292212500dbedf5b72e86  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+ff90e6d779884a5f54c5aad038aeab9e  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+31fdc53c1a0c841944e92cb553d27dd2  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+6f665caa6a2e6abe1c841c2759062fdb  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+f33b9abfc24abbb5e68d8afa9871eaf7  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+99c6463d04c637d3b612116d2e048fd5  models/autoports/zai_org_glm_5_3_flash/tools/moe_bucket_check.py
+77478f1e07e328040fb9a21eb3691e0a  models/autoports/zai_org_glm_5_3_flash/tests/test_dsa_buckets_host.py
+98e8b24dee37a54624a55417f347c0bd  models/autoports/zai_org_glm_5_3_flash/tests/test_generator_vllm_host.py
+=== probe slots=8 shard=0 Wed Oct 21 03:17:51 PM UTC 2026
+2026-10-21 15:18:06.645 | INFO     | conftest:expect_error_:960 - [EXPECTED_ERROR BEGIN] ValueError message="cache is full"
+2026-10-21 15:18:06.646 | INFO     | conftest:expect_error_:965 - [EXPECTED_ERROR END] ValueError message="cache is full"
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+PASSED
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees shared-buffer frees: {'../../../../../../tt-metal/models/common/sampling/tt_sampling.py:1170 <- serving_state.py:69 <- ../../../../../../tt-metal/models/common/lightweightmodule.py:12': 25}
+PASSED2026-10-21 15:18:13.644 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(11))
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+======================== 7 passed, 2 warnings in 20.48s ========================
+rc 0
+=== probe slots=32 shard=0 Wed Oct 21 03:18:59 PM UTC 2026
+2026-10-21 15:19:11.689 | INFO     | conftest:expect_error_:960 - [EXPECTED_ERROR BEGIN] ValueError message="cache is full"
+2026-10-21 15:19:11.689 | INFO     | conftest:expect_error_:965 - [EXPECTED_ERROR END] ValueError message="cache is full"
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+PASSED
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees shared-buffer frees: {'../../../../../../tt-metal/models/common/sampling/tt_sampling.py:1170 <- serving_state.py:69 <- ../../../../../../tt-metal/models/common/lightweightmodule.py:12': 25}
+PASSED2026-10-21 15:19:19.155 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(15))
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+======================== 7 passed, 2 warnings in 18.36s ========================
+rc 0
+=== probe slots=8 shard=1 Wed Oct 21 03:20:04 PM UTC 2026
+2026-10-21 15:20:16.438 | INFO     | conftest:expect_error_:960 - [EXPECTED_ERROR BEGIN] ValueError message="cache is full"
+2026-10-21 15:20:16.438 | INFO     | conftest:expect_error_:965 - [EXPECTED_ERROR END] ValueError message="cache is full"
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+PASSED
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees shared-buffer frees: {'../../../../../../tt-metal/models/common/sampling/tt_sampling.py:1170 <- serving_state.py:69 <- ../../../../../../tt-metal/models/common/lightweightmodule.py:12': 25}
+PASSED2026-10-21 15:20:23.461 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(11))
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_batch_slots
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+======================== 7 passed, 2 warnings in 17.29s ========================
+rc 0
+=== probe slots=1 shard=1 Wed Oct 21 03:21:08 PM UTC 2026
+2026-10-21 15:21:22.680 | INFO     | conftest:expect_error_:960 - [EXPECTED_ERROR BEGIN] ValueError message="cache is full"
+2026-10-21 15:21:22.680 | INFO     | conftest:expect_error_:965 - [EXPECTED_ERROR END] ValueError message="cache is full"
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions PASSED
+PASSED
+PASSED
+models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees shared-buffer frees: {'../../../../../../tt-metal/models/common/sampling/tt_sampling.py:1170 <- serving_state.py:69 <- ../../../../../../tt-metal/models/common/lightweightmodule.py:12': 25}
+PASSED2026-10-21 15:21:26.476 | DEBUG    | models.common.sampling.generator:reset_trace:173 - Resetting sampling trace (bucket=None, penalties=False, log_probs=False, force_argmax=False, trace_id=MeshTraceId(1))
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_decode_inputs_match_host
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_traced_greedy_matches_eager
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_token_feedback_and_positions
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_page_table_change_traced
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_sampling_alternation
+PASSED models/autoports/zai_org_glm_5_3_flash/tests/test_model_probe.py::test_no_shared_buffer_frees
+================== 6 passed, 1 skipped, 2 warnings in 15.99s ===================
+rc 0
+=== (excerpt of ~/glm53-flash-bringup/logs/s10/t19.log lines 1-111; the invariance steps that follow belong to stage 10)
