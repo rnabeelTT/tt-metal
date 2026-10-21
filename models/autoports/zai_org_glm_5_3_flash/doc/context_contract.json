@@ -147,28 +147,21 @@
     "doc": "doc/optimized_multichip_decoder/README.md (Memory and context contract)",
     "status": "unchanged from the multichip decoder (see multichip_decoder; the block-sharded DSA cache is an MCOpts option of both)"
   },
-  "supported_context": 325632,
-  "limiting_reason": "device_dram",
+  "supported_context": 1048576,
+  "supported_context_source": "stage 9 G9 probe of serving profile p300x2-1m (serving_profiles.json): 1 slot, block-sharded fp8 DSA cache (GLM53_DSA_SHARD=1, GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32, 600 MiB workspace), selected precision combo_a_kv_dense4_g4",
+  "limiting_reason": null,
   "capacity_evidence": {
-    "probe": "tools/memory_probe.py capacity --slots 1 --trace-region 67108864, GLM53_PRECISION unset (selected default combo_a_kv_dense4_g4), code HEAD 9fcc17c0dc4 + tt/precision.py 6f46fec82f0f (~/glm53-flash-bringup/s8r3b_snapshot; scripts s8r3b_inner.sh, s8r3c_inner.sh)",
+    "probe": "doc/vllm/capacity/s1_p300x2-1m/capacity.json (tools/memory_probe.py capacity via ~/glm53-flash-bringup/scripts/09-g9-probe.sh, PROFILE=p300x2-1m, snapshot of 3489dfefee2)",
     "free_after_load_bytes": 3139928064,
-    "dsa_bytes_per_block_all_layers": 811008,
-    "runs": {
-      "325632_ws1000": "PASS: doc/datatype_sweep/capacity/final_s1_325632_ws1000_moe512_ix32 (GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32): pool 2,545 blocks, 325,571-token non-aligned copy prompt, prefill 520.4 s, 24 traced decode steps, copy accuracy 1.0, 224 MB per die free at the prefill peak",
-      "337920_ws832_ix32": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512_ix32 (same options): pool 2,641 blocks; warm-up and capture pass; the 337,859-token prefill runs out of DRAM in the MoE row split (82.6 MB, largest free block 8.6 MB per bank); doc/datatype_sweep/evidence/h9c_cap_337920_ix32.excerpt.txt",
-      "337920_ws832": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512 (GLM53_MOE_SORTED_ROWS=512 only): out of DRAM in the warm-up prefill, DSA indexer _select_pools (43 MB); doc/datatype_sweep/evidence/h9_cap_337920_moe512.excerpt.txt"
-    },
-    "result": "bracket: 325,632 passes, 337,920 fails (the 2,048-token steps between were not probed). The passing probe sets two non-default bit-identical split options (MoE rows 512, indexer score blocks 32 MB; defaults 1,024 rows and 64 MB).",
-    "earlier_weights_combo_a_kv": "datatype_sweep.capacity_evidence (311,296 at 1,024 MiB, review #1 / #2)"
+    "dsa_bytes_per_block_all_layers": 292864,
+    "pool_blocks": 8194,
+    "prompt_len": 1048515,
+    "prefill_seconds": 2776.4,
+    "copy_accuracy": 1.0,
+    "free_at_prefill_peak_bytes": 273782272,
+    "earlier": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576 (stage 6 review #2, same result)"
   },
-  "capability_reduction": {
-    "from": 1048576,
-    "to": 325632,
-    "reason": "Layout and speed choice, not a hard device limit. The replicated fp8 latent needs 1,048,576 x 6,336 B = 6.64 GB per die against 3,139,928,064 B free after the weights load (die_allocatable_bytes already excludes the 64 MiB trace region); the replicated default holds 325,632 tokens at 1 slot. The block-sharded fp8 layout (2,288 B per token per die) holds 1,048,576 tokens at 1 slot (measured: copy 1.0 at 1,048,515 tokens) and costs +2.9 ms per decode token at 16K; it is selected with GLM53_DSA_SHARD=1",
-    "setting": "default: Glm53Generator / vLLM, GLM53_PRECISION unset (combo_a_kv_dense4_g4), max_num_seqs 1, max_model_len 325632, workspace 1,000 MiB, GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32, GLM53_TRACE_REGION 67108864 (capacity_evidence). Advertised context: GLM53_DSA_SHARD=1, max_seq_len 1048576, 1 slot, 600 MiB workspace, same MoE / index options (dsa_block_sharded_fp8.capacity_evidence)",
-    "path_to_advertised": "Reached at 1 slot with option (b), the block-sharded fp8 latent (dsa_block_sharded_fp8). Corrected byte math per die (fp8 rows must be 576 B, 64 B aligned for sparse_sdpa): (b) 11 x (576 / 4 + 64) = 2,288 B per token, 2.77x the tokens per byte of the replicated 6,336 B; (a) + (b) 11 x (576 / 4 + 16) = 1,760 B per token (pool-key sharding: not implemented, see dsa_block_sharded_fp8.pool_key_sharding_a). 1,048,576 tokens with (b): 2,399,434,752 B of pool + 180,549,632 B of DSA constants against 3,139,928,064 B free after load, with 194 MB still free at the warm-up peak. To make 1,048,576 the default: a serving profile with the block-sharded layout (dsa_block_sharded_fp8.serving_profile_recommendation)",
-    "applies_to": "the default replicated fp8 layout (all serving profiles today). Not a device limit: the block-sharded fp8 layout holds the advertised 1,048,576 tokens at 1 slot (dsa_block_sharded_fp8, measured)"
-  },
+  "capability_reduction": null,
   "datatype_sweep": {
     "status": "measured (stage 8, review #3 rework on HEAD 9fcc17c0dc4)",
     "selected_policy": "combo_a_kv_dense4_g4 (doc/datatype_sweep/selected_precision_config.json): bfp4 LoFi KDA / DSA projections, shared expert and LM head (layers 1-43), dense MLP bfp4 LoFi on layers 1-2, the bfp4-tuned decode programs of all ten groups, fp8 e4m3 DSA latent pool",
@@ -230,7 +223,7 @@
     },
     "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB): weights + model-level tensors 32.12 GB per die leave ~2.0 GB; the 11 DSA layers' latent + pool-key cache is replicated on every die at 11,968 B per token, after the 64 MiB trace region, ~0.55 GB prefill / warm-up workspace and margin"
   },
-  "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv_dense4_g4): weights + model-level tensors leave 3.14 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a ~1,000 MiB prefill / warm-up workspace",
+  "limiting_reason_detail": "none at 1 slot: the advertised 1,048,576 tokens fit with the block-sharded fp8 DSA cache. The replicated fp8 default (faster decode) holds less; see replicated_default_layout.",
   "dsa_block_sharded_fp8": {
     "status": "measured (stage-6 review #2 P1-1, 2026-10-20)",
     "layout": "block-sharded DSA latent with fp8 e4m3 rows (tt/dsa_shard.py): global block b on die b % 4 (local block b // 4), rows 576 wide (512 latent + 64 control columns, 576 B), sparse_sdpa kv_format FP8_E4M3; pool keys, indexer and top-512 selection replicated",
@@ -272,5 +265,31 @@
     },
     "pool_key_sharding_a": "not implemented. Op contract: indexer_score_dsa scores k.logical_shape()[2] keys and needs page-table ids below the view's 32-key tiles (ttnn/cpp/ttnn/operations/experimental/indexer_score/device/indexer_score_device_operation.cpp:95-99), so the [KB, 1, P_alloc, 128] pool-key view must hold P_alloc keys on every die whatever the ownership. Sharding needs a compact per-die pool numbering (per-die limits and id maps in the prefill inputs and in the decode trace) plus a per-die top-512 and a merge top-k. Not needed for 1,048,576 at 1 slot; it would raise multi-slot capacity",
     "serving_profile_recommendation": "a separate 1-slot long profile: max_num_seqs 1, max_model_len 1,048,576, GLM53_DSA_SHARD=1, 600 MiB workspace (GLM53_DRAM_RESERVE_MIB=600 for the standalone generator), GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32. The default profiles stay replicated (faster: -2.9 ms per token). The vLLM adapter / serving_profiles.json do not have a per-profile DSA layout yet (stage 9 / 10 item)"
+  },
+  "replicated_default_layout": {
+    "note": "the default serving profiles (p300x2, p300x2-long, p300x2-wide, p150x4) use the replicated fp8 DSA cache: faster decode, smaller context. Values before the p300x2-1m profile existed (stage 9, 2026-10-21).",
+    "supported_context": 325632,
+    "limiting_reason": "device_dram",
+    "limiting_reason_detail": "device DRAM (p300x2, 4 dies x 34.18 GB) under the stage-8 default policy (combo_a_kv_dense4_g4): weights + model-level tensors leave 3.14 GB per die after load; the 11 DSA layers' cache is replicated on every die at 6,336 B per token (fp8 e4m3 latent 512 B + bf16 pool keys 64 B per layer), after the 64 MiB trace region and a ~1,000 MiB prefill / warm-up workspace",
+    "capacity_evidence": {
+      "probe": "tools/memory_probe.py capacity --slots 1 --trace-region 67108864, GLM53_PRECISION unset (selected default combo_a_kv_dense4_g4), code HEAD 9fcc17c0dc4 + tt/precision.py 6f46fec82f0f (~/glm53-flash-bringup/s8r3b_snapshot; scripts s8r3b_inner.sh, s8r3c_inner.sh)",
+      "free_after_load_bytes": 3139928064,
+      "dsa_bytes_per_block_all_layers": 811008,
+      "runs": {
+        "325632_ws1000": "PASS: doc/datatype_sweep/capacity/final_s1_325632_ws1000_moe512_ix32 (GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32): pool 2,545 blocks, 325,571-token non-aligned copy prompt, prefill 520.4 s, 24 traced decode steps, copy accuracy 1.0, 224 MB per die free at the prefill peak",
+        "337920_ws832_ix32": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512_ix32 (same options): pool 2,641 blocks; warm-up and capture pass; the 337,859-token prefill runs out of DRAM in the MoE row split (82.6 MB, largest free block 8.6 MB per bank); doc/datatype_sweep/evidence/h9c_cap_337920_ix32.excerpt.txt",
+        "337920_ws832": "FAIL: doc/datatype_sweep/capacity/final_s1_337920_ws832_moe512 (GLM53_MOE_SORTED_ROWS=512 only): out of DRAM in the warm-up prefill, DSA indexer _select_pools (43 MB); doc/datatype_sweep/evidence/h9_cap_337920_moe512.excerpt.txt"
+      },
+      "result": "bracket: 325,632 passes, 337,920 fails (the 2,048-token steps between were not probed). The passing probe sets two non-default bit-identical split options (MoE rows 512, indexer score blocks 32 MB; defaults 1,024 rows and 64 MB).",
+      "earlier_weights_combo_a_kv": "datatype_sweep.capacity_evidence (311,296 at 1,024 MiB, review #1 / #2)"
+    },
+    "capability_reduction": {
+      "from": 1048576,
+      "to": 325632,
+      "reason": "Layout and speed choice, not a hard device limit. The replicated fp8 latent needs 1,048,576 x 6,336 B = 6.64 GB per die against 3,139,928,064 B free after the weights load (die_allocatable_bytes already excludes the 64 MiB trace region); the replicated default holds 325,632 tokens at 1 slot. The block-sharded fp8 layout (2,288 B per token per die) holds 1,048,576 tokens at 1 slot (measured: copy 1.0 at 1,048,515 tokens) and costs +2.9 ms per decode token at 16K; it is selected with GLM53_DSA_SHARD=1",
+      "setting": "default: Glm53Generator / vLLM, GLM53_PRECISION unset (combo_a_kv_dense4_g4), max_num_seqs 1, max_model_len 325632, workspace 1,000 MiB, GLM53_MOE_SORTED_ROWS=512, GLM53_DSA_INDEX_BLOCK_MB=32, GLM53_TRACE_REGION 67108864 (capacity_evidence). Advertised context: GLM53_DSA_SHARD=1, max_seq_len 1048576, 1 slot, 600 MiB workspace, same MoE / index options (dsa_block_sharded_fp8.capacity_evidence)",
+      "path_to_advertised": "Reached at 1 slot with option (b), the block-sharded fp8 latent (dsa_block_sharded_fp8). Corrected byte math per die (fp8 rows must be 576 B, 64 B aligned for sparse_sdpa): (b) 11 x (576 / 4 + 64) = 2,288 B per token, 2.77x the tokens per byte of the replicated 6,336 B; (a) + (b) 11 x (576 / 4 + 16) = 1,760 B per token (pool-key sharding: not implemented, see dsa_block_sharded_fp8.pool_key_sharding_a). 1,048,576 tokens with (b): 2,399,434,752 B of pool + 180,549,632 B of DSA constants against 3,139,928,064 B free after load, with 194 MB still free at the warm-up peak. To make 1,048,576 the default: a serving profile with the block-sharded layout (dsa_block_sharded_fp8.serving_profile_recommendation)",
+      "applies_to": "the default replicated fp8 layout (all serving profiles today). Not a device limit: the block-sharded fp8 layout holds the advertised 1,048,576 tokens at 1 slot (dsa_block_sharded_fp8, measured)"
+    }
   }
 }

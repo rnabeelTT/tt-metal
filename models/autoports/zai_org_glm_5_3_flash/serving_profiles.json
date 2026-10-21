@@ -85,11 +85,27 @@
     "dsa_bytes_per_block": 292864,
     "reserve_bytes": 629145600,
     "evidence": {
-     "dsa_bytes_per_block": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/capacity.json dsa_bytes_per_block_all_layers (11 x 128 x (576 / 4 + 64))",
-     "reserve_bytes": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/capacity.json workspace_mib 600 (1,048,576 tokens, copy 1.0; 194 MB free at the warm-up peak)"
-    }
+     "dsa_bytes_per_block": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1_p300x2-1m/capacity.json dsa_bytes_per_block_all_layers",
+     "reserve_bytes": "doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/capacity.json workspace_mib 600 (1,048,576 tokens, copy 1.0; 194 MB free at the warm-up peak)",
+     "free_after_load_bytes": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1_p300x2-1m/capacity.json after_load"
+    },
+    "free_after_load_bytes": 3139928064
    },
-   "measured": {}
+   "measured": {
+    "1": {
+     "pool_blocks": 8194,
+     "capped_by_max_seq_len": true,
+     "max_model_len_tested": 1048576,
+     "prompt_len": 1048515,
+     "copy_accuracy": 1.0,
+     "free_at_prefill_peak_bytes": 273782272,
+     "trace_allocated_bytes": 42663936,
+     "free_after_load_bytes": 3139928064,
+     "workspace_mib": 600.0,
+     "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1_p300x2-1m/capacity.json",
+     "date": "2026-10-21"
+    }
+   }
   }
  },
  "profiles": [
@@ -119,7 +135,7 @@
    "max_num_seqs": 1,
    "dsa_layout": "sharded",
    "max_model_len": 1048576,
-   "status": "estimate"
+   "status": "measured"
   },
   {
    "name": "p300x2-wide",
