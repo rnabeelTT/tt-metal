@@ -19,9 +19,16 @@ archive of HEAD + the stage-10 files, md5s in the snapshot). Scripts: `~/glm53-f
 | t13 | MoE row buckets, reduced | pairs exact; 7.01 -> 5.42 ms at 1 active |
 | t14 | prefill views, full model 243,712 | TTFT 8K 5,611 -> 4,376 ms; teacher forcing identical |
 | t15, t15b | MoE row buckets, full model 16 slots | t15: 64 MiB trace region overflow -> fit_row_buckets; t15b: 106.3 -> 72.9 ms at 1 active, exact |
+| t16 | vLLM adapter validator on HEAD + the P1/P2 set | PASS, PROGRAM_GUARD 929 = 929 |
+| t17 | async stale-input test (4 slots, buckets active) on 0a2663d0b6b | ASYNC_RESULT PASS |
+| (host) | slot-aware trace-region fit (G9 32-slot capture out of memory) | identical lists for every measured config; 32 slots fit; committed 044dbeaa3fd |
+| t18 | wide batch invariance (32 slots): off / old / family / pairs | old not invariant at 32 active; family (sorted) invariant, 118.6 / 123.8 / 147.4 ms at 1 / 8 / 32 active, TF 93 |
+| t19 | dealloc fixes (moe_opt pairs 1-row ids, dsa_shard q_rm view) + family rule | probe DEALLOC_CHECK clean in 8 / 32 replicated and 8 / 1 sharded; invariance at 32 and 8 slots bit-identical |
+| stage-9 s9_final / wide-r2 | served after numbers | p300x2 1 user TPOT 119.27 -> 69.91 ms; wide on the fixed code: burst 32/32 = solo, 1 user 120.9 ms, 32 users 160.1 ms |
 
 Commits: 86403d19830 (DSA width buckets, pool-key alias), 0a2663d0b6b (MoE row buckets, prefill views, shared iotas,
-per-profile trace region).
+per-profile trace region), 51997a179ba (docs), 044dbeaa3fd (slot-aware trace-region fit), 0bcf89f7fd6
+(batch-invariant MoE buckets, dealloc fixes; t18, t19), 36f3dd30b61 (stage 9: wide final on the fixed code).
 
-Pending: the combined stage-9 serving ticket (served before/after per profile, CI burst, sampling tests, qualitative
-outputs, G9 re-probe), then the stage review.
+The combined stage-9 serving ticket (s9_final) and the wide re-run supplied the served after values. Next: the
+stage-10 review.

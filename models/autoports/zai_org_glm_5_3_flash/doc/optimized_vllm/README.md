@@ -272,7 +272,8 @@ Ticket t15b (full model, 16 slots, max_seq_len 16,384, default precision):
 - One row-bucket point trace is 254 KB of trace region, so each bucket below S costs about 10.7 MB for 42 MoE layers.
   `fit_row_buckets` keeps only the buckets the trace region holds: 64 MiB keeps the 1-row bucket, 96 MiB keeps 1 / 2 / 4 / 8.
 - An explicit `GLM53_MOE_BUCKETS` list is taken as given.
-- The multi-slot serving profiles (p300x2, p300x2-wide, p150x4) take a 96 MiB trace region: `trace_region_bytes` per
+- The multi-slot serving profiles take a larger trace region: p300x2 and p150x4 96 MiB, p300x2-wide 160 MiB (32 slots:
+  six row buckets, 107.3 MiB captured): `trace_region_bytes` per
   profile in `serving_profiles.json`, read by `tt/serving_profiles.trace_region` and rendered into `tt-model.yaml`. The
   1-slot profiles keep 64 MiB.
 - The standalone generator uses the region its mesh was opened with: 1-row bucket at 64 MiB.
@@ -294,7 +295,7 @@ Memory: the pool iotas are one tensor per mesh, not one per layer. Net change pe
 |---|---|---|---|
 | p300x2 16 x 243,712 | -210 MiB | +32 MiB (96 MiB) | **-178 MiB** |
 | p300x2-long 325,632 | -78 MiB | 0 (64 MiB) | **-78 MiB** |
-| p300x2-wide 32 x 151,552 | -130 MiB | +32 MiB (96 MiB) | **-98 MiB** |
+| p300x2-wide 32 x 137,216 | -130 MiB | +96 MiB (160 MiB) | **-34 MiB** |
 | p150x4 16 x 243,712 | -210 MiB | +32 MiB (96 MiB) | **-178 MiB** |
 
 The block-sharded `p300x2-1m` profile is unchanged. Every multi-slot measurement in `serving_profiles.json` was taken
@@ -350,26 +351,34 @@ Settings that changed between the two columns:
 | 8 | 1,024 / 256 | 6,089 ms | 6,091 ms | 144.8 ms | 121.7 ms | 6.90 | 8.20 | 47.6 | 55.2 |
 | 16 | 1,024 / 256 | 12,170 ms | 12,167 ms | 180.5 ms | 174.4 ms | 5.50 | 5.70 | 70.4 | 72.3 |
 
-### p300x2-wide — after values PROVISIONAL (measured before the batch-invariance fix) (max_model_len 151,552)
+### p300x2-wide (32 slots; before: max_model_len 151,552, pre-stage-10 A7 sweep; after: 137,216, 160 MiB trace region, all MoE buckets sorted, `doc/vllm/evidence/final/wide-r2_sweep.json`)
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 128 / 128 | 256 ms | 268 ms | 120.4 ms | 76.0 ms | 8.30 | 13.20 | 8.2 | 12.9 |
-| 1 | 1,024 / 256 | 774 ms | 811 ms | 122.3 ms | 77.9 ms | 8.20 | 12.80 | 8.0 | 12.4 |
-| 1 | 16,384 / 256 | 12,306 ms | 9,934 ms | 124.6 ms | 80.2 ms | 8.00 | 12.50 | 5.8 | 8.4 |
-| 1 | 131,072 / 256 | 101,427 ms | 92,778 ms | 125.4 ms | 83.9 ms | 8.00 | 11.90 | 1.9 | 2.2 |
-| 8 | 128 / 128 | 1,995 ms | 2,016 ms | 133.9 ms | 125.9 ms | 7.50 | 7.90 | 54.2 | 56.8 |
-| 16 | 128 / 128 | 3,986 ms | 3,987 ms | 150.7 ms | 182.0 ms | 6.60 | 5.50 | 89.2 | 75.5 |
-| 32 | 128 / 128 | 7,954 ms | 7,974 ms | 168.7 ms | 163.3 ms | 5.90 | 6.10 | 139.9 | 142.7 |
-| 8 | 1,024 / 256 | 6,158 ms | 6,198 ms | 133.5 ms | 127.7 ms | 7.50 | 7.80 | 50.8 | 52.8 |
-| 16 | 1,024 / 256 | 12,305 ms | 12,318 ms | 150.9 ms | 183.8 ms | 6.60 | 5.40 | 80.9 | 69.2 |
-| 32 | 1,024 / 256 | 24,604 ms | 24,638 ms | 166.3 ms | 160.9 ms | 6.00 | 6.20 | 122.6 | 124.7 |
+| 1 | 128 / 128 | 256 ms | 263 ms | 120.4 ms | 121.0 ms | 8.30 | 8.30 | 8.2 | 8.2 |
+| 1 | 1,024 / 256 | 774 ms | 780 ms | 122.3 ms | 122.8 ms | 8.20 | 8.10 | 8.0 | 8.0 |
+| 1 | 16,384 / 256 | 12,306 ms | - (not in the re-run sweep) | 124.6 ms | - (not in the re-run sweep) | 8.00 | - (not in the re-run sweep) | 5.8 | - (not in the re-run sweep) |
+| 1 | 131,072 / 256 | 101,427 ms | - (not in the re-run sweep) | 125.4 ms | - (not in the re-run sweep) | 8.00 | - (not in the re-run sweep) | 1.9 | - (not in the re-run sweep) |
+| 8 | 128 / 128 | 1,995 ms | 2,022 ms | 133.9 ms | 130.0 ms | 7.50 | 7.70 | 54.2 | 55.2 |
+| 16 | 128 / 128 | 3,986 ms | 3,991 ms | 150.7 ms | 145.8 ms | 6.60 | 6.90 | 89.2 | 91.2 |
+| 32 | 128 / 128 | 7,954 ms | 7,963 ms | 168.7 ms | 160.1 ms | 5.90 | 6.20 | 139.9 | 144.8 |
+| 8 | 1,024 / 256 | 6,158 ms | 6,186 ms | 133.5 ms | 132.4 ms | 7.50 | 7.60 | 50.8 | 51.4 |
+| 16 | 1,024 / 256 | 12,305 ms | 12,334 ms | 150.9 ms | 146.3 ms | 6.60 | 6.80 | 80.9 | 82.2 |
+| 32 | 1,024 / 256 | 24,604 ms | 24,612 ms | 166.3 ms | 163.5 ms | 6.00 | 6.10 | 122.6 | 123.6 |
 
-These wide after values were measured before the batch-invariance fix (row buckets 1 / 2 / 4 / 8 / 16 on the pairs
-path, the 32 bucket on the sorted path). That is the defect below: burst identity was 4 of 32 streams. With the fix,
-every wide bucket runs the sorted path. Standalone full model, 32 slots (t18): 1 active 118.6 ms (73.7 ms on the pairs
-buckets, 164.4 ms with buckets off), 8 active 123.8 ms, 32 active 147.4 ms (buckets off: 145.9 ms). The wide sweep must
-be re-run on the fixed code.
+Wide final (36f3dd30b61, the batch-invariance fix): the served burst of 32 concurrent greedy requests matches solo
+greedy on 32 of 32 streams (`wide-r2_smoke.log.txt`, SMOKE_BURST). Before the fix it was 4 of 32. Primary single user
+(128 / 128, 1 request): TTFT 278 ms, TPOT 120.9 ms (8.27 t/s/u). Before stage 10, from the A7 sweep row: TTFT 256 ms,
+TPOT 120.4 ms. CI burst (100 / 100 / 32): TTFT median 7,828 ms, TPOT 161.1 ms, 134.6 tok/s; before
+(`bench_ci_p300x2-wide.log.txt`): 7,817 ms, 167.7 ms, 132.3 tok/s.
+- At 1 user the sorted family runs at the speed of the code before stage 10. The pairs buckets were faster (76 ms) but
+  not batch-invariant.
+- From 8 users up, wide is faster than before: TPOT 133.9 -> 130.0 ms at 8 users, 150.7 -> 145.8 ms at 16, 168.7 ->
+  160.1 ms at 32 (128 input). The sources of this gain are not separated.
+- The standalone t18 build (32 slots, max_seq_len 2,048) gave 164.4 ms with buckets off at 1 active. The served wide
+  build before stage 10 was already at 120.4 ms. The standalone "46 ms faster than off at 1 active" therefore does not
+  carry over to the served wide profile: served single-user TPOT is unchanged (120.4 -> 121.0 ms).
+- G9: 32 x 137,216 at 160 MiB, 107.3 MiB of trace region captured.
 
 ### p300x2-long (max_model_len 325,632)
 
@@ -398,7 +407,7 @@ this release, so the v4b evidence and the combined serving ticket stay valid.
 At 32 slots the build's own MoE path for 32 rows is the expert-sorted path (QWEN35_DECODE_SORTED_MIN_ROWS 32). The row
 buckets below 32 ran the pairs path. A request's routed math therefore depended on how many slots were active. The two
 paths are each row-exact but differ in the last bits. Served wide burst: 4 of 32 greedy streams matched solo (32 of 32
-before stage 10).
+before stage 10). After the fix (36f3dd30b61): 32 of 32 (`doc/vllm/evidence/final/wide-r2_smoke.log.txt`).
 
 Rule (`moe_family`, `moe_bucket_paths`, `GLM53_MOE_BUCKET_PATH=family`, the default): every row bucket, the S bucket
 included, runs the family of the S bucket's own path. That is sorted at 32 slots and pairs at 16 slots and below (no
