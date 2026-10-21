@@ -1,0 +1,20 @@
+SMOKE_CHAT stop reasoning 0 content '```python\nreversed_s = s[::-1]\n```\n\nThis uses slice notation with a step of `-1` to walk through the string backwards.'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-939e1c69f429890b', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0,1\n    while b <n:\n        print(b,'
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    else: \n '
+SMOKE_SEEDED ' #define a function to generate a list of fibonacci numbers up to n\n    if n == '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_cross_entropy_with'
+SMOKE_NONALIGNED 1 1 'Scoped-Scoped-Scoped-Scoped-'
+SMOKE_NONALIGNED 3 3 ' Gutenberg eBook of The I. W.'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and across'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 'he burial-places of this city through\nwhich I pass, is there'
+SMOKE_BURST 32 ok, 2048 tokens in 19.1s = 107.5 tok/s; 32/32 identical to solo greedy
+SMOKE_MAXEFFORT stop 743 tokens; reasoning 2263 chars: 'The user wants a haiku about machine learning. A haiku is a poem with three lines following a 5-7-5 syllable pattern.\n\nL' ... 's or explanation. Maybe a very brief intro or just the poem itself. Given the request is simple, just deliver the haiku.' | content 'Data flows like streams,\nPatterns hidden, slowly learned—\nthe machine awakes.'
+SMOKE_MAXEFFORT stop 178 tokens; reasoning 345 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... ' 2 hours = 5:40. 5:40 + 20 minutes = 6:00. 6:00 + 15 minutes = 6:15. So 2 hours + 20 + 15 = 2 hours 35 minutes. Correct.' | content '**2 hours 35 minutes**\n\n(From 3:40 to 6:40 would be 3 hours; subtracting the 25 minutes back gives 2 h 35 min.)'
+SMOKE_RESULT PASS

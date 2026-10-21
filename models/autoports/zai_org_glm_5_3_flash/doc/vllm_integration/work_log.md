@@ -313,7 +313,7 @@ One device ticket: `~/glm53-flash-bringup/scripts/s9_final.sh <snapshot>` (snaps
 4. p300x2: full plugin suite at 16 (69 / 4 / 4), qualitative, benchmark (copied to `logs/09/final/readiness-p300x2/`
    for the stage-10 AFTER cells), served smokes PASS (burst 8/8 equal to solo), the 197,077-token needle PASS
    ("8197047", TTFT 159.5 s), sweep 15/15 rows.
-5. p300x2-wide (provisional): full plugin suite at 32 (70 / 3 / 4), qualitative, benchmark, sweep 10/10 rows; served
+5. p300x2-wide (on 0a2663d0b6b, superseded by the re-run on 0bcf89f7fd6 below): full plugin suite at 32 (70 / 3 / 4), qualitative, benchmark, sweep 10/10 rows; served
    smokes FAIL on the burst gate only: 4/32 streams equal to solo (stage-10 MoE row buckets, open item).
 6. p300x2-1m: sampling smoke (3 / 0 / 1), qualitative, benchmark -> `readiness_vllm/`; the 1,048,000-token prompt
    answers in 2,308 s; the burst gate 1/2 (the documented block-placement numerics); the 1M needle PASS (1,038,965
@@ -324,7 +324,7 @@ Sweep, p300x2 (1 user, input tokens: TTFT / TPOT): 128: 252 ms / 69.9 ms; 1,024:
 Users at 128 input tokens (TPOT / total tok/s): 2: 74.8 / 25.6; 4: 90.0 / 41.3; 8: 119.9 / 59.6; 16: 172.6 / 79.4.
 At 1,024 input tokens: 2: 76.5 / 24.3; 4: 91.8 / 38.7; 8: 121.7 / 55.2; 16: 174.4 / 72.3.
 
-Sweep, p300x2-wide (provisional; 1 user: 128: 268 ms / 76.0 ms; 1,024: 811 ms / 77.9 ms; 16,384: 9.9 s / 80.2 ms;
+Sweep, p300x2-wide (0a2663d0b6b, superseded by the re-run below; 1 user: 128: 268 ms / 76.0 ms; 1,024: 811 ms / 77.9 ms; 16,384: 9.9 s / 80.2 ms;
 131,072: 92.8 s / 83.9 ms). Users at 128 input tokens: 8: 125.9 / 56.8; 16: 182.0 / 75.5; 32: 163.3 / 142.7. At 1,024:
 8: 127.7 / 52.8; 16: 183.8 / 69.2; 32: 160.9 / 124.7.
 
@@ -408,6 +408,28 @@ VLLM_ENGINE_READY_TIMEOUT_S=3600
 EXTRA_MODELS_DIR=<snapshot>/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
 python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-name $GLM53_CKPT zai-org/GLM-5.3-Flash --tokenizer $GLM53_CKPT --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 1 --max-model-len 1048576 --port 8131 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs \{\"reasoning_effort\":\"low\"\} --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 67108864\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
 ```
+
+## p300x2-wide re-run after the stage-10 MoE-bucket fix (2026-10-21, 0bcf89f7fd6)
+
+Command: `~/glm53-flash-bringup/scripts/s9_wide_rerun.sh <snapshot>` with REPROBE=1, one ticket (snapshot s9l = pure
+`git archive` of 3872b583092 = 0bcf89f7fd6 + stage-4 docs; tt/ code identical to 0bcf89f7fd6). Evidence:
+`doc/vllm/evidence/final/wide-r2_*`.
+
+- Incidents before the run (infrastructure, not model results): the first attempt (ticket wide2) hung at device open.
+  An out-of-memory kill of the preceding stage-3 gate (host memory: a CPU HF scoring started next to it) left UMD's
+  inter-process chip mutexes (`/dev/shm/TT_UMD_LOCK.CHIP_IN_USE_*`, `MEM_BARRIER_*`) held by a dead process. The
+  coordinator removed the stale lock files with the user's approval and stopped the hung probe; the ticket released
+  with a board reset. The HF scoring now runs only on an idle host.
+- 32-slot G9 probe (160 MiB region): MoE row buckets [1, 2, 4, 8, 16, 32], all on the sorted path; capture 107.3 MiB;
+  1,105 blocks -> 137,216 (unchanged); copy 1.0.
+- Server (`SERVER_CMD` in `wide-r2_servercmd.txt`; GLM53_TRACE_REGION 167,772,160, async on):
+  - burst of 32 concurrent greedy requests: 32/32 equal to solo greedy (0a2663d0b6b: 4/32). `SMOKE_RESULT PASS`.
+  - primary 128/128/1: TTFT 278 ms, TPOT 120.89 ms, ITL 120.9 / P99 121.9 ms, 8.2 tok/s.
+  - CI 100/100/32: TTFT 7.8 s, TPOT 161.1 / P99 161.5 ms, 134.6 tok/s.
+  - sweep (8/8 rows, no failed or short requests), TPOT / total tok/s: 128 input: 1 user 121.0 / 8.2, 8 users
+    130.0 / 55.2, 16 users 145.8 / 91.2, 32 users 160.1 / 144.8; 1,024 input: 1 user 122.8 / 8.0, 8 users 132.4 / 51.4,
+    16 users 146.3 / 82.2, 32 users 163.5 / 123.6.
+  - leftover processes after the probe and the server: none.
 
 ## Notes
 

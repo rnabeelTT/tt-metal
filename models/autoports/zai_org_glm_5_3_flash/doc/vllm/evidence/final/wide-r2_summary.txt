@@ -1,0 +1,43 @@
+=== start Wed Oct 21 10:19:13 PM UTC 2026 : timeout -k 120 21600 /home/raahem/glm53-flash-bringup/scripts/s9_wide_rerun.sh /home/raahem/glm53-flash-bringup/s9l_snap
+=== s9_wide_rerun snapshot /home/raahem/glm53-flash-bringup/s9l_snap base 3872b583092322c3c83d2fb538a1c9763b6153e1
+=== G9 capacity probe:  32 slots, env none, max-context 153600, workspace 1024 MiB, trace 167772160, precision /home/raahem/glm53-flash-bringup/s9l_snap/models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json, run dir /home/raahem/glm53-flash-bringup/s9l_snap -> /home/raahem/tt-metal/models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32 2026-10-21T22:19:13+00:00
+probe exit=0 (log /home/raahem/glm53-flash-bringup/logs/09/g9_s32.log)
+=== exit code: 0 Wed Oct 21 10:44:18 PM UTC 2026
+LEFTOVER after probe 32: none
+WIDE decode buckets: DSA widths [1056, 2080, 4128, 8224, 16416, 32800, 38432] (contexts [4096, 8192, 16384, 32768, 65536, 131072, 153600]), prefill views [40, 80, 160, 320, 640, 1280] blocks; warm plans [2176, 2560, 4096]; MoE row buckets [1, 2, 4, 8, 16, 32] paths {1: 'sorted', 2: 'sorted', 4: 'sorted', 8: 'sorted', 16: 'sorted', 32: 'sorted'} on 42 layers
+WIDE decode buckets: decode captured as 54 segments + 11 DSA x 7 + 42 MoE x 6 point traces, 107.3 MiB of trace region
+=== cwd /home/raahem/glm53-flash-bringup/s9l_snap base 3872b583092322c3c83d2fb538a1c9763b6153e1
+=== serve final-wide-r2 seqs=32 mlen=137216 layers=all async=1 trace=167772160 cache=/home/raahem/.cache/glm53_flash ckpt=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 2026-10-21T22:45:01+00:00
+(EngineCore pid=17098) 2026-10-21 22:47:35.921 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_prefill:463 - warm-up phase 1 (programs) done in 43s
+(EngineCore pid=17098) 2026-10-21 22:47:36.624 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_decode:480 - warm-up phase 2 (model + sampler traces) done in 1s; PROGRAM_GUARD active
+readiness final-wide-r2 stage benchmark exit=0
+readiness final-wide-r2 exit=0
+SMOKE_CHAT stop reasoning 0 content '```python\nreversed_s = s[::-1]\n```\n\nThis uses slice notation with a step of `-1` to walk through the string backwards.'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-939e1c69f429890b', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0,1\n    while b <n:\n        print(b,'
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    else: \n '
+SMOKE_SEEDED ' #define a function to generate a list of fibonacci numbers up to n\n    if n == '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_cross_entropy_with'
+SMOKE_NONALIGNED 1 1 'Scoped-Scoped-Scoped-Scoped-'
+SMOKE_NONALIGNED 3 3 ' Gutenberg eBook of The I. W.'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and across'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 'he burial-places of this city through\nwhich I pass, is there'
+SMOKE_BURST 32 ok, 2048 tokens in 19.1s = 107.5 tok/s; 32/32 identical to solo greedy
+SMOKE_MAXEFFORT stop 743 tokens; reasoning 2263 chars: 'The user wants a haiku about machine learning. A haiku is a poem with three lines following a 5-7-5 syllable pattern.\n\nL' ... 's or explanation. Maybe a very brief intro or just the poem itself. Given the request is simple, just deliver the haiku.' | content 'Data flows like streams,\nPatterns hidden, slowly learned—\nthe machine awakes.'
+SMOKE_MAXEFFORT stop 178 tokens; reasoning 345 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... ' 2 hours = 5:40. 5:40 + 20 minutes = 6:00. 6:00 + 15 minutes = 6:15. So 2 hours + 20 + 15 = 2 hours 35 minutes. Correct.' | content '**2 hours 35 minutes**\n\n(From 3:40 to 6:40 would be 3 hours; subtracting the 25 minutes back gives 2 h 35 min.)'
+SMOKE_RESULT PASS
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:8131 profile=final-wide-r2 max_model_len=137216 tokenizer=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 rows=8
+=== sweep done 8 rows
+=== done 2026-10-21T23:15:16+00:00
+serve exit=0
+LEFTOVER after serve final-wide-r2: none
+SMOKE_BURST 32 ok, 2048 tokens in 19.1s = 107.5 tok/s; 32/32 identical to solo greedy
+SMOKE_RESULT PASS
+=== s9_wide_rerun done 2026-10-21T23:15:59+00:00
+=== exit code: 0 Wed Oct 21 11:15:59 PM UTC 2026

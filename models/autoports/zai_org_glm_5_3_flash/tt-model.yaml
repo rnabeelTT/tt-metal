@@ -204,11 +204,12 @@ card:
     | `p300x2-long` | 288 ms | 49.8 ms | 20.1 |
     | `p300x2` (default) | 265 ms | 69.9 ms | 14.3 |
     | `p300x2-1m` | 290 ms | 71.5 ms | 14.0 |
-    | `p300x2-wide` (provisional) | 278 ms | 76.1 ms | 13.1 |
+    | `p300x2-wide` | 278 ms | 120.9 ms | 8.3 |
 
     Long prompts (one request): about 1,200 prompt tokens per second on `p300x2` (239,360 tokens in 195 s);
     `p300x2-1m`: 1,038,965 tokens in 2,310 s. More users: `p300x2` reaches 79 output tokens/s at 16 users (172.6 ms per
-    token per user). Per-profile tables: doc/vllm_integration/README.md in the autoport.
+    token per user); `p300x2-wide` reaches 145 output tokens/s at 32 users (160 ms per token per user). Per-profile
+    tables: doc/vllm_integration/README.md in the autoport.
 
     ### Limitations
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
@@ -223,7 +224,5 @@ card:
       sample on the host (slower).
     - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
     - No multi-token prediction (the MTP layer is not served).
-    - `p300x2-wide` is provisional: with 32 concurrent requests a greedy output can depend on the number of active
-      requests (MoE row-bucket paths); a fix is pending.
     - The p150x4 profile is derived by the sizing rule for the same (1, 4) mesh as p300x2; it was not run on p150
       boards.

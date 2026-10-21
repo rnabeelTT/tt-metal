@@ -2,7 +2,8 @@
 
 Details, commands and every run: `work_log.md`. Design: `../vllm/DESIGN.md`. Gate artifact: `../../readiness_vllm/` (from the
 p300x2-1m server). The numbers below come from the final serving run on the code-freeze commit 0a2663d0b6b (stage-10
-decode buckets, async decode on) unless a row says otherwise. Evidence: `../vllm/evidence/final/`.
+decode buckets, async decode on); the p300x2-wide rows come from its re-run on 0bcf89f7fd6 (the stage-10 MoE-bucket
+fix). Evidence: `../vllm/evidence/final/` (`wide-r2_*` for the wide re-run).
 
 ## Summary
 
@@ -17,7 +18,7 @@ decode buckets, async decode on) unless a row says otherwise. Evidence: `../vllm
 | Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`); -1.05 ms per token on p300x2-long |
 | Served = standalone | the 6 qualitative prompts give the same tokens through vLLM and through the standalone generator (p300x2-long build) |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
-| Open | p300x2-wide: a 32-request burst equals the solo outputs on 4 of 32 streams (stage-10 MoE row buckets; fix pending, wide numbers provisional) |
+| Concurrency determinism | a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2 |
 
 ## Primary single user (128/128/1) and CI burst (100/100/32)
 
@@ -28,7 +29,7 @@ decode buckets, async decode on) unless a row says otherwise. Evidence: `../vllm
 | p300x2-long | 1 | 288 ms | 49.84 ms | 49.9 / 50.7 ms | 20.1 | 19.3 |
 | p300x2-1m (gate artifact) | 1 | 290 ms | 71.52 ms | 71.5 / 72.6 ms | 14.0 | 13.7 |
 | p300x2 (default) | 16 | 265 ms | 69.91 ms | 69.9 / 70.8 ms | 14.3 | 14.0 |
-| p300x2-wide (provisional) | 32 | 278 ms | 76.07 ms | 76.0 / 77.0 ms | 13.1 | 12.9 |
+| p300x2-wide | 32 | 278 ms | 120.89 ms | 120.9 / 121.9 ms | 8.3 | 8.2 |
 
 CI serving burst, 32 prompts of 100 input / 100 output tokens, no concurrency limit (queued on 1-slot profiles):
 
@@ -37,7 +38,7 @@ CI serving burst, 32 prompts of 100 input / 100 output tokens, no concurrency li
 | p300x2-long | 80.3 s / - (queueing) | 49.8 ms | 19.4 |
 | p300x2-1m | 113.6 s / 224.7 s (queueing) | 71.4 / 71.5 ms | 13.7 |
 | p300x2 | 14.2 s / 24.6 s | 172.5 / 172.6 ms | 76.8 |
-| p300x2-wide (provisional) | 7.9 s / 7.9 s | 161.2 / 161.5 ms | 134.1 |
+| p300x2-wide | 7.8 s / 7.8 s | 161.1 / 161.5 ms | 134.6 |
 
 Async decode on vs off, p300x2-long, same build and flags (`GLM53_VLLM_ASYNC_DECODE` 1 / 0): TPOT 49.84 / 50.89 ms,
 ITL P99 50.7 / 54.5 ms, CI TPOT 49.8 / 51.1 ms.
@@ -103,12 +104,14 @@ TPOT / total output tok/s at a 128-token input, greedy, from the sweeps (`../vll
 | p300x2-long | 49.8 / 19.3 | - | - | - | 325,632 |
 | p300x2-1m | 71.5 / 13.7 | - | - | - | 1,048,576 |
 | p300x2 (default) | 69.9 / 14.0 | 119.9 / 59.6 | 172.6 / 79.4 | - | 239,616 |
-| p300x2-wide (provisional) | 76.0 / 12.9 | 125.9 / 56.8 | 182.0 / 75.5 | 163.3 / 142.7 | 137,216 |
+| p300x2-wide | 121.0 / 8.2 | 130.0 / 55.2 | 145.8 / 91.2 | 160.1 / 144.8 | 137,216 |
 
 - One user, fastest decode: p300x2-long.
 - One user, the full 1M context: p300x2-1m.
 - Up to 16 users: p300x2 (the default).
-- 32 users: p300x2-wide, after the stage-10 MoE-bucket fix (see Open items).
+- 32 users, or the best per-user decode at 16 users: p300x2-wide. Its single-user decode is slower (121 ms): at 32
+  slots every MoE row bucket runs the expert-sorted path (stage-10 fix), which keeps the greedy output independent of
+  the number of active requests.
 
 Single-user TPOT grows slowly with the filled context on the bucketed builds: p300x2 69.9 ms at 128 tokens, 73.9 ms at
 16K, 79.3 ms at 239,360.
@@ -156,12 +159,15 @@ The same request in builds with 1, 8, 16 and 32 slots (reduced model, `../vllm/e
 16 slots are bit-identical to 1 slot; 32 slots differ by 1 to 2 bf16 ULPs from the first decode step (tokens equal),
 and all rows of one build agree. Bounded numerics of the decode path above 16 rows; no fix.
 
-## Open items
+## Concurrency and greedy determinism (p300x2-wide)
 
-- p300x2-wide on the freeze code: a burst of 32 concurrent greedy requests equals the solo outputs on 4 of 32 streams
-  (stage 9 before the MoE row buckets: 32 of 32). Cause under investigation by stage 10: the 32-row bucket runs the
-  expert-sorted MoE path, the smaller buckets the pairs path, which are not bit-exact, so a greedy output depends on the
-  number of active requests. The wide numbers above are provisional; a short wide re-run follows the fix.
+On the freeze 0a2663d0b6b the 32-slot build ran the expert-sorted MoE path for the 32-row bucket and the pairs path for
+the smaller buckets. The two paths are not bit-exact, so a greedy output depended on the number of active requests: a
+burst of 32 equaled the solo outputs on 4 of 32 streams (stage 9 before the buckets: 32 of 32). Stage 10's fix
+(0bcf89f7fd6) runs every bucket of the 32-slot build on the sorted path. Re-run on 0bcf89f7fd6
+(`../vllm/evidence/final/wide-r2_*`): the 32-slot G9 probe (160 MiB, all buckets sorted, 107.3 MiB of trace, 137,216
+tokens, copy 1.0), the burst gate 32/32, the benchmark and the short sweep (8/8 rows). The full plugin suite at 32
+sequences (70 / 3 / 4) ran on 0a2663d0b6b before the fix; the fix changes only the MoE path of the 32-slot build.
 
 ## Readiness runs and reasoning effort
 
@@ -174,5 +180,8 @@ keeps the default max effort. The served smoke checks the max-effort mode with t
 - The French prompt (q5) answers "Bonjour, how are you today?" and repeats it with self-corrections (low reasoning
   effort). The standalone generator gives the same 256 tokens as the server (`../vllm/evidence/final/qcapture/q5.json`),
   so the serving path does not cause it. The stage-6 HF control on CPU (default effort) leaves the translation in
-  English as well (`doc/full_model/qualitative/VERDICT.md`, q5). HF teacher-forced scoring of the served q5 tokens:
-  PENDING.
+  English as well (`doc/full_model/qualitative/VERDICT.md`, q5). Verdict: model behaviour of the E192 checkpoint at
+  low reasoning effort (a greedy repetition loop), not a serving defect: the served and standalone tokens are identical
+  on all 6 prompts. Not run: an HF teacher-forced rescore of the served q5 tokens. It needs about 40 GB of host memory
+  on CPU, and the shared host has about 62 GB available while device jobs run (a capped attempt during a device test
+  caused an out-of-memory kill of that test); it runs only on an idle host.
