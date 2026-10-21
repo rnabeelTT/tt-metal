@@ -1,5 +1,5 @@
 {
- "source": "runs/s7r2/v4_default.json (final default: pure git archive 52aff54486a + the coupled no-split reserve floor; Glm53Generator(mesh), 1 slot, 272,384 tokens, combo_a_kv_dense4_g4 + ten bfp4 decode programs, stage-10 segmented bucketed decode). History: runs/s67r/j2_s1_default.json (280,576, combo_a_kv without kda_in, single decode trace), j2b_s1_16k, j3_s8, j4_s32; runs/s7r2/v3_default.json",
+ "source": "runs/s7r2/v4b_default.json (final default at the code freeze: pure git archive 0a2663d0b6b; Glm53Generator(mesh), 1 slot, 272,384 tokens, combo_a_kv_dense4_g4 + ten bfp4 decode programs, stage-10 segmented bucketed decode, prefill pool-key views). Floor check: runs/s7r2/v4_default.json. History: runs/s67r/j2_s1_default.json, j2b_s1_16k, j3_s8, j4_s32; runs/s7r2/v3_default.json",
  "workload": {
   "profile": "single_user_decode",
   "prompt": "real text (tools/s67r_checks.text_ids)",
@@ -8,16 +8,16 @@
   "batch": 1,
   "max_seq_len": 272384,
   "precision": "combo_a_kv_dense4_g4 + ten bfp4-tuned decode programs",
-  "decode": "segmented bucketed trace (stage 10, max_seq_len >= 65,536)"
+  "decode": "segmented bucketed trace (stage 10, max_seq_len >= 65,536); MoE active-count buckets off at 1 slot; prefill pool-key views on"
  },
- "ttft_ms": 1023.3,
+ "ttft_ms": 1022.4,
  "ttft_ms_by_prompt": {
-  "2048": 1023.3,
-  "8192": 5772.4
+  "2048": 1022.4,
+  "8192": 4385.5
  },
- "decode_ms_per_token_e2e": 50.17,
- "decode_ms_per_token_token_out": 50.08,
- "decode_ms_per_token_model_trace": 49.69,
+ "decode_ms_per_token_e2e": 50.21,
+ "decode_ms_per_token_token_out": 50.1,
+ "decode_ms_per_token_model_trace": 49.71,
  "decode_ms_per_token_sampler": 0.39,
  "short_context_16384": {
   "ttft_ms_by_prompt": {
@@ -96,8 +96,7 @@
   "program_cache_growth": [],
   "seed_changes_draws": true
  },
- "moe_prefill_split": "off (largest free block 1,181,530,112 B >= 1 GiB threshold; reserve 1,344 MiB = threshold + 320 MiB)",
- "teacher_forcing_p0": "92 / 100 / 100 (prefill check 92 / 100 / 100); 3 references + AR in v4b (pending)",
+ "moe_prefill_split": "off (largest free block 1,234,298,880 B >= 1 GiB threshold; reserve 1,344 MiB = threshold + 320 MiB)",
  "history_j2": {
   "workload": {
    "profile": "single_user_decode",
@@ -129,5 +128,23 @@
    "8": 117.16,
    "32": 114.24
   }
+ },
+ "teacher_forcing_p0_p1_p2_top1": [
+  0.92,
+  0.95,
+  0.92
+ ],
+ "prefill_check_p0_p1_p2_top1": [
+  0.92,
+  0.95,
+  0.91
+ ],
+ "v4_floor_check": {
+  "source": "runs/s7r2/v4_default.json",
+  "ttft_ms_by_prompt": {
+   "2048": 1023.3,
+   "8192": 5772.4
+  },
+  "decode_ms_per_token_token_out": 50.08
  }
 }

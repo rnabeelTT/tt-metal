@@ -3,34 +3,34 @@
 Stage 6 of the tt-model-bringup flow. `tt/model.py` (`Glm53Model`) runs the full text model on the (1, 4) mesh of a
 p300x2. `tt/generator.py` (`Glm53Generator`, `build_generator`) is the readiness and serving contract.
 
-## Headline (final default, `v4_default`, 2026-10-21)
+## Headline (final default, `v4b_default`, 2026-10-21)
 
-Source run: `v4_default` (`doc/optimized_full_model/runs/s7r2/v4_default.json`, log
-`~/glm53-flash-bringup/logs/s7r2/v4_default.log`).
-- Code: pure `git archive 52aff54486a` plus the coupled no-split reserve floor (stage-6/7 review #4 kit).
+Source run: `v4b_default` (`doc/optimized_full_model/runs/s7r2/v4b_default.json`, log
+`~/glm53-flash-bringup/logs/s7r2/v4b_default.log`).
+- Code: pure `git archive 0a2663d0b6b` (the code freeze), `code_base` recorded in the record.
 - Build: `Glm53Generator(mesh)` with no arguments and no `GLM53_*` setting: 1 slot, replicated DSA cache,
   `max_seq_len` 272,384, trace region 64 MiB.
 - Precision: HEAD's default, `combo_a_kv_dense4_g4` plus ten bfp4-tuned decode programs.
-- Decode: the stage-10 segmented bucketed trace (86403d19830, on for `max_seq_len` >= 65,536).
+- Decode: the stage-10 segmented bucketed trace (on for `max_seq_len` >= 65,536). The MoE active-count buckets are
+  off at 1 slot; the prefill pool-key views are on.
 
 | Metric | Value | Workload |
 |---|---|---|
-| TTFT, 2,048 / 8,192 tokens | **1,023 / 5,772 ms** | warm, cost chunk plan, MoE prefill unsplit |
-| Batch-1 decode, model trace only | 49.69 ms per step | position 300, 20 replays, no host sync between |
-| Batch-1 decode, token-out (model + sampler, token fed back on device) | **50.08 ms per step, 20.0 t/s/u** | same; sampler 0.39 ms |
-| Batch-1 decode, `generate()` loop (host reads each token) | 50.17 ms per step, 19.9 t/s/u | same |
-| Teacher forcing / prefill check (AIME24 #0) | 92 / 100 / 100 % each | 161 + 100 tokens |
-| Plan / fit / MoE split | 2,129 of 2,133 blocks, 1.13 GB free per die, split off (1,181,530,112 B largest block) | |
-| Programs compiled after the capture | 0 | |
+| TTFT, 2,048 / 8,192 tokens | **1,022 / 4,386 ms** | warm, cost chunk plan, MoE prefill unsplit |
+| Batch-1 decode, model trace only | 49.71 ms per step | position 300, 20 replays, no host sync between |
+| Batch-1 decode, token-out (model + sampler, token fed back on device) | **50.10 ms per step, 20.0 t/s/u** | same; sampler 0.39 ms |
+| Batch-1 decode, `generate()` loop (host reads each token) | 50.21 ms per step, 19.9 t/s/u | same |
+| Teacher forcing top-1, AIME24 references p0 / p1 / p2 (top-5 / top-100 100 %) | 92 / 95 / 92 % | 161 + 100 tokens each |
+| Prefill check top-1, p0 / p1 / p2 (top-5 / top-100 100 %) | 92 / 95 / 91 % | same |
+| Autoregressive, stock prompt, 256 tokens | two runs bit-identical; degenerate check exit 0 | `runs/s7r2/v4b_ar/` |
+| Page-table change between traced (segmented) steps | traced == eager, 12 of 12 steps | slot 0, block change at 256 |
+| Sampler alternation greedy / top-k / penalties | pass, dies agree, seeds take effect | 12 steps |
+| Plan / fit / MoE split | 2,129 of 2,133 blocks, 1.19 GB free per die, split off (1,234,298,880 B largest block) | |
+| Programs compiled after the capture | 0 (address guard incl. 26 `buckets.*` tensors) | |
+| Teardown, then a second default build in one process | 2.68 MB per bank after `teardown()`; second build works | |
 
-Evidence still pending, in v4b (on the HEAD with stage 10's next commit: MoE buckets, pool-key views):
-- teacher forcing on all 3 references and the prefill check;
-- one autoregressive run;
-- the page-table change and sampler alternation under the segmented replay;
-- the program guard, token-out and TTFT;
-- the rebinding leak check.
-
-not run yet (script `~/glm53-flash-bringup/scripts/s7r2_v4b.{py,sh}`, queued when that commit lands)
+`v4_default` (52aff54486a + the coupled floor) was the floor / split check: split off, TTFT 1,023 / 5,772 ms, token-out
+50.08 ms, TF p0 92 / 100 / 100.
 
 Gates of HEAD's precision at other sizes:
 - stage 8 `doc/datatype_sweep/runs/final_default_h9` (16,384 tokens, single trace): teacher-forcing top-1 92 / 95 / 92

@@ -6,30 +6,36 @@ on the (1, 4) mesh of a p300x2 (4 Blackhole dies, FABRIC_1D, TP4). The decoder l
 
 ## Result (headline): final default
 
-**Final default** (`v4_default`, record `runs/s7r2/v4_default.json`, log `~/glm53-flash-bringup/logs/s7r2/v4_default.log`):
+**Final default** (`v4b_default`, record `runs/s7r2/v4b_default.json`, log `~/glm53-flash-bringup/logs/s7r2/v4b_default.log`):
 - Build: `Glm53Generator(mesh)` with no arguments: 1 slot, replicated DSA cache, `max_seq_len` 272,384.
   - The planner's default uses the replicated reserve: the MoE no-split threshold + 320 MiB = 1,344 MiB
     (`tt/generator.NOSPLIT_MARGIN_MIB`).
   - Defaults at 1 / 8 / 16 / 32 slots: 272,384 / 28,672 / 10,240 / 2,048.
 - Precision: HEAD's default, `combo_a_kv_dense4_g4` plus ten bfp4-tuned decode programs (`decode_specs`: kda_in,
   kda_out, dsa_o, dsa_qb, pack_a_spec, shared_gu, shared_dn, lm_head, mlp_gu, mlp_dn).
-- Decode: the stage-10 segmented bucketed trace (86403d19830, `tt/dsa_buckets.py`, on for `max_seq_len` >= 65,536).
-  One selection trace per indexer bucket width; the main segments are shared.
-- Code: pure `git archive 52aff54486a` plus the coupled reserve floor (the review-#4 kit), `GLM53_PRECISION` unset.
-  Prompts are real text. Greedy.
+- Decode: the stage-10 segmented bucketed trace (`tt/dsa_buckets.py`, on for `max_seq_len` >= 65,536): one
+  selection trace per indexer bucket width, shared main segments. The MoE active-count buckets are off at 1 slot; the
+  prefill pool-key views are on. Trace region 64 MiB.
+- Code: pure `git archive 0a2663d0b6b` (the code freeze: stage-10 MoE buckets, prefill views, per-profile trace
+  region), `GLM53_PRECISION` unset. Prompts are real text. Greedy.
 
-| Metric | Final default (`v4_default`, 272,384) |
+| Metric | Final default (`v4b_default`, 272,384, 0a2663d0b6b) |
 |---|---|
-| Plan / fit | replicated, 2,129 of 2,133 blocks; 1.13 GB free per die after the build |
-| MoE prefill split | off: largest free block 1,181,530,112 B at warm-up, 108 MB above the 1 GiB threshold |
-| TTFT, 2,048 / 8,192-token prompt | **1,023 / 5,772 ms** |
-| Decode, model trace / token-out / `generate()` loop, 1 slot | 49.69 / **50.08** / 50.17 ms (**19.9 t/s/u**) |
-| Teacher forcing / prefill check (AIME24 #0) | **92 / 100 / 100 %** / 92 / 100 / 100 % |
-| Programs compiled after the capture | 0 |
+| Plan / fit | replicated, 2,129 of 2,133 blocks; 1.19 GB free per die after the build |
+| MoE prefill split | off: largest free block 1,234,298,880 B at warm-up (160 MB above the 1 GiB threshold) |
+| TTFT, 2,048 / 8,192-token prompt | **1,022 / 4,386 ms** |
+| Decode, model trace / token-out / `generate()` loop, 1 slot | 49.71 / **50.10** / 50.21 ms (**19.9 t/s/u**) |
+| Teacher forcing top-1, references p0 / p1 / p2 (top-5, top-100: 100 %) | **92 / 95 / 92 %** |
+| Prefill check top-1, p0 / p1 / p2 (top-5, top-100: 100 %) | 92 / 95 / 91 % |
+| Autoregressive (stock prompt, 256 tokens) | two runs bit-identical; `check_degenerate_output.py` exit 0 (adjacent duplication 0.0) |
+| Page-table change between traced steps (segmented replay) | traced == eager on 12 of 12 steps (PCC 1.0); one device copy |
+| Sampler alternation (greedy / top-k / penalties) | pass; dies agree; seeds take effect |
+| Programs compiled after the capture | 0; the address guard covers 26 `buckets.*` tensors |
+| Teardown + second build in one process | 2.68 MB per bank after `teardown()` (before `del`); the second default build works |
 
-The other two references, an autoregressive run, the page-table change and sampler alternation under the segmented
-replay are in v4b. v4b runs on the HEAD that includes stage 10's next commit (MoE buckets, pool-key views):
-not run yet (script `~/glm53-flash-bringup/scripts/s7r2_v4b.{py,sh}`, queued when that commit lands).
+`v4_default` (52aff54486a + the coupled floor, before stage 10's MoE buckets and views) was the floor / split check:
+MoE split off (1,181,530,112 B largest block), TTFT 2,048 / 8,192 = 1,023 / 5,772 ms, token-out 50.08 ms, TF p0
+92 / 100 / 100. The 8K TTFT gain from v4 to v4b (5,772 -> 4,386 ms) comes from stage 10's prefill pool-key views.
 
 History (superseded defaults; their records stay in `runs/`):
 - `v3_default` (237ec3b8438, 294,912, 1,200 MiB reserve, before stage-10 buckets): TF 92 / 95 / 92, token-out 55.04
@@ -219,8 +225,9 @@ The runtime fallback audit (host boundaries: prefill token by host argmax in `ge
 host-sampling compatibility mode, one token readback per `generate` step) is in `doc/full_model/README.md`
 ("Runtime fallback audit").
 
-Final default (`v4_default`, 272,384): teacher forcing and prefill check on AIME24 #0, 92 / 100 / 100 % each. The other
-two references and the autoregressive run on the final code are v4b (pending). The table below is the j2 run (history),
+Final default (`v4b_default`, 272,384, 0a2663d0b6b): teacher-forcing top-1 92 / 95 / 92 % and prefill check 92 / 95 / 91 %
+on the 3 references (top-5 / top-100 100 %); autoregressive check two runs bit-identical, degenerate check exit 0
+(`runs/s7r2/v4b_ar/`). The table below is the j2 run (history),
 whose files are `runs/teacher_forcing.json` and `runs/prefill_check.json`.
 
 | Check | top-1 | top-5 | top-100 | Gate | Report |

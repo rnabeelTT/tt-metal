@@ -168,3 +168,12 @@ one line per job). Records: `runs/s7r2/` and `~/glm53-flash-bringup/artifacts/s7
 - **Pending:** v4b (the final code with stage 10's next commit) runs TF on 3 references with the prefill check, an
   autoregressive run, ptchange, sampler alternation, TTFT / token-out, the program guard and the rebinding leak
   check. Script: `~/glm53-flash-bringup/scripts/s7r2_v4b.{py,sh}`.
+- **v4b** (2026-10-21; `doc/optimized_full_model/runs/s7r2/v4b_default.json`; pure `git archive 0a2663d0b6b`, the code
+  freeze; `code_base` recorded): the final default, now the headline in both READMEs and `perf_summary.json`.
+  - Build: 272,384, replicated; segmented decode (`DsaBuckets`); MoE split off (1,234,298,880 B).
+  - Readiness: TF 92 / 95 / 92 and prefill check 92 / 95 / 91 (top-1; top-5 / top-100 100 %).
+  - Autoregressive: repeat bit-identical, degenerate check exit 0 (`runs/s7r2/v4b_ar/`).
+  - ptchange traced = eager 12 / 12; sampler alternation passes with seeds taking effect.
+  - TTFT 2,048 / 8,192 = 1,022 / 4,386 ms; token-out 50.10 ms.
+  - 0 post-capture programs; 26 `buckets.*` tensors under the address guard.
+  - Teardown leaves 2.68 MB per bank (read before `del`), and a second full default build in the same process works.

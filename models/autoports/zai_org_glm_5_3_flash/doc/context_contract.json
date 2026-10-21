@@ -66,7 +66,7 @@
         "8": 28672,
         "16": 10240,
         "32": 2048,
-        "note": "tt/generator.plan_context on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B), replicated, reserve = MoE no-split threshold + 320 MiB = 1,344 MiB (v4_default: split off, 1,181,530,112 B largest free block); max_seq_len=1048576 at 1 slot plans the block-sharded layout"
+        "note": "tt/generator.plan_context on HEAD's serving_profiles.json (G9 free-after-load 3,139,928,064 B), replicated, reserve = MoE no-split threshold + 320 MiB = 1,344 MiB; built in v4b_default (0a2663d0b6b): MoE split off (1,234,298,880 B largest free block), TF 92 / 95 / 92, token-out 50.10 ms; max_seq_len=1048576 at 1 slot plans the block-sharded layout"
       },
       "combo_a_kv (j2-j4 evidence, earlier profile data)": {
         "1": 280576,
