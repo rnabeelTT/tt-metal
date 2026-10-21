@@ -1,0 +1,22 @@
+=== start Tue Oct 20 08:16:41 PM UTC 2026 : timeout -k 60 3600 bash -c cd /home/raahem/glm53-flash-bringup/s3r4_snapshot_ab && /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r4_ab
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+===== one: L3 1 slot, prefill 4000, decode pos 4000
+control (r3 default)              : traced   2895.2 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm in0 8                    : traced   2915.6 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm in0 16                   : traced   2897.5 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm in0 32                   : traced   2881.9 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm in0 64                   : traced   2880.4 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+head split                        : traced   2677.7 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+qi_rm                             : traced   2883.9 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm 64 + head split          : traced   2672.9 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+dsa_q_mm 64 + head split + qi_rm  : traced   2670.6 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+control again                     : traced   2889.3 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+===== b32: L3 32 slots, decode-only pos 128
+control (r3 default)              : traced  11457.9 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+qi_rm                             : traced  11439.2 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+route_rm                          : traced  11430.5 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+qi_rm + route_rm                  : traced  11407.7 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+control again                     : traced  11447.7 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+=== exit code: 0 Tue Oct 20 08:17:36 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

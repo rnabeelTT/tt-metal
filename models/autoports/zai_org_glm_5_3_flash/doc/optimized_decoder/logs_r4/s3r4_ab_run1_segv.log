@@ -1,0 +1,36 @@
+=== start Tue Oct 20 07:29:18 PM UTC 2026 : timeout -k 60 3600 bash -c cd /home/raahem/glm53-flash-bringup/s3r4_snapshot_ab && /home/raahem/tt-metal/python_env/bin/python -m models.autoports.zai_org_glm_5_3_flash.tools.s3r4_ab
+Config{cache_path=/home/raahem/.cache/ttnn,model_cache_path=/home/raahem/.cache/ttnn/models,tmp_dir=/tmp/ttnn,enable_model_cache=false,enable_fast_runtime_mode=true,validate_program_args=false,throw_exception_on_fallback=false,enable_logging=false,enable_graph_report=false,enable_graph_python_stack_traces=false,enable_detailed_buffer_report=false,enable_detailed_tensor_report=false,enable_comparison_mode=false,comparison_mode_should_raise_exception=false,comparison_mode_pcc=0.9999,root_report_path=generated/ttnn/reports,report_name=std::nullopt,std::nullopt}
+===== one: L3 1 slot, prefill 4000, decode pos 4000
+control (r3 default)              : traced   2894.0 us/step (host wall, 50 replays)  eager==control True  traced==control True  PCC traced 1.000000  eager==traced True
+[qb2-120-p11t05:3693993] *** Process received signal ***
+[qb2-120-p11t05:3693993] Signal: Segmentation fault (11)
+[qb2-120-p11t05:3693993] Signal code: Address not mapped (1)
+[qb2-120-p11t05:3693993] Failing at address: (nil)
+[qb2-120-p11t05:3693993] [ 0] /lib/x86_64-linux-gnu/libc.so.6(+0x45330)[0x701722445330]
+[qb2-120-p11t05:3693993] [ 1] /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn10operations13data_movement15is_enough_spaceERKNS_6TensorEjjjjjj+0x29)[0x7016dbf683a9]
+[qb2-120-p11t05:3693993] [ 2] /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn23tilize_with_val_paddingERKNS_6TensorERKN2tt8tt_metal5ShapeESt7variantIJjfEERKSt8optionalINS4_12MemoryConfigEESA_INS4_8DataTypeEEbRKSA_INS4_12CoreRangeSetEE+0x1d8)[0x7016dbcc5108]
+[qb2-120-p11t05:3693993] [ 3] /home/raahem/tt-metal/build_Release/ttnn/_ttnncpp.so(_ZN4ttnn9to_layoutERKNS_6TensorEN2tt8tt_metal6LayoutERKSt8optionalINS4_8DataTypeEERKS6_INS4_12MemoryConfigEERKS6_INS4_12CoreRangeSetEEf+0x176a)[0x7016dbb7d84a]
+[qb2-120-p11t05:3693993] [ 4] /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x858486)[0x7016de458486]
+[qb2-120-p11t05:3693993] [ 5] /home/raahem/tt-metal/ttnn/ttnn/_ttnn.so(+0x39fc7d)[0x7016ddf9fc7d]
+[qb2-120-p11t05:3693993] [ 6] /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0)[0x18c2de0]
+[qb2-120-p11t05:3693993] [ 7] /home/raahem/tt-metal/python_env/bin/python[0x18c2d1a]
+[qb2-120-p11t05:3693993] [ 8] /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0xcbe4)[0x181e0e4]
+[qb2-120-p11t05:3693993] [ 9] /home/raahem/tt-metal/python_env/bin/python(_PyObject_Call_Prepend+0xa0)[0x18c2de0]
+[qb2-120-p11t05:3693993] [10] /home/raahem/tt-metal/python_env/bin/python[0x18c2d1a]
+[qb2-120-p11t05:3693993] [11] /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x45de)[0x1815ade]
+[qb2-120-p11t05:3693993] [12] /home/raahem/tt-metal/python_env/bin/python(PyEval_EvalCode+0xde)[0x18a54ba]
+[qb2-120-p11t05:3693993] [13] /home/raahem/tt-metal/python_env/bin/python[0x18a52d4]
+[qb2-120-p11t05:3693993] [14] /home/raahem/tt-metal/python_env/bin/python[0x18249ff]
+[qb2-120-p11t05:3693993] [15] /home/raahem/tt-metal/python_env/bin/python(_PyEval_EvalFrameDefault+0x4769)[0x1815c69]
+[qb2-120-p11t05:3693993] [16] /home/raahem/tt-metal/python_env/bin/python[0x19800a2]
+[qb2-120-p11t05:3693993] [17] /home/raahem/tt-metal/python_env/bin/python(Py_RunMain+0x345)[0x197f985]
+[qb2-120-p11t05:3693993] [18] /home/raahem/tt-metal/python_env/bin/python[0x197f61f]
+[qb2-120-p11t05:3693993] [19] /home/raahem/tt-metal/python_env/bin/python[0x197f42c]
+[qb2-120-p11t05:3693993] [20] /lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca)[0x70172242a1ca]
+[qb2-120-p11t05:3693993] [21] /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b)[0x70172242a28b]
+[qb2-120-p11t05:3693993] [22] /home/raahem/tt-metal/python_env/bin/python(_start+0x29)[0x19a78a9]
+[qb2-120-p11t05:3693993] *** End of error message ***
+timeout: the monitored command dumped core
+=== exit code: 139 Tue Oct 20 07:29:47 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m
