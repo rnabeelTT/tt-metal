@@ -11,7 +11,18 @@ on the (1, 4) mesh of a p300x2 (4 Blackhole dies, FABRIC_1D, TP4). The decoder l
 - Build: `Glm53Generator(mesh)` with no arguments: 1 slot, replicated DSA cache, `max_seq_len` 280,576 (the largest
   context that fits).
 - Precision: stage-8 `combo_a_kv` without the stage-8 `decode_specs.kda_in` decode program. The snapshot predates
-  aa104284595, which added kda_in to the default.
+  aa104284595, which added kda_in to the default. HEAD's default is now `combo_a_kv_dense4_g4` plus ten bfp4-tuned
+  decode programs (`decode_specs`: kda_in, kda_out, dsa_o, dsa_qb, pack_a_spec, shared_gu, shared_dn, lm_head,
+  mlp_gu, mlp_dn); its standalone defaults are 294,912 / 32,768 / 12,288 / 2,048 tokens at 1 / 8 / 16 / 32 slots.
+  HEAD-default run: `v3_default` (`runs/s7r2/v3_default.json`; pure `git archive 237ec3b8438`, `GLM53_PRECISION` unset, default budget).
+  - Plan: 294,912 tokens (replicated, 2,305 of 2,320 blocks); 1.01 GB free per die after the build.
+  - Teacher forcing top-1 92 / 95 / 92 on 3 references; prefill check 92 / 95 / 91; top-5 and top-100 100 %.
+  - Token-out 55.04 ms (model trace 54.65); `generate()` 55.13 ms = 18.1 t/s/u.
+  - TTFT 128 / 161 / 512 / 2,048 / 8,192 tokens: 227 / 380 / 376 / 1,144 / 7,034 ms.
+  - The MoE prefill row split ENGAGED: the largest free block at warm-up was 1,030,724,608 B, under the 1 GiB
+    threshold, so `GLM53_MOE_SORTED_ROWS` = 1024. That costs about +120 ms per 2048-row chunk against the no-split
+    expectation (1,026 / 6,444 ms in j2).
+  - 0 programs compiled after the capture; seeds take effect.
 - Code: HEAD 656c998e3df plus the stage-6/7 rework files (commits de9852c604d / b3270061cca).
 - Prompts: real text (`tools/s67r_checks.text_ids`). Greedy.
 
@@ -194,6 +205,10 @@ beyond this table.
 
 ## Readiness on the final default (goal 5)
 
+The runtime fallback audit (host boundaries: prefill token by host argmax in `generate()`, all-logits readback, the
+host-sampling compatibility mode, one token readback per `generate` step) is in `doc/full_model/README.md`
+("Runtime fallback audit").
+
 Run `j2_s1_default` (headline build). The readiness runners are driven on the same generator.
 
 | Check | top-1 | top-5 | top-100 | Gate | Report |
@@ -203,19 +218,20 @@ Run `j2_s1_default` (headline build). The readiness runners are driven on the sa
 
 Teacher-forcing runner timing: TTFT 407 ms (161 tokens, host logits), decode 17.78 t/s/u.
 
-Exact HEAD default: the HEAD default also includes the stage-8 `kda_in` decode program, which this run did not have.
-Stage 8 gated kda_in on 914af5b9594 (`doc/datatype_sweep/`). The first run of the exact HEAD default (rework code +
-kda_in) to record teacher forcing and the prefill check is the stage-8 re-selection / stage-9 G9 gate.
+Exact HEAD default (`combo_a_kv_dense4_g4` + ten bfp4-tuned decode programs). This run did not have it.
+- Stage 8 gated it at 16,384 tokens (`doc/datatype_sweep/runs/final_default_h9`): teacher-forcing top-1 92 / 95 / 92
+  on 3 references, top-5 / top-100 100 %, token-out 49.94 ms.
+- On the standalone default build: `v3_default` (`runs/s7r2/v3_default.json`; pure `git archive 237ec3b8438`, `GLM53_PRECISION` unset, default budget) gives the same teacher forcing (92 / 95 / 92) and prefill check (92 / 95 / 91)
+  at 294,912 tokens, token-out 55.04 ms.
 
 Free-running checks on the same build:
 - **Autoregressive** (`autoregressive/VERDICT.md`): the stock prompt, 256 tokens.
   - Two runs are bit-identical.
   - `check_degenerate_output.py` exits 0.
   - HF scored over TT's tokens: top-1 93.75 %, top-5 100 %; the phrase loop is HF's own top-1.
-- **Qualitative suite:** not rerun in the rework. The j2 autoregressive tokens are bit-identical to stage 8's
-  `runs/selected_default_r{1,2}` trajectories, and stage 8 r1 ran the chat suite on combo_a_kv
-  (`doc/datatype_sweep/runs/selected_default_r1/checks/`). `qualitative/VERDICT.md` covers the 2026-10-17 build and
-  states that mapping.
+- **Qualitative suite:** HEAD's default ran it in stage 8's gate
+  (`doc/datatype_sweep/runs/final_default_h9/checks/qualitative/`). `qualitative/VERDICT.md` covers the 2026-10-17
+  build and points there.
 
 ## Context and memory
 
@@ -224,10 +240,13 @@ The stage-7 changes add no persistent device memory except the 512-row prefill c
 
 On 2026-10-17 (stage-7 precision, 1 slot, 16,384) DRAM allocated per die went from 32,410 MB to 32,425 MB (+14.2 MB).
 
-The context the stage ships now comes from the generator's planner and the stage-8 precision:
-- 280,576 tokens at 1 slot (standalone default in j2; 294,912 on HEAD's G9 profile data, same 1,200 MiB reserve);
-- 311,296 tokens measured on the vLLM path;
-- details in `doc/context_contract.json` and `doc/full_model/README.md`.
+Context at 1 slot under the default precision (details in `doc/context_contract.json` and `doc/full_model/README.md`):
+- standalone default 294,912 tokens (replicated, TTFT-favouring 1,200 MiB reserve; 280,576 in j2 on the earlier
+  profile data);
+- serving profile `p300x2-long`: 325,632 (replicated, G9 measured);
+- serving profile `p300x2-1m`: the advertised 1,048,576 (block-sharded fp8 layout, G9 measured, about +2.9 ms per
+  decode token). The standalone generator reaches the same with `Glm53Generator(mesh, max_seq_len=1048576)`: the
+  planner selects the sharded layout and its measured settings (`serving_profiles.json` `layouts.sharded`).
 
 Free per die after the default build: 1,068,291,584 B. Trace region use: 40.4 MB of the 64 MiB region.
 
@@ -323,7 +342,8 @@ the modules were already imported.
 ## Persistent all-gather (`ag_persistent`)
 
 **Re-tested on the fixed code (stage-7 review #2, 2026-10-21): it passes.**
-- Code: b3270061cca snapshot (logits-pad fix in), `GLM53_PRECISION` unset (combo_a_kv_dense4_g4).
+- Code: b3270061cca snapshot (logits-pad fix in), `GLM53_PRECISION` unset: that commit's default, combo_a_kv with the
+  stage-8 kda_in decode program (`1d:c29:ib4`, layers 1-43).
 - Records: `runs/s7r2/{agp0,agp1,det0,det1}.json`.
 - Logs: `~/glm53-flash-bringup/logs/s7r2/{agp,agp1,det0,det1}.log`.
 
@@ -340,17 +360,21 @@ not repeat. With that bug fixed, neither symptom appears.
 The 2026-10-17 reduced control at `=0` was a constant token (67404). This one is not (91886 / 67404 / 52420), so it can
 discriminate.
 
-The gain matches stage 5's per-layer measurement (7 to 15 µs per layer x 45). Caveats:
-- one run per setting, in separate processes;
-- 8 slots were tested on the reduced model only;
-- ttnn still skips the all-gather's start barrier with persistent outputs
-  (`all_gather_async_default_program_factory.cpp:752`); no failure was observed.
+The gain matches stage 5's per-layer measurement (7 to 15 µs per layer x 45). The DRAM cost is small and fixed:
+det0 vs det1 measured +71,680 B per bank, about 0.55 MiB per die.
 
-Decision: **not adopted (capacity re-probe cost); available via MCOpts** (`GLM53_MC=ag_persistent=1` or `MCOpts(ag_persistent=True)`). Quality is identical and decode is
-0.44 ms (0.9 %) faster. But the persistent all-gather outputs hold DRAM, and every serving capacity probe (stage 9 G9)
-was measured without them, so adopting it means re-probing every serving profile. Its capacity impact is unmeasured.
-The re-test also showed DRAM pressure: a second build in the same process ran out of memory. The shipped
-`DEFAULT_MC` keeps it off.
+Decision: **not adopted; available via MCOpts** (`GLM53_MC=ag_persistent=1` or `MCOpts(ag_persistent=True)`). The
+reason is correctness risk, not capacity:
+- with a persistent output, ttnn skips the all-gather's start barrier
+  (`all_gather_async_default_program_factory.cpp:752`: "use synchronize barrier semaphore" = `barrier_semaphore &&
+  !using_persistent_buffers`), so nothing orders a remote write into a buffer after its last reader on the receiving
+  die;
+- one buffer per (call site, shape, dtype) is reused by all 45 layers;
+- one run per setting (and 8 slots on the reduced model only) cannot exclude a race. Ping-pong buffers per layer
+  parity, which would remove the reuse hazard, were not tried.
+
+0.44 ms per token (0.9 %) does not justify that risk. The shipped `DEFAULT_MC` keeps it off. (The same-process OOM
+during the re-test was the generator teardown leak, now fixed: `Glm53Generator.teardown`.)
 
 The 2026-10-17 record, superseded: the persistent all-gather was taken in stage-5 round 6 and reverted on 2026-10-18
 after `s7_final_s1_agp1_TFfail.log` (teacher forcing 14 / 32 / 90) and `s7_det_reduced_s8.log` (8 slots not repeating).

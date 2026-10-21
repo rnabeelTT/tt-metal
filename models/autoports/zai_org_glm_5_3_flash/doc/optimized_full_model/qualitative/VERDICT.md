@@ -10,7 +10,8 @@
 > - stage 8 r1 ran this chat suite on combo_a_kv (`doc/datatype_sweep/runs/selected_default_r1/checks/qualitative/`):
 >   5 of 6 prompts end on EOS; q3 reaches the budget; q5 is the known E192 French behaviour.
 >
-> The suite has not run on the exact HEAD default (rework code + kda_in).
+> The exact HEAD default (`combo_a_kv_dense4_g4` + ten bfp4-tuned decode programs) ran this suite in stage 8's gate:
+> `doc/datatype_sweep/runs/final_default_h9/checks/qualitative/`.
 
 **Run**: `tools/s7_probe.py --do checks` on the stage-7 final build (`~/glm53-flash-bringup/logs/s7_final_s1.log`;
 1 slot, max_seq_len 16,384, stage-7 defaults with `ag_persistent=0`, which is the `DEFAULT_MC` at HEAD). Prompt format

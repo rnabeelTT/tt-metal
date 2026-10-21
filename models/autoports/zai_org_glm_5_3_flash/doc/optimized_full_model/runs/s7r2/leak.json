@@ -1,0 +1,74 @@
+{
+ "steps": [
+  {
+   "build": 0,
+   "layout": "replicated",
+   "alloc_after_build": 254395392,
+   "alloc_after_teardown": 2305344,
+   "leak_vs_baseline": 2305344,
+   "model_collected": true,
+   "tokens": [
+    81,
+    91886,
+    83561,
+    91886,
+    62273,
+    88204,
+    91886,
+    83561
+   ],
+   "GLM53_MOE_SORTED_ROWS": [
+    null,
+    "0"
+   ],
+   "GLM53_DSA_INDEX_BLOCK_MB": null
+  },
+  {
+   "build": 1,
+   "layout": "sharded",
+   "alloc_after_build": 254565568,
+   "alloc_after_teardown": 2643264,
+   "leak_vs_baseline": 2643264,
+   "model_collected": true,
+   "tokens": [
+    81,
+    91886,
+    83561,
+    91886,
+    62273,
+    88204,
+    91886,
+    70660
+   ],
+   "GLM53_MOE_SORTED_ROWS": [
+    "0",
+    "0"
+   ],
+   "GLM53_DSA_INDEX_BLOCK_MB": "32"
+  },
+  {
+   "build": 2,
+   "layout": "replicated",
+   "alloc_after_build": 254733312,
+   "alloc_after_teardown": 2643264,
+   "leak_vs_baseline": 2643264,
+   "model_collected": true,
+   "tokens": [
+    81,
+    91886,
+    83561,
+    91886,
+    62273,
+    88204,
+    91886,
+    83561
+   ],
+   "GLM53_MOE_SORTED_ROWS": [
+    "0",
+    "0"
+   ],
+   "GLM53_DSA_INDEX_BLOCK_MB": "32"
+  }
+ ],
+ "baseline_alloc_per_bank": 0
+}

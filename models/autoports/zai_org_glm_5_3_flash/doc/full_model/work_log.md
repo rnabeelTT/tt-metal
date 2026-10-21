@@ -84,3 +84,44 @@ Defects found and fixed (in order):
    `DeviceDecodeInputs._into`; five benign stage-3 sites in moe.py / moe_opt.py now free with force=False;
    `models/common/sampling/tt_sampling.py:1170` (`sampling_values`, freed after its last use) noted for upstream.
    Permanent check: `GLM53_DEALLOC_CHECK=1` (tests/test_model_probe.py::test_no_shared_buffer_frees).
+
+## 2026-10-20 .. 21: stage-6 review #2 / #3 rework
+
+Commits:
+- 675a8b1bed9: stage-6 review #2 P1-1 (the DSA-1M agent). Block-sharded DSA cache with the fp8 latent: 1,048,576 tokens
+  at 1 slot (copy 1.0 at 1,048,515 tokens; teacher forcing 91 / 95 / 91 at 16,384; +2.9 ms per token).
+- 73c0029ee79: stage 9 G9 probe of profile p300x2-1m (1 x 1,048,576 measured). Contract `supported_context` =
+  advertised.
+- 237ec3b8438: the stage-6/7 review #2 kit.
+  - The ag_persistent re-test (passes on the fixed code; kept off).
+  - The standalone post-capture program guard (`Glm53Generator.guard_programs`).
+  - Standalone budget: per call; reserve max(data, 1,200 MiB) unless `GLM53_DRAM_RESERVE_MIB`.
+  - Weight-cache manifest adoption only when no shard is newer than the cache.
+  - A flat-distribution seed check (seeds take effect).
+  - `test_no_shared_buffer_frees` covering every autoport `tt/` module (two benign `moe_opt.py` view frees guarded).
+  - Evidence: `doc/optimized_full_model/runs/s7r2/`.
+
+Review #3 rework (this entry's kit; logs `~/glm53-flash-bringup/logs/s7r2/`):
+- **P2-1, the standalone generator accepts the supported context:**
+  - `tt/generator.budget()` gives each layout its own budget from `serving_profiles.json` (sharded:
+    `layouts.sharded.budget`, 600 MiB workspace, 292,864 B per block).
+  - Every layout is capped at its measured maximum (replicated 325,632, sharded 1,048,576 at 1 slot), so a low
+    `GLM53_DRAM_RESERVE_MIB` cannot plan an unmeasured replicated context.
+  - `plan_context(1, 1048576)` selects the sharded layout; the default `plan_context(1)` is unchanged (294,912,
+    replicated).
+  - A sharded plan applies `serving_profiles.layout_env` (`setdefault`) before the build.
+  - The `ValueError` names the recipe.
+  - Host tests: `tests/test_standalone_host.py`.
+- **P2-2, docs and contract:** the defaults bullets and table, the fp8 sharded memory row, the context table
+  (p300x2-long 325,632; the 1M recipe), Limitations, the contract's standalone defaults and G9 fields, and
+  `serving_profiles.json` (the sharded budget is measured; the done G9 items are removed from `pending`).
+  `tools/serving_profiles.py check` passes; `tt-model.yaml` is in sync.
+- **P3:**
+  - `generate()` sets greedy params itself;
+  - the sampled (serving) prefill runs `check_trace_addresses` + `guard_programs`;
+  - `generate()` runs the guard once per call;
+  - the fallback audit notes that the all-logits head of a 2048-row chunk compiles after the capture;
+  - `Glm53Generator.teardown` releases every trace, drops the model references and collects the cycle (a second
+    build in one process; the reduced leak check is in `~/glm53-flash-bringup/artifacts/s7r2/leak.json`);
+  - `WeightCache.get` re-raises a device OOM instead of rebuilding;
+  - a read-only cache root reuses a verified legacy cache, or loads uncached.

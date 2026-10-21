@@ -91,8 +91,10 @@ one line per job). Records: `runs/s7r2/` and `~/glm53-flash-bringup/artifacts/s7
     TF 91 / 96 / 91 (top-5 / top-100 100 %), token-out 50.40 ms.
   - The `=1` build in the same process ran out of DRAM (the first generator's memory was not released). agp1 ran it
     alone: identical TF / prefill check, token-out 49.96 ms.
-  - The earlier failure was the logits-pad bug. Coordinator decision: not adopted (capacity re-probe cost); available via MCOpts. The capacity impact is unmeasured, and
-    the G9 probes ran without it.
+  - The earlier failure was the logits-pad bug. Decision (stage-7 review #3): not adopted; available via MCOpts.
+    The DRAM cost is +71,680 B per bank (det0 vs det1); the reason is the skipped all-gather start barrier with one
+    buffer per site reused by 45 layers (a race one run per setting cannot exclude). The same-process OOM was the
+    generator teardown leak (fixed in the review-#3 kit).
 - **P2-3, sharded first-run gap:**
   - cache: reduced, 16,384 tokens, sharded + replicated.
   - cachefull: full model, sharded, 131,072 tokens, bf16.
@@ -120,3 +122,21 @@ one line per job). Records: `runs/s7r2/` and `~/glm53-flash-bringup/artifacts/s7
   - README headline = j2 (final default) + j2b (16,384); the 2026-10-17 table is labelled superseded;
   - `perf_summary.json` rebuilt from j2;
   - Tracy and MTP labels; watcher scope; HF reference noise; qualitative scope.
+
+## 2026-10-21: stage-6 / stage-7 review #3
+
+- **ag_persistent:** the decision text now gives the real reason: the skipped all-gather start barrier, and one buffer
+  per site reused by 45 layers, a race one run per setting cannot exclude. The DRAM cost is +71,680 B per bank. The
+  retest's precision label is fixed (combo_a_kv + kda_in, b3270061cca), and the three `tt/multichip_decoder.py`
+  comments are updated.
+- **v3_default** (`runs/s7r2/v3_default.json`, pure `git archive 237ec3b8438`, `GLM53_PRECISION` unset):
+  - 294,912 replicated; teacher forcing 92 / 95 / 92; token-out 55.04 ms; `program_cache_growth` [];
+  - MoE split ENGAGED (largest free block 1,030,724,608 B < 1 GiB): TTFT 2,048 / 8,192 = 1,144 / 7,034 ms;
+  - reported to the coordinator, no change made.
+- **Teardown leak** (`runs/s7r2/leak.json`, reduced 0 / 3 / 4, kit snapshot):
+  - before the fix, `teardown()` + `del` left ~4.24 GB per bank allocated;
+  - now three builds in one process (replicated, sharded, replicated): allocation returns from 254 MB to 2.3 - 2.6 MB
+    per bank after each teardown, and the model object is collected.
+
+  The same run showed that an earlier build's automatic `GLM53_MOE_SORTED_ROWS=0` blocked the sharded layout's
+  setting (512). Fixed afterwards: the auto-marked value is treated as unset (host logic, not re-run on device).

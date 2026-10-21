@@ -83,26 +83,37 @@ change (no sparse chunk).
 - the budget comes from `serving_profiles.json` (stage 9) when its precision id is the build's, else from the
   built-in stage-7 numbers; DSA bytes per 128-token block follow the latent dtype;
 - the reserve is `GLM53_DRAM_RESERVE_MIB` when set, else max(data reserve, 1,200 MiB). The data reserve is
-  `serving_profiles.json`'s 1,024 MiB serving workspace, so the 1,200 MiB floor wins. It keeps >= 1 GiB free after the
-  build, so the MoE prefill runs unsplit;
+  `serving_profiles.json`'s 1,024 MiB serving workspace, so the 1,200 MiB floor wins. On HEAD's profile data that is not
+  enough to keep the MoE prefill unsplit: `v3_default` measured a 1,030,724,608 B largest free block at warm-up,
+  under the 1 GiB no-split threshold, so the split engaged (TTFT 2,048 tokens 1,144 ms);
 - the budget is computed at each plan (`tt/generator.budget()`), so a `GLM53_PRECISION` or reserve set after import
   applies;
 - a request above the replicated capacity selects the block-sharded DSA layout automatically, with either latent
-  dtype (fp8 rows: 2,288 B per token per die); without a `max_seq_len`, an fp8 build keeps the replicated layout;
-- a request that fits no layout raises `ValueError` before any weight loads, and the generator re-checks the pool
-  against the free DRAM it measures after the load.
+  dtype (fp8 rows: 2,288 B per token per die), up to that layout's budget. With a matching `serving_profiles.json`,
+  that budget is the layout's own measured one (`layouts.sharded.budget`: 600 MiB workspace, 292,864 B per block),
+  not the replicated 1,200 MiB floor. Without a `max_seq_len`, an fp8 build keeps the replicated layout;
+- when the plan selects the sharded layout, the generator sets that layout's measured process settings before the
+  build (`serving_profiles.layout_env`: `GLM53_MOE_SORTED_ROWS=512`, `GLM53_DSA_INDEX_BLOCK_MB=32`; `setdefault`, as
+  the vLLM adapter does);
+- no layout plans above its measured maximum (`serving_profiles.max_model_len_for`: replicated 325,632, sharded
+  1,048,576 at 1 slot), even with a low `GLM53_DRAM_RESERVE_MIB`;
+- a request that fits no layout raises `ValueError` before any weight loads, with the recipe in the message. The
+  re-check against the free DRAM measured after the load runs with `GLM53_DEFER_POOL=1` (pool allocated after the
+  weights); by default the pool is allocated with the layers.
 
 | Precision | Slots | Default `max_seq_len` | Source |
 |---|---|---|---|
-| combo_a_kv_dense4_g4 (default since d16e6b9c2f0) | 1 | 294,912 (replicated) | planner on HEAD 73c0029ee79's `serving_profiles.json` (G9 free-after-load 3,139,928,064 B), 1,200 MiB reserve; stage-10 t5 ran 280,576 (the value on the earlier profile data) |
+| combo_a_kv_dense4_g4 (default since d16e6b9c2f0) | 1 | 294,912 (replicated) | planner on HEAD's `serving_profiles.json` (G9 free-after-load 3,139,928,064 B), 1,200 MiB reserve. Built in `v3_default` (237ec3b8438): teacher forcing 92 / 95 / 92, token-out 55.04 ms, MoE split engaged |
 | combo_a_kv_dense4_g4 | 8 | 32,768 (replicated) | planner |
 | combo_a_kv_dense4_g4 | 32 | 2,048 (replicated) | planner |
+| combo_a_kv_dense4_g4, `max_seq_len=1048576` | 1 | 1,048,576 (block-sharded, selected automatically) | planner, `layouts.sharded.budget`; the serving probe of the same layout is G9 p300x2-1m |
 | combo_a_kv_dense4_g4, `GLM53_DRAM_RESERVE_MIB=1024` | 1 / 8 / 32 | 325,632 / 34,816 / 4,096 | planner; `v1_default` built 311,296 on the earlier profile data |
 | combo_a_kv (the j2-j4 evidence, before review #2) | 1 / 8 / 32 | 280,576 / 30,720 / 2,048 | j2 / j3 / j4 plans, 1,200 MiB reserve |
 | none (bf16 latent) | 1 | 59,392 replicated; 194,560 block-sharded (selected automatically above 59,392) | planner |
 | none (bf16 latent) | 8 / 32 | 4,096 replicated, 16,384 sharded / does not fit | planner |
 
-The standalone default trades about 9 % of the serving context for TTFT. The vLLM serving profiles size with the
+The standalone default trades about 9 % of the serving context for TTFT. On HEAD's profile data the trade is incomplete:
+the split still engages (`v3_default`), by about 43 MB of free DRAM. The vLLM serving profiles size with the
 measured 1,024 MiB workspace (the stage-8 capacity probe completed with it and failed at 832 MiB) and own the long
 contexts. `GLM53_DRAM_RESERVE_MIB=1024` gives the standalone generator the same sizing.
 
@@ -224,7 +235,7 @@ it. The sampler is 0.39 ms of a 56 ms step, so neither has a performance case.
 |---|---|---|
 | Prefill, all layers, LM head | device | chunked, cost plan |
 | Prefill token in `generate()` | **host** argmax over the last logits row (one vocab row read, about 20 ms of TTFT) | the serving path samples the prefill token on the device (`_prefill_sampled`) |
-| `prefill_forward(return_all_logits=True)` | **host**: every row is read back | readiness prefill check only |
+| `prefill_forward(return_all_logits=True)` / `prefill_logits` | **host**: every row is read back | readiness prefill check only. The all-logits head is warmed only for chunks of <= 512 rows (a 2048-row head holds 158 MB of logits per die, kept out of the warm-up peak). A prompt whose plan has a 2048-row chunk compiles that head after the capture; the post-capture program guard (`Glm53Generator.guard_programs`) reports it. Not a serving path |
 | Decode, model step | device, traced | |
 | Decode sampling | device, traced, every variant | `on_device_sampling=False` is a host-sampling compatibility mode (host argmax of the logits row); readiness tools only |
 | Token feedback | device (`tt_out_tok`) | `generate()` reads one token per step back to the host for its return value |
@@ -262,7 +273,8 @@ DRAM is the limit on this model. Measured per die (`memory_budget.json`, `memory
 | KDA state per slot (34 layers) | 35.65 MB |
 | DSA cache per token, replicated, fp8 latent (default) | 6,336 (11 x (512 + 64)) |
 | DSA cache per token, replicated, bf16 latent (`GLM53_PRECISION=none`) | 11,968 (11 x (1,024 + 64)) |
-| DSA cache per token, block-sharded, bf16 latent only | 3,696 (11 x (544 x 2 / 4 + 64)) |
+| DSA cache per token, block-sharded, bf16 latent | 3,696 (11 x (544 x 2 / 4 + 64)) |
+| DSA cache per token, block-sharded, fp8 latent (default precision) | 2,288 (11 x (576 / 4 + 64)); 292,864 B per 128-token block measured |
 | 2048-row prefill peak above layer entry (MoE, after the row split) | 297 MiB (was 417 MiB) |
 
 The MoE prefill runs its routed experts in row blocks of `GLM53_MOE_SORTED_ROWS` when the largest free block is under
@@ -273,10 +285,10 @@ Context per layout (1 slot):
 
 | Layout | Precision | Context | Evidence |
 |---|---|---|---|
-| replicated | combo_a_kv / combo_a_kv_dense4_g4 (default) | 311,296 (vLLM, 1,024 MiB workspace); standalone default 294,912 (1,200 MiB reserve); j2 ran 280,576 | stage-8 capacity probe; j2 deep runs at 32,768 and 100,000 (copy 1.0) |
+| replicated | combo_a_kv_dense4_g4 (default) | 325,632 (serving profile `p300x2-long`, 1,024 MiB workspace, G9); standalone default 294,912 (1,200 MiB reserve); j2 ran 280,576 (combo_a_kv) | G9 `doc/vllm/capacity/s1`; stage-8 capacity probe; j2 deep runs at 32,768 and 100,000 (copy 1.0) |
 | block-sharded | none (bf16) | 281,344 measured in stage 4 (stage-7 policy, bf16); 194,560 planned with the 1,200 MiB reserve | `doc/multichip_decoder/dsa_shard/capacity/`; `j6_s1_shard` at 131,072: TF 92 / 100 / 100, copy 1.0 at 100,000 tokens |
 | replicated | none (bf16) | 104,448 (stage-6 probe) | `memory/capacity_probe_1slot.json` |
-| block-sharded | combo_a_kv_dense4_g4 (fp8 latent) | **1,048,576** (advertised; `GLM53_DSA_SHARD=1`, 600 MiB workspace) | `doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/`: copy 1.0 at 1,048,515 tokens; TF 91 / 95 / 91 at 16,384; +2.9 ms per token |
+| block-sharded | combo_a_kv_dense4_g4 (fp8 latent) | **1,048,576** (advertised; serving profile `p300x2-1m`; standalone `Glm53Generator(mesh, max_seq_len=1048576)`, which selects this layout and its settings; 600 MiB workspace) | `doc/multichip_decoder/dsa_shard/capacity/fp8_s1_1048576/`: copy 1.0 at 1,048,515 tokens; TF 91 / 95 / 91 at 16,384; +2.9 ms per token |
 
 The block-sharded fp8 layout reaches the advertised 1,048,576 tokens at 1 slot. The default stays replicated because
 it is faster. The byte math and the evidence are in `doc/context_contract.json` (`dsa_block_sharded_fp8`) and
@@ -286,9 +298,9 @@ it is faster. The byte math and the evidence are in `doc/context_contract.json` 
 
 - E192 expert pruning: the model cannot finish some French translations (q5). HF with the same E192 set does the same
   ("shouldn" is HF's top-1), so it is a pruning property, not a TT defect.
-- Context is 294,912 (standalone default) / 311,296+ (serving profiles) tokens per slot under the default precision, against the
-  advertised 1,048,576. The block-sharded fp8 layout (`GLM53_DSA_SHARD=1`) holds 1,048,576 tokens at 1 slot, but no
-  serving profile selects it yet.
+- Context: the advertised 1,048,576 tokens are supported at 1 slot with the block-sharded fp8 layout (serving profile
+  `p300x2-1m`, G9 measured; standalone `max_seq_len=1048576`), at about +2.9 ms per decode token. The faster replicated
+  layout holds 325,632 (`p300x2-long`); the standalone default is 294,912 (TTFT-favouring reserve).
 - Largest batch tested on the full model: 32 slots (at 32 slots the default context is short; see
   `serving_profiles.json`).
 - Sampler variant capture: the "Cannot load new binaries during trace capture" defect is fixed (`_warm_sampler`).
@@ -299,7 +311,7 @@ it is faster. The byte math and the evidence are in `doc/context_contract.json` 
 ## Commands
 
 ```
-export GLM53_TP=4      # defaults: 1 slot, the largest context that fits, combo_a_kv
+export GLM53_TP=4      # defaults: 1 slot, 294,912 tokens (replicated), precision combo_a_kv_dense4_g4
 python -m models.autoports.zai_org_glm_5_3_flash.tools.readiness teacher-forcing \
   --reference models/autoports/zai_org_glm_5_3_flash/readiness_aime24_chat.refpt
 python -m models.autoports.zai_org_glm_5_3_flash.tools.readiness prefill-check \

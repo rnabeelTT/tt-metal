@@ -374,8 +374,10 @@ Records: `records/ab{1,2,3,5,6}.jsonl`, `records/pf{2,5,6}.jsonl`, review #2 / #
 - The one-layer tests rewrite each buffer at the same distance as the stack, so reuse distance does not explain the
   difference. Resolved by stage-7 review #2 (2026-10-21): the failures were the logits-pad lifetime bug (fixed in
   46b2a5a601d). On b3270061cca, `ag_persistent=1` gives teacher forcing and the prefill check identical to `=0` on 3
-  references, reduced 8-slot runs repeat, and token-out drops 50.40 -> 49.96 ms. Decision: not adopted (capacity re-probe cost); available via MCOpts. The persistent
-  outputs hold DRAM, and the stage-9 serving capacity probes were measured without them; capacity impact unmeasured.
+  references, reduced 8-slot runs repeat, token-out drops 50.40 -> 49.96 ms, and DRAM grows by 71,680 B per bank
+  (~0.55 MiB per die). Decision: not adopted; available via MCOpts. Persistent outputs skip the start barrier above,
+  one buffer per site serves all 45 layers, and one run per setting cannot exclude a race (ping-pong buffers per
+  layer parity were not tried); 0.44 ms is not worth that risk.
 
 ## Matmul geometry per role (review #1 P1-2)
 
@@ -692,7 +694,7 @@ These are measured costs that stay. None is a deferred option of this stage.
 - 32-user MoE glue: sub-tile expert groups (kernel work in the grouped sparse-matmul factory).
 - Long-context decode: +561 µs per DSA layer at position 130,000 (sparse_sdpa over 2,048 gathered tokens, top-512
   selection over ~32.5K pooled keys); profiled, not optimized here.
-- `ag_persistent`: the stacked-model failure was the logits-pad lifetime bug. On the fixed code it passes and saves 0.44 ms per token (`doc/optimized_full_model/README.md`, "Persistent all-gather"); not adopted (capacity re-probe cost); available via MCOpts.
+- `ag_persistent`: the stacked-model failure was the logits-pad lifetime bug. On the fixed code it passes and saves 0.44 ms per token (`doc/optimized_full_model/README.md`, "Persistent all-gather"); not adopted (barrier / buffer-reuse race risk); available via MCOpts.
 
 ## Artifacts
 

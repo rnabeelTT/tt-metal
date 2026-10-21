@@ -71,8 +71,8 @@ class MCOpts:
     dsa_pack: bool = False  # DSA decode: q_a | kv_a and indexer wk | gate | weights packed, DRAM-sharded matmuls
     router_ds: bool = False  # MoE decode router matmul on a DRAM-sharded (zero-padded 192 -> 256) weight
     mix_nc: bool = False  # mHC mix partial sums with fast_reduce_nc instead of ttnn.sum (transpose + reduce)
-    # decode all-gathers write into preallocated (per call site) output buffers. Rejected: breaks the stacked model
-    # (ttnn skips the all-gather start barrier with persistent outputs; see MeshCCL)
+    # decode all-gathers write into preallocated (per call site) output buffers. Off: passes on the fixed code but not
+    # adopted (ttnn skips the all-gather start barrier with persistent outputs; see MeshCCL)
     ag_persistent: bool = False
     # ds_shared: the DRAM-sharded packed DSA / router weights also serve the prefill rows (2D program config) and the
     # separate interleaved weights are freed at build: no second weight copy (decided at construction)
@@ -206,9 +206,9 @@ DEFAULT_MC = MCOpts(
     # stage-5 review #3 (records/sparse_ab.jsonl, dense_ab.jsonl: bit-identical at 1 slot, positions 128 / 3000 / 130,000)
     dsa_q_mm_ib=64,
     mix_chunks_decode=16,
-    # off: on the 45-layer model the persistent decode all-gather outputs (shared per call site across layers) broke
-    # decode (1 slot: teacher forcing top-5 32 %; 8 slots: identical greedy runs differ), although 2 x 120 replays of
-    # one layer were bit-identical. Stage 7 measured readiness with it off (top-5 100 %); see the stage-7 README.
+    # off. Rejected on 2026-10-17 (45-layer teacher forcing 14 / 32 / 90, 8-slot runs not repeating): that was the
+    # logits-pad lifetime bug (fixed in 46b2a5a601d). On the fixed code it passes (stage-7 review #2: TF identical on
+    # 3 references, reduced 8-slot runs repeat, -0.44 ms per token, +0.55 MiB per die) but is not adopted: see MeshCCL.
     ag_persistent=False,
     moe_grouped_in0=8,
     kda_out="1d:c16:ib4",
@@ -499,14 +499,15 @@ class MeshCCL:
         self.mesh, self.tt_ccl, self.mc = mesh, tt_ccl, mc
         self._topo = {}
         # ag_persistent output buffers, one per (call site, shape, dtype), shared by every layer on this TT_CCL.
-        # REJECTED (off in DEFAULT_MC): with a persistent output ttnn skips the all-gather's start barrier
-        # (all_gather_async_default_program_factory.cpp: "use synchronize barrier semaphore" = barrier_semaphore &&
-        # !using_persistent_buffers), so nothing orders a remote write into a buffer after its consumer on the
-        # receiving die. 1-layer replays (2 x 120, 200) were bit-identical, but the stacked model was not: the reduced
-        # 0 / 3 / 4 model (1 active slot of 8) gave different traced-decode tokens on repeated runs with either prefill
-        # path (s7_probe "eager" / "traced" select the prefill path only; decode is always traced; stage 7:
-        # s7_det_reduced_s8.log), and 45-layer teacher forcing fell to top-5 32 %. Root cause not
-        # established. Any CCL / buffer option must pass the stacked repeatability probe (README "Stacked gate").
+        # OFF in DEFAULT_MC. History: the 2026-10-17 stacked failures (reduced 0 / 3 / 4 8-slot runs not repeating,
+        # 45-layer teacher forcing 14 / 32 / 90) were the logits-pad lifetime bug, not this option; on the fixed code it
+        # passes (stage-7 review #2, b3270061cca: TF identical on 3 references, 8-slot runs repeat, -0.44 ms per token,
+        # +71,680 B per bank). Not adopted: with a persistent output ttnn skips the all-gather's start barrier
+        # (all_gather_async_default_program_factory.cpp:752: "use synchronize barrier semaphore" = barrier_semaphore &&
+        # !using_persistent_buffers), so nothing orders a remote write into a buffer after its last reader on the
+        # receiving die, and one buffer per site is reused by all 45 layers; one run per setting cannot exclude that
+        # race. Per-layer-parity ping-pong buffers were not tried. Any CCL / buffer option must pass the stacked
+        # repeatability probe (README "Stacked gate").
         self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
 
     def topology(self):

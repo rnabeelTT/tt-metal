@@ -19,6 +19,7 @@ DSA latent pool blocks of every slot.
 
 from __future__ import annotations
 
+import gc
 import os
 
 import torch
@@ -88,11 +89,36 @@ def _budget() -> dict:
     # default runs the unsplit (faster) MoE prefill; long contexts belong to the serving profiles (serving_profiles.json)
     env_mib = os.environ.get("GLM53_DRAM_RESERVE_MIB")
     reserve = int(float(env_mib) * (1 << 20)) if env_mib is not None else max(reserve, 1200 << 20)
+    free = int(os.environ.get("GLM53_BUDGET_FREE_BYTES", free))
+    by_layout = {"replicated": {"free": free, "reserve": reserve, "block": blk_rep, "cap": None}}
+    by_layout["sharded"] = {"free": free, "reserve": reserve, "block": blk_shard, "cap": None}
+    if data is not None:
+        from . import serving_profiles as sp
+
+        for L in ("replicated", "sharded"):
+            try:
+                lb = sp.layout_budget(data, L) if L in sp.layouts(data) else None
+            except KeyError:
+                lb = None
+            if lb is None:
+                continue
+            ent = by_layout[L]
+            if L != sp.default_layout(data):  # a measured non-default layout: its own budget (sharded: the
+                # measured 600 MiB workspace; the 1,200 MiB floor applies to the replicated default only)
+                ent["free"] = int(os.environ.get("GLM53_BUDGET_FREE_BYTES", lb["free_after_load_bytes"]))
+                ent["block"] = int(lb.get("dsa_bytes_per_block", ent["block"]))
+                if env_mib is None:
+                    ent["reserve"] = int(lb["reserve_bytes"])
+            try:  # the largest measured / serving-rule context of one request: never plan above it
+                ent["cap"] = int(sp.max_model_len_for(data, 1, layout=L))
+            except Exception:  # noqa: BLE001
+                pass
     return {
-        "free_after_load_bytes": int(os.environ.get("GLM53_BUDGET_FREE_BYTES", free)),
+        "free_after_load_bytes": free,
         "kda_bytes_per_slot": kda,
         "reserve_bytes": reserve,
-        "block_bytes": {"replicated": blk_rep, "sharded": blk_shard},
+        "block_bytes": {L: v["block"] for L, v in by_layout.items()},
+        "layouts": by_layout,
         "latent_dtype": lat,
         "source": src,
     }
@@ -124,11 +150,12 @@ def _kda_slots(S: int) -> int:
 def pool_blocks(S: int, layout: str, free_bytes: int | None = None) -> int:
     """DSA pool blocks (incl. the dummy block) that fit per die next to S slots' KDA state and the reserve."""
     b = budget()
-    free = b["free_after_load_bytes"] if free_bytes is None else free_bytes
-    avail = free - (_kda_slots(S) - 2) * b["kda_bytes_per_slot"] - b["reserve_bytes"]
-    if layout not in b["block_bytes"]:  # the block-sharded layout supports the bf16 latent only
+    if layout not in b["layouts"]:
         return 0
-    return max(0, avail // b["block_bytes"][layout])
+    ent = b["layouts"][layout]
+    free = ent["free"] if free_bytes is None else free_bytes
+    avail = free - (_kda_slots(S) - 2) * b["kda_bytes_per_slot"] - ent["reserve"]
+    return max(0, avail // ent["block"])
 
 
 def blocks_needed(S: int, T: int, serving: bool = False) -> int:
@@ -146,6 +173,9 @@ def max_context(S: int, layout: str, serving: bool = False) -> int:
     """Largest max_seq_len of S slots in `layout` (a multiple of context_granularity)."""
     nb = pool_blocks(S, layout)
     t = ((nb - 2 - (S - 1)) if serving else (nb - 1) // S) * 128
+    cap = BUDGET["layouts"].get(layout, {}).get("cap")
+    if cap:  # measured maximum of the layout (serving_profiles.json): an explicit low reserve must not plan above it
+        t = min(t, cap)
     return 0 if t < 128 else t // context_granularity(t) * context_granularity(t)
 
 
@@ -172,6 +202,9 @@ def plan_context(S: int, T: int | None = None, layout: str | None = None, servin
         raise ValueError(f"max_seq_len {T} must be a multiple of {g} (the largest prefill chunk length that fits it)")
     cands = [layout] if layout is not None else list(LAYOUTS)
     for L in cands:
+        cap = BUDGET["layouts"].get(L, {}).get("cap")
+        if cap and T > cap:  # above the layout's measured maximum
+            continue
         if blocks_needed(S, T, serving) <= pool_blocks(S, L):
             return {
                 "layout": L,
@@ -186,7 +219,11 @@ def plan_context(S: int, T: int | None = None, layout: str | None = None, servin
         f"max_batch_size {S} x max_seq_len {T} does not fit in device DRAM ({'/'.join(cands)} DSA layout"
         f"{'' if layout else 's'}): needs {blocks_needed(S, T, serving)} DSA blocks, the budget holds "
         + ", ".join(f"{L} {pool_blocks(S, L)} (max_seq_len <= {caps[L]})" for L in cands)
-        + " per die (tt/generator.BUDGET; doc/full_model/memory_budget.json)"
+        + " per die (tt/generator.BUDGET; doc/full_model/memory_budget.json). Recipe: up to "
+        + f"{caps['replicated']:,} tokens at {S} slot(s) Glm53Generator(mesh, max_batch_size={S}, max_seq_len=T) "
+        + "plans the replicated layout; above it, the block-sharded layout (planned automatically, or "
+        + "dsa_layout='sharded' / GLM53_DSA_SHARD=1; 1 x 1,048,576 = serving profile p300x2-1m); "
+        + "GLM53_DRAM_RESERVE_MIB lowers the reserve, never above the measured maximum"
     )
 
 
@@ -279,6 +316,21 @@ class Glm53Generator(Generator):
             self.plan = {"layout": dsa_layout or ("sharded" if env else "replicated"), "max_seq_len": T}
             self.plan["dsa_shard"] = self.plan["layout"] == "sharded"
         max_seq_len = self.plan["max_seq_len"]
+        if self.plan["layout"] != "replicated":  # the process settings the layout was measured with (as the adapter)
+            data = _profiles_budget()
+            if data is not None:
+                from . import serving_profiles as sp
+
+                try:
+                    for k, v in sp.layout_env(data, self.plan["layout"]).items():
+                        if k == "GLM53_MOE_SORTED_ROWS" and os.environ.get("_GLM53_MOE_ROWS_AUTO") == "1":
+                            os.environ.pop(
+                                k, None
+                            )  # an earlier build's automatic split choice is not an explicit value
+                            os.environ.pop("_GLM53_MOE_ROWS_AUTO", None)
+                        os.environ.setdefault(k, str(v))
+                except KeyError:
+                    pass
         logger.info(f"generator plan: {self.plan}")
         model_kw.setdefault("dsa_shard", self.plan["dsa_shard"])
         dp = os.environ.get("GLM53_DEFER_POOL", "0")  # 0 = HEAD (pool per layer at construction); 1 = after the
@@ -377,10 +429,11 @@ class Glm53Generator(Generator):
                 free = None
             self.plan["free_after_load_bytes"] = free
             self.plan["pool_bytes"] = need
-            if free is not None and need + BUDGET["reserve_bytes"] > free:
+            reserve = BUDGET["layouts"].get(self.plan["layout"], {}).get("reserve", BUDGET["reserve_bytes"])
+            if free is not None and need + reserve > free:
                 raise ValueError(
                     f"max_batch_size {S} x max_seq_len {T}: the DSA pool ({nb} blocks, {need / 2**30:.2f} GiB per die, "
-                    f"{self.plan['layout']} layout) plus the {BUDGET['reserve_bytes'] / 2**20:.0f} MiB reserve exceeds "
+                    f"{self.plan['layout']} layout) plus the {reserve / 2**20:.0f} MiB reserve exceeds "
                     f"the {free / 2**30:.2f} GiB free per die after loading; use a shorter max_seq_len or fewer slots "
                     f"(tt/generator.plan_context)"
                 )
@@ -893,6 +946,8 @@ class Glm53Generator(Generator):
             out.append(int(row[int(s)]))
             self.positions[int(s)] = int(prompt_lens[b])
             self._fresh.add(int(s))
+        self.check_trace_addresses("after sampled prefill")
+        self.guard_programs(f"sampled prefill of {list(prompt_lens)} tokens")
         return torch.tensor(out, dtype=torch.int64)
 
     def _set_page_rows(self, page_table, slots):
@@ -995,6 +1050,12 @@ class Glm53Generator(Generator):
                 f"generator"
             )
         self.reset()
+        if on_device_sampling:  # greedy explicitly: never the params a previous serving call left on the sampler
+            from models.common.sampling.generator import format_sampling_params
+            from models.common.sampling.sampling_params import SamplingParams
+
+            greedy = format_sampling_params(SamplingParams(temperature=0.0, top_k=1, top_p=1.0), self.model.SR)
+            self.model.sampling.reset_sampling_params(greedy)
         logits = self.prefill_forward(ids, prompt_lens=[P])
         pred = int(torch.argmax(logits[0, -1, : self.model.vocab]).item())  # first token: the prefill logits row
         preds = []
@@ -1019,13 +1080,28 @@ class Glm53Generator(Generator):
             reload = False
         if next_input is not None and len(preds) == int(max_new_tokens):
             next_input(len(preds) - 1, preds[-1])
+        self.guard_programs(f"generate ({len(preds)} tokens)")  # once per call: no per-step cost
         return preds
 
     def teardown(self):
-        self.model.release_prefill_traces()
+        """Release every trace (decode, sampler variants, prefill) and every device tensor this generator owns, so a
+        second generator can be built in the same process. The model is a reference cycle (the decode-input / MoE
+        wrappers close over it): dropping the references and running the cycle collector frees its weights."""
+        m = getattr(self, "model", None)
+        if m is None:
+            return
+        m.release_prefill_traces()
         if self.trace_id is not None:
             dsa_buckets.release_decode(self)
             self.trace_id = None
+        if m.sampling is not None:
+            m.sampling.reset_trace()
+        ttnn.synchronize_device(self.mesh)
+        for name in ("model", "tok_buf", "logits_out", "kv_cache", "_sstate", "_trace_addr"):
+            if hasattr(self, name):
+                setattr(self, name, None)
+        del m
+        gc.collect()
 
 
 def _check_mesh(mesh_device):

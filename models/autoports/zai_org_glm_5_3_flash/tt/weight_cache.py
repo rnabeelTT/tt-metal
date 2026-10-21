@@ -257,9 +257,21 @@ class WeightCache:
         if self.has(name):
             try:
                 return self.load(name)
-            except RuntimeError as e:  # corrupt file: rebuild it
-                logger.warning(f"weight cache: {self.file(name)} unreadable ({e}); rebuilding")
+            except RuntimeError as e:
+                if _is_device_error(e):  # out of DRAM / device fault: the file is fine; a rebuild would fail the same
+                    raise
+                logger.warning(f"weight cache: {self.file(name)} unreadable ({e}); rebuilding")  # corrupt file
         return self.store(name, build())
+
+
+_DEVICE_ERROR_MARKERS = ("out of memory", "not enough space to allocate", "failed to allocate")
+
+
+def _is_device_error(e: BaseException) -> bool:
+    """A RuntimeError from the device allocation of a cached load (DRAM exhausted), not from reading the file. A corrupt
+    file (short read, deserialization TT_THROW) still rebuilds."""
+    msg = str(e).lower()
+    return any(k in msg for k in _DEVICE_ERROR_MARKERS)
 
 
 def cached(cache: WeightCache | None, name: str, build: Callable[[], ttnn.Tensor]) -> ttnn.Tensor:
@@ -297,20 +309,25 @@ def weight_cache_from_env(mesh, rd, opt) -> WeightCache | None:
                 made_ns = calendar.timegm(time.strptime(man["created"], "%Y-%m-%dT%H:%M:%SZ")) * 10**9
             except (KeyError, ValueError, OverflowError):
                 made_ns = manifest.stat().st_mtime_ns
-            if all(v[1] <= made_ns for v in files.values()) and os.access(root, os.W_OK):
-                man["checkpoint_files"] = files
-                tmp = root / f".manifest.{os.getpid()}.tmp"
-                tmp.write_text(json.dumps(man, indent=1))
-                os.replace(tmp, manifest)
+            if all(v[1] <= made_ns for v in files.values()):
+                man["checkpoint_files"] = files  # verified: reuse (record it when the cache is writable)
+                if os.access(root, os.W_OK):
+                    tmp = root / f".manifest.{os.getpid()}.tmp"
+                    tmp.write_text(json.dumps(man, indent=1))
+                    os.replace(tmp, manifest)
             else:
-                rec = {}  # unverifiable: treat as changed
+                rec = {}  # a shard is newer than the cache: treat as changed
         if rec is not None and rec != files and man.get("checkpoint_files") != files:
             # same config / index, rewritten shards: never reuse those tensors
             logger.warning(
                 f"weight cache {root}: checkpoint shard files changed (size / mtime); using a fresh directory"
             )
             root = Path(os.path.expanduser(base)) / f"{key}-f{_digest(files)[:8]}"
-            root.mkdir(parents=True, exist_ok=True)
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+            except OSError as e:  # read-only cache root: never reuse the stale tensors, load uncached instead
+                logger.warning(f"weight cache disabled: stale cache and cannot create {root} ({e})")
+                return None
             manifest = root / "manifest.json"
     if not manifest.exists() and os.access(root, os.W_OK):
         tmp = root / f".manifest.{os.getpid()}.tmp"

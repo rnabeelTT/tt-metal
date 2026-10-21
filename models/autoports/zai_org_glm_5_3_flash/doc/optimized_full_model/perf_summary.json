@@ -52,9 +52,9 @@
  "named_limitations": [
   "context-size cost: the sparse DSA indexer scores every allocated pool slot (P_alloc from max_seq_len), not the filled prefix: 16,384 vs 280,576 -> token-out 51.10 vs 56.24 ms (+10 %), TTFT at 8,192 tokens 4,408 vs 6,444 ms (+46 %); planned fix (stage 10, PLAN.md 'cap at max position'): score the filled prefix, bucketed",
   "decoder layers are ~97 % of the step; terminal path (LM head 471 us, sampler 0.39 ms, glue ~0.25 ms) ~1.1 ms",
-  "LM head 471 us interleaved bfp8 (168 MB per die); DRAM-sharded column splits slower (10 x 66 us)",
+  "LM head 471 us (measured 2026-10-17: interleaved bfp8, stage-7 precision, 168 MB per die); HEAD's default runs a bfp4 LM head with its own decode program (decode_specs.lm_head), not profiled here; DRAM-sharded column splits were slower (10 x 66 us)",
   "128-row prefill chunk is device-bound (~5 ms per layer): prefill traces save 10 ms only",
-  "persistent decode all-gather (ag_persistent) is off in the shipped DEFAULT_MC: not adopted (capacity re-probe cost); available via MCOpts. Re-tested on the fixed code: quality identical (TF on 3 references, reduced 8-slot repeats), 0.44 ms per token faster (49.96 vs 50.40 ms at 16,384, runs/s7r2/agp{0,1}.json); capacity impact unmeasured",
+  "persistent decode all-gather (ag_persistent) is off in the shipped DEFAULT_MC: not adopted, available via MCOpts. Re-tested on the fixed code (b3270061cca, combo_a_kv + kda_in): quality identical (TF on 3 references, reduced 8-slot repeats), -0.44 ms per token (49.96 vs 50.40 ms at 16,384, runs/s7r2/agp{0,1}.json), +71,680 B per bank (~0.55 MiB per die). Kept off because persistent outputs skip the all-gather start barrier and one buffer per site is reused by all 45 layers: one run per setting cannot exclude a race; per-layer-parity ping-pong buffers not tried",
   "inactive-row MoE skip rebuilds its sentinel in each of 42 MoE layers: +1.1 % at 8 active (112.24 vs 110.97 ms skip off)",
   "device time of the full step not profiled (full-stack Tracy forbidden); 1-layer Tracy windows (2026-10-17) are stale"
  ],
@@ -68,5 +68,35 @@
    "context-size indexer cost: ~5.1 ms at 280,576 (stage 10)",
    "8-slot builds: MoE pairs glue on all 64 (row, expert) groups (stage 5)"
   ]
+ },
+ "head_default_v3": {
+  "source": "runs/s7r2/v3_default.json (git archive 237ec3b8438, GLM53_PRECISION unset = combo_a_kv_dense4_g4 + ten bfp4 decode programs, Glm53Generator(mesh) default budget)",
+  "max_seq_len": 294912,
+  "layout": "replicated",
+  "dram_free_after_build_per_die": 1009826816,
+  "moe_split": "engaged (rows 1024): largest free block 1,030,724,608 B < 1 GiB threshold",
+  "teacher_forcing_top1_p0_p1_p2": [
+   0.92,
+   0.95,
+   0.92
+  ],
+  "prefill_check_top1_p0_p1_p2": [
+   0.92,
+   0.95,
+   0.91
+  ],
+  "top5_top100": "1.0 / 1.0 on all three",
+  "ttft_ms_by_prompt": {
+   "128": 226.5,
+   "161": 379.9,
+   "512": 375.7,
+   "2048": 1144.2,
+   "8192": 7034.0
+  },
+  "decode_ms_per_token_model_trace": 54.65,
+  "decode_ms_per_token_token_out": 55.04,
+  "decode_ms_per_token_e2e": 55.13,
+  "program_cache_growth": [],
+  "seed_changes_draws": true
  }
 }
