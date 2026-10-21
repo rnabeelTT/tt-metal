@@ -238,6 +238,20 @@ by default for this profile, low reasoning effort for the readiness stages). Ser
   - Follow-up: `scripts/09_shard_place.py` compares logits bitwise for a repeat, a 4-block-aligned shift and a
     1-block shift (reduced model, explicit page tables).
 
+## Block-placement control (2026-10-21, snapshot s9g, `logs/09/shard_place.json`)
+
+Command: `scripts/09_shard_place.py OUT` in one ticket (reduced layers 0, 3, 4, `GLM53_DSA_SHARD=1` + the layout
+env, max_seq_len 16,384, a 6,001-token prompt in 47 blocks, host-logits mode, prefill + 8 traced greedy decode steps).
+
+| case | blocks | bit-identical to base [1..47] | max abs logit diff | tokens equal |
+| --- | --- | --- | ---: | --- |
+| repeat | [1..47] | yes | 0 | yes |
+| 4-block-aligned shift | [5..51] | yes | 0 | yes |
+| 1-block shift | [2..48] | no | 0.527 | yes |
+
+Verdict: placement-only numerics of the block-sharded layout. The same die placement gives bit-identical logits. The
+A8-1M burst divergence (gap 0.5625 after a block-id change) is this effect, not stale state.
+
 ## Notes
 
 - Indexer cost: the sparse DSA indexer selects over all pools of the model context, not over the filled prefix. The

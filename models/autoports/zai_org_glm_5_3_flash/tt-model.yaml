@@ -153,7 +153,8 @@ card:
     ### Profiles
     `tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole --profile <name>`. The context is limited by device
     DRAM: the weights fill about 28.9 of the 31.8 GiB of each die; the 11 DSA layers need 6,336 B per token per die
-    (replicated on every die) and every decode slot holds 34 MiB of KDA state per die.
+    with the replicated DSA cache (every profile except `p300x2-1m`) or 2,288 B with the block-sharded cache of
+    `p300x2-1m`, and every decode slot holds 34 MiB of KDA state per die.
     <!-- BEGIN profiles: serving_profiles.json -->
     - `p300x2` (default): 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
     - `p300x2-long`: 1 sequence, 325,632-token context, DSA pool 325,760 tokens shared by all sequences.
@@ -161,7 +162,8 @@ card:
     - `p300x2-wide`: 32 sequences, 151,552-token context, DSA pool 157,184 tokens shared by all sequences.
     - `p150x4`: 16 sequences, 243,712-token context, DSA pool 247,296 tokens shared by all sequences.
     <!-- END profiles: serving_profiles.json -->
-    The advertised context of the checkpoint is 1,048,576 tokens; no profile reaches it on four dies.
+    The advertised context of the checkpoint is 1,048,576 tokens. The profile `p300x2-1m` serves it (one sequence,
+    block-sharded DSA cache, slower decode than `p300x2-long`).
 
     ### Precision
     Selected by a datatype sweep of the full model (policy `combo_a_kv_dense4_g4`):
@@ -181,8 +183,10 @@ card:
     | AIME24 #1 | 0.95 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
     | AIME24 #2 | 0.92 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
 
-    TODO(stage 8): long-context TT-vs-TT gate. TODO(stage 9): vLLM sampling-parameter conformance (vllm-tt-plugin
-    suite). TODO(stage 11): TTI release evals (meta_ifeval, meta_gpqa_cot, ...). The accuracy of E192 against the full
+    vLLM sampling-parameter conformance (vllm-tt-plugin suite, 16 sequences): 69 passed, 4 failed, 4 skipped; the 4
+    are test-format and model-property failures of the always-thinking template (details in the autoport's
+    doc/vllm/README.md). Long-context retrieval through vLLM: a passkey at 1,038,965 tokens is found.
+    TODO(stage 8): long-context TT-vs-TT gate. TODO(stage 11): TTI release evals (meta_ifeval, meta_gpqa_cot, ...). The accuracy of E192 against the full
     288-expert GLM-5.3-Flash was not measured here.
 
     ### Performance
@@ -192,7 +196,10 @@ card:
 
     ### Limitations
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
-    - Context is DRAM-limited (see Profiles); the advertised 1,048,576 tokens do not fit on four dies.
+    - Context is DRAM-limited per DSA cache layout (see Profiles): the full 1,048,576 tokens need `p300x2-1m` (one
+      sequence); the replicated profiles hold fewer tokens per sequence but decode faster.
+    - `p300x2-1m`: a request's cache blocks map to dies by block id, so a greedy output can differ in a near-tie token
+      from the same request on other blocks (bounded numerics; the same blocks give bit-identical logits).
     - One decode trace width for all slots: a profile with more sequences decodes slower per user, also with one
       active request.
     - The device sampler supports `top_k` up to 32; requests with logprobs, `min_p`, `logit_bias` or structured output
