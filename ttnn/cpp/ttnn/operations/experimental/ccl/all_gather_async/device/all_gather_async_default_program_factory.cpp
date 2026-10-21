@@ -42,6 +42,10 @@ namespace {
 constexpr tt::tt_metal::KernelHandle kReaderKernelIndex = 0;
 constexpr tt::tt_metal::KernelHandle kWriterKernelIndex = 1;
 
+// Circular buffer holding the fabric mux's L1 map on the mux cores. all_gather_matmul_async builds its matmul into
+// the same Program, so take the top index rather than one the matmul's circular buffers start from.
+constexpr uint8_t kMuxL1CbIndex = tt::CBIndex::c_31;
+
 uint32_t all_gather_async_core_count_per_link(
     uint32_t num_workers_per_direction,
     uint32_t num_directions_per_link,
@@ -329,10 +333,6 @@ tt::tt_metal::ProgramDescriptor build_all_gather_async_minimal_default_program_d
         writer_compute_defines.emplace_back("USE_WORKER_MUX", "1");
     }
 
-    const uint32_t l1_unreserved_base_address =
-        mesh_device->allocator()->get_base_allocator_addr(tt::tt_metal::HalMemType::L1);
-    const size_t mux_base_l1_address = l1_unreserved_base_address;
-
     auto map_nd_to_4d = [&]() {
         // Here we do a couple of tricks so that the kernels can handle ND tensors
         // implicitly reshape lower dims so it is treated as 4D
@@ -407,13 +407,18 @@ tt::tt_metal::ProgramDescriptor build_all_gather_async_minimal_default_program_d
     auto num_full_size_channels = num_workers_per_direction;
     auto num_header_only_channels = 0;
     size_t buffer_size_bytes_full_size_channel = tt::tt_fabric::get_tt_fabric_channel_buffer_size_bytes();
+    // The mux's map goes in program-local L1 rather than at a fixed address, so it stays clear of persistent L1
+    // (PrefetcherPipe rings) on the mux cores. Its addresses are offsets until the mux publishes the map's base.
     auto mux_kernel_config = tt::tt_fabric::FabricMuxConfig(
         num_full_size_channels,
         num_header_only_channels,
         num_buffers_full_size_channels,
         0,
         buffer_size_bytes_full_size_channel,
-        mux_base_l1_address);
+        /*base_l1_address=*/0);
+    if (!mux_core_range_set.empty()) {
+        mux_kernel_config.place_in_program_local_l1(desc, mux_core_range_set, kMuxL1CbIndex);
+    }
 
     // Create Reader Kernels
     std::vector<uint32_t> sender_reader_compile_args = {
@@ -1015,9 +1020,6 @@ AllGatherProgramArtifacts build_all_gather_async_minimal_default_program_artifac
     }
 
     std::vector<tt::tt_metal::KernelHandle> writer_kernel_ids;
-    const uint32_t l1_unreserved_base_address =
-        mesh_device->allocator()->get_base_allocator_addr(tt::tt_metal::HalMemType::L1);
-    const size_t mux_base_l1_address = l1_unreserved_base_address;
 
     auto map_nd_to_4d = [&]() {
         // Here we do a couple of tricks so that the kernels can handle ND tensors
@@ -1093,13 +1095,17 @@ AllGatherProgramArtifacts build_all_gather_async_minimal_default_program_artifac
     auto num_full_size_channels = num_workers_per_direction;
     auto num_header_only_channels = 0;
     size_t buffer_size_bytes_full_size_channel = tt::tt_fabric::get_tt_fabric_channel_buffer_size_bytes();
+    // As in the ProgramDescriptor builder above: the mux's map goes in program-local L1.
     auto mux_kernel_config = tt::tt_fabric::FabricMuxConfig(
         num_full_size_channels,
         num_header_only_channels,
         num_buffers_full_size_channels,
         0,
         buffer_size_bytes_full_size_channel,
-        mux_base_l1_address);
+        /*base_l1_address=*/0);
+    if (!mux_core_range_set.empty()) {
+        mux_kernel_config.place_in_program_local_l1(program, mux_core_range_set, kMuxL1CbIndex);
+    }
 
     // Create Reader Kernels
     std::vector<uint32_t> sender_reader_compile_args = {
