@@ -56,7 +56,8 @@ void kernel_main() {
 
     uint32_t ids[topk];
     uint16_t w[topk];
-    moe_topk::topk_softmax<topk, n>(reinterpret_cast<volatile tt_l1_ptr uint16_t*>(logits_l1), ids, w);
+    invalidate_l1_cache();
+    moe_topk::topk_softmax<topk, n>(reinterpret_cast<const uint32_t*>(logits_l1), ids, w);
 
     volatile tt_l1_ptr uint16_t* id_out = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(ids_l1);
     volatile tt_l1_ptr uint16_t* w_out = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(score_l1);

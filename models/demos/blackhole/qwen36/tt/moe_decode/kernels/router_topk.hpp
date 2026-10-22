@@ -3,7 +3,7 @@
 
 // Router top-k + softmax on a data-movement core (no FPU), for the Qwen3.5-MoE decode router
 // (moe_decode/topk.py). Top-k by order-preserving integer keys of the BF16 logits (ties to the lower id, one pass
-// of insertion into a sorted k-list), softmax over the selected logits in 64-bit fixed point (exp2 = integer shift x
+// of insertion into a sorted k-list, 32-bit word loads), softmax over the selected logits in 64-bit fixed point (exp2 = integer shift x
 // degree-5 polynomial, ~1e-5 relative), rounded to BF16. softmax over all experts -> top-k -> renormalize equals
 // top-k of the logits -> softmax over the k selected (the global partition function cancels).
 // Fixed-point helpers from the gpt-oss fused decode router (models/demos/gpt_oss/tt/fused_decode/kernels).
@@ -55,43 +55,129 @@ inline uint16_t fixed_to_bf16(uint64_t w, int32_t frac) {
     return static_cast<uint16_t>(((127 + msb - frac) << 7) | (static_cast<uint32_t>(m) & 0x7F));
 }
 
-inline uint32_t order_key(uint32_t b) { return (b & 0x8000) ? (~b & 0xFFFF) : (b | 0x8000); }
+// sigmoid(x) of a BF16 logit -> BF16 bits: e = exp(-|x|) in Q32, 1 / (1 + e) or e / (1 + e) in Q27.
+inline uint16_t sigmoid_bf16(uint16_t b) {
+    const int32_t v = bf16_to_q16(b);
+    int32_t n;
+    const uint32_t p = exp2_parts(v < 0 ? v : -v, n);
+    const uint64_t e = n < -32 ? 0 : (n < -16 ? static_cast<uint64_t>(p >> (-16 - n)) : static_cast<uint64_t>(p) << (16 + n));
+    const uint64_t den = (1ull << 32) + e;
+    return fixed_to_bf16(((v < 0 ? e : (1ull << 32)) << 27) / den, 27);
+}
 
-// Top-k of the n BF16 logits (sorted descending, ties to the lower id) -> ids[k], softmax weights[k] (BF16 bits).
-template <uint32_t topk, uint32_t n>
-inline void topk_softmax(volatile tt_l1_ptr uint16_t* logits, uint32_t* ids, uint16_t* weights) {
-    uint32_t keys[topk];
+// Order-preserving integer key of BF16 bits (larger value -> larger key), branchless.
+inline uint32_t order_key(uint32_t b) { return b ^ 0x8000 ^ ((0u - (b >> 15)) & 0x7FFF); }
+
+template <uint32_t topk>
+inline void insert(uint32_t key, uint32_t id, uint32_t* keys, uint32_t* ids) {
+    uint32_t j = topk - 1;
+    while (j > 0 && key > keys[j - 1]) {
+        keys[j] = keys[j - 1];
+        ids[j] = ids[j - 1];
+        --j;
+    }
+    keys[j] = key;
+    ids[j] = id;
+}
+
+// Top-k (sorted descending, ties to the lower id) of the BF16 values in 32-bit words [w0, w1) (value ids 2 w0 ..):
+// keys[k] (order keys, 0 = empty) and ids[k].
+template <uint32_t topk>
+inline void select_range(const uint32_t* words, uint32_t w0, uint32_t w1, uint32_t* keys_out, uint32_t* ids_out) {
+    // keys / ids live in registers (fully unrolled constant indexing; the kernel stack is in L1); a new value
+    // bubbles up from the last slot with compare-swaps. The running k-th largest key is keys[topk - 1].
+    uint32_t keys[topk], ids[topk];
+#pragma GCC unroll 16
     for (uint32_t j = 0; j < topk; ++j) {
         keys[j] = 0;
         ids[j] = 0;
     }
-    for (uint32_t i = 0; i < n; ++i) {
-        const uint32_t key = order_key(logits[i]);
-        if (key <= keys[topk - 1]) {
-            continue;
+    auto push = [&](uint32_t key, uint32_t id) __attribute__((always_inline)) {
+        keys[topk - 1] = key;
+        ids[topk - 1] = id;
+#pragma GCC unroll 16
+        for (uint32_t j = topk - 1; j > 0; --j) {
+            if (keys[j] > keys[j - 1]) {
+                const uint32_t tk = keys[j], ti = ids[j];
+                keys[j] = keys[j - 1];
+                ids[j] = ids[j - 1];
+                keys[j - 1] = tk;
+                ids[j - 1] = ti;
+            }
         }
-        uint32_t j = topk - 1;
-        while (j > 0 && key > keys[j - 1]) {
-            keys[j] = keys[j - 1];
-            ids[j] = ids[j - 1];
-            --j;
+    };
+#pragma GCC unroll 1
+    for (uint32_t i = w0; i < w1; ++i) {
+        const uint32_t v = words[i];
+        // both halves' order keys at once: flip the sign bit, and the magnitude bits of negative values
+        const uint32_t sgn = (v >> 15) & 0x00010001u;
+        const uint32_t kk = v ^ 0x80008000u ^ ((sgn << 15) - sgn);
+        const uint32_t k0 = kk & 0xFFFF, k1 = kk >> 16;
+        if (k0 > keys[topk - 1]) {
+            push(k0, 2 * i);
         }
-        keys[j] = key;
-        ids[j] = i;
+        if (k1 > keys[topk - 1]) {
+            push(k1, 2 * i + 1);
+        }
     }
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys_out[j] = keys[j];
+        ids_out[j] = ids[j];
+    }
+}
+
+// keys / ids <- the top-k of (keys, ids) and (keys2, ids2), both sorted; on equal keys the first list (lower ids) wins.
+template <uint32_t topk>
+inline void merge(uint32_t* keys, uint32_t* ids, const uint32_t* keys2, const uint32_t* ids2) {
+    uint32_t mk[topk], mi[topk];
+    uint32_t a = 0, b = 0;
+    for (uint32_t j = 0; j < topk; ++j) {
+        if (keys[a] >= keys2[b]) {
+            mk[j] = keys[a];
+            mi[j] = ids[a++];
+        } else {
+            mk[j] = keys2[b];
+            mi[j] = ids2[b++];
+        }
+    }
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys[j] = mk[j];
+        ids[j] = mi[j];
+    }
+}
+
+template <uint32_t topk, uint32_t n>
+inline void topk_select(const uint32_t* words, uint32_t* ids) {
+    uint32_t keys[topk];
+    select_range<topk>(words, 0, n / 2, keys, ids);
+}
+
+template <uint32_t topk>
+inline void softmax_selected(const uint32_t* words, const uint32_t* ids, uint16_t* weights) {
     // softmax over the selected: e_j = exp(v_j - v_0) = p_j 2^(n_j - 16) in Q32 (p_j << (16 + n_j), n_j <= 0;
-    // terms below 2^-16 of the largest dropped), weights in Q27 from a 64-bit division (~1e-5 relative)
-    const int32_t v0 = bf16_to_q16(logits[ids[0]]);
+    // terms below 2^-16 of the largest dropped); weights in Q27 = e_j * (2^59 / sum) >> 32 (one 64-bit division)
+    const uint16_t* vals = reinterpret_cast<const uint16_t*>(words);
+    const int32_t v0 = bf16_to_q16(vals[ids[0]]);
     uint64_t e[topk];
     uint64_t sum = 0;
     for (uint32_t j = 0; j < topk; ++j) {
         int32_t nj;
-        const uint32_t p = exp2_parts(bf16_to_q16(logits[ids[j]]) - v0, nj);
+        const uint32_t p = exp2_parts(bf16_to_q16(vals[ids[j]]) - v0, nj);
         e[j] = nj < -16 ? 0 : static_cast<uint64_t>(p) << (16 + nj);
         sum += e[j];
     }
+    const uint64_t inv = (1ull << 59) / sum;  // sum in [2^32, 2^36)
     for (uint32_t j = 0; j < topk; ++j) {
-        weights[j] = fixed_to_bf16((e[j] << 27) / sum, 27);
+        weights[j] = fixed_to_bf16((e[j] * inv) >> 32, 27);
     }
+}
+
+// Top-k of the n BF16 logits (sorted descending, ties to the lower id) -> ids[k], softmax weights[k] (BF16 bits).
+// words: the logits as n / 2 32-bit words, read through the cache (the caller invalidates it after they arrive).
+template <uint32_t topk, uint32_t n>
+inline void topk_softmax(const uint32_t* words, uint32_t* ids, uint16_t* weights) {
+    topk_select<topk, n>(words, ids);
+    softmax_selected<topk>(words, ids, weights);
 }
 }  // namespace moe_topk
