@@ -128,8 +128,6 @@ TEST(ThreadPoolTest, ParallelForUsesWorkers) {
     EXPECT_LT(on_caller, static_cast<int64_t>(ran_on.size()));
 }
 
-// When every call maps to one worker, the caller runs them all in order, and still runs every call before
-// rethrowing.
 TEST(ThreadPoolTest, ParallelForOneWorkerRunsOnCaller) {
     auto thread_pool = create_device_bound_thread_pool(DEFAULT_CONTEXT_ID, 2);
     const auto caller_id = std::this_thread::get_id();
