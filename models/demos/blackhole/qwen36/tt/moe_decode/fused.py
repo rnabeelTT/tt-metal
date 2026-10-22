@@ -22,7 +22,7 @@ import torch
 import ttnn
 
 from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers
-from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers
+from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
 CACHE_SUFFIX = f".r{WEIGHT_SIG_BITS}"
@@ -109,16 +109,19 @@ class FusedMoEDecode:
         key = self._key + ("rows", rows)
         if key not in self._cache:
             H, Il, E, k, dtype = self._key
+            act_key = self._key + ("act",)
+            if act_key not in self._cache:
+                self._cache[act_key] = act_buffer(self._mesh, Il, E, k, 32)
             self._cache[key] = (
                 RouteRows(self._mesh, E, k, rows),
                 ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows),
                 ExpertDownRows(self._mesh, H, Il, E, k, dtype, rows),
-                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
+                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype, act=self._cache[act_key]),
             )
         return self._cache[key]
 
     def rows(self, x, up_gate, down):
-        """x: the normed hidden [1, 1, M, H] (2 <= M <= 8). Returns the model-wide [1, 1, M, H] partial-sum buffer."""
+        """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
         logits = ttnn.linear(

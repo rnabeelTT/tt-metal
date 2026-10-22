@@ -300,6 +300,7 @@ def main():
         if "tp2" in what:  # p300 (2 chips) / Qwen3.5-122B on 4 chips: 256 expert columns per device, strided up|gate reads
             check_experts(dev, I=256, trials=1)
             check_rows(dev, 4, I=256, trials=1)
+            check_rows(dev, 16, I=256, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Multi-row expert gate|up matmul + SwiGLU (TRISC) of the fused MoE decode (moe_decode/union.py ExpertGateUpRows),
-// M = ROWS rows ([M, 32] activation tiles). Per union slot this core owns (count from BRISC through the mailboxes):
+// row groups of ROWS rows ([ROWS, 32] activation tiles). Per union slot this core owns (count from BRISC through the
+// mailboxes) and row group:
 //   u = x . W[:, up col j], g = x . W[:, gate col j]          (custom_mm, LoFi, FP32 accumulation)
 //   w = the slot's [M, 32] weight tile . I                   (custom_mm with the identity tile: loads it into DST)
 //   act = w * silu(g) * u, rounded to 7 significant bits (the down projection's srcB width), one [M, 32] tile.
@@ -63,6 +64,7 @@ void kernel_main() {
     constexpr uint32_t cb_sc = get_compile_time_arg_val(3);
     constexpr uint32_t cb_id = get_compile_time_arg_val(4);
     constexpr uint32_t kt = get_compile_time_arg_val(5);
+    constexpr uint32_t groups = get_compile_time_arg_val(6);  // row groups of ROWS rows
 
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
@@ -79,44 +81,42 @@ void kernel_main() {
     MATH(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
 
-    cb_wait_front(cb_x, kt);
+    cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
     for (uint32_t i = 0; i < n; ++i) {
-        tile_regs_acquire();
+        cb_wait_front(cb_w, 2 * kt);  // the slot's up and gate columns (one [kt, 2] block or two columns)
+        cb_wait_front(cb_sc, 2 * groups);
+        for (uint32_t g = 0; g < groups; ++g) {
+            tile_regs_acquire();
 #ifdef PAIR_JOINT
-        cb_wait_front(cb_w, 2 * kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
-        cb_pop_front(cb_w, 2 * kt);
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
+            custom_mm_block<true>(cb_x, cb_w, g * kt, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
 #else
-        cb_wait_front(cb_w, kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt);  // up
-        cb_pop_front(cb_w, kt);
-        cb_wait_front(cb_w, kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 1, kt);  // gate
-        cb_pop_front(cb_w, kt);
+            custom_mm_block<true>(cb_x, cb_w, g * kt, 0, 0, kt);   // up
+            custom_mm_block<true>(cb_x, cb_w, g * kt, kt, 1, kt);  // gate
 #endif
-        cb_wait_front(cb_sc, 2);
-        custom_mm_block<true>(cb_sc, cb_id, 0, 0, 2, 2);  // per-row weights
-        cb_pop_front(cb_sc, 2);
+            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
+            custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, 2, 2);  // the group's per-row weights
 
-        silu_tile_init();
-        silu_rows(1);
-        mul_binary_tile_init();
-        mul_rows(0, 1, 0);
-        mul_rows(0, 2, 0);
-        round_rows(0);
-        tile_regs_commit();
+            silu_tile_init();
+            silu_rows(1);
+            mul_binary_tile_init();
+            mul_rows(0, 1, 0);
+            mul_rows(0, 2, 0);
+            round_rows(0);
+            tile_regs_commit();
 
-        cb_reserve_back(cb_act, 1);
-        tile_regs_wait();
-        pack_tile(0, cb_act);
-        tile_regs_release();
-        cb_push_back(cb_act, 1);
+            cb_reserve_back(cb_act, 1);
+            tile_regs_wait();
+            pack_tile(0, cb_act);
+            tile_regs_release();
+            cb_push_back(cb_act, 1);
 
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+        }
+        cb_pop_front(cb_sc, 2 * groups);
+        cb_pop_front(cb_w, 2 * kt);
     }
     cb_pop_front(cb_id, 2);
-    cb_pop_front(cb_x, kt);
+    cb_pop_front(cb_x, groups * kt);
     custom_mm_block_uninit<dense_packing>();
 }

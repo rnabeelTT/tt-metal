@@ -132,7 +132,7 @@ def _rt(args, cores=None):
     return rt
 
 
-def _kernels(cores, name, reader, writer, compute, defines=()):
+def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False):
     """reader / writer / compute: (compile args, {(x, y): runtime args})."""
     dm = ttnn.DataMovementConfigDescriptor
     rd_ct, rd_args = reader
@@ -170,7 +170,8 @@ def _kernels(cores, name, reader, writer, compute, defines=()):
             runtime_args=cp_rt if cp_rt is not None else [],
             defines=list(defines),
             config=ttnn.ComputeConfigDescriptor(
-                math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False
+                math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False,
+                dst_full_sync_en=dst_full,
             ),
         ),
     ]

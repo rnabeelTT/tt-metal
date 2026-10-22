@@ -27,7 +27,29 @@ TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
 
 
 def tile_rows(m):
-    return next(r for r in TILE_ROWS if r >= m)
+    """[rows, 32] activation tile height for m decode rows (> 8 rows: groups of 8)."""
+    return next(r for r in TILE_ROWS if r >= min(m, 8))
+
+
+def row_groups(m):
+    return -(-m // tile_rows(m))
+
+
+ACT_PAGE = 64 * 8  # one [8, 32] BF16 tile: every width's [Mp, 32] tile fits a page
+
+
+def act_buffer(mesh_device, inter, num_experts, k, max_rows):
+    """The activations of every width (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
+    interleaved: every down core reads all of it, which from DRAM cost more than the weights at 32 rows (2.7 MB x 64
+    cores per device on 2 chips). Sized for max_rows (32 rows: 1.3 / 2.7 MB per device at 4 / 2 chips, spread over
+    the L1 banks)."""
+    multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
+    rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
+    slots = min(num_experts, max_rows * k) + 1
+    return ttnn.from_torch(
+        torch.zeros(slots * inter // TILE * row_groups(max_rows), ACT_PAGE // 2, dtype=torch.bfloat16),
+        dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep,
+    )
 
 
 class RowsBuffers:
@@ -35,17 +57,14 @@ class RowsBuffers:
     ([(U_max + 1) * I / 32] pages of one [Mp, 32] tile), output [1, 1, M, H] BF16 TILE in DRAM (zeros; rows 0..Mp-1 of
     each tile are written), the identity tile in the weight dtype."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, rows, weight_dtype):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, rows, weight_dtype, act=None):
+        """act: the activation buffer (act_buffer), shared by every width."""
         multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
         rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
         l1 = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
-        mp = tile_rows(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         self.table = ttnn.from_torch(torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1)
-        self.act = ttnn.from_torch(
-            torch.zeros(self.max_slots * inter // TILE, TILE * mp, dtype=torch.bfloat16),
-            dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1,
-        )
+        self.act = act if act is not None else act_buffer(mesh_device, inter, num_experts, k, rows)
         self.out = ttnn.from_torch(
             torch.zeros(1, 1, rows, hidden, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
             device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,
@@ -111,7 +130,7 @@ class ExpertGateUpRows:
         self.pairs = self.n_tiles // 2
         assert self.n_tiles % self.banks == 0
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
-        self.trows = tile_rows(rows)
+        self.trows, self.groups = tile_rows(rows), row_groups(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         if readers is None:
             readers = 4
@@ -127,18 +146,22 @@ class ExpertGateUpRows:
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act):
-        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_act = 0, 1, 2, 3, 4, 5, 16
+        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
         tb = 64 * self.trows
+        g = self.groups
+        # split mode (up / gate columns in two banks): a slot is two consecutive ring blocks the compute indexes
+        # together, so the ring holds an even number of blocks (custom_mm's tile index does not wrap)
+        buffers = self.buffers if self.joint else self.buffers + (self.buffers % 2)
+        per_core = -(-self.max_slots // self.readers)
         cbs = [
-            _cb(self.cores, cb_x, ttnn.bfloat16, tb, self.kt, tiny=True, rows=self.trows),
-            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * (2 if self.joint else 1)),
+            _cb(self.cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * (2 if self.joint else 1)),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
-            # every per-row weight tile of this core's slots at once: the writer builds them all before it drains the
-            # outputs, so a 2-slot ring deadlocked against cb_act at >= 6 slots per core
-            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * -(-self.max_slots // self.readers), tiny=True, rows=self.trows),
+            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * 2 * g, tiny=True, rows=self.trows),  # two slots' weight tiles
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
-            _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
+            _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}
         for c, j, r in self.assign:
@@ -146,12 +169,12 @@ class ExpertGateUpRows:
                                  identity.buffer_address(), j, r, (j + r) & 0x3]
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, r]
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
-        rd_ct += [self.page_bytes, self.banks, self.buffers]
+        rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
-        wr_ct = [cb_x, cb_act, cb_sc, cb_tab, self.kt, self.k, self.rows, self.readers, self.pairs, self.trows]
+        wr_ct = [cb_x, cb_act, cb_sc, cb_tab, self.kt, self.k, self.rows, self.readers, self.pairs, self.trows, g, cb_wt, ACT_PAGE]
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt]
+        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g]
         defines = [("ROWS", str(self.trows))] + ([("PAIR_JOINT", "1")] if self.joint else [])
         kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
@@ -166,12 +189,16 @@ class ExpertDownRows:
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.m = hidden // TILE // self.banks
+        self.trows, self.groups = tile_rows(rows), row_groups(rows)
+        # > 1 row group: full-sync DST (8 FP32 tiles; the kernel packs once, at the end): groups x cols <= 8, so fewer
+        # cores each read the whole activation block
+        self.dst_full = self.groups > 1
         if readers is None:  # 2 per bank (4 / 8 measured slower at 8 rows: 33 vs 24 us)
-            readers = 2 if self.m % 2 == 0 else 1
+            readers = max(2 if self.m % 2 == 0 else 1, self.m // max(1, (8 if self.dst_full else 4) // self.groups))
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
         self.cols = self.m // readers
+        assert self.groups * self.cols <= (8 if self.dst_full else 4), (self.groups, self.cols)
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
-        self.trows = tile_rows(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
@@ -183,11 +210,11 @@ class ExpertDownRows:
         cb_in0, cb_w, cb_scr, cb_tab, cb_out = 0, 1, 3, 5, 16
         tb = 64 * self.trows
         cbs = [
-            _cb(self.cores, cb_in0, ttnn.bfloat16, tb, self.max_slots * self.kt, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_in0, ttnn.bfloat16, tb, 2 * self.groups * self.chunk * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
-            _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.cols, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.groups * self.cols, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}
         for c, b, r in self.assign:
@@ -196,10 +223,11 @@ class ExpertDownRows:
             wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0]
         rd_ct = [cb_w, cb_scr, self.kt, self.m, self.cols, self.k, self.tile_bytes, self.rows, self.chunk]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args()
-        wr_ct = [cb_in0, cb_out, cb_tab, self.kt, self.cols, self.banks, self.k, self.rows, self.trows]
+        wr_ct = [cb_in0, cb_out, cb_tab, self.kt, self.cols, self.banks, self.k, self.rows, self.trows, self.groups, self.chunk, ACT_PAGE]
         for t in (act, out, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk]
-        kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), [("ROWS", str(self.trows))])
+        cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
+        defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
+        kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         return ttnn.generic_op([down, shared_down, act, table, out], program)
