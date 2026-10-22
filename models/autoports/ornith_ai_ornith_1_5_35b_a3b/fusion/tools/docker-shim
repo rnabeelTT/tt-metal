@@ -1,0 +1,4 @@
+#!/bin/bash
+# Run docker under the docker group (sessions started before `usermod -aG docker` lack it).
+if id -nG | grep -qw docker; then exec /usr/bin/docker "$@"; fi
+exec sg docker -c "$(printf '%q ' /usr/bin/docker "$@")"

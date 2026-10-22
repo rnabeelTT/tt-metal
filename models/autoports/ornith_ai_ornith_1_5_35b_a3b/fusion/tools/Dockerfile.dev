@@ -1,0 +1,6 @@
+FROM tt-model/ornith-1.5-35b-a3b-v2:0fe927ac6e21
+USER root
+# uv: any static uv binary copied next to this file (the image has no pip)
+COPY uv /usr/local/bin/uv
+RUN uv pip install --python /opt/tt-venv/bin/python pytest pytest-timeout tt-perf-report && /opt/tt-venv/bin/python -c "import pytest"
+USER tt

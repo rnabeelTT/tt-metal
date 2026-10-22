@@ -2,6 +2,7 @@
 # serve.sh <name> <image> <profile:p300|p300x2|p150> [extra docker -e args...]
 # The published raahemnabeel/ornith-1.5-35b-a3b launch command (tt-model serve --print), with the weights mounted from
 # ~/.cache/huggingface and thinking off by default (the scorecard's eval setting).
+# MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
 set -e
 NAME=$1; IMAGE=$2; PROFILE=$3; shift 3
 CACHE=$HOME/.cache/tt-model/ornith-1.5-35b-a3b-v2
@@ -11,6 +12,9 @@ case $PROFILE in
   p150)   MESH=P150;   VIS="--env TT_VISIBLE_DEVICES=0";   FAB=DISABLED;  QV=0; MM='{"image": 0, "video": 0}';;
 esac
 KCACHE=${KCACHE:-$CACHE/cache}
+METAL=${METAL:-$(cd "$(dirname "$0")/../../../../.." && pwd)}
+MNT=""; [ "${MODELS:-0}" = 1 ] && MNT="--volume $METAL/models:/opt/tt-metal/models:ro"
+mkdir -p $KCACHE $CACHE/weights $CACHE/tensors
 docker rm -f $NAME >/dev/null 2>&1 || true
 docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --ipc host \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
@@ -18,7 +22,7 @@ docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --
   --volume $KCACHE:/cache --env TT_METAL_CACHE=/cache \
   --volume $CACHE/weights:/weight-cache --env TT_DIT_CACHE_DIR=/weight-cache \
   --volume $CACHE/tensors:/tensor-cache --env TT_CACHE_PATH=/tensor-cache \
-  --publish 20000:20000 --env ARCH_NAME=blackhole --env HF_MODEL=ornith-ai/Ornith-1.5-35B-A3B --env MESH_DEVICE=$MESH \
+  $MNT --publish 20000:20000 --env ARCH_NAME=blackhole --env HF_MODEL=ornith-ai/Ornith-1.5-35B-A3B --env MESH_DEVICE=$MESH \
   --env QWEN35_BATCHED_PREFILL=0 --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_TRACE_REGION_MIB=768 --env QWEN35_VISION=$QV \
   --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304 $VIS --env VLLM_ENGINE_READY_TIMEOUT_S=3600 \
   "$@" $IMAGE vllm serve ornith-ai/Ornith-1.5-35B-A3B --max-model-len 262144 --max-num-seqs 32 --block-size 64 \

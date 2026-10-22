@@ -49,6 +49,9 @@ ROUTER_TOPK_ROUTE_K = int(
 ROUTER_L1 = (
     os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
 )  # L1-resident router intermediates for decode rows (experiment)
+# One-token decode: top-k + softmax as one generic_op (models/demos/blackhole/qwen36/tt/moe_decode/topk.py) instead of
+# the 7-op topk route -> slice -> softmax -> untilize chain (~25 us per layer on 4 chips, fusion step 1)
+ROUTER_TOPK_FUSED = os.environ.get("QWEN35_ROUTER_TOPK_FUSED", "1") == "1"
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -300,6 +303,8 @@ class Qwen35MoE:
         self.cfg_down_masked = sparse_matmul_program_config(
             self.PREFILL_CHUNK, H, Nl, target_cores=max(8, min(32, union // 4)), in0_block_w_cap=32
         )
+        if ROUTER_TOPK_FUSED:
+            self._fused_topk()  # build the shared outputs now: no host upload once decode traces are captured
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
 
     # ------------------------------------------------------------------------------------------------
@@ -321,8 +326,9 @@ class Qwen35MoE:
                 routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
         else:
             routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
-        ttnn.deallocate(scores)
-        ttnn.deallocate(ids)
+        if not getattr(self, "_route_persistent", False):
+            ttnn.deallocate(scores)
+            ttnn.deallocate(ids)
         shared = self._shared(x4)
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
@@ -351,8 +357,14 @@ class Qwen35MoE:
     # ------------------------------------------------------------------------------------------------
     def _route(self, x4):
         """Router: returns renormalized top-k scores [1,1,T,k] (bf16) and expert ids [1,1,T,k] (uint16)."""
+        self._route_persistent = False
+        fused_topk = ROUTER_TOPK_FUSED and x4.shape[-2] == 1 and list(x4.padded_shape)[-2] == TILE
         # decode rows (<= 32 tokens): keep the router chain L1-resident (perf pass, QWEN35_ROUTER_L1); prefill rows in DRAM
-        r_mc = ttnn.L1_MEMORY_CONFIG if (ROUTER_L1 and x4.shape[-2] <= TILE) else ttnn.DRAM_MEMORY_CONFIG
+        r_mc = (
+            ttnn.L1_MEMORY_CONFIG
+            if ((ROUTER_L1 or fused_topk) and x4.shape[-2] <= TILE)
+            else ttnn.DRAM_MEMORY_CONFIG
+        )
         if getattr(self, "_router_sharded", False):
             from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
@@ -374,6 +386,14 @@ class Qwen35MoE:
                 compute_kernel_config=self.router_ckc,
                 memory_config=r_mc,
             )
+        if fused_topk:
+            # one token: top-k + softmax in one op, into model-wide persistent outputs (ids UINT16 row-major, the gather
+            # path's `indices` layout; weights BF16 TILE)
+            topk, ids, scores = self._fused_topk()
+            topk(logits, ids, scores)
+            ttnn.deallocate(logits)
+            self._route_persistent = True
+            return scores, ids
         if ROUTER_TOPK_FIRST:
             # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
             # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).
@@ -419,6 +439,18 @@ class Qwen35MoE:
         if ids.dtype != ttnn.uint16:
             ids = ttnn.typecast(ids, ttnn.uint16)
         return scores, ids
+
+    def _fused_topk(self):
+        """(RouterTopK, ids, scores): one op and one pair of output buffers per model build (args), shared by the layers
+        (each layer consumes them before the next layer's router writes them)."""
+        cache = self.args.__dict__.setdefault("_qwen35_fused_topk", {})
+        key = (self.num_experts, self.top_k)
+        if key not in cache:
+            from models.demos.blackhole.qwen36.tt.moe_decode.topk import RouterTopK
+
+            op = RouterTopK(self.device, self.num_experts, self.top_k)
+            cache[key] = (op, *op.alloc_outputs())
+        return cache[key]
 
     def _alloc_dev(self, shape, dtype, zero=False, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG):
         """Device-side buffer allocation (no host write, trace-safe, nothing cached): ``ttnn.empty`` and, when the
