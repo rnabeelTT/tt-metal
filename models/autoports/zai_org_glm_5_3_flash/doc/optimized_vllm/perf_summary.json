@@ -16,7 +16,8 @@
       "tpot_ms": 69.91,
       "decode_tps_user": 14.3,
       "evidence": "doc/vllm/evidence/final/p300x2_vllm_benchmark.json",
-      "code": "0a2663d0b6b (holds for 0bcf89f7fd6 at <= 16 slots, see README)"
+      "code": "0a2663d0b6b (holds for 0bcf89f7fd6 at <= 16 slots, see README)",
+      "shipped_code_note": "measured with the multi-slot DSA decode buckets on; the shipped code turns them off at S >= 2 (served batch invariance, t23 / t24). Estimated +4 to +5 ms TPOT, not measured; the final scorecard run measures it"
     }
   },
   "ci_serving_burst": {

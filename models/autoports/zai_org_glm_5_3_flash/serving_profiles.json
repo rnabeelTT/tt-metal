@@ -26,51 +26,51 @@
   "dsa_bytes_per_block": 811008,
   "reserve_bytes": 1073741824,
   "evidence": {
-   "free_after_load_bytes": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json after_load",
-   "dsa_bytes_per_block": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json dsa_bytes_per_block_all_layers",
+   "free_after_load_bytes": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s10_s1/capacity.json after_load",
+   "dsa_bytes_per_block": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s10_s1/capacity.json dsa_bytes_per_block_all_layers",
    "kda_bytes_per_slot": "doc/full_model/memory_budget.json kda_state_per_slot_bytes (34 layers x 16 local heads x 128 x 128 fp32)",
    "reserve_bytes": "serving workspace 1,024 MiB: every G9 probe (doc/vllm/capacity/s*) ran at --workspace-mib 1024 (stage 8 review #2: 832 MiB failed in the warm-up prefill, doc/datatype_sweep/capacity/combo_a_kv_s1_337920_ws832)"
   }
  },
  "measured": {
   "1": {
-   "pool_blocks": 2548,
+   "pool_blocks": 2705,
    "capped_by_max_seq_len": false,
-   "max_model_len_tested": 342016,
-   "prompt_len": 325827,
+   "max_model_len_tested": 350208,
+   "prompt_len": 345923,
    "copy_accuracy": 1.0,
-   "free_at_prefill_peak_bytes": 492976640,
+   "free_at_prefill_peak_bytes": 379517440,
    "trace_allocated_bytes": 47054848,
    "free_after_load_bytes": 3139928064,
    "workspace_mib": 1024.0,
-   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s1/capacity.json",
-   "date": "2026-10-21"
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s10_s1/capacity.json",
+   "date": "2026-10-22"
   },
   "16": {
-   "pool_blocks": 1891,
+   "pool_blocks": 2073,
    "capped_by_max_seq_len": false,
-   "max_model_len_tested": 260096,
-   "prompt_len": 241731,
+   "max_model_len_tested": 278528,
+   "prompt_len": 265027,
    "copy_accuracy": 1.0,
-   "free_at_prefill_peak_bytes": 423063552,
-   "trace_allocated_bytes": 97746944,
+   "free_at_prefill_peak_bytes": 363163648,
+   "trace_allocated_bytes": 91553792,
    "free_after_load_bytes": 2607251456,
    "workspace_mib": 1024.0,
-   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s16/capacity.json",
-   "date": "2026-10-21"
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s10_s16/capacity.json",
+   "date": "2026-10-22"
   },
   "32": {
-   "pool_blocks": 1105,
+   "pool_blocks": 1283,
    "capped_by_max_seq_len": false,
-   "max_model_len_tested": 153600,
-   "prompt_len": 141123,
+   "max_model_len_tested": 167936,
+   "prompt_len": 163907,
    "copy_accuracy": 1.0,
-   "free_at_prefill_peak_bytes": 516645888,
-   "trace_allocated_bytes": 113344512,
+   "free_at_prefill_peak_bytes": 367895552,
+   "trace_allocated_bytes": 106561536,
    "free_after_load_bytes": 1969733632,
    "workspace_mib": 1024.0,
-   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s32/capacity.json",
-   "date": "2026-10-21"
+   "evidence": "models/autoports/zai_org_glm_5_3_flash/doc/vllm/capacity/s10_s32/capacity.json",
+   "date": "2026-10-22"
   }
  },
  "measured_note": "slots -> {pool_blocks, max_model_len_tested, prompt_len, copy_accuracy, free_at_prefill_peak_bytes, evidence, date}; written by tools/serving_profiles.py ingest from a COMPLETED capacity probe (load, bind, warm-up, capture, longest prefill, traced decode). A measured entry wins over the budget rule for that slot count.",
@@ -117,7 +117,7 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 16,
-   "max_model_len": 239616,
+   "max_model_len": 262144,
    "status": "measured",
    "trace_region_bytes": 100663296
   },
@@ -127,7 +127,7 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 1,
-   "max_model_len": 325632,
+   "max_model_len": 344064,
    "status": "measured"
   },
   {
@@ -146,7 +146,7 @@
    "hardware": "p300x2",
    "mesh_device": "P300x2",
    "max_num_seqs": 32,
-   "max_model_len": 137216,
+   "max_model_len": 159744,
    "status": "measured",
    "trace_region_bytes": 167772160
   },
@@ -156,7 +156,7 @@
    "hardware": "p150x4",
    "mesh_device": "P150x4",
    "max_num_seqs": 16,
-   "max_model_len": 239616,
+   "max_model_len": 262144,
    "status": "derived",
    "derived_from": "p300x2",
    "trace_region_bytes": 100663296

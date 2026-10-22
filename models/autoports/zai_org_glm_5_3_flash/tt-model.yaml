@@ -56,7 +56,7 @@ serve:
   port: 8000
   block_size: 128          # DSA page block: 32 pool keys = one tile row (tt/dsa.py BLOCK); any other value is refused
   max_num_seqs: 16         # @profiles:default.max_num_seqs
-  max_model_len: 239616    # @profiles:default.max_model_len
+  max_model_len: 262144    # @profiles:default.max_model_len
   capabilities:
     tool_parser: glm47       # <tool_call>name<arg_key>..</arg_key><arg_value>..</arg_value></tool_call> (chat_template.jinja)
     reasoning_parser: glm45  # always-thinking template: <|assistant|><think>
@@ -85,15 +85,15 @@ serve:
 # BEGIN generated from serving_profiles.json
 serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies, tensor parallel 4), 16 sequences sharing one DSA pool. 16 x 239616 tokens (measured).
+    description: Two p300 boards (4 dies, tensor parallel 4), 16 sequences sharing one DSA pool. 16 x 262144 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
   - name: p300x2-long
-    description: Two p300 boards, one sequence, the largest context the device DRAM allows. 1 x 325632 tokens (measured).
+    description: Two p300 boards, one sequence, the largest context the device DRAM allows. 1 x 344064 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 1
-    max_model_len: 325632
+    max_model_len: 344064
     additional_config: {tt: {trace_region_size: 67108864}}
     env: {GLM53_TRACE_REGION: "67108864"}
   - name: p300x2-1m
@@ -105,19 +105,19 @@ serve_profiles:
     additional_config: {tt: {trace_region_size: 67108864}}
     env: {GLM53_DSA_SHARD: "1", GLM53_MOE_SORTED_ROWS: "512", GLM53_DSA_INDEX_BLOCK_MB: "32", GLM53_TRACE_REGION: "67108864"}
   - name: p300x2-wide
-    description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 137216 tokens (measured).
+    description: Two p300 boards, 32 sequences sharing one DSA pool (the KDA state of 32 slots takes 1.1 GiB per die). 32 x 159744 tokens (measured).
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 32
-    max_model_len: 137216
+    max_model_len: 159744
     additional_config: {tt: {trace_region_size: 167772160}}
     env: {GLM53_TRACE_REGION: "167772160"}
   - name: p150x4
-    description: Four p150 boards (4 dies), the same (1, 4) mesh and numbers as p300x2 (sizing rule); not run on p150 hardware. 16 x 239616 tokens (derived from the p300x2 measurement; not run on p150x4).
+    description: Four p150 boards (4 dies), the same (1, 4) mesh and numbers as p300x2 (sizing rule); not run on p150 hardware. 16 x 262144 tokens (derived from the p300x2 measurement; not run on p150x4).
     hardware: p150x4
     mesh_device: P150x4
     max_num_seqs: 16
-    max_model_len: 239616
+    max_model_len: 262144
 default_profile: p300x2
 # END generated from serving_profiles.json
 
@@ -161,11 +161,11 @@ card:
     with the replicated DSA cache (every profile except `p300x2-1m`) or 2,288 B with the block-sharded cache of
     `p300x2-1m`, and every decode slot holds 34 MiB of KDA state per die.
     <!-- BEGIN profiles: serving_profiles.json -->
-    - `p300x2` (default): 16 sequences, 239,616-token context, DSA pool 241,920 tokens shared by all sequences.
-    - `p300x2-long`: 1 sequence, 325,632-token context, DSA pool 326,016 tokens shared by all sequences.
+    - `p300x2` (default): 16 sequences, 262,144-token context, DSA pool 265,216 tokens shared by all sequences.
+    - `p300x2-long`: 1 sequence, 344,064-token context, DSA pool 346,112 tokens shared by all sequences.
     - `p300x2-1m`: 1 sequence, 1,048,576-token context, DSA pool 1,048,704 tokens shared by all sequences (sharded DSA cache).
-    - `p300x2-wide`: 32 sequences, 137,216-token context, DSA pool 141,312 tokens shared by all sequences.
-    - `p150x4`: 16 sequences, 239,616-token context, DSA pool 241,920 tokens shared by all sequences [derived from `p300x2`, not run on p150x4].
+    - `p300x2-wide`: 32 sequences, 159,744-token context, DSA pool 164,096 tokens shared by all sequences.
+    - `p150x4`: 16 sequences, 262,144-token context, DSA pool 265,216 tokens shared by all sequences [derived from `p300x2`, not run on p150x4].
     <!-- END profiles: serving_profiles.json -->
     The advertised context of the checkpoint is 1,048,576 tokens. The profile `p300x2-1m` serves it (one sequence,
     block-sharded DSA cache, slower decode than `p300x2-long`).

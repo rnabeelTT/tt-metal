@@ -40,18 +40,18 @@ from .dsa import DENSE_MAX_POSITION, KPOOL, TOPK_POOLS
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
-# Smallest bucket context of a multi-slot build: its width 65,536/4 + 32 = 16,416 pools is above 32 top-k chunks of
-# 512, so every bucket runs the classic top-k mode. The fused mode (<= 16,384 pools) and the classic mode order tied
-# scores differently: with mixed modes a request's selection depended on the other slots' positions (stage-10 review #1
-# P2-2, ticket t20: max logit delta 1.73, tokens differ; classic-only buckets bit-identical, +0.7 to +1.3 ms below
-# position 65,536).
-MULTI_SLOT_MIN_CONTEXT = 65536
+# Multi-slot builds (S >= 2) take no auto DSA decode buckets. With mixed top-k modes (fused <= 16,384 pools, classic
+# above; they order tied scores differently) a request's selection depended on the other slots' positions (stage-10
+# review #1 P2-2, ticket t20). Classic-only buckets (contexts from 65,536) passed the reduced proof (t22) but not the
+# served one: a 4,100-token greedy request differed solo vs next to a ~70K decode (t22, t23 runs ii / iii, async on and
+# off), while the same server with DSA buckets off and MoE row buckets on was identical (t23 run iv). 1 slot keeps them.
 
 
 def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
     """Bucket contexts (tokens) of a T-token cache, ascending, the last one T; None = bucketing off. The block-sharded
-    DSA layout (tt/dsa_shard.py) takes no buckets (unmeasured there; its pool iota is shared already). slots >= 2: the
-    auto buckets start at MULTI_SLOT_MIN_CONTEXT (one top-k mode: batch invariance); 1 slot starts at 4,096."""
+    DSA layout (tt/dsa_shard.py) takes no buckets (unmeasured there; its pool iota is shared already). slots >= 2: no
+    auto buckets (served batch invariance, t23); an explicit GLM53_DSA_BUCKETS list still applies. 1 slot starts at
+    4,096."""
     env = os.environ.get("GLM53_DSA_BUCKETS", "auto").strip().lower()
     if env in ("0", "off", "none", "false") or sharded:
         return None
@@ -60,9 +60,9 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
         # saves there): GLM53_DSA_BUCKET_MIN_T, default 65536. Measured at 16,384 (stage-10 ticket t4, full model, 1
         # slot): segmented 50.08 / 53.45 / 53.69 ms vs single trace 49.95 / 53.23 / 53.24 ms at positions 300 / 5000 /
         # 15000 (+0.1 to +0.45 ms); the selection at P_alloc 4,128 costs only 0.08 ms per layer
-        if T < int(os.environ.get("GLM53_DSA_BUCKET_MIN_T", "65536")):
+        if slots >= 2 or T < int(os.environ.get("GLM53_DSA_BUCKET_MIN_T", "65536")):
             return None
-        ctx, t = [], (MULTI_SLOT_MIN_CONTEXT if slots >= 2 else 4096)
+        ctx, t = [], 4096
         while t < T:
             ctx.append(t)
             t *= 2

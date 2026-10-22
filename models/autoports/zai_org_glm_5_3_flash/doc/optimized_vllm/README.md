@@ -16,6 +16,10 @@ Why these numbers also hold for the shipped 0bcf89f7fd6:
 - Wide (32 slots) was re-measured on the fix (wide-r2, 3872b583092).
 The slot-aware trace-region fit (044dbeaa3fd) picks the same bucket lists for p300x2 and long.
 
+The after values below were measured with the multi-slot DSA decode buckets on. The shipped code turns them off at
+S >= 2 for served batch invariance (see "Batch invariance of the DSA width buckets"). The p300x2 TPOT is estimated to
+rise by about 4 to 5 ms (not measured); the final scorecard run measures it.
+
 Settings that changed between before and after:
 - Async decode is on (stage 9, 4678d8fccf4; the before runs had it off). It moves the TTFT, see "Async decode and
   TTFT" below.
@@ -48,7 +52,7 @@ The served TPOT of the same build should match these within the host overhead:
 
 | Comparable work | Standalone traced token-out | Served TPOT, 1 user |
 |---|---|---|
-| p300x2 (16 slots, 243,712), 1 active | 72.9 ms (t15b, 16 slots at 16,384; DSA width bucket 4,096 at short positions) | **69.91 ms** |
+| p300x2 (16 slots, 243,712), 1 active | 72.9 ms (t15b, 16 slots at 16,384; DSA width bucket 4,096 at short positions) | **69.91 ms** (DSA buckets on; see above) |
 | p300x2-long (1 slot, 325,632) | 50.10 ms (t5, 280,576, position 300) | **49.84 ms** (async decode on) |
 
 Non-aligned prompt lengths stay supported. The combined serving ticket's smokes send NONALIGNED prompts of 1 / 3 / 2,381
@@ -332,6 +336,24 @@ Memory: the pool iotas are one tensor per mesh, not one per layer. Net change pe
 The block-sharded `p300x2-1m` profile is unchanged. Every multi-slot measurement in `serving_profiles.json` was taken
 with a 64 MiB region. The G9 capacity re-probe of the combined stage-9 ticket replaces them.
 
+### Capacity re-probe (review #1 P2-1, ticket t21)
+
+The G9 probes (`doc/vllm/capacity/s{1,16,32}/`, 2,547 / 1,890 / 1,104 blocks) left 875 to 906 MB free after the
+bind. `tools/memory_probe.py` now sizes the pool from the bytes per block measured by an earlier probe of the same
+slot count (`--per-block-from`), to leave about 700 MiB free after the bind (`--free-after-bind-mib 700`). t21 ran on cf41be52370 + the P2-2 fallback (`tt/dsa_buckets.py`), workspace 1,024
+MiB, the copy check on a non-aligned prompt near the limit (evidence: `doc/vllm/capacity/s10_s{1,16,32}/`).
+
+| Profile | Trace region | Pool blocks | Free after the bind | Copy prompt | Copy accuracy | max_model_len before (G9) | after |
+|---|---|---|---|---|---|---|---|
+| p300x2 (16 slots), p150x4 (derived) | 96 MiB | 2,072 | 741 MB | 265,027 | 1.0 | 239,616 | **262,144** |
+| p300x2-wide (32 slots) | 160 MiB | 1,282 | 752 MB | 163,907 | 1.0 | 137,216 | **159,744** |
+| p300x2-long (1 slot) | 64 MiB | 2,704 | 761 MB | 345,923 | 1.0 | 325,632 | **344,064** |
+
+`tools/serving_profiles.py ingest` / `refresh` / `render-yaml` wrote the new values to `serving_profiles.json` and
+`tt-model.yaml`; `doc/context_contract.json` cites them (`replicated_default_layout.serving_profiles_stage10_t21`).
+The served numbers in this README were measured at the earlier limits (239,616 / 137,216 / 325,632). p300x2-1m
+(block-sharded, 1,048,576) is unchanged.
+
 Ticket t14 (full model, 1 slot, 243,712):
 
 | | views off | views on |
@@ -475,7 +497,7 @@ waits for the decode step already in flight, and with two requests the first wai
   both +34 %. Part of that rise is async, part is the different code; they are not separated here.
 - Stage 9 is running an async TTFT A/B with N >= 4 runs per arm; its result goes here when it lands.
 
-## Batch invariance of the DSA width buckets (review #1 P2-2, ticket t20)
+## Batch invariance of the DSA width buckets (review #1 P2-2, tickets t20, t22, t23, t24)
 
 The DSA decode bucket is keyed on the batch's largest position. A 4,000-token request decoded next to a 70,000-token
 request runs its selection at the larger width. Below 16,384 pools the top-k runs its fused mode (at most 32 chunks of
@@ -489,14 +511,40 @@ t20 (reduced model, 2 slots, 131,072): the 4,000-token target, alone vs next to 
 | classic only (16,416 / 32,800) | bit-identical, tokens equal | 51.45 / 54.76 / 54.76 ms |
 | off | bit-identical | - |
 
-Rule (shipped): with S >= 2 slots the auto bucket contexts start at 65,536 (`MULTI_SLOT_MIN_CONTEXT`: width 16,416
-pools, 33 chunks), so every bucket is in the classic mode.
-- Cost: +0.7 to +1.3 ms per token below position 65,536 (t20); nothing above.
-- One slot (long) keeps the 4,096 start: one request at a time, so there is no cross-request effect.
-- An explicit `GLM53_DSA_BUCKETS` list is taken as given.
-- Prefill views are unchanged: each prefill is one request.
-- Host test: `test_multi_slot_dsa_widths_one_topk_mode`.
-- Proof on the fixed code: PROOF_PENDING.
+The first fix (3993d5eecef) started the multi-slot buckets at 65,536 (width 16,416), so every bucket ran the classic
+mode. t22 (reduced model, 3993d5eecef) passed: S = 2 and S = 16 (also 16 active), bit-identical, tokens equal. The
+served check did not pass. t23 isolated the cause on the full model.
+
+Served check (`tools/vllm_served_invariance.py`, profile p300x2, 16 slots, 239,616, greedy, temperature 0, no
+logprobs): a 4,100-token request alone (solo 1), the same request while a 70,000-token request decodes 800 tokens
+(concurrent), then alone again (solo 2). Two prompt kinds: natural text (Tale of Two Cities) and random token ids.
+Evidence: `evidence/served_invariance/`.
+
+| Ticket, code | Server settings | Text: solo 2 / concurrent vs solo 1 | Random ids: solo 2 / concurrent vs solo 1 |
+|---|---|---|---|
+| t22, 3993d5eecef | default (async on) | - | - / **differs at token 2** |
+| t23 (i), 3993d5eecef | DSA buckets, MoE row buckets and prefill views off | equal / equal | equal / equal |
+| t23 (iv), 3993d5eecef | DSA buckets off (MoE row buckets, views on) | equal / equal | equal / equal |
+| t23 (ii), 3993d5eecef | default, async off | equal / **differs at token 17** | equal / **differs at token 2** |
+| t23 (iii), 3993d5eecef | default | equal / **differs at token 17** | equal / **differs at token 2** |
+| t24, fallback code | default | equal / equal | equal / equal |
+
+Findings:
+- The served path is deterministic: solo 2 equals solo 1 in every run.
+- The DSA decode width buckets cause the served batch dependence. The MoE row buckets, the prefill views and async
+  decode do not: (iv) is identical and (ii) still differs.
+- Classic-only widths still select differently on the full model (42 layers, 11 DSA). The 3-layer reduced probe did
+  not show it. The cause inside the classic top-k is not isolated.
+
+Rule (shipped): with S >= 2 slots there are no auto DSA decode buckets. Every step selects over the full `P_alloc`.
+- One slot (profiles long and p300x2-1m) keeps the buckets from 4,096: one request at a time, so there is no
+  cross-request effect. p300x2-1m takes no DSA buckets (block-sharded layout).
+- An explicit `GLM53_DSA_BUCKETS` list is taken as given (a diagnostic setting, not batch-invariant at S >= 2).
+- The MoE row buckets and the prefill views stay on.
+- Host test: `test_multi_slot_takes_no_auto_dsa_buckets`.
+- Cost: the multi-slot profiles lose the DSA part of the decode gain. Estimated (not measured): about +4 to +5 ms
+  per token at p300x2 short positions (the 1-slot full-width vs bucketed difference at 262,144 to 280,576: 55.07 vs
+  50.10 ms). Measured in the final scorecard run.
 
 The async validator with a bucket switch (`GLM53_DSA_BUCKETS=4096` at 8,192, a 4,100-token request crossing position
 4,227) passes (t20, ASYNC_RESULT PASS).

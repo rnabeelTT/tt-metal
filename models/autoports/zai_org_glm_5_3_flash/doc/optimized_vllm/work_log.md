@@ -24,6 +24,10 @@ archive of HEAD + the stage-10 files, md5s in the snapshot). Scripts: `~/glm53-f
 | (host) | slot-aware trace-region fit (G9 32-slot capture out of memory) | identical lists for every measured config; 32 slots fit; committed 044dbeaa3fd |
 | t18 | wide batch invariance (32 slots): off / old / family / pairs | old not invariant at 32 active; family (sorted) invariant, 118.6 / 123.8 / 147.4 ms at 1 / 8 / 32 active, TF 93 |
 | t19 | dealloc fixes (moe_opt pairs 1-row ids, dsa_shard q_rm view) + family rule | probe DEALLOC_CHECK clean in 8 / 32 replicated and 8 / 1 sharded; invariance at 32 and 8 slots bit-identical |
+| t20 | DSA bucket batch invariance (reduced, 2 slots): auto / classic-only / off | auto not invariant (max logit delta 1.73); classic-only invariant, +0.7 to +1.3 ms below 65,536 |
+| t22 | proof of classic-only buckets at S >= 2 on 3993d5eecef | reduced S = 2 / 16 bit-identical; served smokes and burst 8/8 pass; served 4K solo vs next to a 70K decode differs |
+| t23 | served diagnostic on 3993d5eecef (p300x2, text + random prompts) | solo repeat always equal; all-off and DSA-buckets-off identical; default and async off differ: DSA buckets cause it |
+| t24 | served check on the fallback (no auto DSA buckets at S >= 2) | text and random: solo repeat and concurrent equal |
 | stage-9 s9_final / wide-r2 | served after numbers | p300x2 1 user TPOT 119.27 -> 69.91 ms; wide on the fixed code: burst 32/32 = solo, 1 user 120.9 ms, 32 users 160.1 ms |
 
 Commits: 86403d19830 (DSA width buckets, pool-key alias), 0a2663d0b6b (MoE row buckets, prefill views, shared iotas,
