@@ -454,11 +454,32 @@ requests do not retain device memory or programs:
 `logs/s10/t17.log` (copied to `doc/vllm/evidence/t17_async_validate_buckets.txt`): all 5 streams equal to their solo
 controls, 413 steady / 7 reload / 13 page-table-only / 3 host steps, `ASYNC_RESULT PASS`.
 
+## Preemption smoke, p300x2 (review #2 P3, 2026-10-22, code freeze 3993d5eecef, snapshot s9n)
+
+`scripts/09-preempt.py` on a p300x2 server (16 x 239,616; the DSA pool is 1,890 blocks = 241,920 tokens). Two
+different 119,000-token prompts, greedy, `ignore_eos`, 3,000 output tokens. First each prompt runs alone (the
+controls), then both run together. Together they need 2 x 122,000 tokens, more than the pool, so vLLM must preempt one.
+Evidence: `doc/vllm/evidence/p3_preempt_p300x2.txt` and `.json` (token ids).
+
+- Result PASS: both concurrent requests finished with 3,000 tokens. `vllm:num_preemptions` +1. No leftover processes.
+- B was preempted after 1,833 output tokens. vLLM re-prefilled it at 120,833 tokens (prompt + output) after A finished.
+  A took 416.0 s, B took 595.3 s, and each solo control took 319 s.
+- A: equal to its solo control for all 3,000 tokens (1,833 steps with 2 active rows, then 1 row).
+- B: the first divergence from its solo control is at output token 9 ("plans at all," / "plans, nor yet"). This is
+  during the 2-row decode, about 1,824 steps before the preemption, so the preemption does not cause it. Concurrent B
+  differs from solo B in model slot (1 vs 0), physical KV blocks, MoE row bucket (2 vs 1) and prefill timing. A shared
+  bucket 2 with B and stayed equal. Without logits we cannot tell which of these differences flips the token, so we do
+  not classify it further. The 32-stream burst gate on p300x2-wide (32/32 equal to solo, short prompts) does not show
+  this effect.
+- Recompute boundary: B's token stream continues with no dropped or repeated token. B is in a greedy repetition loop on
+  both sides of the boundary ("and Madame Anarchist,"). A few tokens after the resume the loop word changes ("An
+  aristocrat"). That is the expected effect of rebuilding the cache rows through prefill instead of decode.
+
 ## Scripts
 
 The device runs used workspace scripts (`~/glm53-flash-bringup/scripts/`). Copies of the ones the evidence names most
 are in `doc/vllm/scripts/` for reference (paths assume that workspace): `09-serve.sh` (server + readiness + smokes +
-needle + sweep), `09-smoke.py` (served smokes), `09-needle.py` (passkey retrieval), `10-perf-sweep.py` (sweeps).
+needle + sweep), `09-smoke.py` (served smokes), `09-needle.py` (passkey retrieval), `10-perf-sweep.py` (sweeps), `09-preempt.py` (preemption smoke).
 The others (`s9_final.sh`, `s9_wide_rerun.sh`, `09-g9-probe.sh`, `09-diag.py`, `09-burst-diag.py`,
 `09_shard_place.py`, `09_slot_width_check.py`, `09-qcapture.py`, `09_standalone_q.py`) are workspace-only.
 

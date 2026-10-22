@@ -202,6 +202,16 @@ burst of 32 equaled the solo outputs on 4 of 32 streams (stage 9 before the buck
 tokens, copy 1.0), the burst gate 32/32, the benchmark and the short sweep (8/8 rows). The full plugin suite at 32
 sequences (70 / 3 / 4) ran on 0a2663d0b6b before the fix; the fix changes only the MoE path of the 32-slot build.
 
+## Preemption (p300x2, 3993d5eecef)
+
+Two 119,000-token prompts, each with 3,000 greedy output tokens, ran concurrently on p300x2. Together they need more
+than the 241,920-token DSA pool. vLLM preempted one request (`num_preemptions` +1) after 1,833 output tokens and
+re-prefilled it at 120,833 tokens. Both requests finished with 3,000 tokens. The request that was not preempted equals
+its solo greedy control for all 3,000 tokens. The preempted request leaves its solo control at output token 9, during
+the 2-request decode and long before the preemption. That divergence comes from concurrent decode at 119K context, not
+from the recompute; its cause is not isolated (work log). Its stream continues across the recompute with no dropped or
+repeated token (`../vllm/evidence/p3_preempt_p300x2.txt`).
+
 ## Readiness runs and reasoning effort
 
 The readiness runner sends 256-token chat requests. With the default (max) effort the reasoning does not finish in 256

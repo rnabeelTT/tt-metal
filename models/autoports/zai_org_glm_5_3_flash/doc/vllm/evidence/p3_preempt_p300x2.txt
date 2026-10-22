@@ -1,0 +1,78 @@
+# Stage-9 review #2 P3 (b): preemption smoke, profile p300x2 (16 x 239,616), code freeze 3993d5eecef (snapshot s9n)
+# ticket: ~/glm53-flash-bringup/scripts/s9_p3.sh, log logs/09/s9_p3.log; server log logs/09/server-p3-p300x2-preempt.log
+# token ids: p3_preempt_p300x2.json (09-preempt.py URL OUT 119000 3000)
+
+## ticket
+=== start Thu Oct 22 08:31:43 AM UTC 2026 : timeout -k 120 14400 /home/raahem/glm53-flash-bringup/scripts/s9_p3.sh /home/raahem/glm53-flash-bringup/s9m_snap
+=== s9_p3 snapshot /home/raahem/glm53-flash-bringup/s9n_snap base 3993d5eecefa9e5d83d44838ed3ea900166149c3
+serve exit=0
+LEFTOVER after p300x2 preempt: none
+=== s9_p3 done 2026-10-22T08:56:09+00:00
+=== exit code: 0 Thu Oct 22 08:56:09 AM UTC 2026
+
+## md5 tt/*.py (snapshot)
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 31fdc53c1a0c841944e92cb553d27dd2  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 6f665caa6a2e6abe1c841c2759062fdb  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 9b551ef2ab7292212500dbedf5b72e86  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 ea24d3b71cc815e79aec968a302fc190  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 f33b9abfc24abbb5e68d8afa9871eaf7  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+
+## 09-preempt.py output
+PREEMPT solo A: 3000 tokens, 318.7 s
+PREEMPT solo B: 3000 tokens, 318.8 s
+PREEMPT vllm:num_preemptions 1792658065.5539553 -> 1792658066.5539553
+PREEMPT concurrent A: 3000 tokens (finished True), equal to solo True, first divergence None
+PREEMPT concurrent B: 3000 tokens (finished True), equal to solo False, first divergence 9
+PREEMPT_RESULT PASS concurrent wall 595.4 s /home/raahem/glm53-flash-bringup/logs/09/preempt-p300x2.json
+
+## server log: prefills, scheduler state around the preemption
+models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:prefill_forward:521 - prefill 1 request(s): lengths [119000], vLLM slots [0] -> model slots [0]
+(APIServer pid=1369907) INFO:     127.0.0.1:59752 - "POST /v1/completions HTTP/1.1" 200 OK
+models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:prefill_forward:521 - prefill 1 request(s): lengths [119000], vLLM slots [0] -> model slots [0]
+(APIServer pid=1369907) INFO:     127.0.0.1:44982 - "POST /v1/completions HTTP/1.1" 200 OK
+models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:prefill_forward:521 - prefill 1 request(s): lengths [119000], vLLM slots [0] -> model slots [0]
+models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:prefill_forward:521 - prefill 1 request(s): lengths [119000], vLLM slots [1] -> model slots [1]
+models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:prefill_forward:521 - prefill 1 request(s): lengths [120833], vLLM slots [0] -> model slots [1]
+(APIServer pid=1369907) INFO:     127.0.0.1:36840 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1369907) INFO:     127.0.0.1:36826 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1369907) INFO 10-22 08:48:30 [loggers.py:310] Engine 000: Avg prompt throughput: 23799.9 tokens/s, Avg generation throughput: 21.0 tokens/s, Running: 2 reqs, Waiting: 0 reqs, GPU KV cache usage: 98.6%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO 10-22 08:50:50 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 24.4 tokens/s, Running: 2 reqs, Waiting: 0 reqs, GPU KV cache usage: 99.9%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO 10-22 08:51:00 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 14.2 tokens/s, Running: 1 reqs, Waiting: 1 reqs, GPU KV cache usage: 50.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO:     127.0.0.1:36840 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1369907) INFO 10-22 08:52:30 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.9 tokens/s, Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO 10-22 08:52:40 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO:     127.0.0.1:45268 - "GET /metrics HTTP/1.1" 200 OK
+(APIServer pid=1369907) INFO 10-22 08:54:00 [loggers.py:310] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 12.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 50.0%, Prefix cache hit rate: 0.0%
+(APIServer pid=1369907) INFO:     127.0.0.1:36826 - "POST /v1/completions HTTP/1.1" 200 OK
+
+## analysis
+- Pool: 1,890 blocks x 128 = 241,920 tokens. Two 119,000-token prompts take 2 x 930 blocks; 3,840 tokens remain for decode,
+  so both cannot reach 3,000 output tokens. vllm:num_preemptions +1 (the summed value includes the constant
+  vllm:num_preemptions_created timestamp; the delta is the count).
+- B was preempted: 08:51:00 "Running: 1, Waiting: 1". A finished at 08:52:30 (416.0 s); B was re-prefilled at
+  120,833 = 119,000 + 1,833 tokens (vLLM slot 0 -> model slot 1) and finished at 08:55:20 (595.3 s).
+- A (model slot 0; 1,833 steps with 2 active rows, then 1 row): equal to its solo control for all 3,000 tokens.
+- B (model slot 1): first divergence at output token 9 (solo "plans at all," / concurrent "plans, nor yet"), during
+  the 2-row decode, about 1,824 steps before the preemption. The preemption does not cause it.
+- Boundary: B's token stream continues across the recompute with no dropped or repeated token (", and Madame Anarchist,"
+  | " and Madame Anarchist, and"). Both sides of the boundary are in a greedy repetition loop
+  ("and Madame <X>,"); the word in the loop changes a few tokens after the resume (Anarchist -> An aristocrat).
