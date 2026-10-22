@@ -1,0 +1,1093 @@
+2026-10-21 16:42:31,926 - run.py:1218 - INFO: TT-Inference version: 0.22.0
+2026-10-21 16:42:31,926 - run.py:1219 - INFO: TT-Inference SHA: 9ef9d6602669
+2026-10-21 16:42:31,926 - run.py:1220 - INFO:
+============================================================
+tt-inference-server run.py CLI args summary
+============================================================
+
+Model Options:
+  model:                      zai-org/GLM-5.3-Flash
+  device:                     p300x2
+  impl:                       glm53-flash-autoport
+  engine:                     vLLM
+  workflow:                   release
+  tools:                      vllm
+
+Optional args:
+  dev_mode:                   True
+  docker_server:              False
+  local_server:               False
+  no_auth:                    True
+  tt_metal_python_venv_dir:   None
+  tt_metal_home:              /home/raahem/tt-metal
+  service_port:               8141
+  bind_host:                  0.0.0.0
+  docker_override_image:      None
+  docker_interactive:         False
+  device_id:                  None
+  disable_trace_capture:      False
+  override_tt_config:         None
+  vllm_override_args:         None
+  workflow_args:              None
+  limit_samples_mode:         ci-nightly
+  eval_samples:               None
+  skip_system_sw_validation:  True
+
+Host Storage Options:
+  host_volume:                None
+  host_hf_cache:              None
+  host_weights_dir:           None
+  quetzal_package_root:       None
+  image_user:                 1000
+
+============================================================
+2026-10-21 16:42:31,926 - run.py:1226 - INFO: Runtime model spec saved to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_16-42-31_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_ZSiaE1Ol.json
+2026-10-21 16:42:31,927 - target_pack.py:137 - DEBUG: No TargetPack registered; using Tenstorrent reference_config.
+2026-10-21 16:42:31,932 - validate_setup.py:341 - INFO: Starting local setup validation
+2026-10-21 16:42:31,932 - validate_setup.py:377 - INFO: ✅ validating local setup completed
+2026-10-21 16:42:31,932 - run.py:1343 - INFO: Model GLM-5.3-Flash (model_type=LLM) routes through the workflow engine.
+2026-10-21 16:42:31,932 - runner.py:31 - INFO: → command=release
+2026-10-21 16:42:31,933 - venv_provisioner.py:73 - DEBUG: No VenvProvisioner registered; using Tenstorrent VENV_CONFIGS.
+2026-10-21 16:42:31,933 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python --index-strategy unsafe-best-match -r /home/raahem/glm53-flash-bringup/tti/requirements/workflow-run-script.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_workflow_run_script
+Checked 19 packages in 55ms
+2026-10-21 16:42:32,012 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_evals_common/bin/python --index-strategy unsafe-best-match -r /home/raahem/glm53-flash-bringup/tti/requirements/evals-common.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_evals_common
+Resolved 104 packages in 782ms
+Checked 104 packages in 1ms
+2026-10-21 16:42:32,824 - workflow_venvs.py:177 - INFO: sub-dir already exists for llm_vllm: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/artifacts
+2026-10-21 16:42:32,824 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/python --index-strategy unsafe-best-match --override /home/raahem/glm53-flash-bringup/tti/requirements/llm-vllm-overrides.txt -r /home/raahem/glm53-flash-bringup/tti/requirements/llm-vllm.txt
+Using Python 3.11.16 environment at: .workflow_venvs/.venv_llm_vllm
+Checked 7 packages in 70ms
+2026-10-21 16:42:32,899 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/glm53-flash-bringup/tti/run_workflows.py --model zai-org/GLM-5.3-Flash --workflow release --device p300x2 --service-port 8141 --runtime-model-spec-json /home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_16-42-31_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_ZSiaE1Ol.json --output-dir /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release
+2026-10-21 16:42:33,208 [INFO] workflow_module.runner: → command=workflow
+2026-10-21 16:42:33,208 [INFO] workflow.release: === Workflow start: release | model=GLM-5.3-Flash device=P300X2 port=8141 output=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release ===
+2026-10-21 16:42:33,208 [INFO] workflow.release: --- release: evals ---
+2026-10-21 16:42:33,226 [INFO] workflow.evals: → task=llm_eval
+2026-10-21 16:42:33,226 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8141/health (timeout 3600s)
+2026-10-21 16:42:33,227 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8141/health
+2026-10-21 16:42:33,228 [INFO] llm_module.eval_command: Clamping ifeval num_concurrent: 16 -> 1 (device_model_spec.max_concurrency=1)
+2026-10-21 16:42:33,228 [INFO] test_module.llm_tests.llm_eval_tests: task=ifeval will preserve reasoning_content in sample logs.
+2026-10-21 16:42:33,228 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=ifeval
+2026-10-21 16:42:33,228 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks ifeval --model local-chat-completions --model_args model=zai-org/GLM-5.3-Flash,base_url=http://127.0.0.1:8141/v1/chat/completions,tokenizer_backend=huggingface,timeout=21600,max_length=1048576,num_concurrent=1 --gen_kwargs 'max_gen_toks=32768,until=['"'"'<|endoftext|>'"'"'],do_sample=true,temperature=1.0,top_p=0.95,stream=false,reasoning_effort=low,seed=42' --output_path /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-10-21 16:42:33,395 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:33 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-10-21 16:42:33,395 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:33 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-10-21 16:42:36,755 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:36 INFO     [_cli.run:376] Selected Tasks: ['ifeval']
+2026-10-21 16:42:37,441 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-10-21 16:42:37,441 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 32768, 'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-10-21 16:42:37,441 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'zai-org/GLM-5.3-Flash', 'base_url': 'http://127.0.0.1:8141/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'timeout': 21600, 'max_length': 1048576, 'num_concurrent': 1, 'trust_remote_code': True}
+2026-10-21 16:42:37,446 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 INFO     [models.api_models:310] Using max length 1048576 - 1
+2026-10-21 16:42:37,446 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 INFO     [models.api_models:313] Concurrent requests are disabled. To enable concurrent requests, set `num_concurrent` > 1.
+2026-10-21 16:42:37,446 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:37 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-10-21 16:42:41,093 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [tasks:700] Selected tasks:
+2026-10-21 16:42:41,093 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [tasks:691] Task: ifeval (ifeval/ifeval.yaml)
+2026-10-21 16:42:41,093 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [evaluator:313] ifeval: Using gen_kwargs: {'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'max_gen_toks': 32768, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42}
+2026-10-21 16:42:41,093 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [evaluator:328] num_fewshot has been set to 0 for ifeval in its config. Manual configuration will be ignored.
+2026-10-21 16:42:41,093 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-10-21 16:42:41,094 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [api.task:310] Building contexts for ifeval on rank 0...
+2026-10-21 16:42:41,096 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 16:42:41,097 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/109 [00:00<?, ?it/s]
+2026-10-21 16:42:41,097 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 109/109 [00:00<00:00, 83350.80it/s]
+2026-10-21 16:42:41,097 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [evaluator:583] Running generate_until requests
+2026-10-21 16:42:41,098 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:16:42:41 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-10-21 16:42:41,098 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 16:43:18,303 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/109 [00:00<?, ?it/s]
+2026-10-21 16:43:46,514 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   1%|          | 1/109 [00:37<1:06:58, 37.20s/it]
+2026-10-21 16:44:15,512 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   2%|▏         | 2/109 [01:05<56:54, 31.91s/it]
+2026-10-21 16:44:27,484 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   3%|▎         | 3/109 [01:34<54:01, 30.58s/it]
+2026-10-21 16:44:29,078 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   4%|▎         | 4/109 [01:46<40:39, 23.24s/it]
+2026-10-21 16:44:43,489 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   5%|▍         | 5/109 [01:47<26:44, 15.43s/it]
+2026-10-21 16:45:13,770 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▌         | 6/109 [02:02<25:53, 15.08s/it]
+2026-10-21 16:45:33,906 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   6%|▋         | 7/109 [02:32<34:05, 20.05s/it]
+2026-10-21 16:45:49,124 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   7%|▋         | 8/109 [02:52<33:48, 20.08s/it]
+2026-10-21 16:46:41,280 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   8%|▊         | 9/109 [03:08<30:55, 18.56s/it]
+2026-10-21 16:47:25,650 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   9%|▉         | 10/109 [04:00<47:44, 28.93s/it]
+2026-10-21 16:47:57,767 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  10%|█         | 11/109 [04:44<54:58, 33.66s/it]
+2026-10-21 16:48:28,611 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  11%|█         | 12/109 [05:16<53:39, 33.19s/it]
+2026-10-21 16:49:09,158 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  12%|█▏        | 13/109 [05:47<51:57, 32.48s/it]
+2026-10-21 16:49:38,495 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  13%|█▎        | 14/109 [06:28<55:16, 34.92s/it]
+2026-10-21 16:50:01,434 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  14%|█▍        | 15/109 [06:57<52:03, 33.23s/it]
+2026-10-21 16:50:02,805 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  15%|█▍        | 16/109 [07:20<46:42, 30.14s/it]
+2026-10-21 16:50:06,229 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  16%|█▌        | 17/109 [07:21<32:56, 21.49s/it]
+2026-10-21 16:50:39,162 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 18/109 [07:25<24:21, 16.06s/it]
+2026-10-21 16:50:44,688 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  17%|█▋        | 19/109 [07:58<31:41, 21.13s/it]
+2026-10-21 16:50:56,557 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  18%|█▊        | 20/109 [08:03<24:23, 16.44s/it]
+2026-10-21 16:51:03,212 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  19%|█▉        | 21/109 [08:15<22:06, 15.07s/it]
+2026-10-21 16:51:17,937 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  20%|██        | 22/109 [08:22<18:11, 12.54s/it]
+2026-10-21 16:54:32,119 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  21%|██        | 23/109 [08:36<18:55, 13.20s/it]
+2026-10-21 16:55:05,726 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  22%|██▏       | 24/109 [11:51<1:35:37, 67.50s/it]
+2026-10-21 16:55:27,515 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  23%|██▎       | 25/109 [12:24<1:20:16, 57.33s/it]
+2026-10-21 16:55:39,091 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  24%|██▍       | 26/109 [12:46<1:04:33, 46.67s/it]
+2026-10-21 16:55:43,641 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  25%|██▍       | 27/109 [12:57<49:23, 36.14s/it]
+2026-10-21 16:55:57,208 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  26%|██▌       | 28/109 [13:02<35:59, 26.66s/it]
+2026-10-21 16:56:05,133 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  27%|██▋       | 29/109 [13:16<30:18, 22.73s/it]
+2026-10-21 16:56:19,281 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 30/109 [13:24<24:05, 18.29s/it]
+2026-10-21 17:00:33,072 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 31/109 [13:38<22:09, 17.05s/it]
+2026-10-21 17:00:43,424 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  29%|██▉       | 32/109 [17:51<1:53:01, 88.07s/it]
+2026-10-21 17:00:52,383 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  30%|███       | 33/109 [18:02<1:22:01, 64.76s/it]
+2026-10-21 17:01:20,267 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  31%|███       | 34/109 [18:11<1:00:01, 48.02s/it]
+2026-10-21 17:01:24,127 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  32%|███▏      | 35/109 [18:39<51:46, 41.98s/it]
+2026-10-21 17:02:00,892 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  33%|███▎      | 36/109 [18:43<37:09, 30.54s/it]
+2026-10-21 17:03:25,893 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  34%|███▍      | 37/109 [19:19<38:53, 32.41s/it]
+2026-10-21 17:03:41,617 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  35%|███▍      | 38/109 [20:44<57:01, 48.19s/it]
+2026-10-21 17:04:09,425 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  36%|███▌      | 39/109 [21:00<44:51, 38.45s/it]
+2026-10-21 17:04:49,525 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  37%|███▋      | 40/109 [21:28<40:32, 35.26s/it]
+2026-10-21 17:05:05,902 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  38%|███▊      | 41/109 [22:08<41:36, 36.71s/it]
+2026-10-21 17:05:22,903 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▊      | 42/109 [22:24<34:10, 30.61s/it]
+2026-10-21 17:05:52,781 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  39%|███▉      | 43/109 [22:41<29:10, 26.53s/it]
+2026-10-21 17:06:19,707 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  40%|████      | 44/109 [23:11<29:49, 27.53s/it]
+2026-10-21 17:06:23,213 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  41%|████▏     | 45/109 [23:38<29:10, 27.35s/it]
+2026-10-21 17:06:45,107 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  42%|████▏     | 46/109 [23:42<21:12, 20.20s/it]
+2026-10-21 17:07:05,465 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  43%|████▎     | 47/109 [24:04<21:23, 20.71s/it]
+2026-10-21 17:07:49,063 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  44%|████▍     | 48/109 [24:24<20:56, 20.60s/it]
+2026-10-21 17:09:06,176 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  45%|████▍     | 49/109 [25:07<27:30, 27.50s/it]
+2026-10-21 17:09:41,993 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  46%|████▌     | 50/109 [26:25<41:40, 42.38s/it]
+2026-10-21 17:09:51,007 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  47%|████▋     | 51/109 [27:00<39:04, 40.41s/it]
+2026-10-21 17:10:59,275 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  48%|████▊     | 52/109 [27:09<29:26, 30.99s/it]
+2026-10-21 17:11:09,379 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  49%|████▊     | 53/109 [28:18<39:21, 42.18s/it]
+2026-10-21 17:11:58,515 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|████▉     | 54/109 [28:28<29:50, 32.55s/it]
+2026-10-21 17:12:06,198 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|█████     | 55/109 [29:17<33:46, 37.53s/it]
+2026-10-21 17:12:40,880 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  51%|█████▏    | 56/109 [29:25<25:14, 28.58s/it]
+2026-10-21 17:13:02,412 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  52%|█████▏    | 57/109 [29:59<26:21, 30.41s/it]
+2026-10-21 17:15:54,285 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  53%|█████▎    | 58/109 [30:21<23:34, 27.74s/it]
+2026-10-21 17:16:32,183 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  54%|█████▍    | 59/109 [33:13<59:09, 70.98s/it]
+2026-10-21 17:16:38,642 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  55%|█████▌    | 60/109 [33:51<49:51, 61.06s/it]
+2026-10-21 17:17:41,367 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  56%|█████▌    | 61/109 [33:57<35:44, 44.68s/it]
+2026-10-21 17:18:05,993 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  57%|█████▋    | 62/109 [35:00<39:14, 50.09s/it]
+2026-10-21 17:18:48,505 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  58%|█████▊    | 63/109 [35:24<32:32, 42.45s/it]
+2026-10-21 17:19:13,283 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  59%|█████▊    | 64/109 [36:07<31:51, 42.47s/it]
+2026-10-21 18:01:34,494 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  60%|█████▉    | 65/109 [36:32<27:15, 37.16s/it]
+2026-10-21 18:02:06,820 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  61%|██████    | 66/109 [1:18:53<9:25:00, 788.38s/it]
+2026-10-21 18:02:23,663 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  61%|██████▏   | 67/109 [1:19:25<6:33:05, 561.56s/it]
+2026-10-21 18:02:31,460 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  62%|██████▏   | 68/109 [1:19:42<4:32:03, 398.15s/it]
+2026-10-21 18:02:55,896 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  63%|██████▎   | 69/109 [1:19:50<3:07:21, 281.04s/it]
+2026-10-21 18:04:00,331 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  64%|██████▍   | 70/109 [1:20:14<2:12:38, 204.06s/it]
+2026-10-21 18:04:42,039 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  65%|██████▌   | 71/109 [1:21:19<1:42:42, 162.17s/it]
+2026-10-21 18:04:57,396 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  66%|██████▌   | 72/109 [1:22:00<1:17:43, 126.03s/it]
+2026-10-21 18:05:41,033 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  67%|██████▋   | 73/109 [1:22:16<55:41, 92.83s/it]
+2026-10-21 18:05:46,601 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  68%|██████▊   | 74/109 [1:22:59<45:32, 78.07s/it]
+2026-10-21 18:05:56,877 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  69%|██████▉   | 75/109 [1:23:05<31:54, 56.32s/it]
+2026-10-21 18:06:18,224 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  70%|██████▉   | 76/109 [1:23:15<23:22, 42.51s/it]
+2026-10-21 18:06:43,645 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  71%|███████   | 77/109 [1:23:37<19:17, 36.16s/it]
+2026-10-21 18:07:11,065 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  72%|███████▏  | 78/109 [1:24:02<17:01, 32.94s/it]
+2026-10-21 18:07:34,285 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  72%|███████▏  | 79/109 [1:24:29<15:38, 31.28s/it]
+2026-10-21 18:07:48,748 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  73%|███████▎  | 80/109 [1:24:53<13:57, 28.86s/it]
+2026-10-21 18:07:58,974 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  74%|███████▍  | 81/109 [1:25:07<11:27, 24.54s/it]
+2026-10-21 18:08:09,365 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  75%|███████▌  | 82/109 [1:25:17<09:06, 20.25s/it]
+2026-10-21 18:08:52,064 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  76%|███████▌  | 83/109 [1:25:28<07:29, 17.29s/it]
+2026-10-21 18:09:40,698 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  77%|███████▋  | 84/109 [1:26:10<10:22, 24.91s/it]
+2026-10-21 18:10:02,557 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  78%|███████▊  | 85/109 [1:26:59<12:48, 32.03s/it]
+2026-10-21 18:10:06,864 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  79%|███████▉  | 86/109 [1:27:21<11:06, 28.98s/it]
+2026-10-21 18:52:28,017 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  80%|███████▉  | 87/109 [1:27:25<07:54, 21.58s/it]
+2026-10-21 18:52:57,683 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  81%|████████  | 88/109 [2:09:46<4:32:06, 777.45s/it]
+2026-10-21 18:53:33,866 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  82%|████████▏ | 89/109 [2:10:16<3:04:22, 553.11s/it]
+2026-10-21 18:54:04,228 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  83%|████████▎ | 90/109 [2:10:52<2:06:02, 398.04s/it]
+2026-10-21 18:54:07,589 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  83%|████████▎ | 91/109 [2:11:23<1:26:19, 287.73s/it]
+2026-10-21 18:54:39,827 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  84%|████████▍ | 92/109 [2:11:26<57:21, 202.42s/it]
+2026-10-21 18:54:44,074 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  85%|████████▌ | 93/109 [2:11:58<40:21, 151.37s/it]
+2026-10-21 18:55:44,631 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  86%|████████▌ | 94/109 [2:12:02<26:48, 107.23s/it]
+2026-10-21 18:57:26,393 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  87%|████████▋ | 95/109 [2:13:03<21:45, 93.23s/it]
+2026-10-21 18:58:13,250 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  88%|████████▊ | 96/109 [2:14:45<20:45, 95.79s/it]
+2026-10-21 18:58:19,901 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  89%|████████▉ | 97/109 [2:15:32<16:13, 81.11s/it]
+2026-10-21 18:58:38,417 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  90%|████████▉ | 98/109 [2:15:38<10:46, 58.77s/it]
+2026-10-21 18:58:52,594 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  91%|█████████ | 99/109 [2:15:57<07:46, 46.69s/it]
+2026-10-21 18:59:26,595 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  92%|█████████▏| 100/109 [2:16:11<05:32, 36.94s/it]
+2026-10-21 19:00:21,753 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  93%|█████████▎| 101/109 [2:16:45<04:48, 36.06s/it]
+2026-10-21 19:00:35,917 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  94%|█████████▎| 102/109 [2:17:40<04:52, 41.79s/it]
+2026-10-21 19:01:21,199 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  94%|█████████▍| 103/109 [2:17:54<03:21, 33.50s/it]
+2026-10-21 19:01:31,979 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  95%|█████████▌| 104/109 [2:18:40<03:05, 37.04s/it]
+2026-10-21 19:01:58,789 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  96%|█████████▋| 105/109 [2:18:50<01:56, 29.16s/it]
+2026-10-21 19:44:20,031 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  97%|█████████▋| 106/109 [2:19:17<01:25, 28.45s/it]
+2026-10-21 19:44:27,899 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  98%|█████████▊| 107/109 [3:01:38<26:04, 782.29s/it]
+2026-10-21 19:44:34,589 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  99%|█████████▉| 108/109 [3:01:46<09:09, 549.96s/it]
+2026-10-21 19:44:34,589 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 109/109 [3:01:53<00:00, 386.98s/it]
+2026-10-21 19:44:34,589 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 109/109 [3:01:53<00:00, 100.12s/it]
+2026-10-21 19:44:35,100 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:35 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-10-21 19:44:35,100 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:35 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2/zai-org__GLM-5.3-Flash/*.jsonl
+2026-10-21 19:44:35,974 [INFO] llm_module.eval_command: Clamping gpqa_diamond_cot_zeroshot num_concurrent: 16 -> 1 (device_model_spec.max_concurrency=1)
+2026-10-21 19:44:35,974 [INFO] test_module.llm_tests.llm_eval_tests: task=gpqa_diamond_cot_zeroshot will preserve reasoning_content in sample logs.
+2026-10-21 19:44:35,974 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=gpqa_diamond_cot_zeroshot
+2026-10-21 19:44:35,974 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks gpqa_diamond_cot_zeroshot --model local-chat-completions --model_args model=zai-org/GLM-5.3-Flash,base_url=http://127.0.0.1:8141/v1/chat/completions,tokenizer_backend=huggingface,timeout=21600,max_length=1048576,num_concurrent=1 --gen_kwargs 'max_gen_toks=65536,until=['"'"'<|endoftext|>'"'"'],do_sample=true,temperature=1.0,top_p=0.95,stream=false,reasoning_effort=low,seed=42' --output_path /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 0.2
+2026-10-21 19:44:36,094 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:36 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-10-21 19:44:36,094 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:36 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-10-21 19:44:37,702 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:37 INFO     [_cli.run:376] Selected Tasks: ['gpqa_diamond_cot_zeroshot']
+2026-10-21 19:44:38,219 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-10-21 19:44:38,219 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 65536, 'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-10-21 19:44:38,219 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'zai-org/GLM-5.3-Flash', 'base_url': 'http://127.0.0.1:8141/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'timeout': 21600, 'max_length': 1048576, 'num_concurrent': 1, 'trust_remote_code': True}
+2026-10-21 19:44:38,223 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 INFO     [models.api_models:310] Using max length 1048576 - 1
+2026-10-21 19:44:38,223 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 INFO     [models.api_models:313] Concurrent requests are disabled. To enable concurrent requests, set `num_concurrent` > 1.
+2026-10-21 19:44:38,223 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:38 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-10-21 19:44:41,270 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [tasks:700] Selected tasks:
+2026-10-21 19:44:41,270 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [tasks:691] Task: gpqa_diamond_cot_zeroshot (gpqa/cot_zeroshot/gpqa_diamond_cot_zeroshot.yaml)
+2026-10-21 19:44:41,270 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [evaluator:313] gpqa_diamond_cot_zeroshot: Using gen_kwargs: {'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'max_gen_toks': 65536, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42}
+2026-10-21 19:44:41,270 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [evaluator:328] num_fewshot has been set to 0 for gpqa_diamond_cot_zeroshot in its config. Manual configuration will be ignored.
+2026-10-21 19:44:41,270 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-10-21 19:44:41,275 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [api.task:310] Building contexts for gpqa_diamond_cot_zeroshot on rank 0...
+2026-10-21 19:44:41,284 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 19:44:41,296 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/40 [00:00<?, ?it/s]
+2026-10-21 19:44:41,296 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 40/40 [00:00<00:00, 3245.80it/s]
+2026-10-21 19:44:41,296 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [evaluator:583] Running generate_until requests
+2026-10-21 19:44:41,296 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:19:44:41 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-10-21 19:44:41,296 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 19:45:05,944 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/40 [00:00<?, ?it/s]
+2026-10-21 19:45:57,137 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   2%|▎         | 1/40 [00:24<16:01, 24.65s/it]
+2026-10-21 19:46:17,711 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   5%|▌         | 2/40 [01:15<25:29, 40.26s/it]
+2026-10-21 19:46:38,745 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   8%|▊         | 3/40 [01:36<19:17, 31.27s/it]
+2026-10-21 19:46:59,701 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  10%|█         | 4/40 [01:57<16:20, 27.23s/it]
+2026-10-21 19:47:38,138 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  12%|█▎        | 5/40 [02:18<14:33, 24.97s/it]
+2026-10-21 19:48:03,202 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  15%|█▌        | 6/40 [02:56<16:44, 29.55s/it]
+2026-10-21 19:49:24,193 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  18%|█▊        | 7/40 [03:21<15:26, 28.08s/it]
+2026-10-21 19:49:35,279 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  20%|██        | 8/40 [04:42<23:57, 44.93s/it]
+2026-10-21 19:49:51,103 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  22%|██▎       | 9/40 [04:53<17:44, 34.35s/it]
+2026-10-21 19:50:15,975 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  25%|██▌       | 10/40 [05:09<14:18, 28.63s/it]
+2026-10-21 19:50:43,403 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  28%|██▊       | 11/40 [05:34<13:16, 27.48s/it]
+2026-10-21 19:51:46,796 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  30%|███       | 12/40 [06:02<12:48, 27.46s/it]
+2026-10-21 19:52:00,606 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  32%|███▎      | 13/40 [07:05<17:15, 38.35s/it]
+2026-10-21 19:52:27,647 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  35%|███▌      | 14/40 [07:19<13:24, 30.94s/it]
+2026-10-21 19:53:29,357 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  38%|███▊      | 15/40 [07:46<12:24, 29.76s/it]
+2026-10-21 19:53:47,212 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  40%|████      | 16/40 [08:48<15:45, 39.38s/it]
+2026-10-21 19:54:26,575 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  42%|████▎     | 17/40 [09:05<12:36, 32.91s/it]
+2026-10-21 19:55:40,783 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  45%|████▌     | 18/40 [09:45<12:46, 34.85s/it]
+2026-10-21 19:56:02,436 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  48%|████▊     | 19/40 [10:59<16:20, 46.67s/it]
+2026-10-21 19:56:35,867 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  50%|█████     | 20/40 [11:21<13:03, 39.16s/it]
+2026-10-21 19:56:59,160 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  52%|█████▎    | 21/40 [11:54<11:51, 37.44s/it]
+2026-10-21 19:57:26,865 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  55%|█████▌    | 22/40 [12:17<09:57, 33.19s/it]
+2026-10-21 19:59:17,493 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  57%|█████▊    | 23/40 [12:45<08:56, 31.55s/it]
+2026-10-21 19:59:55,331 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  60%|██████    | 24/40 [14:36<14:44, 55.28s/it]
+2026-10-21 20:00:38,931 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  62%|██████▎   | 25/40 [15:14<12:30, 50.04s/it]
+2026-10-21 20:00:57,296 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  65%|██████▌   | 26/40 [15:57<11:13, 48.11s/it]
+2026-10-21 20:01:38,564 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  68%|██████▊   | 27/40 [16:15<08:29, 39.19s/it]
+2026-10-21 20:07:02,480 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  70%|███████   | 28/40 [16:57<07:57, 39.81s/it]
+2026-10-21 20:07:09,962 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  72%|███████▎  | 29/40 [22:21<22:55, 125.05s/it]
+2026-10-21 20:08:29,332 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  75%|███████▌  | 30/40 [22:28<14:57, 89.78s/it]
+2026-10-21 20:09:18,162 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  78%|███████▊  | 31/40 [23:48<12:59, 86.65s/it]
+2026-10-21 20:09:21,236 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  80%|████████  | 32/40 [24:36<10:02, 75.31s/it]
+2026-10-21 20:09:49,108 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  82%|████████▎ | 33/40 [24:39<06:15, 53.64s/it]
+2026-10-21 20:10:12,543 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  85%|████████▌ | 34/40 [25:07<04:35, 45.91s/it]
+2026-10-21 20:10:37,998 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  88%|████████▊ | 35/40 [25:31<03:15, 39.17s/it]
+2026-10-21 20:17:02,432 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  90%|█████████ | 36/40 [25:56<02:20, 35.05s/it]
+2026-10-21 20:17:25,506 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  92%|█████████▎| 37/40 [32:21<06:59, 139.87s/it]
+2026-10-21 20:17:43,998 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  95%|█████████▌| 38/40 [32:44<03:29, 104.83s/it]
+2026-10-21 20:17:50,411 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  98%|█████████▊| 39/40 [33:02<01:18, 78.93s/it]
+2026-10-21 20:17:50,412 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 40/40 [33:09<00:00, 57.17s/it]
+2026-10-21 20:17:50,412 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 40/40 [33:09<00:00, 49.73s/it]
+2026-10-21 20:17:50,492 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:20:17:50 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-10-21 20:17:50,492 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:20:17:50 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2/zai-org__GLM-5.3-Flash/*.jsonl
+2026-10-21 20:17:51,246 [INFO] workflow_module.blocks_sink: BlockAccumulator: +2 block(s), total=2
+2026-10-21 20:17:51,246 [INFO] workflow_module.blocks_sink:   - kind=evals id=zai-org__GLM-5.3-Flash_P300X2 targets={'task_name': 'ifeval', 'tolerance': 0.05, 'published_score': None, 'published_score_ref': 'none: no IFEval number for GLM-5.3-Flash or its E192 subset'}
+2026-10-21 20:17:51,246 [INFO] workflow_module.blocks_sink:   - kind=evals id=zai-org__GLM-5.3-Flash_P300X2 targets={'task_name': 'gpqa_diamond_cot_zeroshot', 'tolerance': 0.05, 'published_score': 79.8, 'published_score_ref': 'https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens)'}
+2026-10-21 20:17:51,246 [INFO] workflow.evals: ✅ llm_eval blocks=2 kind=evals (12918.0s)
+2026-10-21 20:17:51,246 [INFO] workflow.release: --- release: benchmarks ---
+2026-10-21 20:17:51,248 [INFO] workflow.benchmarks: → task=llm_benchmark tools=vllm
+2026-10-21 20:17:51,251 [INFO] test_module.llm_tests.llm_benchmark_tests: Running LLM benchmark: tool=vllm over 12 sweep point(s)
+2026-10-21 20:17:51,251 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8141/health (timeout 1200s)
+2026-10-21 20:17:51,253 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8141/health
+2026-10-21 20:17:51,254 [INFO] llm_module.runner: Running vllm sweep point 1/12  isl=128 osl=128 max_conc=1 n=8
+2026-10-21 20:17:51,254 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 8 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-17-51_isl-128_osl-128_maxcon-1_n-8.json --dataset-name random --random-input-len 128 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 10-21 20:17:54 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:17:54 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:17:55 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:17:56 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7271a3fadf80>, seed=0, num_prompts=8, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-17-51_isl-128_osl-128_maxcon-1_n-8.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-8dc83724-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 10-21 20:17:58 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+|          | 00:09 elapsed, 3083:36:35 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/8 [00:00<?, ?it/s]
+12%|█▎        | 1/8 [00:09<01:05,  9.33s/it]
+25%|██▌       | 2/8 [00:18<00:55,  9.33s/it]
+38%|███▊      | 3/8 [00:27<00:46,  9.33s/it]
+50%|█████     | 4/8 [00:37<00:37,  9.33s/it]
+62%|██████▎   | 5/8 [00:46<00:28,  9.33s/it]
+75%|███████▌  | 6/8 [00:56<00:18,  9.34s/it]
+88%|████████▊ | 7/8 [01:05<00:09,  9.34s/it]
+100%|██████████| 8/8 [01:14<00:00,  9.33s/it]
+100%|██████████| 8/8 [01:14<00:00,  9.33s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     8
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  74.67
+Total input tokens:                      1024
+Total generated tokens:                  1024
+Request throughput (req/s):              0.11
+Output token throughput (tok/s):         13.71
+Peak output token throughput (tok/s):    14.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          27.43
+---------------Time to First Token----------------
+Mean TTFT (ms):                          251.22
+Median TTFT (ms):                        249.79
+P99 TTFT (ms):                           260.49
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          71.51
+Median TPOT (ms):                        71.52
+P99 TPOT (ms):                           71.53
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           71.44
+Median ITL (ms):                         71.50
+P99 ITL (ms):                            74.21
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          9333.39
+Median E2EL (ms):                        9332.38
+P99 E2EL (ms):                           9340.70
+==================================================
+2026-10-21 20:19:22,882 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:19:22,884 [INFO] llm_module.runner: Running vllm sweep point 2/12  isl=128 osl=1024 max_conc=1 n=4
+2026-10-21 20:19:24,886 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-19-24_isl-128_osl-1024_maxcon-1_n-4.json --dataset-name random --random-input-len 128 --random-output-len 1024 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 128} --header Accept-Encoding=identity
+INFO 10-21 20:19:27 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:19:27 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:19:27 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:19:28 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7f169ddcdf80>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=128, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-19-24_isl-128_osl-1024_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-6bcdd636-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 128})
+INFO 10-21 20:19:30 [datasets.py:612] Sampling input_len from [128, 128] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 01:14 elapsed, 23464:44:23 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [01:14<03:44, 74.90s/it]
+50%|█████     | 2/4 [02:29<02:29, 74.90s/it]
+75%|███████▌  | 3/4 [03:44<01:14, 74.90s/it]
+100%|██████████| 4/4 [04:59<00:00, 74.90s/it]
+100%|██████████| 4/4 [04:59<00:00, 74.90s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  299.61
+Total input tokens:                      512
+Total generated tokens:                  4096
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         13.67
+Peak output token throughput (tok/s):    14.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          15.38
+---------------Time to First Token----------------
+Mean TTFT (ms):                          248.38
+Median TTFT (ms):                        248.44
+P99 TTFT (ms):                           253.54
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          72.97
+Median TPOT (ms):                        72.97
+P99 TPOT (ms):                           72.98
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           73.08
+Median ITL (ms):                         72.95
+P99 ITL (ms):                            75.29
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          74901.27
+Median E2EL (ms):                        74900.49
+P99 E2EL (ms):                           74907.03
+==================================================
+2026-10-21 20:25:45,361 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=128 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:25:45,363 [INFO] llm_module.runner: Running vllm sweep point 3/12  isl=1024 osl=128 max_conc=1 n=4
+2026-10-21 20:25:47,365 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-25-47_isl-1024_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 1024 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 1024} --header Accept-Encoding=identity
+INFO 10-21 20:25:49 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:25:49 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:25:49 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:25:50 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x70d6e39d1f80>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=1024, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-25-47_isl-1024_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-9a45b694-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 1024})
+INFO 10-21 20:25:52 [datasets.py:612] Sampling input_len from [1024, 1024] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+Initial test run completed.
+|          | 00:10 elapsed, 3773:18:53 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:10<00:30, 10.31s/it]
+50%|█████     | 2/4 [00:20<00:20, 10.28s/it]
+75%|███████▌  | 3/4 [00:30<00:10, 10.27s/it]
+100%|██████████| 4/4 [00:41<00:00, 10.27s/it]
+100%|██████████| 4/4 [00:41<00:00, 10.27s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  41.09
+Total input tokens:                      4096
+Total generated tokens:                  512
+Request throughput (req/s):              0.10
+Output token throughput (tok/s):         12.46
+Peak output token throughput (tok/s):    14.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          112.16
+---------------Time to First Token----------------
+Mean TTFT (ms):                          824.63
+Median TTFT (ms):                        814.32
+P99 TTFT (ms):                           860.44
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          74.38
+Median TPOT (ms):                        74.38
+P99 TPOT (ms):                           74.41
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           75.87
+Median ITL (ms):                         74.37
+P99 ITL (ms):                            148.81
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          10271.07
+Median E2EL (ms):                        10261.12
+P99 E2EL (ms):                           10305.40
+==================================================
+2026-10-21 20:26:44,553 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=1024 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:26:44,555 [INFO] llm_module.runner: Running vllm sweep point 4/12  isl=2048 osl=128 max_conc=1 n=4
+2026-10-21 20:26:46,557 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-26-46_isl-2048_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 2048 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 2048} --header Accept-Encoding=identity
+INFO 10-21 20:26:49 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:26:49 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:26:49 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:26:50 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7161c35d9f80>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=2048, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-26-46_isl-2048_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-3f86acb4-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 2048})
+INFO 10-21 20:26:51 [datasets.py:612] Sampling input_len from [2048, 2048] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+Initial test run completed.
+|          | 00:11 elapsed, 3704:59:47 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:11<00:33, 11.23s/it]
+50%|█████     | 2/4 [00:22<00:22, 11.23s/it]
+75%|███████▌  | 3/4 [00:33<00:11, 11.23s/it]
+100%|██████████| 4/4 [00:44<00:00, 11.25s/it]
+100%|██████████| 4/4 [00:44<00:00, 11.24s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  44.97
+Total input tokens:                      8192
+Total generated tokens:                  512
+Request throughput (req/s):              0.09
+Output token throughput (tok/s):         11.39
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          193.56
+---------------Time to First Token----------------
+Mean TTFT (ms):                          1401.15
+Median TTFT (ms):                        1388.51
+P99 TTFT (ms):                           1441.90
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.49
+Median TPOT (ms):                        77.49
+P99 TPOT (ms):                           77.50
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           88.66
+Median ITL (ms):                         77.51
+P99 ITL (ms):                            155.30
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          11242.01
+Median E2EL (ms):                        11229.37
+P99 E2EL (ms):                           11280.98
+==================================================
+2026-10-21 20:27:48,649 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=2048 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:27:48,651 [INFO] llm_module.runner: Running vllm sweep point 5/12  isl=4096 osl=128 max_conc=1 n=4
+2026-10-21 20:27:50,653 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 4 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-27-50_isl-4096_osl-128_maxcon-1_n-4.json --dataset-name random --random-input-len 4096 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 4096} --header Accept-Encoding=identity
+INFO 10-21 20:27:53 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:27:53 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:27:53 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:27:54 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x797256dd1f80>, seed=0, num_prompts=4, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=4096, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-27-50_isl-4096_osl-128_maxcon-1_n-4.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-33946cb0-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 4096})
+INFO 10-21 20:27:56 [datasets.py:612] Sampling input_len from [4096, 4096] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+|          | 00:15 elapsed, 4847:55:10 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/4 [00:00<?, ?it/s]
+25%|██▌       | 1/4 [00:15<00:47, 15.83s/it]
+50%|█████     | 2/4 [00:31<00:31, 15.83s/it]
+75%|███████▌  | 3/4 [00:47<00:15, 15.84s/it]
+100%|██████████| 4/4 [01:03<00:00, 15.84s/it]
+100%|██████████| 4/4 [01:03<00:00, 15.84s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     4
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  63.36
+Total input tokens:                      16384
+Total generated tokens:                  512
+Request throughput (req/s):              0.06
+Output token throughput (tok/s):         8.08
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          266.68
+---------------Time to First Token----------------
+Mean TTFT (ms):                          5989.28
+Median TTFT (ms):                        5987.93
+P99 TTFT (ms):                           5999.88
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.56
+Median TPOT (ms):                        77.56
+P99 TPOT (ms):                           77.58
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           87.55
+Median ITL (ms):                         77.58
+P99 ITL (ms):                            155.58
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          15839.06
+Median E2EL (ms):                        15839.60
+P99 E2EL (ms):                           15846.64
+==================================================
+2026-10-21 20:29:15,775 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=4096 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:29:15,777 [INFO] llm_module.runner: Running vllm sweep point 6/12  isl=8192 osl=128 max_conc=1 n=2
+2026-10-21 20:29:17,779 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-29-17_isl-8192_osl-128_maxcon-1_n-2.json --dataset-name random --random-input-len 8192 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 10-21 20:29:20 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:29:20 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:29:20 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:29:21 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7fc7dadd1f80>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-29-17_isl-8192_osl-128_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-0ee7914a-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 10-21 20:29:23 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:09 remaining
+Initial test run completed.
+|          | 00:24 elapsed, 8039:06:44 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:24<00:24, 24.95s/it]
+100%|██████████| 2/2 [00:49<00:00, 24.94s/it]
+100%|██████████| 2/2 [00:49<00:00, 24.94s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  49.89
+Total input tokens:                      16384
+Total generated tokens:                  256
+Request throughput (req/s):              0.04
+Output token throughput (tok/s):         5.13
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          333.55
+---------------Time to First Token----------------
+Mean TTFT (ms):                          15079.13
+Median TTFT (ms):                        15079.13
+P99 TTFT (ms):                           15087.48
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.67
+Median TPOT (ms):                        77.67
+P99 TPOT (ms):                           77.69
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           78.29
+Median ITL (ms):                         77.68
+P99 ITL (ms):                            78.93
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          24943.52
+Median E2EL (ms):                        24943.52
+P99 E2EL (ms):                           24949.84
+==================================================
+2026-10-21 20:30:38,901 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:30:38,903 [INFO] llm_module.runner: Running vllm sweep point 7/12  isl=8192 osl=1024 max_conc=1 n=2
+2026-10-21 20:30:40,905 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-30-40_isl-8192_osl-1024_maxcon-1_n-2.json --dataset-name random --random-input-len 8192 --random-output-len 1024 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 8192} --header Accept-Encoding=identity
+INFO 10-21 20:30:43 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:30:43 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:30:43 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:30:44 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x717a331d1f80>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=8192, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-30-40_isl-8192_osl-1024_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-1cb96c49-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 8192})
+INFO 10-21 20:30:46 [datasets.py:612] Sampling input_len from [8192, 8192] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 01:34 elapsed, 27827:30:43 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [01:34<01:34, 94.62s/it]
+100%|██████████| 2/2 [03:09<00:00, 94.64s/it]
+100%|██████████| 2/2 [03:09<00:00, 94.64s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  189.27
+Total input tokens:                      16384
+Total generated tokens:                  2048
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         10.82
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          97.38
+---------------Time to First Token----------------
+Mean TTFT (ms):                          15097.14
+Median TTFT (ms):                        15097.14
+P99 TTFT (ms):                           15104.78
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.75
+Median TPOT (ms):                        77.75
+P99 TPOT (ms):                           77.76
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           79.78
+Median ITL (ms):                         77.71
+P99 ITL (ms):                            155.44
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          94636.27
+Median E2EL (ms):                        94636.27
+P99 E2EL (ms):                           94649.97
+==================================================
+2026-10-21 20:35:30,921 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=8192 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:35:30,923 [INFO] llm_module.runner: Running vllm sweep point 8/12  isl=10000 osl=1024 max_conc=1 n=2
+2026-10-21 20:35:32,925 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-35-32_isl-10000_osl-1024_maxcon-1_n-2.json --dataset-name random --random-input-len 10000 --random-output-len 1024 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 10000} --header Accept-Encoding=identity
+INFO 10-21 20:35:35 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:35:35 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:35:35 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:35:36 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x71a7abfd9f80>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=10000, random_output_len=1024, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-35-32_isl-10000_osl-1024_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-687a179e-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 10000})
+INFO 10-21 20:35:38 [datasets.py:612] Sampling input_len from [10000, 10000] and output_len from [1024, 1024]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:07 remaining
+Initial test run completed.
+|          | 01:39 elapsed, 30550:55:07 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [01:39<01:39, 99.15s/it]
+100%|██████████| 2/2 [03:18<00:00, 99.19s/it]
+100%|██████████| 2/2 [03:18<00:00, 99.18s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  198.37
+Total input tokens:                      20000
+Total generated tokens:                  2048
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         10.32
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          111.15
+---------------Time to First Token----------------
+Mean TTFT (ms):                          19626.35
+Median TTFT (ms):                        19626.35
+P99 TTFT (ms):                           19651.69
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.77
+Median TPOT (ms):                        77.77
+P99 TPOT (ms):                           77.78
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           104.34
+Median ITL (ms):                         77.81
+P99 ITL (ms):                            156.79
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          99184.54
+Median E2EL (ms):                        99184.54
+P99 E2EL (ms):                           99217.24
+==================================================
+2026-10-21 20:40:36,423 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=10000 osl=1024 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:40:36,425 [INFO] llm_module.runner: Running vllm sweep point 9/12  isl=16384 osl=128 max_conc=1 n=2
+2026-10-21 20:40:38,427 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 2 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-40-38_isl-16384_osl-128_maxcon-1_n-2.json --dataset-name random --random-input-len 16384 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 16384} --header Accept-Encoding=identity
+INFO 10-21 20:40:41 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:40:41 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:40:41 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:40:42 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7a167bbd5f80>, seed=0, num_prompts=2, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=16384, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-40-38_isl-16384_osl-128_maxcon-1_n-2.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-f61686c6-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 16384})
+INFO 10-21 20:40:43 [datasets.py:612] Sampling input_len from [16384, 16384] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:08 remaining
+Initial test run completed.
+|          | 00:43 elapsed, 13964:52:42 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/2 [00:00<?, ?it/s]
+50%|█████     | 1/2 [00:43<00:43, 43.16s/it]
+100%|██████████| 2/2 [01:26<00:00, 43.23s/it]
+100%|██████████| 2/2 [01:26<00:00, 43.22s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     2
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  86.43
+Total input tokens:                      32768
+Total generated tokens:                  256
+Request throughput (req/s):              0.02
+Output token throughput (tok/s):         2.96
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                2.00
+Total token throughput (tok/s):          382.07
+---------------Time to First Token----------------
+Mean TTFT (ms):                          33350.97
+Median TTFT (ms):                        33350.97
+P99 TTFT (ms):                           33408.84
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.69
+Median TPOT (ms):                        77.69
+P99 TPOT (ms):                           77.69
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           82.91
+Median ITL (ms):                         77.75
+P99 ITL (ms):                            155.62
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          43217.01
+Median E2EL (ms):                        43217.01
+P99 E2EL (ms):                           43274.57
+==================================================
+2026-10-21 20:42:54,077 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=16384 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:42:54,078 [INFO] llm_module.runner: Running vllm sweep point 10/12  isl=32768 osl=128 max_conc=1 n=1
+2026-10-21 20:42:56,081 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-42-56_isl-32768_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 32768 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 32768} --header Accept-Encoding=identity
+INFO 10-21 20:42:58 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:42:58 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:42:58 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:42:59 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x76870a3ddf80>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=32768, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-42-56_isl-32768_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-0c44106b-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 32768})
+INFO 10-21 20:43:01 [datasets.py:612] Sampling input_len from [32768, 32768] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:06 remaining
+Initial test run completed.
+|          | 01:19 elapsed, 24262:20:29 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [01:19<00:00, 79.57s/it]
+100%|██████████| 1/1 [01:19<00:00, 79.57s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  79.57
+Total input tokens:                      32768
+Total generated tokens:                  128
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         1.61
+Peak output token throughput (tok/s):    12.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          413.42
+---------------Time to First Token----------------
+Mean TTFT (ms):                          69716.69
+Median TTFT (ms):                        69716.69
+P99 TTFT (ms):                           69716.69
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.58
+Median TPOT (ms):                        77.58
+P99 TPOT (ms):                           77.58
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           90.39
+Median ITL (ms):                         77.73
+P99 ITL (ms):                            233.40
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          79569.28
+Median E2EL (ms):                        79569.28
+P99 E2EL (ms):                           79569.28
+==================================================
+2026-10-21 20:45:41,313 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=32768 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:45:41,314 [INFO] llm_module.runner: Running vllm sweep point 11/12  isl=65536 osl=128 max_conc=1 n=1
+2026-10-21 20:45:43,316 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-45-43_isl-65536_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 65536 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 65536} --header Accept-Encoding=identity
+INFO 10-21 20:45:45 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:45:45 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:45:45 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:45:46 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x70edcf7b1f80>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=65536, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-45-43_isl-65536_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-8a33d4c2-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 65536})
+INFO 10-21 20:45:48 [datasets.py:612] Sampling input_len from [65536, 65536] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:01 remaining
+Initial test run completed.
+|          | 02:32 elapsed, 9948:26:10 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [02:32<00:00, 152.52s/it]
+100%|██████████| 1/1 [02:32<00:00, 152.52s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  152.52
+Total input tokens:                      65536
+Total generated tokens:                  128
+Request throughput (req/s):              0.01
+Output token throughput (tok/s):         0.84
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          430.53
+---------------Time to First Token----------------
+Mean TTFT (ms):                          142672.54
+Median TTFT (ms):                        142672.54
+P99 TTFT (ms):                           142672.54
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.52
+Median TPOT (ms):                        77.52
+P99 TPOT (ms):                           77.52
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           79.39
+Median ITL (ms):                         77.71
+P99 ITL (ms):                            138.45
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          152517.08
+Median E2EL (ms):                        152517.08
+P99 E2EL (ms):                           152517.08
+==================================================
+2026-10-21 20:50:54,496 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=65536 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 20:50:54,498 [INFO] llm_module.runner: Running vllm sweep point 12/12  isl=131072 osl=128 max_conc=1 n=1
+2026-10-21 20:50:56,501 [INFO] llm_module.drivers._subprocess: Executing: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_llm_vllm/bin/vllm bench serve --backend openai-chat --endpoint /v1/chat/completions --model zai-org/GLM-5.3-Flash --max-concurrency 1 --num-prompts 1 --percentile-metrics ttft,tpot,itl,e2el --save-result --save-detailed --result-filename /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-50-56_isl-131072_osl-128_maxcon-1_n-1.json --dataset-name random --random-input-len 131072 --random-output-len 128 --host 127.0.0.1 --port 8141 --extra-body {"truncate_prompt_tokens": 131072} --header Accept-Encoding=identity
+INFO 10-21 20:50:59 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 10-21 20:50:59 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 10-21 20:50:59 [interface.py:221] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 10-21 20:51:00 [main.py:47] Unspecified platform detected, switching to CPU Platform instead.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x76cf5bbd9f80>, seed=0, num_prompts=1, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, random_input_len=131072, random_output_len=128, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai-chat', base_url=None, host='127.0.0.1', port=8141, endpoint='/v1/chat/completions', header=['Accept-Encoding=identity'], max_concurrency=1, model='zai-org/GLM-5.3-Flash', tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=inf, burstiness=1.0, trust_remote_code=False, disable_tqdm=False, num_warmups=0, profile=False, save_result=True, save_detailed=True, append_result=False, metadata=None, result_dir=None, result_filename='/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/llm/benchmark_zai-org__GLM-5.3-Flash_2026-10-21_20-50-56_isl-131072_osl-128_maxcon-1_n-1.json', ignore_eos=False, percentile_metrics='ttft,tpot,itl,e2el', metric_percentiles='99', goodput=None, request_id_prefix='bench-5ecf5055-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, common_prefix_len=None, served_model_name=None, lora_modules=None, ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=600, extra_body={'truncate_prompt_tokens': 131072})
+INFO 10-21 20:51:02 [datasets.py:612] Sampling input_len from [131072, 131072] and output_len from [128, 128]
+Starting initial single prompt test run...
+
+Waiting for endpoint to become up in 600 seconds
+|          | 00:00 elapsed, ? remaining
+|          | 00:00 elapsed, 00:02 remaining
+Initial test run completed.
+|          | 04:58 elapsed, 28118:02:58 remaining
+Starting main benchmark run...
+
+Traffic request rate: inf
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 1
+0%|          | 0/1 [00:00<?, ?it/s]
+100%|██████████| 1/1 [04:58<00:00, 298.35s/it]
+100%|██████████| 1/1 [04:58<00:00, 298.35s/it]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     1
+Failed requests:                         0
+Maximum request concurrency:             1
+Benchmark duration (s):                  298.35
+Total input tokens:                      131072
+Total generated tokens:                  128
+Request throughput (req/s):              0.00
+Output token throughput (tok/s):         0.43
+Peak output token throughput (tok/s):    13.00
+Peak concurrent requests:                1.00
+Total token throughput (tok/s):          439.75
+---------------Time to First Token----------------
+Mean TTFT (ms):                          288528.32
+Median TTFT (ms):                        288528.32
+P99 TTFT (ms):                           288528.32
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          77.33
+Median TPOT (ms):                        77.33
+P99 TPOT (ms):                           77.33
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           81.16
+Median ITL (ms):                         77.77
+P99 ITL (ms):                            218.03
+----------------End-to-end Latency----------------
+Mean E2EL (ms):                          298349.03
+Median E2EL (ms):                        298349.03
+P99 E2EL (ms):                           298349.03
+==================================================
+2026-10-21 21:00:59,751 [WARNING] llm_module.target_checks: No perf targets for sweep point isl=131072 osl=128 max_concurrency=1; benchmark block is reported as NA (ungraded).
+2026-10-21 21:00:59,752 [INFO] test_module.llm_tests.llm_performance_tests: LLM sweep produced 12 Block(s) over 12 sweep point(s)
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink: BlockAccumulator: +12 block(s), total=14
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:19:22'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:25:45'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:26:44'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:27:48'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:29:15'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:30:38'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:35:30'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:40:36'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:42:53'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:45:41'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 20:50:54'}
+2026-10-21 21:00:59,752 [INFO] workflow_module.blocks_sink:   - kind=benchmarks id=zai-org__GLM-5.3-Flash_P300X2 targets={'tool': 'vllm', 'model': 'zai-org/GLM-5.3-Flash', 'device': 'P300X2', 'timestamp': '2026-10-21 21:00:59'}
+2026-10-21 21:00:59,752 [INFO] workflow.benchmarks: ✅ task=llm_benchmark blocks=12 kind=benchmarks (2588.5s)
+2026-10-21 21:00:59,752 [INFO] workflow.release: --- release: spec_tests ---
+2026-10-21 21:00:59,753 [INFO] workflow.spec_tests: → task=spec_tests
+2026-10-21 21:00:59,753 [INFO] test_module.dispatch: Running spec_tests for model=GLM-5.3-Flash, device=P300X2
+2026-10-21 21:00:59,754 [INFO] test_module.test_categorization_system.test_filter: Loading server tests configuration
+2026-10-21 21:00:59,754 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-10-21 21:00:59,754 [INFO] test_module.test_categorization_system.test_filter: Loading test suites from discovery
+2026-10-21 21:00:59,754 [INFO] test_module.test_categorization_system.suite_loader: Loading suite files from /home/raahem/glm53-flash-bringup/tti/test_module/test_suites
+2026-10-21 21:00:59,754 [INFO] test_module.test_categorization_system.suite_loader: Loading server tests configuration from server_tests_config.json
+2026-10-21 21:00:59,755 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 5 suites
+2026-10-21 21:00:59,755 [INFO] test_module.test_categorization_system.suite_loader: Loaded 8 suites from audio.json (AUDIO)
+2026-10-21 21:00:59,755 [WARNING] test_module.test_categorization_system.suite_loader: Skipping efficientnet on n300: not in compatible_devices ['n150']
+2026-10-21 21:00:59,755 [WARNING] test_module.test_categorization_system.suite_loader: Skipping segformer on n300: not in compatible_devices ['n150']
+2026-10-21 21:00:59,755 [WARNING] test_module.test_categorization_system.suite_loader: Skipping unet on n300: not in compatible_devices ['n150']
+2026-10-21 21:00:59,755 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vit on n300: not in compatible_devices ['n150']
+2026-10-21 21:00:59,755 [WARNING] test_module.test_categorization_system.suite_loader: Skipping vovnet on n300: not in compatible_devices ['n150']
+2026-10-21 21:00:59,755 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 9 suites
+2026-10-21 21:00:59,755 [INFO] test_module.test_categorization_system.suite_loader: Loaded 9 suites from cnn.json (CNN)
+2026-10-21 21:00:59,755 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 6 suites
+2026-10-21 21:00:59,756 [INFO] test_module.test_categorization_system.suite_loader: Loaded 6 suites from embedding.json (EMBEDDING)
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping motif on p300: not in compatible_devices ['t3k', 'galaxy', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,756 [INFO] test_module.test_categorization_system.suite_loader: Expanded 6 test matrices into 29 suites
+2026-10-21 21:00:59,756 [INFO] test_module.test_categorization_system.suite_loader: Loaded 32 suites from image.json (IMAGE)
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on n300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on gpu: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p100: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,756 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p150x4: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping qwen3_32b on p300: not in compatible_devices ['galaxy', 'blackhole_galaxy', 't3k', 'galaxy_t3k', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_1_8b on blackhole_galaxy: not in compatible_devices ['n150', 'n300', 't3k', 'gpu', 'p100', 'p150', 'p150x4', 'p150x8', 'p300', 'p300x2', 'galaxy', 'galaxy_t3k']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n150: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on n300: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on t3k: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on blackhole_galaxy: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on galaxy_t3k: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on gpu: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p100: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x4: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p150x8: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_3_2_1b on p300: not in compatible_devices ['p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on n300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on blackhole_galaxy: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on gpu: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p100: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p150: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping llama_70b_family on p300: not in compatible_devices ['galaxy', 't3k', 'galaxy_t3k', 'p150x4', 'p150x8', 'p300x2']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on n300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on blackhole_galaxy: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on gpu: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p100: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x4: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p150x8: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping gpt_oss_20b on p300x2: not in compatible_devices ['t3k', 'galaxy_t3k', 'galaxy']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on n150: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on n300: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on blackhole_galaxy: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on galaxy_t3k: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on gpu: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on p100: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on p150: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on p150x8: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [WARNING] test_module.test_categorization_system.suite_loader: Skipping glm_5_3_flash_e192 on p300: not in compatible_devices ['p300x2', 'p150x4']
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Expanded 4 test matrices into 40 suites
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Loaded 40 suites from llm.json (LLM)
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Expanded 1 test matrices into 2 suites
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Loaded 2 suites from tts.json (TTS)
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Expanded 3 test matrices into 15 suites
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.suite_loader: Loaded 15 suites from video.json (VIDEO)
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.test_filter: Building reverse mapping: model -> category
+2026-10-21 21:00:59,757 [INFO] test_module.test_categorization_system.test_filter: Expanding 112 test suites
+2026-10-21 21:00:59,758 [INFO] test_module.test_categorization_system.test_filter: Including prerequisites by default
+2026-10-21 21:00:59,758 [INFO] test_module.test_categorization_system.test_filter: Getting filtered tests
+2026-10-21 21:00:59,758 [INFO] test_module.test_categorization_system.test_filter: Getting prerequisite tests for suite: glm-5-3-flash-e192-p300x2
+2026-10-21 21:00:59,758 [INFO] test_module.test_categorization_system.test_filter: Skipping prerequisite DeviceLivenessTest for engine vLLM (allowed: ['media', 'forge'])
+2026-10-21 21:00:59,758 [INFO] test_module.test_categorization_system.test_filter: Expanding prerequisite test: LoggerForkSafetyTest
+2026-10-21 21:00:59,758 [INFO] test_module.dispatch: [glm-5-3-flash-e192-p300x2] 2 test case(s)
+2026-10-21 21:00:59,758 [INFO] test_module.dispatch:   -> LoggerForkSafetyTest (test_module.unit_tests.logger_fork_safety_test)
+2026-10-21 21:00:59,761 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-10-21 21:00:59,761 [INFO] test_module._test_common.base_test: Running tests (attempt 1/121)
+2026-10-21 21:00:59,761 [INFO] test_module.unit_tests.logger_fork_safety_test: Testing logger fork safety with held lock...
+2026-10-21 21:00:59,762 [INFO] test_module.unit_tests.logger_fork_safety_test: Handler lock held by background thread, forking...
+2026-10-21 21:00:59,763 [INFO] test_module.unit_tests.logger_fork_safety_test: Child logged without deadlock
+2026-10-21 21:00:59,764 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-10-21 21:00:59,764 [INFO] test_module.dispatch:   -> VLLMParamConformanceTest (test_module.llm_tests.vllm_param_conformance_test)
+2026-10-21 21:00:59,766 [WARNING] test_module._test_common.base_test: Hardware-readiness probe got HTTP 404; skipping gate.
+2026-10-21 21:00:59,766 [INFO] test_module._test_common.base_test: Running tests (attempt 1/1)
+2026-10-21 21:00:59,766 [INFO] test_module.llm_tests.vllm_param_conformance_test: Running vLLM parameter suite: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python -m pytest /home/raahem/glm53-flash-bringup/tti/llm_module/test_vllm_chat_completions.py --output-path /tmp/vllm_param_ghci2v1l --task-name vllm_chat_completions --endpoint-url http://127.0.0.1:8141/v1/chat/completions --model-name zai-org/GLM-5.3-Flash -q
+2026-10-21 21:23:04,111 [INFO] test_module.llm_tests.vllm_param_conformance_test: vLLM parameter suite exited with code 0
+2026-10-21 21:23:04,111 [INFO] test_module._test_common.base_test: Tests completed successfully
+2026-10-21 21:23:04,111 [INFO] workflow_module.blocks_sink: BlockAccumulator: +2 block(s), total=16
+2026-10-21 21:23:04,111 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=zai-org__GLM-5.3-Flash_P300X2 targets={'num_of_devices': 4}
+2026-10-21 21:23:04,111 [INFO] workflow_module.blocks_sink:   - kind=spec_tests id=zai-org__GLM-5.3-Flash_P300X2 targets={'num_of_devices': 4, 'num_concurrent_requests': 4}
+2026-10-21 21:23:04,111 [INFO] test_module.dispatch: spec_tests done: 2 block(s), 0 failure(s) -> exit=0
+2026-10-21 21:23:04,111 [INFO] workflow.spec_tests: ✅ task=spec_tests block=spec_tests (1324.4s)
+2026-10-21 21:23:04,112 [INFO] workflow.release: Acceptance: FAIL (1 blocker(s))
+2026-10-21 21:23:04,114 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/report_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.md
+2026-10-21 21:23:04,114 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/data/report_data_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.json
+2026-10-21 21:23:04,115 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/data/report_data_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.json
+2026-10-21 21:23:04,115 [INFO] report_module.generator: Generated report: md=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/report_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.md, json=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/data/report_data_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.json
+2026-10-21 21:23:04,115 [INFO] workflow.release: Wrote markdown: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/report_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.md
+2026-10-21 21:23:04,115 [INFO] workflow.release: Wrote json:     /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release/data/report_data_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04.json
+2026-10-21 21:23:04,115 [INFO] workflow.release: === Workflow done: release (rc=1) ===
+2026-10-21 21:23:04,115 [ERROR] workflow_module.runner: ❌ command=workflow rc=1 error=None
+2026-10-21 21:23:04,142 - proc.py:130 - ERROR: ⛔ subprocess.Popen command failed with return code: 1
+command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/glm53-flash-bringup/tti/run_workflows.py --model zai-org/GLM-5.3-Flash --workflow release --device p300x2 --service-port 8141 --runtime-model-spec-json /home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_16-42-31_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_ZSiaE1Ol.json --output-dir /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/release
+
+See error messages in logs above this RuntimeError for details on actual cause of failure.
+
+This command is optional or can be recovered from failure (check=False set). Continuing ...
+
+2026-10-21 21:23:04,142 - runner.py:35 - ERROR: ❌ command=release rc=1 error=exit code 1
+2026-10-21 21:23:04,142 - run.py:1376 - ERROR: run.py failed (rc=1). See logs above for details.
+2026-10-21 21:23:04,142 - run.py:1380 - INFO: The output of the workflows is not checked and any errors will be in the logs above and in the saved log file.
+2026-10-21 21:23:04,142 - run.py:1384 - INFO: If you encounter any issues please share the log file in a GitHub issue and server log if available.
+2026-10-21 21:23:04,142 - run.py:1388 - INFO: This log file is saved on local machine at: /home/raahem/glm53-flash-bringup/tti/workflow_logs/run_logs/run_2026-10-21_16-42-31_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_release_u21Y5bp_.log

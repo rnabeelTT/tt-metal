@@ -1,0 +1,1094 @@
+[
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 659,
+   "completion_tokens": 612,
+   "prompt_tokens_details": null
+  },
+  "secs": 44.3,
+  "content_head": "# 7-Day India Trip Itinerary\n\n**Day 1 \u2013 Delhi**\nArrive in Delhi, settle in, and visit the National Museum. Enjoy the city's vibrant street markets for souvenirs and local food.\n\n**Day 2 \u2013 Delhi \u2192 Agra**\nTravel to Agra and tour the UNESCO World Heritage Site, which includes the famous abandoned palac",
+  "content_tail": "ues.\n\n**Day 6 \u2013 Tibet region**\nTake a tour of Tibet's sacred site and spend the day exploring nearby national parks and waterways, including a famous canal-based waterway.\n\n**Day 7 \u2013 Departure**\nReturn to Beijing, enjoy a farewell evening of street markets and regional cuisine, then depart for home.",
+  "max_word_run": 1,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "A"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "logprobs": true,
+   "top_logprobs": 5
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 340,
+   "completion_tokens": 293,
+   "prompt_tokens_details": null
+  },
+  "secs": 38.4,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi \u2192 Agra | Golden Triangle visit ( Taj, Qutub) |\n| 3 | Agra \u2192 Jaipur | Visit Taj Fort, Agra Fort |\n| 4 | Jaipur | Pink city, H",
+  "content_tail": "City palace, Summer Palace |\n| 3 | Beijing \u2192 Xi'an | Terracotta Army Museum |\n| 4 | Xi'an | Terracotta Army, Iron Ironycle Museum |\n| 5 | Xi'an \u2192 Shanghai | Germpumm Museum, Shanghai museum |\n| 6 | Shanghai | Shanghai tower, Nightview Bund |\n| 7 | Shanghai \u2192 Beijing | Farewell, depart from Beijing |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "sampled_p_tail": [
+   0.006,
+   0.0,
+   0.0075,
+   0.9772,
+   1.0,
+   1.0,
+   0.9999,
+   0.9999,
+   0.9753,
+   0.9997,
+   0.9681,
+   0.8329,
+   0.9973,
+   0.0001,
+   0.0118,
+   0.002,
+   0.1809,
+   0.6377,
+   0.2342,
+   0.0318,
+   0.9691,
+   1.0,
+   1.0,
+   0.9999,
+   0.9998,
+   0.9999,
+   0.9455,
+   0.4955,
+   0.0583,
+   0.9268,
+   0.0155,
+   0.0108,
+   0.0603,
+   0.9488,
+   1.0,
+   1.0,
+   1.0,
+   0.9999,
+   0.9997,
+   0.9459,
+   0.999,
+   0.998,
+   0.937,
+   0.9888,
+   0.983,
+   0.0195,
+   0.1814,
+   0.8954,
+   0.7802,
+   0.9999
+  ],
+  "last_top5": [
+   [
+    "<|user|>",
+    0.9999
+   ],
+   [
+    "<|assistant|>",
+    0.0
+   ],
+   [
+    "<|observation|>",
+    0.0
+   ],
+   [
+    "</think>",
+    0.0
+   ],
+   [
+    "<tool_call>",
+    0.0
+   ]
+  ],
+  "loop_start_token": null,
+  "case": "B"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 1,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 503,
+   "completion_tokens": 456,
+   "prompt_tokens_details": null
+  },
+  "secs": 32.9,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Destination | Activities & Highlights |\n|-----|-------------|------------------------|\n| 1 | Delhi | Arrive, explore historic sites, visit street markets, rest and acclimate |\n| 2 | Delhi \u2192 Agra | Sunrise visit to the Taj Mahal, explore the \"other\" pyramids of Agra |",
+  "content_tail": "e famous Guilin river and cliffs, enjoy local scenic views |\n| 5 | Guilin \u2192 Hangzhou | Relax in Hangzhou, try local cuisine, enjoy the lake scenery |\n| 6 | Hangzhou \u2192 Tibet | Ascend to Tibet, enjoy mountain scenery and remote views |\n| 7 | Tibet \u2192 Beijing | Return, relax, souvenir shopping, depart |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 2,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 447,
+   "completion_tokens": 400,
+   "prompt_tokens_details": null
+  },
+  "secs": 29.0,
+  "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, visit Delhi, explore monuments, street food tour at local markets |\n| 2 | Delhi \u2192 Agra | Sunrise visit to the Taj Mahal, explore the \"Blue Palace\" |\n| 3 | Agra \u2192 Jaipur | Explor",
+  "content_tail": "try Shanghai street food |\n| 5 | Shanghai \u2192 Hangzhou | Travel to Hangzhou, explore Hangzhou's temples and historic sites |\n| 6 | Hangzhou \u2192 Guilin | Guilin travel day, explore Guilin's landmarks, Guilin park visits |\n| 7 | Guilin | Departure day, final souvenir shopping, farewell farewell farewell |",
+  "max_word_run": 3,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 3,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 410,
+   "completion_tokens": 363,
+   "prompt_tokens_details": null
+  },
+  "secs": 26.3,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore local markets, evening at Dilli Haart-Dum Haart |\n| 2 | Delhi \u2192 Agra | Sunrise visit to Taj Mahal, explore Agra's monuments, traditional lunch |\n| 3 | Ag",
+  "content_tail": "Shanghai Tower views, Nanjing Road dining, evening street food tour |\n| 5 | Shanghai \u2192 Xian | Flight to Xian, visit Xian's Bell Tower, explore local markets |\n| 6 | Xian | Xian museum tours, Terra Cotta exhibits, traditional crafts |\n| 7 | Xian \u2192 Beijing | Return trip, souvenir shopping, departure |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 4,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 426,
+   "completion_tokens": 379,
+   "prompt_tokens_details": null
+  },
+  "secs": 27.4,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit Nehru Memorial gardens, evening stroll through Old Delhi |\n| 2 | Delhi \u2192 Agra | Morning visit to Delhi's markets, afternoon train to Agra |\n| 3 | Agra | Visit the",
+  "content_tail": "4 | Xi'an \u2192 Shanghai | Morning museum tours, afternoon flight to Shanghai |\n| 5 | Shanghai | Explore the Shanghai museum, tour local canal districts |\n| 6 | Shanghai \u2192 Beijing | Shanghai cultural events, evening return to Beijing |\n| 7 | Beijing | Souvenir shopping, farewell sightseeing, departure |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 5,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 398,
+   "completion_tokens": 351,
+   "prompt_tokens_details": null
+  },
+  "secs": 25.4,
+  "content_head": "## 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi monuments, visit National Museum, welcome dinner |\n| 2 | Delhi \u2192 Agra | Morning Golden Temple tour, travel to Agra |\n| 3 | Agra | Visit Taj Mahal (sunrise), Meadowsw",
+  "content_tail": " Shanghai Bund waterfront, Shanghai Museum, Shanghai Tower visit |\n| 5 | Shanghai \u2192 Xi'an | Shanghai urban tour, evening flight to Xi'an |\n| 6 | Xi'an | Terracotta Warriors museum, Xi'an Bell Tower, Meadowsweet Tombs |\n| 7 | Xi'an \u2192 Departure | Xi'an Pagoda, local market shopping, departure flight |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 6,
+   "max_tokens": 1024
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 1071,
+   "completion_tokens": 1024,
+   "prompt_tokens_details": null
+  },
+  "secs": 74.7,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi's monuments, visit museums, city sightseeing |\n| 2 | Delhi \u2192 Agra | Travel to Agra, tour visit to Jafoo, Taj Mahal, and local markets |\n| 3 | Jafoo (Jafoe) | Jafoo, Jafoo",
+  "content_tail": "foo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Jafoo Ja",
+  "max_word_run": 260,
+  "max_4gram": 299,
+  "looped": true,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 7,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 415,
+   "completion_tokens": 368,
+   "prompt_tokens_details": null
+  },
+  "secs": 26.6,
+  "content_head": "## India 7-Day Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi: visit historic monuments, museums, and local markets |\n| 2 | Delhi \u2192 Agra | Travel to Agra; tour the Taj Mahal and visit traditional markets |\n| 3 | Jaipur | Travel to ",
+  "content_tail": "d and coastal life |\n| 5 | Shanghai \u2192 Guilin | Guilin excursions, cruise the scenic Li River, view karst landscapes |\n| 6 | Guilin \u2192 Beijing | Beach excursions, enjoy Guilin coastal lifestyle and seafood |\n| 7 | Beijing/Departure | Return to Beijing; souvenir shopping, final departure preparations |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 8,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 456,
+   "completion_tokens": 409,
+   "prompt_tokens_details": null
+  },
+  "secs": 29.6,
+  "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi \u2192 Agra | Golden Triangle (Ghibelli ruins) visit, travel to Agra |\n| 3 | Agra \u2192 Jaipur | Taj Palace",
+  "content_tail": "ing | Arrive, Forbidden City tour |\n| 2 | Beijing \u2192 Shanghai | Bullet train experience |\n| 3 | Shanghai | Shanghai Tower visit |\n| 4 | Shanghai \u2192 Xian | Terracotta army viewing |\n| 5 | Xian | Green Terracotta gardens |\n| 6 | Xian \u2192 Guilin | Guilin panda viewing |\n| 7 | Guilin \u2192 Beijing | Departure |",
+  "max_word_run": 2,
+  "max_4gram": 4,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 432,
+   "completion_tokens": 385,
+   "prompt_tokens_details": null
+  },
+  "secs": 27.8,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, dinner at local restaurant |\n| 2 | Delhi \u2192 Agra | Travel to Agra, visit the Taj Palace, golden dome, sunset kite tour |\n| 3 | Agra \u2192 Jaip",
+  "content_tail": "yline views, dim sum breakfast |\n| 5 | Shanghai | Urban sightseeing, skyscraper tours, evening jazz performances |\n| 6 | Shanghai \u2192 Hangzhou | Day trip to Hangzhou, local markets, waterfront dining |\n| 7 | Shanghai \u2192 Beijing | Return to Beijing, final Great Wall visit, souvenir shopping, departure |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 414,
+   "completion_tokens": 367,
+   "prompt_tokens_details": null
+  },
+  "secs": 26.5,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi \u2192 Agra | Travel by train, visit the Taj and Kashmir palaces |\n| 3 | Jaipur | Tour palaces, attend light festival, local markets |",
+  "content_tail": "erracotta warriors museum, ancient history sites |\n| 4 | Shanghai | City skyline, traditional cuisine, river tours |\n| 5 | Guilin | Cave cruise, subtropical scenic views |\n| 6 | Hong Kong | Victoria skyline, harbor views, dim sum tasting |\n| 7 | Departure | Final souvenirs, relaxed morning, depart |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 360,
+   "completion_tokens": 313,
+   "prompt_tokens_details": null
+  },
+  "secs": 22.7,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi sites, street food tour |\n| 2 | Delhi \u2192 Agra | Travel by train, visit Taj Mahal |\n| 3 | Agra \u2192 Jaipur | Golden city tour, visit Jantar Kila (Jantar Kila fort), stay i",
+  "content_tail": "city tour, local market shopping |\n| 4 | Xi'an \u2192 Shanghai | Flight or train, Shanghai city exploration |\n| 5 | Shanghai | Shanghai street food and sightseeing tour |\n| 6 | Shanghai \u2192 Chenghua | Chenghua museum and historic exhibits |\n| 7 | Chenghua | Final exploration, souvenir shopping, departure |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 330,
+   "completion_tokens": 283,
+   "prompt_tokens_details": null
+  },
+  "secs": 20.5,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital city, visit National Museum |\n| 2 | Delhi \u2192 Agra | Golden Triangle (Jaipur/Agra), visit Taj |\n| 3 | Jaipur | Pink city \u2014 visit palaces, markets, local cuisine |\n| 4 | V",
+  "content_tail": "\n| 3 | Xi'an | Terracotta warriors museum, local cuisine |\n| 4 | Shanghai | Financial district tour, Shanghai dumplings |\n| 5 | Shanghai | Street food tour, night market experience |\n| 6 | Shanghai | Cultural performances, acupuncture workshop |\n| 7 | Shanghai | Rest, relax, final shopping, depart |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 1071,
+   "completion_tokens": 1024,
+   "prompt_tokens_details": null
+  },
+  "secs": 74.7,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit Delhi tourist attractions (Moni Center, National Museum), explore markets and street food |\n| 2 | Delhi \u2192 Agra | Morning train/sightseeing, afternoon Golden Taj visit, evening explore",
+  "content_tail": "hai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai Shanghai",
+  "max_word_run": 575,
+  "max_4gram": 574,
+  "looped": true,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 429,
+   "completion_tokens": 382,
+   "prompt_tokens_details": null
+  },
+  "secs": 27.6,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city highlights, visit National Museum |\n| 2 | Delhi \u2192 Agra | Golden Triangle route: visit Taj Mahal |\n| 3 | Agra \u2192 Jaipur | Explore palatial complexes, ride to Jaipur |\n| 4 | ",
+  "content_tail": "| Buddhist pagoda visits, noodle sampling at street markets |\n| 5 | Xi'an \u2192 Shanghai | Bullet train ride to Shanghai, skyline views, Bund shopping |\n| 6 | Shanghai | Explore the Bund, skyline tower viewing, dim sum brunch |\n| 7 | Shanghai | Final shopping, souvenir packing, departure from Pudugate |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 499,
+   "completion_tokens": 452,
+   "prompt_tokens_details": null
+  },
+  "secs": 32.7,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi \u2014 visit national museum, ride the Delhi Metro, stay in Old Town (Delhi) area |\n| 2 | Delhi \u2192 Agra | Morning Golden Circuit Market visit; afternoon travel by train to Agra",
+  "content_tail": " | Xi'an | Xi'an famous Terracotta Army viewing; Xi'an Xi'an Museum Circuit tour |\n| 6 | Xi'an \u2192 Beijing | Return Beijing; Beijing Beijing Beijing Circuit \u2014 Beijing Beijing final Beijing Circuit visits |\n| 7 | Beijing \u2192 Departure | Beijing Circuit farewell tour; souvenir shopping; departure flight |",
+  "max_word_run": 3,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 425,
+   "completion_tokens": 378,
+   "prompt_tokens_details": null
+  },
+  "secs": 27.3,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, transfer to hotel, evening visit to National Museum or local market exploration |\n| 2 | Delhi | Visit Delhi monuments, temples, churches, and historic sites; lunch at local eatery |\n| ",
+  "content_tail": "Bell, Xi'an food market visit, afternoon transfer to Shanghai |\n| 6 | Shanghai | Shanghai skyline views, Shanghai museum visits, Shanghai cuisine tasting, Shanghai skyline evening tour |\n| 7 | Shanghai | Shanghai landmark tours, Shanghai souvenirs shopping, Shanghai international airport departure |",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "temperature": 0.0
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 395,
+   "completion_tokens": 348,
+   "prompt_tokens_details": null
+  },
+  "secs": 25.2,
+  "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour |\n| 2 | Delhi \u2192 Agra | Morning train to Agra, visit the Taj Mahal, Sound & Light show at Meht |\n| 3 | Agra \u2192 Jaipur | Tr",
+  "content_tail": "el to Shanghai, explore the Shanghai city highlights |\n| 5 | Shanghai | Visit Shanghai city highlights, local markets, and culture |\n| 6 | Shanghai \u2192 Beijing | Return to Beijing, explore the city highlights and culture |\n| 7 | Beijing | Final day: souvenir shopping, farewell sightseeing, departure |",
+  "max_word_run": 2,
+  "max_4gram": 3,
+  "looped": false,
+  "case": "E"
+ },
+ {
+  "doc": "65",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "top_p": 1.0
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 47,
+   "total_tokens": 648,
+   "completion_tokens": 601,
+   "prompt_tokens_details": null
+  },
+  "secs": 43.5,
+  "content_head": "# 7-Day India Itinerary\n\n**Day 1 \u2013 Delhi**\nArrive in Delhi, check into a hotel, explore Old Delhi monuments and New Delhi sights. Visit the National Museum and enjoy Indian street food for dinner.\n\n**Day 2 \u2013 Delhi \u2192 Agra**\nMorning visit to the Taj Museum/Heritage building, then travel to Agra. Tour ",
+  "content_tail": " Xian**\nFull day at Xian Heritage museum, tour of Xian landmark photo gallery exhibits and Xian landmark Art Complex. Overnight stay.\n\n**Day 7 \u2013 Xian \u2192 Beijing**\nMorning tour of Xian Photo Gallery, then return by high-speed rail to Beijing. Afternoon Beijing Photo Gallery visit, evening flight home.",
+  "max_word_run": 1,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "F"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 2113,
+   "completion_tokens": 2048,
+   "prompt_tokens_details": null
+  },
+  "secs": 152.7,
+  "content_head": "Chao'! \u0110\u1ea7u ti\u00ean ch\u1eef \"N\" to nh\u01b0 th\u1ec3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c",
+  "content_tail": " c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3 c\u1ea3",
+  "max_word_run": 1993,
+  "max_4gram": 1990,
+  "looped": true,
+  "case": "A"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "logprobs": true,
+   "top_logprobs": 5
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 2113,
+   "completion_tokens": 2048,
+   "prompt_tokens_details": null
+  },
+  "secs": 271.9,
+  "content_head": "Nhi\u1ec7m v\u1ee5? Nghe nh\u01b0 m\u1eb9 ch\u1ec9 l\u00e0 nh\u00e2n vi\u00ean l\u00e0m ca l\u00e0m ca theo ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca. \u0110\u1ee3i \u00e0 ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca c",
+  "content_tail": " ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca ca",
+  "max_word_run": 1994,
+  "max_4gram": 2007,
+  "looped": true,
+  "sampled_p_tail": [
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   1.0,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9998,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   0.9999,
+   1.0,
+   0.9999,
+   0.9999,
+   0.9998,
+   0.9999
+  ],
+  "last_top5": [
+   [
+    " ca",
+    0.9999
+   ],
+   [
+    "\n\n",
+    0.0
+   ],
+   [
+    ".",
+    0.0
+   ],
+   [
+    ".\n\n",
+    0.0
+   ],
+   [
+    "\n",
+    0.0
+   ]
+  ],
+  "loop_start_token": 31,
+  "loop_first3": [
+   {
+    "pos": 30,
+    "token": " ca",
+    "p": 0.5382,
+    "top5": [
+     [
+      " ca",
+      0.5382
+     ],
+     [
+      " b\u1ea3ng",
+      0.1747
+     ],
+     [
+      " l\u1ecbch",
+      0.1449
+     ],
+     [
+      " s\u01a1",
+      0.0119
+     ],
+     [
+      " b\u1ea3n",
+      0.0105
+     ]
+    ]
+   },
+   {
+    "pos": 31,
+    "token": " ca",
+    "p": 0.4931,
+    "top5": [
+     [
+      " ca",
+      0.4931
+     ],
+     [
+      " l\u1ecbch",
+      0.038
+     ],
+     [
+      " l\u00e0m",
+      0.0336
+     ],
+     [
+      " tr\u00ecnh",
+      0.0261
+     ],
+     [
+      " tr\u1ef1c",
+      0.0231
+     ]
+    ]
+   },
+   {
+    "pos": 32,
+    "token": " ca",
+    "p": 0.8508,
+    "top5": [
+     [
+      " ca",
+      0.8508
+     ],
+     [
+      " trong",
+      0.0129
+     ],
+     [
+      " c\u1ee7a",
+      0.0089
+     ],
+     [
+      " m\u00e0",
+      0.0074
+     ],
+     [
+      " c\u00f4ng",
+      0.0057
+     ]
+    ]
+   },
+   {
+    "pos": 33,
+    "token": " ca",
+    "p": 0.7836,
+    "top5": [
+     [
+      " ca",
+      0.7836
+     ],
+     [
+      " trong",
+      0.0196
+     ],
+     [
+      " c\u1ee7a",
+      0.0135
+     ],
+     [
+      ".",
+      0.0087
+     ],
+     [
+      " v\u1edbi",
+      0.006
+     ]
+    ]
+   }
+  ],
+  "case": "B"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 1,
+   "max_tokens": 1024
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 1089,
+   "completion_tokens": 1024,
+   "prompt_tokens_details": null
+  },
+  "secs": 74.7,
+  "content_head": "",
+  "content_tail": "",
+  "max_word_run": 0,
+  "max_4gram": 0,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 2,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 247,
+   "completion_tokens": 182,
+   "prompt_tokens_details": null
+  },
+  "secs": 13.2,
+  "content_head": "C\u00e2u n\u00e0y tr\u1ed9n ti\u1ebfng v\u00e0 ti\u1ebfng con nh\u01b0 th\u1ec3 ch\u00fang l\u00e0 hai lo\u1ea1i nguy\u00ean li\u1ec7u trong c\u00f9ng m\u1ed9t n\u1ed3i canh g\u00e2y. \"Nhi\u1ec7m v\u1ee5\" nghe gi\u1ed1ng nh\u01b0 m\u1eb9 \u0111ang tham gia m\u1ed9t d\u1ef1 \u00e1n c\u00f3 deadline v\u00e0 s\u1ebfp \u0111ang gi\u00e1m s\u1ed1 li\u1ec7u. Ng\u01b0\u1eddi m\u1eb9 \u0111\u1ecdc c\u00e2u n\u00e0y xong c\u00f3 c\u1ea3m gi\u00e1c nh\u01b0 v\u1eeba b\u1ecb \u0111\u0103ng k\u00fd v\u00e0o m\u1ed9t h\u1ee3p \u0111\u1ed3ng nh\u00e2n\u751f\u547d\u5468\u671f m\u00e0 kh\u00f4ng h\u1ec1 \u0111\u01b0\u1ee3c k\u00fd t\u00ean.\n\n*",
+  "content_tail": " k\u00fd t\u00ean.\n\n****** \n\n\"Nhi\u1ec7m v\u1ee5\" \u00e0? Tr\u1eddi ra ai, ng\u01b0\u1eddi m\u1eb9 \u0111ang l\u00e0m m\u1ed9t \"c\u00f4ng t\u00e1c\" nh\u01b0 m\u1ed9t robot trong m\u1ed9t nh\u00e0 m\u00e1y s\u1ea3n xu\u1ea5t, s\u1ea3n xu\u1ea5t l\u00e0 con c\u00e1i, c\u00f2n con c\u00e1i l\u00e0 s\u1ea3n ph\u1ea9m. C\u00e2u nghe gi\u1ed1ng nh\u01b0 m\u1ed9t d\u00f2ng mi\u00eau trong m\u1ed9t t\u00e0i li\u1ec7u h\u01b0\u1edbng d\u1eabn s\u1eed d\u1ee5ng cho m\u1ed9t c\u1ed7 m\u00e1y gia \u0111\u00ecnh ch\u1ee9 kh\u00f4ng nh\u01b0 m\u1ed9t c\u00e2u v\u1ec1 t\u00ecnh v\u00e0 th\u01b0\u01a1ng.",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 3,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 227,
+   "completion_tokens": 162,
+   "prompt_tokens_details": null
+  },
+  "secs": 11.9,
+  "content_head": "\u00d4i ch\u00faa uy v\u0169! C\u00e1i n\u00e0y l\u00e0m su\u00f4ng l\u00e0 \"Nhi\u1ec7m v\u1ee5\" \u00e0? M\u1ed9t ch\u1eef N to \u0111\u1ea7u to \u0111\u1ea5y m\u00e0 mu\u1ed1n \u0111\u1ee9ng th\u1eb3ng b\u00ean c\u1ea1nh \"hi\u1ec7m v\u1ee5\" \u00e0? \u0110\u00e1ng l\u00e0m ch\u1eef N c\u0169ng c\u00f3 quy\u1ec1n ri\u00eang l\u00e0m cha \u00e0!\n\n*******\n\nC\u00e1i n\u00e0y n\u00f3i \"nu\u00f4i d\u1ea1y con c\u00e1i\" \u00e0? Nu\u00f4i \u00e0? \u0110\u00e1ng l\u00e0 con \u0111\u01b0\u1ee3c nu\u00f4i nh\u01b0 nu\u00f4i con heo \u00e0? Nu\u00f4i d\u1ea1y c\u00f9ng nhau m\u00e0 mu\u1ed1n c\u00e1ch nhau b\u1eb1ng kho",
+  "content_tail": "\u00ean c\u1ea1nh \"hi\u1ec7m v\u1ee5\" \u00e0? \u0110\u00e1ng l\u00e0m ch\u1eef N c\u0169ng c\u00f3 quy\u1ec1n ri\u00eang l\u00e0m cha \u00e0!\n\n*******\n\nC\u00e1i n\u00e0y n\u00f3i \"nu\u00f4i d\u1ea1y con c\u00e1i\" \u00e0? Nu\u00f4i \u00e0? \u0110\u00e1ng l\u00e0 con \u0111\u01b0\u1ee3c nu\u00f4i nh\u01b0 nu\u00f4i con heo \u00e0? Nu\u00f4i d\u1ea1y c\u00f9ng nhau m\u00e0 mu\u1ed1n c\u00e1ch nhau b\u1eb1ng kho\u1ea3ng m\u1ed9t \u0111\u1eadp \u00e0? \u0110\u00e1ng l\u00e0m con c\u00e1i \u0111\u01b0\u1ee3c nu\u00f4i v\u00e0 d\u1ea1y c\u00f9ng m\u1ed9t l\u00fac m\u00e0 kh\u00f4ng chocha n\u00e0o \u0111\u01b0\u1ee3c ngh\u1ec9 \u00e0?",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 4,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 175,
+   "completion_tokens": 110,
+   "prompt_tokens_details": null
+  },
+  "secs": 8.1,
+  "content_head": "\u00d4i tr\u1eddi \u1ed1 i \"Nhi\u1ec7m v\u1ee5\" nghe nh\u01b0 m\u1eb9 \u0111ang l\u00e0m shift ca tr\u1ef1c tr\u00ean \u0111\u1eddi ch\u1ee9 kh\u00f4ng ph\u1ea3i raising con \u00e1! ******\n\nV\u00e0 thi\u1ebfu d\u1ea5u g\u00e0 \"Nurturing teaching\" ng\u1ed3i c\u1ea1nh nhau nh\u01b0 hai anh em kh\u00f4ng bi\u1ebft c\u00e1ch t\u00e1ch\u2014\u2014ch\u1ec9 c\u1ea7n m\u1ed9t d\u1ea5u g\u00e0 \u0111\u1ec3 ch\u00fang kh\u00f4ng nu\u1ed1p nhau trong c\u00f9ng m\u1ed9t t\u1eeb!",
+  "content_tail": "\u00d4i tr\u1eddi \u1ed1 i \"Nhi\u1ec7m v\u1ee5\" nghe nh\u01b0 m\u1eb9 \u0111ang l\u00e0m shift ca tr\u1ef1c tr\u00ean \u0111\u1eddi ch\u1ee9 kh\u00f4ng ph\u1ea3i raising con \u00e1! ******\n\nV\u00e0 thi\u1ebfu d\u1ea5u g\u00e0 \"Nurturing teaching\" ng\u1ed3i c\u1ea1nh nhau nh\u01b0 hai anh em kh\u00f4ng bi\u1ebft c\u00e1ch t\u00e1ch\u2014\u2014ch\u1ec9 c\u1ea7n m\u1ed9t d\u1ea5u g\u00e0 \u0111\u1ec3 ch\u00fang kh\u00f4ng nu\u1ed1p nhau trong c\u00f9ng m\u1ed9t t\u1eeb!",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 5,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 174,
+   "completion_tokens": 109,
+   "prompt_tokens_details": null
+  },
+  "secs": 8.1,
+  "content_head": "N\u00e0y nhi\u1ec7m v\u1ee5 sao l\u1ea1i mang m\u1ed9t ch\u1eef N ti\u1ebfng Anh l\u00e0m ti\u1ec1n t\u1ed1? Tr\u00f4ng b\u00e0 m\u1eb9 nu\u00f4i d\u1ea1y con th\u00ec cha \u1edf \u0111\u00e2u? Ng\u1ed3i ra ngo\u00e0i c\u00f4ng vi\u1ec7c?\n\n****** \n\n\u0110\u1ecdc c\u00e2u n\u00e0y t\u00f4i c\u00f2n t\u01b0\u1edfng m\u1ed9t t\u1eeb m\u1edbi c\u1ee7a ti\u1ebfng Anh l\u00e0 Nhi\u1ec7m v\u00ec n\u00f3 v\u1eeba ti\u1ebfng Vi\u1ec7t v\u1eeba ti\u1ebfng Anh nh\u01b0 m\u1ed9t m\u00f3n \u0103n lai t\u1ea1p c\u1ee7a ng\u00f4n ng\u1eef.",
+  "content_tail": "N\u00e0y nhi\u1ec7m v\u1ee5 sao l\u1ea1i mang m\u1ed9t ch\u1eef N ti\u1ebfng Anh l\u00e0m ti\u1ec1n t\u1ed1? Tr\u00f4ng b\u00e0 m\u1eb9 nu\u00f4i d\u1ea1y con th\u00ec cha \u1edf \u0111\u00e2u? Ng\u1ed3i ra ngo\u00e0i c\u00f4ng vi\u1ec7c?\n\n****** \n\n\u0110\u1ecdc c\u00e2u n\u00e0y t\u00f4i c\u00f2n t\u01b0\u1edfng m\u1ed9t t\u1eeb m\u1edbi c\u1ee7a ti\u1ebfng Anh l\u00e0 Nhi\u1ec7m v\u00ec n\u00f3 v\u1eeba ti\u1ebfng Vi\u1ec7t v\u1eeba ti\u1ebfng Anh nh\u01b0 m\u1ed9t m\u00f3n \u0103n lai t\u1ea1p c\u1ee7a ng\u00f4n ng\u1eef.",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 6,
+   "max_tokens": 1024
+  },
+  "finish": "length",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 1089,
+   "completion_tokens": 1024,
+   "prompt_tokens_details": null
+  },
+  "secs": 74.8,
+  "content_head": "",
+  "content_tail": "",
+  "max_word_run": 0,
+  "max_4gram": 0,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 7,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 156,
+   "completion_tokens": 91,
+   "prompt_tokens_details": null
+  },
+  "secs": 6.7,
+  "content_head": "******Nhi\u1ec1u ch\u1eef c\u00e1i \u0111\u1ebfn m\u1ee9c t\u00f4i t\u01b0\u1edfng ai \u0111\u00e3 ph\u00e1t minh ch\u1eef c\u00e1i ch\u00e9n \u00e1c v\u00e0o c\u00e2u n\u00e0y r\u1ed3i ch\u00e8n \u00e1c ch\u00e8n \u00e1c******\n\n******C\u00e2u n\u00e0y \u0111\u1ecdc l\u00ean gi\u1ed1ng nh\u01b0 \u0111ang gi\u00e3 \u00e1c ch\u00e8n \u00e1c m\u1ed9t n\u00e9n \u00e1c ch\u00e9n \u00e1c ch\u00e8n \u00e1c ch\u00e8n \u00e1c chen \u00e1c***",
+  "content_tail": "******Nhi\u1ec1u ch\u1eef c\u00e1i \u0111\u1ebfn m\u1ee9c t\u00f4i t\u01b0\u1edfng ai \u0111\u00e3 ph\u00e1t minh ch\u1eef c\u00e1i ch\u00e9n \u00e1c v\u00e0o c\u00e2u n\u00e0y r\u1ed3i ch\u00e8n \u00e1c ch\u00e8n \u00e1c******\n\n******C\u00e2u n\u00e0y \u0111\u1ecdc l\u00ean gi\u1ed1ng nh\u01b0 \u0111ang gi\u00e3 \u00e1c ch\u00e8n \u00e1c m\u1ed9t n\u00e9n \u00e1c ch\u00e9n \u00e1c ch\u00e8n \u00e1c ch\u00e8n \u00e1c chen \u00e1c***",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 8,
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 152,
+   "completion_tokens": 87,
+   "prompt_tokens_details": null
+  },
+  "secs": 6.4,
+  "content_head": "\u1eca\u00eau n\u00e0y nghe gi\u1ed1ng nh\u01b0 m\u1eb9 ch\u1ec9 l\u00e0 m\u1ed9t c\u1ed7 m\u00e1y part-time c\u1ee7a nh\u00e0 m\u00e1y nu\u00f4i con kh\u00f4ng c\u00f3 c\u1ea3m x\u00fac lu\u00f4n lu\u00f4n l\u00e0m vi\u1ec7c kh\u00f4ng bao gi\u1edd \u0111\u01b0\u1ee3c ngh\u1ec9 ******\n\nCh\u1eef \"Nhi\u1ec7m\" c\u1ee7a to \u0111\u1ef1c \u0111\u1ea7u nh\u01b0 th\u1ec3 ai vi\u1ebft sai \u0111\u1ea7u c\u1ee7a c\u00e2u nh\u01b0ng v\u1eabn ki\u00ean tr\u00ec nh\u01b0 m\u1ed9t h\u1ecdc sinh kh\u00f4ng c\u00f3 ai",
+  "content_tail": "\u1eca\u00eau n\u00e0y nghe gi\u1ed1ng nh\u01b0 m\u1eb9 ch\u1ec9 l\u00e0 m\u1ed9t c\u1ed7 m\u00e1y part-time c\u1ee7a nh\u00e0 m\u00e1y nu\u00f4i con kh\u00f4ng c\u00f3 c\u1ea3m x\u00fac lu\u00f4n lu\u00f4n l\u00e0m vi\u1ec7c kh\u00f4ng bao gi\u1edd \u0111\u01b0\u1ee3c ngh\u1ec9 ******\n\nCh\u1eef \"Nhi\u1ec7m\" c\u1ee7a to \u0111\u1ef1c \u0111\u1ea7u nh\u01b0 th\u1ec3 ai vi\u1ebft sai \u0111\u1ea7u c\u1ee7a c\u00e2u nh\u01b0ng v\u1eabn ki\u00ean tr\u00ec nh\u01b0 m\u1ed9t h\u1ecdc sinh kh\u00f4ng c\u00f3 ai",
+  "max_word_run": 2,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "C"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 255,
+   "completion_tokens": 190,
+   "prompt_tokens_details": null
+  },
+  "secs": 13.8,
+  "content_head": "Kho\u1ea3ng 1: B\u00e0i \u1eaft \u0111\u1ea7u ch\u1eef \"N\" vi\u1ebft to c\u00f2n c\u00e1c ch\u1eef c\u00e1i sau l\u1ea1i b\u00e9 b\u00e9 \u0111\u1ee3i \u1ea1? Ch\u1eef c\u00e1i c\u1ee7a em c\u0169ng ph\u1ea3i ph\u00e2n chia \u0111\u1ec1u \u0111\u1ec1u th\u00f4i anh \u1ea1, kh\u00f4ng ph\u1ea3i l\u00e0 c\u00e1i na na l\u1eabn n\u1ecd to na b\u00e9 \u1ea1!\n\n*******\n\nKho\u1ea3ng 2: B\u00e0i n\u00f3i \"Nhi\u1ec7m\" nh\u01b0ng nh\u00ecn th\u1eb3ng v\u00e0o c\u00e1ch \u0111\u00e1nh v\u1ea7n l\u00e0 \"Nhiem\" \u2014 thi\u1ebfu ch\u1eef c\u00e1i \"v\" \u1ea1! Nhiem c\u1ee7a m\u1eb9 nu\u00f4i con c",
+  "content_tail": "c\u0169ng ph\u1ea3i ph\u00e2n chia \u0111\u1ec1u \u0111\u1ec1u th\u00f4i anh \u1ea1, kh\u00f4ng ph\u1ea3i l\u00e0 c\u00e1i na na l\u1eabn n\u1ecd to na b\u00e9 \u1ea1!\n\n*******\n\nKho\u1ea3ng 2: B\u00e0i n\u00f3i \"Nhi\u1ec7m\" nh\u01b0ng nh\u00ecn th\u1eb3ng v\u00e0o c\u00e1ch \u0111\u00e1nh v\u1ea7n l\u00e0 \"Nhiem\" \u2014 thi\u1ebfu ch\u1eef c\u00e1i \"v\" \u1ea1! Nhiem c\u1ee7a m\u1eb9 nu\u00f4i con c\u00e1i \u1ea1? Kh\u00f4ng c\u00f3 ch\u1eef c\u00e1i \"v\" c\u1ee7a \"nhiem\" th\u00ec con c\u00e1i s\u1ebd \u0103n trong g\u00ec \u1ea1, trong kh\u00f4ng kh\u00ed \u00e0 \u1ea1?",
+  "max_word_run": 2,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 244,
+   "completion_tokens": 179,
+   "prompt_tokens_details": null
+  },
+  "secs": 13.0,
+  "content_head": "Critique n\u00e0y nh\u01b0 th\u1ec3 ai \u0111\u00e3 u\u1ed1ng m\u1ed9t c\u1ed1c ti\u1ebfng Anh v\u00e0 m\u1ed9t c\u1ed1c ti\u1ebfng Vi\u1ec7t r\u1ed3i tr\u1ed9n ch\u00fang trong m\u00e1y xay. Nhi\u1ec7m v\u1ee5? Th\u1eadt ra ch\u1eef N l\u1eafc l\u01b0\u01a1ng gi\u1eefa hai ng\u00f4n ng\u1eef nh\u01b0 ai \u0111ang ch\u1edd ai c\u00f3 th\u1ec3 quy\u1ebft \u0111\u1ecbnh ai thu\u1ed9c v\u1ec1 ai ng\u00f4n n\u00e0o!\n\n******\n\nC\u00e1ch vi\u1ebft n\u00e0y nh\u01b0 th\u1ec3 ai \u0111ang tr\u1ea3 ph\u00ed cho hai ng\u00f4n ng\u00f4n c\u00f9ng l\u00fac. Nu\u00f4i d\u1ea1y?",
+  "content_tail": "ch\u1eef N l\u1eafc l\u01b0\u01a1ng gi\u1eefa hai ng\u00f4n ng\u1eef nh\u01b0 ai \u0111ang ch\u1edd ai c\u00f3 th\u1ec3 quy\u1ebft \u0111\u1ecbnh ai thu\u1ed9c v\u1ec1 ai ng\u00f4n n\u00e0o!\n\n******\n\nC\u00e1ch vi\u1ebft n\u00e0y nh\u01b0 th\u1ec3 ai \u0111ang tr\u1ea3 ph\u00ed cho hai ng\u00f4n ng\u00f4n c\u00f9ng l\u00fac. Nu\u00f4i d\u1ea1y? Th\u1eadt ra ai k\u1ebft h\u1ee3p nu\u00f4i v\u00e0 d\u1ea1y th\u00e0nh m\u1ed9t t\u1eeb nh\u01b0 ai c\u1ed1 g\u1eafng ti\u1ebft ki\u1ec7m kh\u00f4ng kho\u1ea3ng trong khi \u0111ang tr\u1ea3 cho hai ng\u00f4n ng\u00f4n!",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 136,
+   "completion_tokens": 71,
+   "prompt_tokens_details": null
+  },
+  "secs": 5.3,
+  "content_head": "C\u00e2u n\u00e0y d\u1ecbch sang ti\u1ebfng Anh c\u00f3 ngh\u0129a l\u00e0 \"m\u1eb9 nu\u00f4i d\u1ea1y con c\u00e1i\" nh\u01b0ng nghe ra nh\u01b0 th\u1ec3 m\u1eb9 l\u00e0 m\u1ed9t m\u00e1y l\u00e0m n\u01b0\u1edbc ho\u1eb7c m\u1ed9t c\u1ed7 m\u00e1y nu\u00f4i con nh\u01b0 nu\u00f4i g\u00e0 hay nu\u00f4i ch\u00f3 v\u00e0 c\u00f3 th\u1ec3 ai x\u00e9m ai x\u00e9m kh\u00f4ng ai",
+  "content_tail": "C\u00e2u n\u00e0y d\u1ecbch sang ti\u1ebfng Anh c\u00f3 ngh\u0129a l\u00e0 \"m\u1eb9 nu\u00f4i d\u1ea1y con c\u00e1i\" nh\u01b0ng nghe ra nh\u01b0 th\u1ec3 m\u1eb9 l\u00e0 m\u1ed9t m\u00e1y l\u00e0m n\u01b0\u1edbc ho\u1eb7c m\u1ed9t c\u1ed7 m\u00e1y nu\u00f4i con nh\u01b0 nu\u00f4i g\u00e0 hay nu\u00f4i ch\u00f3 v\u00e0 c\u00f3 th\u1ec3 ai x\u00e9m ai x\u00e9m kh\u00f4ng ai",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 230,
+   "completion_tokens": 165,
+   "prompt_tokens_details": null
+  },
+  "secs": 12.0,
+  "content_head": "Ch\u043e \u0451hi! \u0411\u00e0i \u0111\u1ea7u l\u00e0 ch\u1eef \"N\" m\u1ea1ch ti\u1ebfp \"hi\u1ec7m v\u1ee5\" nh\u01b0 th\u1ec3 ti\u1ebfng Vi\u1ec7t t\u1ef1 ph\u00e1t m\u00ecnh m\u1ed9t con ng\u01b0\u1eddi m\u1edbi tr\u01b0\u1edbc khi m\u1eb9 m\u1edbi nu\u00f4i n\u00f3 \u2014 l\u1ed7i \u0111\u00e1nh ch\u1eef to \u0111\u1ebfn g\u1ea7n nh\u01b0 \"Nhi\u1ec7m v\u1ee5\" \u0111\u00e3 t\u1ef1 sinh ra m\u1ed9t \u0111\u1ee9a con!\n\n******\n\nV\u00e0 \"nu\u00f4i d\u1ea1y\" gh\u00e9p ch\u1eb7t l\u1ea1i nh\u01b0 th\u1ec3 m\u1eb9 ch\u1ec9 c\u1ea7n m\u1ed9t c\u1ed7 m\u00e1y m\u1ed9t l\u1ea7n b\u1ea5m n\u00fat l\u00e0 con t\u1ef1 ch\u00edn l\u1edbn \u2014 c\u00f2n c",
+  "content_tail": "ph\u00e1t m\u00ecnh m\u1ed9t con ng\u01b0\u1eddi m\u1edbi tr\u01b0\u1edbc khi m\u1eb9 m\u1edbi nu\u00f4i n\u00f3 \u2014 l\u1ed7i \u0111\u00e1nh ch\u1eef to \u0111\u1ebfn g\u1ea7n nh\u01b0 \"Nhi\u1ec7m v\u1ee5\" \u0111\u00e3 t\u1ef1 sinh ra m\u1ed9t \u0111\u1ee9a con!\n\n******\n\nV\u00e0 \"nu\u00f4i d\u1ea1y\" gh\u00e9p ch\u1eb7t l\u1ea1i nh\u01b0 th\u1ec3 m\u1eb9 ch\u1ec9 c\u1ea7n m\u1ed9t c\u1ed7 m\u00e1y m\u1ed9t l\u1ea7n b\u1ea5m n\u00fat l\u00e0 con t\u1ef1 ch\u00edn l\u1edbn \u2014 c\u00f2n con 18 n\u0103m \u0103n ng\u1ee7 kh\u00f3c \u0111\u00f2i ti\u1ec1n \u0111i\u1ec7n ch\u01b0a \u0111\u01b0\u1ee3c t\u00ednh v\u00e0o nhi\u1ec7m v\u1ee5 t\u00edtle!",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 183,
+   "completion_tokens": 118,
+   "prompt_tokens_details": null
+  },
+  "secs": 8.7,
+  "content_head": "Nghe c\u00e2u n\u00e0y t\u00f4i c\u00f2n t\u01b0\u1edfng \"Nhi\u1ec7m v\u1ee5\" l\u00e0 t\u00ean m\u1ed9t superhero m\u1edbi xu\u1ea5t hi\u1ec7n trong phim c\u1ee7a Disney c\u00f2n t\u01b0\u1edfng ch\u1eef N c\u1ee7a \"Nhi\u1ec7m v\u1ee5\" l\u00e0 nh\u00e2n t\u1ef1 nhi\u00ean c\u1ee7a ch\u1eef Nghi\u00ea\n\n******\n\nC\u00e2u n\u00e0y \u0111\u1ecdc l\u00ean gi\u1ed1ng nh\u01b0 m\u1ed9t m\u1eb9 \u0111\u00e3 \u0111\u01b0\u1ee3c qu\u00e2n chu\u1ea9n ho\u00e1 ho\u00e0n to\u00e0n trong qu\u00e2n \u0111\u1ed9i c\u1ee7a qu\u00e2n ch\u1ee9c \u0111\u1ebfn m\u1ee9c con c\u00e1i c\u1ee7a b\u00e0 ch\u1ec9 c\u00f2n l\u00e0 m\u1ed9t h",
+  "content_tail": "\u1edbi xu\u1ea5t hi\u1ec7n trong phim c\u1ee7a Disney c\u00f2n t\u01b0\u1edfng ch\u1eef N c\u1ee7a \"Nhi\u1ec7m v\u1ee5\" l\u00e0 nh\u00e2n t\u1ef1 nhi\u00ean c\u1ee7a ch\u1eef Nghi\u00ea\n\n******\n\nC\u00e2u n\u00e0y \u0111\u1ecdc l\u00ean gi\u1ed1ng nh\u01b0 m\u1ed9t m\u1eb9 \u0111\u00e3 \u0111\u01b0\u1ee3c qu\u00e2n chu\u1ea9n ho\u00e1 ho\u00e0n to\u00e0n trong qu\u00e2n \u0111\u1ed9i c\u1ee7a qu\u00e2n ch\u1ee9c \u0111\u1ebfn m\u1ee9c con c\u00e1i c\u1ee7a b\u00e0 ch\u1ec9 c\u00f2n l\u00e0 m\u1ed9t h\u1ea1ng m\u1ee5c trong qu\u00e2n chi\u1ebfn c\u1ee7a qu\u00e2n \u0111\u1ed9i c\u1ee7a qu\u00e2n ch\u1ee9c c\u1ee7a qu\u00e2n",
+  "max_word_run": 1,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 152,
+   "completion_tokens": 87,
+   "prompt_tokens_details": null
+  },
+  "secs": 6.4,
+  "content_head": "Nhi\u1ec7m v\u1ee5 n\u00e0y nghe nh\u01b0 th\u1ec3 m\u1eb9 ch\u1ec9 l\u00e0 m\u1ed9t c\u1ed7 m\u00e1y nu\u00f4i d\u1ea1y con c\u00e1i theo ch\u01b0\u01a1ng tr\u00ecnh c\u00f2n t\u00ecnh \u1ea5m v\u00e0 y\u00eau th\u01b0\u01a1ng \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1eaft kh\u1ecfi ph\u1ea7n m\u1ec1m entirely. ****** Ch\u1eef N \u0111\u1ee9ng \u0111\u1ea7u c\u00e2u nh\u01b0 m\u1ed9t con ng\u00e3ng l\u00ean ch\u00e0o m\u1ecdi ng\u01b0\u1eddi c\u00f2n ph\u1ea7n c\u00f2n l\u1ea1i c\u1ee7a c\u00e2u \u0111i l\u00e0m b\u1eb1ng c\u1ea5p ti\u1ebfng Trung Qu\u1ed1c tr\u1ed3i tr\u1ed3i.",
+  "content_tail": "Nhi\u1ec7m v\u1ee5 n\u00e0y nghe nh\u01b0 th\u1ec3 m\u1eb9 ch\u1ec9 l\u00e0 m\u1ed9t c\u1ed7 m\u00e1y nu\u00f4i d\u1ea1y con c\u00e1i theo ch\u01b0\u01a1ng tr\u00ecnh c\u00f2n t\u00ecnh \u1ea5m v\u00e0 y\u00eau th\u01b0\u01a1ng \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1eaft kh\u1ecfi ph\u1ea7n m\u1ec1m entirely. ****** Ch\u1eef N \u0111\u1ee9ng \u0111\u1ea7u c\u00e2u nh\u01b0 m\u1ed9t con ng\u00e3ng l\u00ean ch\u00e0o m\u1ecdi ng\u01b0\u1eddi c\u00f2n ph\u1ea7n c\u00f2n l\u1ea1i c\u1ee7a c\u00e2u \u0111i l\u00e0m b\u1eb1ng c\u1ea5p ti\u1ebfng Trung Qu\u1ed1c tr\u1ed3i tr\u1ed3i.",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 355,
+   "completion_tokens": 290,
+   "prompt_tokens_details": null
+  },
+  "secs": 21.0,
+  "content_head": "\u00d4i ch\u00faa ki\u00eam \u1ed1 ch\u1eef c\u00e1i \u0111\u1ea7u to b\u1eb1ng c\u1ea3 c\u1ea3 nh\u1eefng t\u1eeb c\u00f2n sau n\u00f3 nh\u01b0 th\u1ec3 ch\u1eef N just th\u1eafng c\u01b0\u1ee3c v\u1edbi c\u1ea3 c\u00e2u c\u00f2n l\u1ea1i r\u1ed3i ng\u01b0\u1eddi vi\u1ebft xong m\u1edbi ph\u00e1t hi\u1ec7n m\u00ecnh l\u1eeba k\u00fd c\u1ea3 c\u00e2u b\u1eb1ng m\u1ed9t ch\u1eef c\u00e1i to \u0111\u1ea5y c\u00f2n \u0111\u00f2i nu\u00f4i d\u1ea1y con c\u00e1i nh\u01b0 th\u1ec3 c\u00e1i th\u00f3 m\u1eadp m\u1ecb c\u00f3 th\u1ec3 \u0111\u01b0\u1ee3c nu\u00f4i nh\u01b0 heo hay d\u1ea1y nh\u01b0 ch\u00f3 con c\u00e1i l\u1ea1i l\u00e0 v\u1eadt hay l",
+  "content_tail": "\u00e0 d\u1ea1y b\u1eb1ng l\u1ec7nh c\u00f2n b\u1ed1 cha h\u1ecd h\u00e0ng b\u00e0 con ch\u00e1u ch\u00fa are all completely invisible trong c\u00e2u n\u00e0y nh\u01b0 th\u1ec3 gia \u0111\u00ecnh ch\u1ec9 g\u1ed3m m\u1eb9 v\u00e0 con c\u00e1i th\u00f4i n\u1eefa l\u00e0 ch\u1eef N to \u0111\u1ea7u nh\u01b0 th\u1ec3 n\u00f3 v\u1eeba u\u1ed1ng red double c\u00f2n c\u1ea3 c\u00e2u c\u00f2n sau ch\u1ec9 l\u00e0 nh\u1eefng ch\u1eef th\u01b0\u1eddng nh\u1ecf \u0111i khi\u00eam \u1ed1 to nh\u01b0 v\u1eeba gi\u1eadn th\u00f3 m\u1ed9t n\u01a1 th\u1eadp ch\u1ec9 ri\u00eang n\u00f3 m\u1ed9t m\u00ecnh",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "max_tokens": 1024
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 159,
+   "completion_tokens": 94,
+   "prompt_tokens_details": null
+  },
+  "secs": 6.9,
+  "content_head": "Phe viu, c\u00e2u n\u00e0y coi m\u1eb9 nu\u00f4i con c\u00e1i nh\u01b0 m\u1ed9t \" nhi\u1ec7m v\u1ee5\" nh\u01b0 th\u1ec3 ng\u01b0\u1eddi m\u1eb9 v\u1eeba nh\u1eadn vi\u1ec7c t\u1eeb ai n\u00e0o \u0111\u00f3 v\u1edbi c\u00f4ng lao v\u00e0 ph\u1ea7n th\u01b0\u1edfng v\u00e0o cu\u1ed1i m\u1ed7i th\u00e1ng! ******\n\nNghe c\u00e2u n\u00e0y ai ng\u01b0\u1eddi ta coi con c\u00e1i ai m\u1ed9t \" d\u1ef1 \u00e1n\" ph\u1ea3i nu\u00f4i \u0111ua gi\u1ed1ng nh\u01b0 nu\u00f4i heo hay nu\u00f4i gi\u1ed1ng l\u00faa!",
+  "content_tail": "Phe viu, c\u00e2u n\u00e0y coi m\u1eb9 nu\u00f4i con c\u00e1i nh\u01b0 m\u1ed9t \" nhi\u1ec7m v\u1ee5\" nh\u01b0 th\u1ec3 ng\u01b0\u1eddi m\u1eb9 v\u1eeba nh\u1eadn vi\u1ec7c t\u1eeb ai n\u00e0o \u0111\u00f3 v\u1edbi c\u00f4ng lao v\u00e0 ph\u1ea7n th\u01b0\u1edfng v\u00e0o cu\u1ed1i m\u1ed7i th\u00e1ng! ******\n\nNghe c\u00e2u n\u00e0y ai ng\u01b0\u1eddi ta coi con c\u00e1i ai m\u1ed9t \" d\u1ef1 \u00e1n\" ph\u1ea3i nu\u00f4i \u0111ua gi\u1ed1ng nh\u01b0 nu\u00f4i heo hay nu\u00f4i gi\u1ed1ng l\u00faa!",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "D"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "temperature": 0.0
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 230,
+   "completion_tokens": 165,
+   "prompt_tokens_details": null
+  },
+  "secs": 12.0,
+  "content_head": "N\u00e0y anh b\u1ea1n \u01a1i ch\u1eef \"Nhiem\" l\u00e0 g\u00ec? \u0110\u00e1nh \u0111\u1ea5y c\u00f3 con trai t\u00ean Nhiem \u00e0? \u0110\u00e1nh vi\u1ebft \"Nhi\u1ec7m\" m\u1edbi \u0111\u00fang ch\u1ee9 n\u1ebfu kh\u00f4ng ai s\u1ebd t\u01b0\u1edfng l\u00e0 t\u00ean m\u1ed9t nh\u00e2n v\u1eadt trong phim H\u00e0n Qu\u1ed1c \u0111\u1ea5y!\n\n******\n\n\"nu\u00f4i d\u1ea1y\" l\u00e0 g\u00ec? \u0110\u00e1nh nu\u00f4i con b\u1eb1ng c\u01a1 \u00e0? \u0110\u00e1nh mu\u1ed1n n\u00f3i \"nu\u00f4i\" hay \"d\u1ea1y\" hay \"nu\u00f4i v\u00e0 d\u1ea1y\" hay \"nu\u00f4i-d\u1ea1y\"? \u0110\u00e1nh vi\u1ebft nh\u01b0 v\u1eady",
+  "content_tail": "\u1ea5y c\u00f3 con trai t\u00ean Nhiem \u00e0? \u0110\u00e1nh vi\u1ebft \"Nhi\u1ec7m\" m\u1edbi \u0111\u00fang ch\u1ee9 n\u1ebfu kh\u00f4ng ai s\u1ebd t\u01b0\u1edfng l\u00e0 t\u00ean m\u1ed9t nh\u00e2n v\u1eadt trong phim H\u00e0n Qu\u1ed1c \u0111\u1ea5y!\n\n******\n\n\"nu\u00f4i d\u1ea1y\" l\u00e0 g\u00ec? \u0110\u00e1nh nu\u00f4i con b\u1eb1ng c\u01a1 \u00e0? \u0110\u00e1nh mu\u1ed1n n\u00f3i \"nu\u00f4i\" hay \"d\u1ea1y\" hay \"nu\u00f4i v\u00e0 d\u1ea1y\" hay \"nu\u00f4i-d\u1ea1y\"? \u0110\u00e1nh vi\u1ebft nh\u01b0 v\u1eady con \u0111\u1ecdc xong s\u1ebd t\u1ef1 nu\u00f4i ch\u00ednh m\u00ecnh \u0111\u1ea5y!",
+  "max_word_run": 1,
+  "max_4gram": 1,
+  "looped": false,
+  "case": "E"
+ },
+ {
+  "doc": "106",
+  "kw": {
+   "seed": 42,
+   "max_tokens": 2048,
+   "top_p": 1.0
+  },
+  "finish": "stop",
+  "usage": {
+   "prompt_tokens": 65,
+   "total_tokens": 258,
+   "completion_tokens": 193,
+   "prompt_tokens_details": null
+  },
+  "secs": 14.0,
+  "content_head": "\u00d4i tr\u1eddi l\u01b0\u1ee3ng \u1ea1! C\u00e2u n\u00e0y v\u1eeba m\u1edbi b\u1eaft \u0111\u1ea7u \u0111\u00e3 ng\u00e3ym \"Nhi\u1ec7m\" v\u1edbi \"v\u1ee5\" d\u00e1n s\u00e1t v\u00e0o nhau nh\u01b0 hai v\u1ee3 l\u00e2u y\u00eau nhau ch\u1eb3ng mu\u1ed1n chia r\u1ed3i. Ch\u1eef c\u00e1i N c\u00f2n ch\u01b0a k\u1ecbp th\u1ee9c t\u1ec9nh \u0111\u00e3 ph\u1ea3i \u0111\u1ea3m vai l\u00e0m \u0111\u1ea7u ch\u1eef in th\u01b0\u1eddng l\u00e0m m\u1ed3 m\u00f2n.\n\nCh\u1eef c\u00e1i N c\u00f2n ch\u01b0a k\u1ecbp th\u1ee9c t\u1ec9nh \u0111\u00e3 ph\u1ea3i \u0111\u1ea3m vai l\u00e0m \u0111\u1ea7u ch\u1eef in th\u01b0\u1eddng l\u00e0m m\u1ed3 m\u00f2n *****",
+  "content_tail": "\u1ed3i. Ch\u1eef c\u00e1i N c\u00f2n ch\u01b0a k\u1ecbp th\u1ee9c t\u1ec9nh \u0111\u00e3 ph\u1ea3i \u0111\u1ea3m vai l\u00e0m \u0111\u1ea7u ch\u1eef in th\u01b0\u1eddng l\u00e0m m\u1ed3 m\u00f2n.\n\nCh\u1eef c\u00e1i N c\u00f2n ch\u01b0a k\u1ecbp th\u1ee9c t\u1ec9nh \u0111\u00e3 ph\u1ea3i \u0111\u1ea3m vai l\u00e0m \u0111\u1ea7u ch\u1eef in th\u01b0\u1eddng l\u00e0m m\u1ed3 m\u00f2n ****** \"Nhi\u1ec7m v\u1ee5\" \u01a1i \"Nhi\u1ec7m v\u1ee5\" ai ai ai! B\u1ea1n \u0111\u00e3 bao gi\u1edd \u0111\u01b0\u1ee3c \u0111\u1ec1n bi\u00eai b\u00f4 c\u00f9ng t\u1eeb \"Hi\u1ec7m\" ch\u0103ng? \u0110\u00e1p \u00e1m m\u01b0\u1eddi ch\u00edn ba no \u0111\u00ean no \u0111\u00ean.",
+  "max_word_run": 2,
+  "max_4gram": 2,
+  "looped": false,
+  "case": "F"
+ }
+]

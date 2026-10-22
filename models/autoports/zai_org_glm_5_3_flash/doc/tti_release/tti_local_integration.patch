@@ -1,8 +1,117 @@
+diff --git a/llm_module/test_vllm_chat_completions.py b/llm_module/test_vllm_chat_completions.py
+index 4905fb02..60f2ada0 100644
+--- a/llm_module/test_vllm_chat_completions.py
++++ b/llm_module/test_vllm_chat_completions.py
+@@ -59,6 +59,14 @@ PENALTY_PROMPTS = {
+ }
+ 
+ 
++def _message_text(message):
++    """The generated text of a chat message. An always-thinking model (GLM-5.3-Flash: the chat template opens <think>
++    on every turn) served with a reasoning parser returns the think text in `reasoning` / `reasoning_content` and
++    `content` = null until the think block closes; these parameter tests observe the generated text, so take the
++    answer when there is one, else the reasoning."""
++    return message.get("content") or message.get("reasoning_content") or message.get("reasoning") or ""
++
++
+ # --- Test Functions ---
+ @pytest.mark.parametrize("n_val", [2, 3])
+ def test_n(report_test, api_client, n_val, request):
+@@ -98,7 +106,7 @@ def test_stop(report_test, api_client, stop_seq, request):
+     payload = {"messages": prompt, "stop": stop_seq, "max_tokens": 1024}
+     response = api_client(payload)
+ 
+-    output_text = response["choices"][0]["message"]["content"]
++    output_text = _message_text(response["choices"][0]["message"])
+     for seq in stop_seq:
+         assert seq not in output_text, f"Sequence {seq} was in {output_text}"
+ 
+@@ -110,8 +118,8 @@ def test_seed_reproducibility(report_test, api_client, request):
+     response1 = api_client(payload)
+     response2 = api_client(payload)
+ 
+-    output1 = response1["choices"][0]["message"]["content"]
+-    output2 = response2["choices"][0]["message"]["content"]
++    output1 = _message_text(response1["choices"][0]["message"])
++    output2 = _message_text(response2["choices"][0]["message"])
+     assert output1 and output1 == output2, (
+         f"Seed did not produce reproducible results. Output 1: '{output1}', Output 2: '{output2}'"
+     )
+@@ -141,7 +149,7 @@ def test_coherence_verbatim_echo(report_test, api_client, request):
+     payload = {"messages": prompt, "max_tokens": 32, "temperature": 0}
+     response = api_client(payload)
+ 
+-    output_text = response["choices"][0]["message"]["content"]
++    output_text = _message_text(response["choices"][0]["message"])
+     assert sentence in output_text, (
+         "Coherence guard failed: model did not echo the sentence verbatim "
+         "(likely gibberish from a corrupted forward pass). Expected to find "
+@@ -183,10 +191,13 @@ async def test_non_uniform_seeding(report_test, api_client, request):
+                 "temperature": 0.9,
+                 "seed": seed_val,
+             }
+-            response = await asyncio.to_thread(api_client, payload)
++            # No per-request read timeout (as test_penalties): on a server with fewer slots than the 32 concurrent
++            # requests (GLM-5.3-Flash p300x2-1m: max_num_seqs 1) the later requests wait in vLLM's queue for
++            # minutes; the 30 s client default turned that queueing into a test failure.
++            response = await asyncio.to_thread(api_client, payload, timeout=None)
+             return {
+                 "seed": seed_val,
+-                "content": response["choices"][0]["message"]["content"].strip(),
++                "content": _message_text(response["choices"][0]["message"]).strip(),
+                 "id": response["id"],
+             }
+         except Exception as e:
+@@ -273,8 +284,8 @@ def test_determinism_parameters(
+     response1 = api_client(payload)
+     response2 = api_client(payload)
+ 
+-    output1 = response1["choices"][0]["message"]["content"]
+-    output2 = response2["choices"][0]["message"]["content"]
++    output1 = _message_text(response1["choices"][0]["message"])
++    output2 = _message_text(response2["choices"][0]["message"])
+     assert output1 and output1 == output2, (
+         f"{param_name}={param_value} was not deterministic. Output 1: '{output1}', Output 2: '{output2}'"
+     )
+@@ -309,8 +320,8 @@ def test_penalties(
+     response_test = api_client(payload_test, timeout=None)
+ 
+     # Compute baseline and test statistics
+-    text_base = response_base["choices"][0]["message"]["content"]
+-    text_test = response_test["choices"][0]["message"]["content"]
++    text_base = _message_text(response_base["choices"][0]["message"])
++    text_test = _message_text(response_test["choices"][0]["message"])
+ 
+     base_stats = repetition_stats(text_base)
+     test_stats = repetition_stats(text_test)
+diff --git a/reference_config/benchmarking/benchmark_config.py b/reference_config/benchmarking/benchmark_config.py
+index d02232a2..24a8be75 100644
+--- a/reference_config/benchmarking/benchmark_config.py
++++ b/reference_config/benchmarking/benchmark_config.py
+@@ -23,8 +23,18 @@ _VLLM_BENCHMARK_VENV_BY_ENGINE = {
+ }
+ 
+ 
++# Models whose tokenizer needs transformers >= 5 (tokenizer_class TokenizersBackend): the shared client venv
++# (vllm 0.13 / transformers 4.57) cannot load it, so they use the newer client venv (vllm 0.19.1 / transformers 5.5.1).
++_VLLM_BENCHMARK_VENV_BY_MODEL = {
++    "zai-org/GLM-5.3-Flash": WorkflowVenvType.BENCHMARKS_VLLM_FORGE,
++}
++
++
+ def select_vllm_benchmark_venv(model_spec) -> WorkflowVenvType:
+     """Pick the vllm benchmark client venv for ``model_spec``."""
++    by_model = _VLLM_BENCHMARK_VENV_BY_MODEL.get(getattr(model_spec, "hf_model_repo", None))
++    if by_model is not None:
++        return by_model
+     return _VLLM_BENCHMARK_VENV_BY_ENGINE.get(
+         model_spec.inference_engine, WorkflowVenvType.BENCHMARKS_VLLM
+     )
 diff --git a/reference_config/evals/eval_config.py b/reference_config/evals/eval_config.py
-index 04d3a7d..2c00cda 100644
+index 04d3a7d8..29074516 100644
 --- a/reference_config/evals/eval_config.py
 +++ b/reference_config/evals/eval_config.py
-@@ -474,6 +474,13 @@ class EvalConfig:
+@@ -474,6 +474,30 @@ class EvalConfig:
  # Note: reasoning models (QwQ-32B, DeepSeek-R1-Distill-Llama-70B) need evals allowing more tokens generated
  
  
@@ -13,22 +122,41 @@ index 04d3a7d..2c00cda 100644
 +    return [t for t in names if not keep or t.task_name in keep.split(",")]
 +
 +
++def _glm53_gen_kwargs(task, effort, max_gen_toks):
++    """GLM-5.3-Flash E192 request knobs: GLM53_EVAL_EFFORT_<TASK> (low / high / max / default = no field, the chat
++    template's default = max) and GLM53_EVAL_MAX_GEN_TOKS_<TASK>."""
++    kw = {
++        "max_gen_toks": os.environ.get(f"GLM53_EVAL_MAX_GEN_TOKS_{task}", max_gen_toks),
++        "until": ["<|endoftext|>"],
++        "do_sample": "true",
++        "temperature": 1.0,
++        "top_p": 0.95,
++        "stream": "false",
++    }
++    effort = os.environ.get(f"GLM53_EVAL_EFFORT_{task}", effort)
++    if effort != "default":
++        kw["reasoning_effort"] = effort
++    return kw
++
++
  _eval_config_list = [
      EvalConfig(
          hf_model_repo="zai-org/GLM-5.2",
-@@ -3235,6 +3242,77 @@ _eval_config_list = [
+@@ -3235,6 +3259,75 @@ _eval_config_list = [
              ),
          ],
      ),
 +    EvalConfig(
 +        # GLM-5.3-Flash with the E192 expert subset (192 of 288 routed experts per MoE layer), agentic autoport
-+        # models/autoports/zai_org_glm_5_3_flash, served externally (tt-metal readiness runner / 09-serve.sh). Standard
-+        # lm-eval tasks through the chat API (GLM chat template; thinking is always on, reasoning_effort = template
-+        # default). Sampling = the checkpoint generation_config (temperature 1.0, top_p 0.95). NO same-model reference:
-+        # the published scores of the 288-expert model do not apply to E192 and no GPU / HF reference of E192 exists.
-+        # TODO(stage 11): fill mode_reference_scores (ci-nightly subset) or record every accuracy row as informational
-+        # with the reason in doc/tti_release/RUN_NOTES.md. model_kwargs.timeout 7200 s: thinking generations at ~10-18
-+        # tokens/s per user run 10-30+ min.
++        # models/autoports/zai_org_glm_5_3_flash, served externally from the tt-metal release worktree (stage 11,
++        # p300x2-1m profile: 1 x 1,048,576 = doc/context_contract.json). Chat API, the model's chat template: thinking
++        # is always on; the glm45 reasoning parser puts the think block in `reasoning`, lm-eval scores `content` only,
++        # so a think block that does not close within max_gen_toks scores as an empty answer (counted wrong, as in the
++        # E192 card's strict scoring). Sampling = the checkpoint generation_config / the E192 card recipe
++        # (temperature 1.0, top_p 0.95). reasoning_effort goes into the request body (vLLM maps the top-level field
++        # to the chat-template kwarg). capture_reasoning keeps the think text in the sample logs for the cut analysis.
++        # Knobs (env): GLM53_EVAL_TASKS (comma list), GLM53_EVAL_EFFORT_<TASK> ("default" = template default = max),
++        # GLM53_EVAL_MAX_GEN_TOKS_<TASK>, GLM53_EVAL_TIMEOUT.
 +        hf_model_repo="zai-org/GLM-5.3-Flash",
 +        tasks=_glm53_flash_tasks(
 +            [
@@ -36,20 +164,17 @@ index 04d3a7d..2c00cda 100644
 +                    task_name="ifeval",
 +                    use_chat_api=True,
 +                    max_concurrent=16,
-+                    model_kwargs={"timeout": 7200},
-+                    gen_kwargs={
-+                        "max_gen_toks": os.environ.get("GLM53_EVAL_MAX_GEN_TOKS_IFEVAL", "16384"),
-+                        "until": ["<|endoftext|>"],
-+                        "do_sample": "true",
-+                        "temperature": 1.0,
-+                        "top_p": 0.95,
-+                        "stream": "false",
-+                    },
++                    capture_reasoning=True,
++                    model_kwargs={"timeout": int(os.environ.get("GLM53_EVAL_TIMEOUT", "21600")), "max_length": 1048576},
++                    gen_kwargs=_glm53_gen_kwargs("IFEVAL", "low", "32768"),
 +                    score=EvalTaskScore(
++                        # No IFEval score exists for E192 or for the 288-expert parent (its card lists agentic rows only);
++                        # an HF bf16 reference of E192 on this host's CPU is not practical (thinking-length outputs at
++                        # ~1 token/s). The row is reported as measured, without a reference (accuracy check NA).
 +                        published_score=None,
-+                        published_score_ref="no published IFEval score for GLM-5.3-Flash E192",
++                        published_score_ref="none: no IFEval number for GLM-5.3-Flash or its E192 subset",
 +                        gpu_reference_score=None,
-+                        gpu_reference_score_ref="no reference of the E192 model (TODO stage 11)",
++                        gpu_reference_score_ref="none: no same-setting reference of the E192 model",
 +                        score_func=score_task_single_key,
 +                        score_func_kwargs={
 +                            "result_keys": ["prompt_level_strict_acc,none", "inst_level_strict_acc,none"],
@@ -66,20 +191,19 @@ index 04d3a7d..2c00cda 100644
 +                    num_fewshot=0,
 +                    use_chat_api=True,
 +                    max_concurrent=16,
-+                    model_kwargs={"timeout": 7200},
-+                    gen_kwargs={
-+                        "max_gen_toks": os.environ.get("GLM53_EVAL_MAX_GEN_TOKS_GPQA", "32768"),
-+                        "until": ["<|endoftext|>"],
-+                        "do_sample": "true",
-+                        "temperature": 1.0,
-+                        "top_p": 0.95,
-+                        "stream": "false",
-+                    },
++                    capture_reasoning=True,
++                    model_kwargs={"timeout": int(os.environ.get("GLM53_EVAL_TIMEOUT", "21600")), "max_length": 1048576},
++                    gen_kwargs=_glm53_gen_kwargs("GPQA", "low", "65536"),
 +                    score=EvalTaskScore(
-+                        published_score=None,
-+                        published_score_ref="no published GPQA score for GLM-5.3-Flash E192",
++                        # E192 card (autotrust/GLM5.3-Flash-E192-DGX-Spark, "Benchmarks"): GPQA-Diamond 79.8 % (158/198)
++                        # at reasoning_effort=low, 65,536-token budget, temperature 1.0 / top_p 0.95, strict scoring,
++                        # one B200 with vLLM, NVFP4 weights; its prompt asks for "ANSWER: X" after </think>, lm-eval's
++                        # gpqa_diamond_cot_zeroshot asks for "(X)" and grades exact_match,flexible-extract. Same model,
++                        # effort, budget and sampling; prompt / extraction and weight quantization differ.
++                        published_score=79.8,
++                        published_score_ref="https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens)",
 +                        gpu_reference_score=None,
-+                        gpu_reference_score_ref="no reference of the E192 model (TODO stage 11)",
++                        gpu_reference_score_ref=None,
 +                        score_func=score_task_single_key,
 +                        score_func_kwargs={"result_keys": ["exact_match,flexible-extract"], "unit": "percent"},
 +                    ),
@@ -95,7 +219,7 @@ index 04d3a7d..2c00cda 100644
          hf_model_repo="mistralai/Mistral-7B-Instruct-v0.3",
          tasks=[
 diff --git a/test_module/server_tests_config.json b/test_module/server_tests_config.json
-index cf40056..1b799c8 100644
+index cf400560..1b799c8b 100644
 --- a/test_module/server_tests_config.json
 +++ b/test_module/server_tests_config.json
 @@ -391,6 +391,17 @@
@@ -117,7 +241,7 @@ index cf40056..1b799c8 100644
              "id_name": "qwen3-32b",
              "weights": [
 diff --git a/test_module/test_suites/llm.json b/test_module/test_suites/llm.json
-index 7177e4f..a680d38 100644
+index 7177e4f7..a680d385 100644
 --- a/test_module/test_suites/llm.json
 +++ b/test_module/test_suites/llm.json
 @@ -8,7 +8,8 @@
@@ -131,7 +255,7 @@ index 7177e4f..a680d38 100644
              "devices": [
                  "n150",
 diff --git a/workflows/model_spec.py b/workflows/model_spec.py
-index c68ad26..889b0da 100644
+index c68ad267..889b0dae 100644
 --- a/workflows/model_spec.py
 +++ b/workflows/model_spec.py
 @@ -390,7 +390,16 @@ quetzal_impl = ImplSpec(
@@ -152,18 +276,19 @@ index c68ad26..889b0da 100644
      "tt_transformers": tt_transformers_impl,
      "llama3_70b_galaxy": llama3_70b_galaxy_impl,
 diff --git a/workflows/model_specs/dev/llm.yaml b/workflows/model_specs/dev/llm.yaml
-index d885932..63bb1c2 100644
+index d8859322..7df8c3c8 100644
 --- a/workflows/model_specs/dev/llm.yaml
 +++ b/workflows/model_specs/dev/llm.yaml
-@@ -2687,3 +2687,42 @@ templates:
+@@ -2687,3 +2687,47 @@ templates:
      Qwen/Qwen3.5-27B:
        reasoning_parser_name: qwen3
        tool_call_parser_name: qwen3_coder
 +
 +# GLM-5.3-Flash E192 agentic autoport (models/autoports/zai_org_glm_5_3_flash), text-only, 4 Blackhole dies (P300x2).
-+# Served externally by the tt-metal checkout (docker_server / local_server false). The numbers below must equal the
-+# autoport's serving_profiles.json default profile (max_num_seqs, max_model_len, trace_region_bytes); TODO(stage 11):
-+# re-check them after the G9 capacity probes.
++# Served externally from the tt-metal release worktree (docker_server / local_server false) with the autoport's
++# serving profile p300x2-1m (serving_profiles.json): 1 sequence x 1,048,576 tokens = doc/context_contract.json
++# supported_context, block-sharded fp8 DSA cache. The numbers below equal that profile (max_num_seqs,
++# max_model_len, trace region, profile env); the server launch reads them from serving_profiles.json.
 +- weights:
 +  - zai-org/GLM-5.3-Flash
 +  impl: glm53_flash_autoport
@@ -173,8 +298,8 @@ index d885932..63bb1c2 100644
 +  - text
 +  device_model_specs:
 +  - device: P300X2
-+    max_concurrency: 16
-+    max_context: 282624
++    max_concurrency: 1
++    max_context: 1048576
 +    default_impl: true
 +    env_vars:
 +      HF_MODEL: zai-org/GLM-5.3-Flash
@@ -182,7 +307,11 @@ index d885932..63bb1c2 100644
 +      ARCH_NAME: blackhole
 +      EXTRA_MODELS_DIR: models/autoports/zai_org_glm_5_3_flash/vllm_bundle
 +      GLM53_TRACE_REGION: '67108864'
++      GLM53_DSA_SHARD: '1'
++      GLM53_MOE_SORTED_ROWS: '512'
++      GLM53_DSA_INDEX_BLOCK_MB: '32'
 +    vllm_args:
++      block_size: '128'
 +      enable_auto_tool_choice: true
 +      reasoning_parser: glm45
 +      tool_call_parser: glm47
