@@ -11,7 +11,7 @@ import sys
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.moe_decode.experts import ExpertDown, ExpertGateUp, MoEDecodeBuffers
+from models.demos.blackhole.qwen36.tt.moe_decode.experts import ExpertDown, ExpertGateUp, ExpertMoE, MoEDecodeBuffers
 from models.demos.blackhole.qwen36.tt.moe_decode.topk import RouterTopK
 
 torch.manual_seed(0)
@@ -57,7 +57,8 @@ def round_sig(t, bits):
 
 
 def check_experts(
-    dev, H=2048, I=128, E=256, k=8, dtype=ttnn.bfloat8_b, gu_readers=4, dn_readers=2, trials=3, w_bits=None, x_bits=None
+    dev, H=2048, I=128, E=256, k=8, dtype=ttnn.bfloat8_b, gu_readers=4, dn_readers=2, trials=3, w_bits=None, x_bits=None,
+    one_program=False,
 ):
     """Fused gate|up + down vs torch on the device-rounded weights (Ornith TP4 per-device shapes by default).
     w_bits / x_bits: pre-round the weights / the activation to that many significant bits (LoFi window probes)."""
@@ -77,7 +78,8 @@ def check_experts(
     W_ug, W_ugs, W_dn, W_dns = back(ug)[0], back(ug_s)[0, 0], back(dn)[0], back(dn_s)[0, 0]
     buf = MoEDecodeBuffers(dev, H, I, k)
     gu = ExpertGateUp(dev, H, I, E, k, dtype, readers=gu_readers)
-    dn_op = ExpertDown(dev, H, I, k, dtype, readers=dn_readers)
+    dn_op = ExpertDown(dev, H, I, E, k, dtype, readers=dn_readers)
+    one = ExpertMoE(dev, H, I, E, k, dtype, gu_readers=gu_readers, dn_readers=dn_readers) if one_program else None
     for t in range(trials):
         xr = torch.zeros(1, 1, 32, H)
         xr[0, 0, 0] = torch.randn(H)
@@ -87,8 +89,12 @@ def check_experts(
         lgb = lg.bfloat16()
         x_tt = ttnn.from_torch(xb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
         lg_tt = ttnn.from_torch(lgb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
-        gu(x_tt, lg_tt, ug, ug_s, buf.act, buf.route)
-        dn_op(buf.act, buf.route, dn, dn_s, buf.out)
+        if one is not None:
+            one(x_tt, lg_tt, ug, ug_s, dn, dn_s, buf.act, buf.out)
+            gu(x_tt, lg_tt, ug, ug_s, buf.act, buf.route)  # the route record for the id check
+        else:
+            gu(x_tt, lg_tt, ug, ug_s, buf.act, buf.route)
+            dn_op(buf.act, buf.route, dn, dn_s, buf.out)
         route = ttnn.to_torch(buf.route).reshape(-1).long()
         act = back(buf.act)[0, 0]
         out = back(buf.out)[0, 0, 0]
@@ -103,7 +109,7 @@ def check_experts(
         ref_out = sum(ref_act[i] @ Wd[i] for i in range(k + 1))
         assert torch.equal(route[:k], ids), (route[:k].tolist(), ids.tolist())
         print(
-            f"w_bits {w_bits} x_bits {x_bits} experts trial {t}: ids exact, act pcc {pcc(act, ref_act):.5f}, out pcc {pcc(out, ref_out):.5f}, "
+            f"{'one-program ' if one_program else ''}w_bits {w_bits} x_bits {x_bits} experts trial {t}: ids exact, act pcc {pcc(act, ref_act):.5f}, out pcc {pcc(out, ref_out):.5f}, "
             f"out rel err {((out - ref_out).norm() / ref_out.norm()).item():.4f}, "
             f"scale act {(act * ref_act).sum().item() / (ref_act * ref_act).sum().item():.4f} "
             f"out {(out * ref_out).sum().item() / (ref_out * ref_out).sum().item():.4f}"
@@ -145,19 +151,23 @@ def time_experts(
 
     for gr, dr in variants:
         gu = ExpertGateUp(dev, H, I, E, k, dtype, readers=gr)
-        dn_op = ExpertDown(dev, H, I, k, dtype, readers=dr)
+        dn_op = ExpertDown(dev, H, I, E, k, dtype, readers=dr)
+        one = ExpertMoE(dev, H, I, E, k, dtype, gu_readers=gr, dn_readers=dr)
         if prof:
             for _ in range(3):
                 gu(x, lg, ug, ug_s, buf.act, buf.route)
                 dn_op(buf.act, buf.route, dn, dn_s, buf.out)
+            for _ in range(3):
+                one(x, lg, ug, ug_s, dn, dn_s, buf.act, buf.out)
             ttnn.synchronize_device(dev)
             ttnn.ReadDeviceProfiler(dev)
             continue
         t_gu = bench(lambda: gu(x, lg, ug, ug_s, buf.act, buf.route))
         t_dn = bench(lambda: dn_op(buf.act, buf.route, dn, dn_s, buf.out))
         t_both = bench(lambda: (gu(x, lg, ug, ug_s, buf.act, buf.route), dn_op(buf.act, buf.route, dn, dn_s, buf.out)))
+        t_one = bench(lambda: one(x, lg, ug, ug_s, dn, dn_s, buf.act, buf.out))
         print(f"time gu_readers {gr} ({len(gu.assign)} cores) dn_readers {dr} ({len(dn_op.assign)} cores): "
-              f"gate|up {t_gu:5.1f} us, down {t_dn:5.1f} us, both {t_both:5.1f} us")
+              f"gate|up {t_gu:5.1f} us, down {t_dn:5.1f} us, both {t_both:5.1f} us, one program {t_one:5.1f} us")
 
 
 def main():
@@ -168,11 +178,12 @@ def main():
             check_topk(dev)
             check_topk(dev, E=512, k=10)
         if "prof" in what:  # eager calls for the device profiler (TT_METAL_DEVICE_PROFILER=1)
-            time_experts(dev, variants=((4, 1),), prof=True)
+            time_experts(dev, variants=((4, 2),), prof=True)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:
             check_experts(dev)
+            check_experts(dev, one_program=True)
             if "probe" in what:
                 for wb, xb in ((5, None), (6, None), (5, 7), (6, 7)):
                     check_experts(dev, trials=1, w_bits=wb, x_bits=xb)

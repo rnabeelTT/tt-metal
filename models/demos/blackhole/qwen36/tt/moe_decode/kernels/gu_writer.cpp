@@ -103,5 +103,17 @@ void kernel_main() {
         cb_pop_front(cb_act, 1);
     }
     noc_async_write_barrier();
+#ifdef MOE_FUSED
+    // the one-program MoE: tell every down core this core's activations are written
+    // (runtime args after the slot list: num_down, then (x, y) NOC coordinates per down core)
+    const uint32_t a0 = 7 + num_slots;
+    const uint32_t num_down = get_arg_val<uint32_t>(a0);
+    const uint32_t sem = get_semaphore(MOE_SEM);
+    for (uint32_t d = 0; d < num_down; ++d) {
+        noc_semaphore_inc(
+            get_noc_addr(get_arg_val<uint32_t>(a0 + 1 + 2 * d), get_arg_val<uint32_t>(a0 + 2 + 2 * d), sem), 1);
+    }
+    noc_async_atomic_barrier();
+#endif
     cb_pop_front(cb_route, 1);
 }

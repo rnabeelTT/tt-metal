@@ -51,8 +51,18 @@ MoE ports (Qwen3-Coder-30B, Qwen3-Coder-Next, Qwen3.5-122B-A10B, GLM-4.5-Air).
   - Example: `"traced_decode_batched and b1-"` profiles one GDN layer (L0) and one attention layer (L3), traced single-user decode, shipped precision policy.
 - `analyze.py <ops_perf csv> [iters]`: per-op table of the signposted decode windows.
   - The first all-gather's "gap" is the idle time between trace replays, not real.
-- `segments.py <csv>`: the same windows split into boundary / mixer / MoE.
-  - The op index ranges are hard-coded for the current op sequence; re-derive them after any change.
+- `segments.py <csv> [iters] [--ops]`: the same windows split into boundary / mixer / MoE (found from the
+  collectives, so it survives op-count changes); `--ops` lists the MoE ops of one step.
+- `trun.sh <cmd>`: run a command in an image (`IMAGE`, default the published one; `ornith-dev` = + pytest,
+  `ornith-prof` = + profiler tools) on all 4 chips with this checkout's `models/` + `tests/` mounted; `TENV` = extra
+  docker args. `Dockerfile.dev` builds `ornith-dev` (copy a static `uv` next to it).
+- `zones.py <profile_log_device.csv> [chip]`: per-op, per-RISC kernel and `DeviceZoneScopedN` zone durations
+  (min / median / max over cores). Use with `TT_METAL_DEVICE_PROFILER=1` in `ornith-prof` and an explicit
+  `ttnn.ReadDeviceProfiler(dev)`; `tests/test_moe_decode_ops.py prof` does this for the fused MoE ops.
+- `mbench_moe.py`: traced op microbenchmark of MoE variants (one chip); compare variants, not absolute times.
+- Box qb2-120-p06t08 (where steps 1-2 ran): the user was added to the `docker` group mid-session; until a fresh
+  login put `docker-shim` first on `PATH` as `docker` (it runs through `sg docker`). Weights were downloaded
+  anonymously; `refs/main` was written by hand for `HF_HUB_OFFLINE`.
 
 ### Hardware notes (QuietBox 2, 4x p300c)
 
@@ -120,16 +130,75 @@ Per-op bandwidth, device 0. All weights are bfp8 in the shipped 4-chip policy `o
 
 The dense mixer matmuls are already efficient. The waste is the ~40 small ops around them, the collectives, and the MoE.
 
+### Steps 1-2 (QB2 box qb2-120-p06t08; per-layer = device 0, b1 traced decode, shipped policy)
+
+Baseline re-measured here: layers 0.487 / 0.442 ms (GDN / attention), MoE 177.4 us per layer, served TPOT 19.20 ms
+(4 chips, MTP off, 128/128, 1 user).
+
+| Change | MoE us/layer (ops) | Layer GDN / attn us | Served TPOT |
+|---|---|---|---|
+| Baseline | 177.4 (29) | 488 / 434 | 19.20 ms |
+| Step 1a: fused router top-k + softmax (`RouterTopK`, one generic_op) | 158.1 (23) | 468 / 413 | |
+| Step 1b: decode router 1D on 8 cores, interleaved weight (24.7 us + 2 reshards -> 7.5 us) | 136.8 (21) | 446 / 392 | 17.90 ms |
+| Step 2 v1: fused MoE decode, 3 ops (`QWEN35_MOE_FUSED_DECODE=1`) | 38.4 (3) | 346 / 293 | 13.97 ms (14.00 rerun) |
+
+Step 2 v1 per-op (layer profile): router matmul 8.2-9.5 us, `ExpertGateUp` 19.8 us, `ExpertDown` 8.5 us, 1.1 us of
+gaps. Served: 19.20 -> 13.97 ms is -27% (71.6 tok/s single user, 4 chips, MTP off). Greedy (step2v1 vs base4_here):
+all 16 outputs differ and read coherent. Scorecard evals at concurrency 1 (so they exercise the single-user fused
+path; the scorecard runs 8 in flight, which takes the batched path): `runs/step2v1_c1/evals`, see below.
+
+- Step 1 greedy: outputs differ from the baseline (the change runs) and stay coherent; early divergences are
+  near-tie rewordings (the baseline's own sequential and concurrent outputs differ the same way).
+- Step 1 knobs that did not help: gate|up sparse matmul at 16 cores with 16-wide tiles, in0_block_w 16/32/64
+  (42.9-53 us vs 41.6 us). The sparse matmul is not core-bound; step 2 replaces it.
+- Step 2 v1 design (models/demos/blackhole/qwen36/tt/moe_decode, shared by the Qwen3.5-MoE ports):
+  - Router: ttnn 1D matmul (HiFi4, BF16 weight) over [H, E + 32]; column E = the shared-expert gate.
+  - `ExpertGateUp` (16 cores = 4 per column pair): top-k + softmax on every core (NCRISC and BRISC each take half
+    the logits, then merge; register-resident selection), the shared expert streams during it, then the routed
+    columns stream straight from the interleaved ttnn expert tensor (page p in bank p % 8, so an expert's column is
+    contiguous in one bank: in-place mode (b), no duplicate weights), custom_mm, SwiGLU x routing weight.
+  - `ExpertDown` (16 cores = 2 per bank): every slot's down columns stacked along K, one custom_mm, written into
+    row 0 of the partial-sum tiles; the layer's reduce-scatter reads them directly.
+  - Numerics: custom_mm is LoFi only; measured operand widths: weights (srcA) 5 significant bits, activations (srcB)
+    7. bfp8 weights as-is lose ~1.8% per matmul (truncation bias; op test: output scale 0.948). The expert weights are
+    now stored rounded to 5 significant bits (unbiased; cache files `*.r5`, prefill reads the same weights) and the
+    gate|up outputs rounded to 7 bits: output scale 0.989, PCC 0.99998 vs torch on the stored weights. The remaining
+    ~1% is the normed hidden's last bit (srcB truncation); rounding it in-kernel is the next numerics item if needed.
+  - Layer decode PCC vs HF (real weights, positions 37 / 333): unchanged to 6 decimals (0.99998 / 0.99994).
+  - Gate|up timing: 15 us median core, 19.8 us max: the column pair on DRAM banks 0 + 4 (both on logical row 9) is
+    ~40% slower per byte (moving its cores to rows 8 / 7: no help). The in-place layout fixes which banks a column
+    lives in; gpt-oss balanced the same banks with a rotated duplicate copy.
+  - Scalar code on these RISCs is slow (~23-45 cycles per logit in the first top-k): keep data in registers (the
+    kernel stack is in L1), avoid 64-bit divisions, split across RISCs. Top-k went 9.3 -> ~4 us (NCRISC tail).
+  - Tried, no gain: 3 / 6 / 8 cores per pair (vs 4), 1 / 4 down cores per bank (vs 2); pair-0 cores on rows 8 / 7
+    (20.8 / 24.9 us vs 19.8), around bank 4's reader (28.4), its readers on NOC1 (20.2); `ExpertMoE` (gate|up and
+    down in ONE program on disjoint cores, down weights prefetched during gate|up, semaphore handoff; correct, kept in
+    experts.py): 30 us vs 20 + 8.5 + gap, because the down reads of banks 0 / 4 slow the pair-0 cores to 28 us.
+  - Why pair 0 is slow: its cores read BOTH bank 0 and bank 4 across logical row 9. The down op reads the same banks
+    at ~60 GB/s per bank when each core reads only its own bank. Fix (next): split-pair gate|up, each core streams only
+    its bank's column (up cores near banks 0-3, gate cores near banks 4-7), the gate cores write silu(g) * w and the up
+    cores u into two activation buffers, and the down cores form act = u * silu(g) w on the SFPU while their weights
+    stream. Then the one-program merge (`ExpertMoE`) should pay off, and the router could move in as well
+    (router weights split into two 5-significant-bit halves so LoFi custom_mm reads them exactly).
+  - 2-chip (p300) and the 122B: the kernels are written for any `2 I / 32` and `H / 32` that are multiples of 8
+    (the 122B's packed up|gate has 2 columns per bank and expert, read with the strided path; not yet run).
+
+### Where the 14 ms goes now (per layer, device 0): GDN 346 us = boundary 102 + mixer 207 + MoE 38; attention 293 us
+= boundary 100 + mixer 156 + MoE 38. Re-plan from this: the boundary (step 3, ~4 ms per token) and the GDN mixer
+(step 4, ~6.2 ms) are now the big items; the remaining MoE work (split-pair, merge, router) is worth ~0.4-0.6 ms.
+
 ## Plan (in order; each step ends with a measurement)
 
-1. **MoE quick wins.** Settings and program configs only, in `tt/moe.py` / `tt/optimized_decoder.py`:
+1. **MoE quick wins.** (DONE: fused top-k + 1D router, MoE 177 -> 137 us, TPOT 19.20 -> 17.90 ms; the gate|up / shared
+   core-count knobs did not help, see above.) Settings and program configs only, in `tt/moe.py` / `tt/optimized_decoder.py`:
    - Put the router matmul on a sane config: 1 MB should take 3–5 µs, not 25.
    - Give the gate/up SparseMatmul as many cores as the down projection (or more).
    - Spread the shared expert over more cores.
    - Replace the 7-op top-k chain with one fused router top-k. Check the merged PR #58472, "Fused GPT router on Blackhole P150 and partial batches".
    - Expected: about 3 ms of 19, roughly +15% single-user. It also carries over to every model sharing `Qwen35MoE`.
    - Verify with `run_layer_prof.sh` (MoE segment), then the 4-chip MTP-off bench row, then the greedy check.
-2. **Fused MoE decode kernel.** Target about 30 µs per layer, down from 176.
+2. **Fused MoE decode kernel.** (v1 DONE: 38 us, 3 ops, in-place streaming; TPOT 13.97 ms. Follow-ups above.) Target
+   about 30 µs per layer, down from 176.
    - Router with top-k computed inside the matmul writer, then streaming gate/up + SiLU + down over the 8 selected experts plus the shared expert, in one or two ops.
    - Sources: tt-metal PR #60161 (gpt-oss fused decode, merged 2026-10-16) and the `nd.py` ND-sharded experts in the `jashansinghTT/gpt-oss-120b-blackhole-fast` package.
    - Adapt to 256 experts top-8 plus a shared expert.

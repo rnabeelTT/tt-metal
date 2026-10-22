@@ -96,7 +96,7 @@ class FusedMoEDecode:
         if key not in cache:
             cache[key] = (
                 ExpertGateUp(mesh_device, H, Il, E, k, dtype),
-                ExpertDown(mesh_device, H, Il, k, dtype),
+                ExpertDown(mesh_device, H, Il, E, k, dtype),
                 MoEDecodeBuffers(mesh_device, H, Il, k),
             )
         self.gate_up, self.down_op, self.buf = cache[key]
