@@ -21,8 +21,8 @@ plus the small selection traces.
 Prefill (eager): a sparse chunk scores W_b keys (indexer_score_dsa kv_len = W_b) for the smallest W_b that covers the
 chunk's last position, and ranks only those columns.
 
-GLM53_DSA_BUCKETS: "auto" (default; on for max_seq_len >= GLM53_DSA_BUCKET_MIN_T) | "0" / "off" (the full-width code,
-unchanged) | comma list of bucket contexts (forces it on).
+GLM53_DSA_BUCKETS: "auto" (default; on for max_seq_len >= GLM53_DSA_BUCKET_MIN_T; 1-slot builds only, S >= 2 takes
+none) | "0" / "off" (the full-width code, unchanged) | comma list of bucket contexts (forces it on).
 Every bucket program is compiled by install() (eager, before any capture).
 """
 

@@ -1,6 +1,6 @@
 # GLM-5.3-Flash (E192) optimized vLLM serving (stage 10)
 
-## Headline: primary single-user vLLM serving (default profile p300x2: 16 slots x 243,712)
+## Headline: primary single-user vLLM serving (default profile p300x2: 16 slots x 262,144 shipped; measured at 243,712 before / 239,616 after)
 
 Workload: `vllm bench serve`, random dataset, 128 input / 128 output tokens, 1 request, concurrency 1, temperature 0,
 `--ignore-eos`, `sample_on_device_mode=all`, mesh (1, 4) P300x2, served profile p300x2 (max-num-seqs 16,
@@ -8,7 +8,7 @@ max-model-len 243,712, replicated DSA cache). Before: the stage-9 A6 readiness b
 (`doc/vllm/evidence/bench_p300x2.log.txt`). After: the same command and profile on the stage-10 HEAD in the combined
 stage-9 ticket, run on the code freeze 0a2663d0b6b (`doc/vllm/evidence/final/p300x2_vllm_benchmark.json`, server
 command `doc/vllm/evidence/final/p300x2_servercmd.txt`; the p300x2 max-model-len after the G9 re-probe is 239,616).
-Why these numbers also hold for the shipped 0bcf89f7fd6:
+Why these numbers hold for 0bcf89f7fd6 (the shipped 344195b5ef5 differs, see below):
 - 0bcf89f7fd6 changes the MoE bucket paths only where the build's own path is sorted, which is 32 slots. At 16 slots and
   below the family is pairs, the same paths as 0a2663d0b6b.
 - Its dealloc fixes change only frees: `force=False` on the pairs ids loop and `del q_rm` in the sharded path.
@@ -333,8 +333,9 @@ Memory: the pool iotas are one tensor per mesh, not one per layer. Net change pe
 | p300x2-wide 32 x 137,216 | -130 MiB | +96 MiB (160 MiB) | **-34 MiB** |
 | p150x4 16 x 243,712 | -210 MiB | +32 MiB (96 MiB) | **-178 MiB** |
 
-The block-sharded `p300x2-1m` profile is unchanged. Every multi-slot measurement in `serving_profiles.json` was taken
-with a 64 MiB region. The G9 capacity re-probe of the combined stage-9 ticket replaces them.
+The block-sharded `p300x2-1m` profile is unchanged. The multi-slot measurements before stage 10 were taken with a 64
+MiB region. The stage-10 t21 re-probe (below) replaces them: trace captured 87.3 MiB at 16 slots (96 MiB region),
+101.6 MiB at 32 slots (160 MiB) and 44.9 MiB at 1 slot (64 MiB), with no DSA decode buckets at S >= 2.
 
 ### Capacity re-probe (review #1 P2-1, ticket t21)
 
@@ -364,15 +365,24 @@ Ticket t14 (full model, 1 slot, 243,712):
 | Token-out, positions 300 / 5,000 / 70,000 / 200,000 | 50.10 / 53.54 / 56.01 / 58.20 ms | 50.10 / 53.52 / 55.99 / 58.20 ms |
 | Teacher forcing, 3 references | 92 / 95 / 92 (prefill 92 / 95 / 91) | identical (tracker on: clean) |
 
-- Prefill and decode logits are bit-identical views on vs off in the full-model check (4,221 tokens).
+- Prefill and decode logits are bit-identical views on vs off in the full-model check (4,221 tokens). This holds for
+  that 1-slot build only.
+- In serving (16 slots, t23), the solo outputs of run (i) (views off) and run (iv) (views on) differ (text: from the
+  5th word). Classification: a prefill top-k width / mode effect (a view runs the fused top-k on its few pools; views
+  off run the classic top-k over the full width). It is the same for every batch: in each run, solo and concurrent
+  outputs are equal. It is not a batch-invariance issue.
 - On the reduced model, a 40,000-token prompt shows a 0.03 logit delta (top-k tie order across widths); top-1 21/21.
 
-## Served before / after (vLLM, `vllm bench serve`, the stage-9 sweep workload)
+## Served before / after (vLLM, `vllm bench serve`, the stage-9 sweep workload) [DSA buckets on]
 
 "Before": the stage-9 A6 sweeps on code before stage 10 (DSA, MoE and view buckets absent; 64 MiB trace region),
 `~/glm53-flash-bringup/artifacts/s10/sweep_<profile>.json`. "After": the same sweep, on the same profile, workload
 and sampling, on the stage-10 HEAD (0a2663d0b6b + the slot-aware fit), in the combined stage-9 ticket
 (`~/glm53-flash-bringup/artifacts/s10/sweep_final-<profile>.json`).
+
+[DSA buckets on]: every "after" value in this section was measured with the multi-slot DSA decode buckets on. The
+shipped 344195b5ef5 has none at S >= 2. p300x2 is estimated about 4 to 5 ms slower per token. Wide may show no decode
+gain, or a small regression, against the code before stage 10. The final scorecard run measures both.
 
 Settings that changed between the two columns:
 - The trace region changes 64 -> 96 MiB for p300x2 and p150x4, and to 160 MiB for wide in this release. The MoE row
@@ -384,7 +394,7 @@ Settings that changed between the two columns:
 - The decode gain at 1 to 2 users comes from the MoE row buckets (106 -> 73 ms standalone). The TTFT gain at long prompts
   comes from the prefill views. At 16 users (the S bucket) the time is unchanged.
 
-### p300x2 (max_model_len 243,712)
+### p300x2 (max_model_len 243,712) [DSA buckets on]
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
@@ -404,7 +414,7 @@ Settings that changed between the two columns:
 | 8 | 1,024 / 256 | 6,089 ms | 6,091 ms | 144.8 ms | 121.7 ms | 6.90 | 8.20 | 47.6 | 55.2 |
 | 16 | 1,024 / 256 | 12,170 ms | 12,167 ms | 180.5 ms | 174.4 ms | 5.50 | 5.70 | 70.4 | 72.3 |
 
-### p300x2-wide (32 slots; before: max_model_len 151,552, pre-stage-10 A7 sweep; after: 137,216, 160 MiB trace region, all MoE buckets sorted, `doc/vllm/evidence/final/wide-r2_sweep.json`)
+### p300x2-wide [DSA buckets on] (32 slots; before: max_model_len 151,552, pre-stage-10 A7 sweep; after: 137,216, 160 MiB trace region, all MoE buckets sorted, `doc/vllm/evidence/final/wide-r2_sweep.json`)
 
 | Users | Input / output tokens | TTFT before | TTFT after | TPOT before | TPOT after | t/s/u before | t/s/u after | Output t/s before | Output t/s after |
 |---|---|---|---|---|---|---|---|---|---|
@@ -495,7 +505,7 @@ waits for the decode step already in flight, and with two requests the first wai
   -> 288.1 ms (+21 %), TPOT 50.89 -> 49.84 ms. CI burst TTFT median 82,318 -> 80,321 ms.
 - p300x2, 2 users at the same time (sweep rows): TTFT 365 -> 491 ms (128 input) and 1,146 -> 1,534 ms (1,024 input),
   both +34 %. Part of that rise is async, part is the different code; they are not separated here.
-- Stage 9 is running an async TTFT A/B with N >= 4 runs per arm; its result goes here when it lands.
+- N >= 4 confirmation in the final scorecard run.
 
 ## Batch invariance of the DSA width buckets (review #1 P2-2, tickets t20, t22, t23, t24)
 
