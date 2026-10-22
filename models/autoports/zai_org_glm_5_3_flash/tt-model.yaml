@@ -46,6 +46,8 @@ source:
 runtime:
   vllm: {version: "0.26.0"}
   plugin: {path: /home/raahem/vllm-tt-plugin}
+  # vllm-tt-plugin: branch glm53_finished_ids_fix = 92403f3 + 16febac (scheduler keeps finished-request ids; without
+  # it the engine stops with "no free device state slot" under KV pressure). doc/vllm_integration/README.md
   # the plugin scans the CHILDREN of this dir for vllm_metadata.json (TTGlm5NextForConditionalGeneration)
   extra_models_dir: models/autoports/zai_org_glm_5_3_flash/vllm_bundle
   # glm5_next needs transformers >= 5.16 (the tt-metal python_env has 5.12.1: "Transformers does not recognize this
@@ -233,3 +235,5 @@ card:
     - No multi-token prediction (the MTP layer is not served).
     - The p150x4 profile is derived by the sizing rule for the same (1, 4) mesh as p300x2; it was not run on p150
       boards.
+    - Needs vllm-tt-plugin 92403f3 plus fix 16febac (branch `glm53_finished_ids_fix`). An unfixed plugin loses
+      finished requests under KV pressure, and the engine stops with "no free device state slot".

@@ -500,11 +500,47 @@ Evidence: `doc/vllm/evidence/p3_preempt_p300x2.txt` and `.json` (token ids).
   both sides of the boundary ("and Madame Anarchist,"). A few tokens after the resume the loop word changes ("An
   aristocrat"). That is the expected effect of rebuilding the cache rows through prefill instead of decode.
 
+## Plugin fix: state-slot leak under KV pressure (2026-10-22, snapshot s9o, plugin 92403f3 + 16febac)
+
+Failure (stage-11 GPQA, `~/glm53-flash-bringup/logs/11/server-evals-20261022T1550.log`): `_alloc_prefill_state_slots`
+raised "no free device state slot for 4 prefill(s): held=[0..7], capacity=8"; EngineDeadError. The step had 4 prefills
+and 4 running decodes, but 5 slots were held: one by a request that was no longer running.
+
+Root cause (host repro with the real `TTScheduler`, then code reading): in default mode with a waiting request,
+`TTScheduler._schedule_without_pending_output_resumes` calls `super().schedule()` twice in one engine step. The
+prefill-only call schedules 0 tokens when the waiting head does not fit in the KV pool. It is then discarded for
+`_schedule_decode_only()`. The discarded call had already put `finished_req_ids` in its output and reset them
+(`_update_after_schedule`). The runner never saw those ids: the request stayed in `runner.requests` with its
+`_req_state_slot`, and `_alloc_prefill_state_slots` counted the slot as held. The engine does call `execute_model` on
+0-token steps, so the zero-token skip in the engine was not the cause. The 2-request preemption smoke passed because
+the waiting request always fit when a request finished.
+
+Fix: vllm-tt-plugin commit 16febac on the local branch `glm53_finished_ids_fix` (from 92403f3, not pushed):
+`_carry_lifecycle_events` merges the discarded result's finished / preempted ids and freed encoder hashes into the
+returned result. Regression test `tests/test_scheduler_lifecycle_events.py` (passes with the fix, fails without it);
+`test_scheduler.py`, `test_state_slots.py`, `test_block_scheduler.py` pass (53 with the new test); ruff clean.
+
+Device validation: `~/glm53-flash-bringup/scripts/s9_slot.sh`, one p300x2 server (16 x 262,144) on snapshot s9o
+(27780ede3fd, tt code of 344195b5ef5), the patched plugin from a copy on PYTHONPATH (with one validation-only log line
+per carried event), `scripts/09-slotleak.py`. Evidence: `doc/vllm/evidence/slotleak/` (`slotfix_p300x2.txt`,
+`t1_p300x2.json`, `t2_p300x2.json`).
+
+- T1, leak trigger: 15 requests of 2,000 tokens (max_tokens 200 to 760), then a 262,112-token request that cannot be
+  admitted until they finish, then 16 concurrent requests. 32/32 complete. The scheduler carried 13 finished ids from
+  empty prefill attempts. Without the fix those 13 slots leak, and the 16 concurrent requests need more than the 3
+  remaining slots.
+- T2, overload: a solo greedy control of prompt 15, then 16 concurrent 20,000-token prompts x 512 greedy tokens (more
+  than the 265,216-token pool). 16/16 complete with 512 tokens, `vllm:num_preemptions` 0 -> 1, no error. Prompt 15
+  equals its solo output (all 512 tokens).
+- Server exit 0, no leftover processes. We did not run an unpatched device crash (user: no runs that do not change the
+  result); the host repro shows the lost id.
+
 ## Scripts
 
 The device runs used workspace scripts (`~/glm53-flash-bringup/scripts/`). Copies of the ones the evidence names most
 are in `doc/vllm/scripts/` for reference (paths assume that workspace): `09-serve.sh` (server + readiness + smokes +
-needle + sweep), `09-smoke.py` (served smokes), `09-needle.py` (passkey retrieval), `10-perf-sweep.py` (sweeps), `09-preempt.py` (preemption smoke).
+needle + sweep), `09-smoke.py` (served smokes), `09-needle.py` (passkey retrieval), `10-perf-sweep.py` (sweeps),
+`09-preempt.py` (preemption smoke), `09-slotleak.py` (state-slot leak loads).
 The others (`s9_final.sh`, `s9_wide_rerun.sh`, `09-g9-probe.sh`, `09-diag.py`, `09-burst-diag.py`,
 `09_shard_place.py`, `09_slot_width_check.py`, `09-qcapture.py`, `09_standalone_q.py`) are workspace-only.
 

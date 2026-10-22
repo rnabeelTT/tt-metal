@@ -1,0 +1,40 @@
+# Device state-slot leak: validation of the vllm-tt-plugin fix (16febac on 92403f3), profile p300x2
+# ticket ~/glm53-flash-bringup/scripts/s9_slot.sh (snapshot s9o = 27780ede3fd, tt code of 344195b5ef5); plugin from a patched copy via PYTHONPATH
+
+## ticket
+=== start Thu Oct 22 04:54:51 PM UTC 2026 : timeout -k 120 7200 /home/raahem/glm53-flash-bringup/scripts/s9_slot.sh
+=== s9_slot snapshot /home/raahem/glm53-flash-bringup/s9o_snap base 27780ede3fd71be8a468c6e7d2a0c96aefc148ef plugin /home/raahem/glm53-flash-bringup/plugin_fixcopy/src
+4e745e71ebecc736d4e58bc9118837b0  /home/raahem/glm53-flash-bringup/plugin_fixcopy/src/vllm_tt_plugin/scheduler.py
+serve exit=0
+LEFTOVER after slotfix: none
+carried log lines: 13
+=== s9_slot done 2026-10-22T17:11:02+00:00
+=== exit code: 0 Thu Oct 22 05:11:02 PM UTC 2026
+
+## 09-slotleak.py output
+SLOTLEAK t1 phase 1: 15 short requests (2,000 tokens, max_tokens 200..760) + blocker 262112 tokens
+SLOTLEAK t1 phase 1 done: 16/16 ok, errors []
+SLOTLEAK t1 phase 2 (16 concurrent after the blocker): 16/16 ok, errors []
+SLOTLEAK RESULT t1 PASS wall 373.4 s -> /home/raahem/glm53-flash-bringup/logs/09/slotleak-t1.json
+SLOTLEAK t2 solo 15: 512 tokens, 53.2 s, ok True
+SLOTLEAK t2 concurrent: 16/16 finished with 512 tokens; num_preemptions 0.0 -> 1.0; errors []
+SLOTLEAK t2 prompt 15: concurrent equal to solo True, first divergence None, wall 351.4 s
+SLOTLEAK RESULT t2 PASS wall 404.7 s -> /home/raahem/glm53-flash-bringup/logs/09/slotleak-t2.json
+
+## server: the fix carried these finished ids (each one is a slot the unpatched plugin leaks)
+10-22 16:58:48 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:58:55 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:02 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:08 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:15 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:21 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:27 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:32 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:37 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:42 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:46 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:50 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+10-22 16:59:54 [tt/scheduler.py:467] SLOTLEAK carried 1 finished / 0 preempted id(s) from the empty prefill attempt
+
+## server: errors
+slot-exhaustion or EngineDead lines: 0

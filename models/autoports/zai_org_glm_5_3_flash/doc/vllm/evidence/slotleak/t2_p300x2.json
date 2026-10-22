@@ -1,0 +1,153 @@
+{
+ "mode": "t2",
+ "preemptions_before": 0.0,
+ "preemptions_after": 1.0,
+ "solo": {
+  "15": {
+   "tag": "solo15",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 53.2
+  }
+ },
+ "concurrent": [
+  {
+   "tag": "conc0",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 318.1
+  },
+  {
+   "tag": "conc1",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc2",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc3",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc4",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc5",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc6",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc7",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc8",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc9",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc10",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc11",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc12",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 251.7
+  },
+  {
+   "tag": "conc13",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 351.4
+  },
+  {
+   "tag": "conc14",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 351.4
+  },
+  {
+   "tag": "conc15",
+   "ok": true,
+   "n": 512,
+   "max_tokens": 512,
+   "finish": "length",
+   "wall_s": 351.4
+  }
+ ],
+ "equality": {
+  "15": {
+   "equal": true,
+   "first_divergence": null
+  }
+ },
+ "result": "PASS",
+ "wall_s": 404.7
+}

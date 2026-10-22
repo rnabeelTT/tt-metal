@@ -33,6 +33,7 @@ re-measures every number on the current code.
 | Shipped mode (max reasoning effort) | 2 control prompts finish the reasoning and give correct content on every profile |
 | Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`: on 0bd45f315e1 + the P1-2 fix, on 4678d8fccf4, and with the stage-10 buckets on 0a2663d0b6b, stage-10 t17 [DSA buckets on]); -1.05 ms per token on p300x2-long |
 | Served = standalone | the 6 qualitative prompts give the same tokens through vLLM and through the standalone generator (p300x2-long build) |
+| Overload and preemption (plugin fix 16febac) | p300x2: 16 x 20K-token prompts over the pool, and a slot-leak trigger load: no error, all requests complete (Plugin fix below) |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
 | Concurrency determinism | [DSA buckets on] a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2. Short prompts only: every request uses the smallest width bucket, alone or in the burst. Next to a long request the multi-slot DSA buckets made outputs batch-dependent (stage 10; Preemption below); the current code turns them off |
 
@@ -238,6 +239,28 @@ showed the same kind of divergence: a 4,100-token request next to a ~70K decode 
 17 with the buckets on, and is equal with them off. 344195b5ef5 turns them off at S >= 2. The final verification run on
 the current code re-checks it. The preempted request's stream continues across the recompute with no dropped or repeated
 token (`../vllm/evidence/p3_preempt_p300x2.txt`).
+
+## Plugin fix: device state slots under KV pressure (vllm-tt-plugin 92403f3 + 16febac)
+
+The stage-11 GPQA run (p300x2, 8 slots, full KV pool, requests waiting) stopped the engine with "no free device state
+slot for 4 prefill(s): held=[0..7], capacity=8". Root cause: the plugin scheduler (`TTScheduler`) lost the ids of
+finished requests. With a request waiting, it first tries a prefill-only schedule. When the waiting request does not fit
+in the KV pool, that schedule is empty, and the scheduler returns a decode-only schedule instead. The empty schedule had
+already taken the ids of the requests that finished since the last step, so the model runner never released them. Each
+such request kept its device state slot, until a prefill found no free slot. The adapter cannot correct this: the slot
+map belongs to the runner.
+
+Fix: commit 16febac on the local vllm-tt-plugin branch `glm53_finished_ids_fix` (from 92403f3, not pushed). The
+scheduler adds the finished and preempted ids of the empty schedule to the schedule that it returns. Regression test:
+`tests/test_scheduler_lifecycle_events.py` (fails without the fix). The bundle uses this plugin tree
+(`runtime.plugin.path` in `tt-model.yaml`).
+
+Device check (p300x2, 344195b5ef5 code, `../vllm/evidence/slotleak/`): one server, two loads.
+
+| load | result |
+| --- | --- |
+| 15 short requests, then a 262,112-token request that cannot start until they finish, then 16 concurrent requests | 32/32 complete; the fix carried 13 finished ids (each one a leaked slot without the fix, so the 16 concurrent requests would exceed the free slots) |
+| 16 concurrent 20,000-token prompts x 512 greedy tokens (more than the 265,216-token pool) | 16/16 complete, `num_preemptions` 0 -> 1, no error; the spot-checked request (the last one) equals its solo greedy output |
 
 ## Readiness runs and reasoning effort
 

@@ -1,0 +1,265 @@
+{
+ "mode": "t1",
+ "preemptions_before": 0.0,
+ "requests": [
+  {
+   "tag": "short0",
+   "ok": true,
+   "n": 200,
+   "max_tokens": 200,
+   "finish": "length",
+   "wall_s": 52.7
+  },
+  {
+   "tag": "short1",
+   "ok": true,
+   "n": 240,
+   "max_tokens": 240,
+   "finish": "length",
+   "wall_s": 59.7
+  },
+  {
+   "tag": "short2",
+   "ok": true,
+   "n": 280,
+   "max_tokens": 280,
+   "finish": "length",
+   "wall_s": 66.7
+  },
+  {
+   "tag": "short3",
+   "ok": true,
+   "n": 320,
+   "max_tokens": 320,
+   "finish": "length",
+   "wall_s": 73.4
+  },
+  {
+   "tag": "short4",
+   "ok": true,
+   "n": 360,
+   "max_tokens": 360,
+   "finish": "length",
+   "wall_s": 79.7
+  },
+  {
+   "tag": "short5",
+   "ok": true,
+   "n": 400,
+   "max_tokens": 400,
+   "finish": "length",
+   "wall_s": 85.9
+  },
+  {
+   "tag": "short6",
+   "ok": true,
+   "n": 440,
+   "max_tokens": 440,
+   "finish": "length",
+   "wall_s": 91.9
+  },
+  {
+   "tag": "short7",
+   "ok": true,
+   "n": 480,
+   "max_tokens": 480,
+   "finish": "length",
+   "wall_s": 97.0
+  },
+  {
+   "tag": "short8",
+   "ok": true,
+   "n": 520,
+   "max_tokens": 520,
+   "finish": "length",
+   "wall_s": 102.0
+  },
+  {
+   "tag": "short9",
+   "ok": true,
+   "n": 560,
+   "max_tokens": 560,
+   "finish": "length",
+   "wall_s": 106.8
+  },
+  {
+   "tag": "short10",
+   "ok": true,
+   "n": 600,
+   "max_tokens": 600,
+   "finish": "length",
+   "wall_s": 111.4
+  },
+  {
+   "tag": "short11",
+   "ok": true,
+   "n": 640,
+   "max_tokens": 640,
+   "finish": "length",
+   "wall_s": 115.3
+  },
+  {
+   "tag": "short12",
+   "ok": true,
+   "n": 680,
+   "max_tokens": 680,
+   "finish": "length",
+   "wall_s": 119.1
+  },
+  {
+   "tag": "short13",
+   "ok": true,
+   "n": 720,
+   "max_tokens": 720,
+   "finish": "length",
+   "wall_s": 122.4
+  },
+  {
+   "tag": "short14",
+   "ok": true,
+   "n": 760,
+   "max_tokens": 760,
+   "finish": "length",
+   "wall_s": 343.3
+  },
+  {
+   "tag": "blocker",
+   "ok": true,
+   "n": 32,
+   "max_tokens": 32,
+   "finish": "length",
+   "wall_s": 312.7
+  },
+  {
+   "tag": "after0",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after1",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after2",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after3",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after4",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after5",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after6",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after7",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after8",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after9",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after10",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after11",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after12",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after13",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after14",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  },
+  {
+   "tag": "after15",
+   "ok": true,
+   "n": 64,
+   "max_tokens": 64,
+   "finish": "length",
+   "wall_s": 30.1
+  }
+ ],
+ "preemptions_after": 0.0,
+ "result": "PASS",
+ "wall_s": 373.4
+}
