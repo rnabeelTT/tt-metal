@@ -8,6 +8,7 @@ add_subdirectory(dispatch)
 add_subdirectory(extract)
 add_subdirectory(inbound_socket_service_sync)
 add_subdirectory(insert)
+add_subdirectory(kda_decode_conv)
 add_subdirectory(masked_bincount)
 add_subdirectory(moe_grouped_topk)
 add_subdirectory(moe_hash_gate)
@@ -38,6 +39,7 @@ target_link_libraries(
         TTNN::Ops::Experimental::DeepSeekPrefill::Extract
         TTNN::Ops::Experimental::DeepSeekPrefill::H2dSocketSync
         TTNN::Ops::Experimental::DeepSeekPrefill::Insert
+        TTNN::Ops::Experimental::DeepSeekPrefill::KdaDecodeConv
         TTNN::Ops::Experimental::DeepSeekPrefill::MaskedBincount
         TTNN::Ops::Experimental::DeepSeekPrefill::MoeGroupedTopk
         TTNN::Ops::Experimental::DeepSeekPrefill::MoeHashGate
@@ -75,6 +77,7 @@ target_sources(
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::Extract>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::H2dSocketSync>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::Insert>
+        $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::KdaDecodeConv>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MaskedBincount>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MoeGroupedTopk>
         $<TARGET_OBJECTS:TTNN::Ops::Experimental::DeepSeekPrefill::MoeHashGate>

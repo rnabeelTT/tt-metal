@@ -98,6 +98,7 @@
 #include "ttnn/operations/experimental/fusion/fusion_dispatch_op_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/extract/extract_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/insert/insert_nanobind.hpp"
+#include "ttnn/operations/experimental/deepseek_prefill/kda_decode_conv/kda_decode_conv_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/moe_grouped_topk/moe_grouped_topk_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/moe_hash_gate/moe_hash_gate_nanobind.hpp"
 #include "ttnn/operations/experimental/deepseek_prefill/update_padded_kv_cache/update_padded_kv_cache_nanobind.hpp"
@@ -227,6 +228,7 @@ void py_module(nb::module_& mod) {
     deepseek_prefill::detail::bind_unified_routed_expert_ffn(mod);
     deepseek_prefill::detail::bind_extract(mod);
     deepseek_prefill::detail::bind_insert(mod);
+    deepseek_prefill::kda_decode_conv::detail::bind_experimental_kda_decode_conv_operation(mod);
     deepseek_prefill::detail::bind_update_padded_kv_cache(mod);
     deepseek_prefill::detail::bind_zero_padded_kv_cache(mod);
     deepseek_prefill::detail::bind_rotary_embedding_indexed(mod);

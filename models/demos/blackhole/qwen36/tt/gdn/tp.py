@@ -320,6 +320,12 @@ class TPGatedDeltaNet:
             self._gqa_expand_matrix()
         if getattr(self.args, "gdn_norm_fold", False):
             self._decode_norm_weights(bool(getattr(self.args, "gdn_decode_high_precision", True)))
+        # Fused decode (QWEN35_GDN_FUSED_DECODE=1): the conv shift register + SiLU is one kda_decode_conv and the
+        # delta-rule step one in-place fp32 kda.recurrent_decode (grouped q/k heads, per-head decay), ~30 ops -> ~8.
+        # Needs the fp32 recurrent state (the model forces gdn_state_dtype fp32 with the flag).
+        self._fused_decode = os.environ.get("QWEN35_GDN_FUSED_DECODE", "0") == "1" and self.K == 4
+        if self._fused_decode:
+            self._fused_decode_consts()
 
     def reset_state(self, batch_size=None):
         # batch_size is accepted so this matches Qwen36GatedDeltaNet.reset_state, which
@@ -545,12 +551,15 @@ class TPGatedDeltaNet:
             self.args.gdn_value_dim_tp,
         )
 
-    def _project_qkvzab(self, x, S, out_mc=None):
+    def _project_qkvzab(self, x, S, out_mc=None, keep_proj=False):
         """Project x → (qkv, z, a, b). Fused path: one [qkv|z|a|b] matmul then slice.
         out_mc: placement of the qkvzab matmul + slices. None → DRAM; prefill+decode now pass L1 to
-        keep qkvzab + q/k/v/z/a/b resident (was DRAM to spare NoC traffic — re-measure if reverting)."""
+        keep qkvzab + q/k/v/z/a/b resident (was DRAM to spare NoC traffic — re-measure if reverting).
+        keep_proj (decode, fused qkvzab weight only): return the whole DRAM [qkv|z|a|b] projection in place of the qkv
+        slice -- kda_decode_conv reads its first qkv_dim columns straight from it."""
         Nv, qz, az = self.Nv, self.qkv_dim_tp, self.qkvz_dim_tp
-        _proj_mc = out_mc if out_mc is not None else ttnn.DRAM_MEMORY_CONFIG
+        keep_proj = keep_proj and self._fuse_ab and S <= tpc.TILE_SIZE
+        _proj_mc = ttnn.DRAM_MEMORY_CONFIG if keep_proj else (out_mc if out_mc is not None else ttnn.DRAM_MEMORY_CONFIG)
         if self._fuse_ab:
             # Prefill: x is K-sharded (norm skipped its AG) -> fused all-gather + qkvzab matmul.
             if self._fuse_agmm and S > tpc.TILE_SIZE:
@@ -577,11 +586,13 @@ class TPGatedDeltaNet:
                     self.tw["qkvz"],
                     self.args.gdn_qkvz_decode_1d_progcfg,
                     self.cfg,
-                    out_memory_config=ttnn.L1_MEMORY_CONFIG if out_mc is not None else ttnn.DRAM_MEMORY_CONFIG,
+                    out_memory_config=ttnn.L1_MEMORY_CONFIG
+                    if out_mc is not None and not keep_proj
+                    else ttnn.DRAM_MEMORY_CONFIG,
                 )
             else:
                 qkvzab = self._col_proj(x, self.tw["qkvz"], self.args.gdn_qkvzab_progcfg, out_memory_config=_proj_mc)
-            qkv = ttnn.slice(qkvzab, (0, 0, 0), (1, S, qz), memory_config=out_mc)
+            qkv = qkvzab if keep_proj else ttnn.slice(qkvzab, (0, 0, 0), (1, S, qz), memory_config=out_mc)
             # z (output gate) lives across the chunk kernel (gated = out_f * silu(z)); L1 z (6MB@S=2048)
             # clashes with the scan kernel CBs -> keep DRAM in chunk-prefill; decode (small S) keeps out_mc.
             _z_mc = ttnn.DRAM_MEMORY_CONFIG if S > tpc.TILE_SIZE else out_mc  # chunk prefill: z stays DRAM (CB clash)
@@ -592,13 +603,15 @@ class TPGatedDeltaNet:
                 stride = -(-Nv // tpc.TILE_SIZE) * tpc.TILE_SIZE
                 a = ttnn.slice(qkvzab, (0, 0, az), (1, S, az + Nv), memory_config=out_mc)
                 b = ttnn.slice(qkvzab, (0, 0, az + stride), (1, S, az + stride + Nv), memory_config=out_mc)
-                ttnn.deallocate(qkvzab)
+                if not keep_proj:
+                    ttnn.deallocate(qkvzab)
                 return qkv, z, a, b
             # a,b end mid-tile; slicing straight from qkvzab untilizes the full 4120-wide tensor.
             # Grab the enclosing tile-aligned block once (no untilize), then split a/b from it (test_gdn_slice_opt).
             _ab_end = min(az + -(-2 * Nv // tpc.TILE_SIZE) * tpc.TILE_SIZE, qkvzab.shape[-1])  # 2*Nv up to a tile
             ab = ttnn.slice(qkvzab, (0, 0, az), (1, S, _ab_end), memory_config=out_mc)
-            ttnn.deallocate(qkvzab)
+            if not keep_proj:
+                ttnn.deallocate(qkvzab)
             a = ttnn.slice(ab, (0, 0, 0), (1, S, Nv), memory_config=out_mc)
             b = ttnn.slice(ab, (0, 0, Nv), (1, S, 2 * Nv), memory_config=out_mc)
             ttnn.deallocate(ab)
@@ -1445,7 +1458,128 @@ class TPGatedDeltaNet:
         ttnn.deallocate(gated)
         return out
 
+    def _fused_decode_consts(self):
+        """kda_decode_conv operands built once, before any trace: this layer's 4 conv taps as fp32 [1,1,1,qkv_dim]
+        rows, and the per-width slot masks [1,1,Bmax,1] (rows < B are 1), shared by every layer through args."""
+        self._taps32 = [
+            ttnn.reshape(
+                ttnn.typecast(t, ttnn.float32, memory_config=ttnn.DRAM_MEMORY_CONFIG), (1, 1, 1, self.qkv_dim_tp)
+            )
+            for t in self.tw["conv_taps"]
+        ]
+        cache = getattr(self.args, "_qwen36_gqa_expand", None)
+        if cache is None:
+            cache = {}
+            self.args._qwen36_gqa_expand = cache
+        key = ("fused_decode_active", self.B)
+        if key not in cache:
+            masks = {}
+            for b in range(1, self.B + 1):
+                m = torch.zeros(1, 1, self.B, 1, dtype=torch.float32)
+                m[:, :, :b] = 1.0
+                masks[b] = ttnn.from_torch(
+                    m,
+                    dtype=ttnn.float32,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=self.mesh,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+                )
+            cache[key] = masks
+        self._active_masks = cache[key]
+
+    def _forward_decode_fused(self, x):
+        tw, Nk, Nv, Dv = self.tw, self.Nk, self.Nv, self.Dv
+        Bmax = self.B
+        _L1 = ttnn.L1_MEMORY_CONFIG
+        _DR = ttnn.DRAM_MEMORY_CONFIG  # the two kda ops address 64-byte face rows of DRAM-interleaved tensors
+        if self.conv_states is None:
+            self.reset_state()
+        assert self.rec_state.dtype == ttnn.float32, "fused GDN decode needs the fp32 recurrent state"
+        if len(x.shape) == 4:
+            x = ttnn.reshape(x, (1, x.shape[-2], x.shape[-1]))
+        B = x.shape[-2]
+
+        proj, z, a, b = self._project_qkvzab(x, B, out_mc=_L1, keep_proj=True)
+        # keep_proj hands back the DRAM [qkv|z|a|b] projection; the unfused-weight fallback returns an L1 qkv slice
+        proj_d = proj if proj.memory_config().buffer_type == ttnn.BufferType.DRAM else ttnn.to_memory_config(proj, _DR)
+        # conv: h0..h2 are the persistent conv_states[1..3] (oldest first), shifted in place; conv_states[0] is the
+        # tap the unfused shift register drops this step anyway. Rows >= B are idle (mask 0): untouched, output 0.
+        st = self.conv_states
+        hist = [ttnn.reshape(st[j], (1, 1, Bmax, self.qkv_dim_tp)) for j in range(1, 4)]
+        qkv = ttnn.experimental.deepseek_prefill.kda_decode_conv(
+            ttnn.reshape(proj_d, (1, 1, B, proj_d.shape[-1])),
+            hist[0],
+            hist[1],
+            hist[2],
+            self._taps32[0],
+            self._taps32[1],
+            self._taps32[2],
+            self._taps32[3],
+            self._active_masks[B],
+            self.qkv_dim_tp,
+        )
+        if proj_d is not proj:
+            ttnn.deallocate(proj_d)
+        ttnn.deallocate(proj)
+
+        beta = ttnn.sigmoid(ttnn.typecast(b, ttnn.float32, memory_config=_DR), memory_config=_DR)
+        ttnn.deallocate(b)
+        g = ttnn.multiply(tw["neg_exp_A"], _softplus_add(a, tw["dt_bias"]), memory_config=_L1)
+        ttnn.deallocate(a)
+        decay = ttnn.exp(ttnn.typecast(g, ttnn.float32, memory_config=_DR), memory_config=_DR)
+        ttnn.deallocate(g)
+
+        # in-place fp32 step over users [0, B): value head h reads q / k head h // (Nv / Nk); the L2 norms, the query
+        # scale and exp(g) broadcast over K all happen in the kernel
+        o = ttnn.experimental.kda.recurrent_decode(
+            self.rec_state,
+            qkv,
+            ttnn.reshape(decay, (1, 1, B, Nv)),
+            ttnn.reshape(beta, (1, 1, B, Nv)),
+            float(self.scale),
+            eps=1e-6,
+            num_qk_heads=Nk,
+            per_head_decay=True,
+            batch=B,
+        )
+        ttnn.deallocate(qkv)
+        ttnn.deallocate(decay)
+        ttnn.deallocate(beta)
+
+        o16 = ttnn.typecast(o, ttnn.bfloat16, memory_config=_L1)
+        ttnn.deallocate(o)
+        out_r = ttnn.reshape(o16, (B, Nv, Dv))
+        out_n = ttnn.rms_norm(out_r, weight=tw["norm_w"], epsilon=1e-6, memory_config=_L1)  # gated norm (no +1)
+        ttnn.deallocate(out_r)
+        out_f = ttnn.reshape(out_n, (1, B, self.value_dim_tp))
+        ttnn.deallocate(out_n)
+        gated = _silu_mul(out_f, z, _L1)
+        ttnn.deallocate(out_f)
+        ttnn.deallocate(z)
+        return self._decode_out_proj(gated, B)
+
+    def _decode_out_proj(self, gated, B):
+        tw = self.tw
+        if getattr(self.args, "fuse_out_mmrs_decode", False):
+            # Stage-5 candidate: out-proj matmul fused with the reduce-scatter (one op, persistent buffers per B).
+            return self._out_mmrs_decode(gated, tw["out"], B)
+        partial = self._row_proj(gated, tw["out"])
+        ttnn.deallocate(gated)
+        partial = ttnn.reshape(partial, (1, 1, B, partial.shape[-1]))
+        return tt_all_reduce(
+            partial,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+
     def forward_decode(self, x):
+        if self._fused_decode:
+            return self._forward_decode_fused(x)
         tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
         Bmax = self.B
         _L1 = ttnn.L1_MEMORY_CONFIG  # keep decode conv→recurrence→norm/gate chain L1-resident

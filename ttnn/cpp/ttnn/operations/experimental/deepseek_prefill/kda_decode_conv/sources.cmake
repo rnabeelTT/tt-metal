@@ -1,0 +1,11 @@
+# Source files for ttnn_op_experimental_deepseek_prefill_kda_decode_conv.
+
+set(TTNN_OP_EXPERIMENTAL_DEEPSEEK_PREFILL_KDA_DECODE_CONV_API_HEADERS kda_decode_conv.hpp)
+
+set(TTNN_OP_EXPERIMENTAL_DEEPSEEK_PREFILL_KDA_DECODE_CONV_SRCS
+    device/kda_decode_conv_device_operation.cpp
+    device/kda_decode_conv_program_factory.cpp
+    kda_decode_conv.cpp
+)
+
+set(TTNN_OP_EXPERIMENTAL_DEEPSEEK_PREFILL_KDA_DECODE_CONV_NANOBIND_SRCS kda_decode_conv_nanobind.cpp)

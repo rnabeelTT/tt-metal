@@ -825,6 +825,9 @@ def create_model(
     # named by QWEN35_PRECISION_CONFIG (``none`` = code defaults), mapped onto the MultichipConfig knobs the runtime reads.
     policy, policy_path = precision.load_policy(num_devices=mesh_device.get_num_devices())
     mc = precision.apply_policy(mc, policy)
+    if os.environ.get("QWEN35_GDN_FUSED_DECODE", "0") == "1":
+        # the fused GDN decode steps the recurrent state in place in fp32 (kda.recurrent_decode); the KV budget follows
+        mc = mc.with_(gdn_state_dtype=ttnn.float32, gdn_decode_high_precision=True)
     logger.info(
         f"precision policy {policy.get('config_id')} ({policy_path or 'code defaults'}): "
         f"{json.dumps(precision.describe_config(mc), sort_keys=True)}"
