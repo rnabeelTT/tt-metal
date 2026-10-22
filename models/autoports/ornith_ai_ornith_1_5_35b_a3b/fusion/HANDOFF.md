@@ -187,6 +187,26 @@ path; the scorecard runs 8 in flight, which takes the batched path): `runs/step2
 = boundary 100 + mixer 156 + MoE 38. Re-plan from this: the boundary (step 3, ~4 ms per token) and the GDN mixer
 (step 4, ~6.2 ms) are now the big items; the remaining MoE work (split-pair, merge, router) is worth ~0.4-0.6 ms.
 
+## Principle (from the user, 2026-10-22): scale single-user and concurrent decode together
+
+Every fused op is built for M rows (decode widths 1..32, and the MTP verify's 2 rows), not only for one token. A
+single-user-only path is allowed only where the multi-row version is intractable or clearly not worth it, and that
+is written down next to it. Measure each step at 1 user and at concurrency: per-layer b1 / b8 / b32
+(`traced_decode_batched and (b1- or b8- or b32-)`), served TPOT at 1 / 8 / 32 users.
+
+Status against that: step 1's router matmul config covers every decode width (<= 32 rows); the fused top-k and the
+step 2 v1 fused MoE are one-row only (`T == 1`); widths 2-16 take the pairs path, 32 the expert-sorted path (they see
+only the rounded weights). Multi-user 4-chip baseline rows (u8 / u32, MTP off) still to be measured.
+
+Revised order (re-planned from the step 0-2 profiles):
+- 2b. Multi-row fused MoE: per-row top-k + expert union (UINT16 list) + per-(row, expert) weights; each core streams
+  its column of every union expert once and multiplies all rows (custom_mm in0 tiles of 1/2/4/8 rows; >8 rows in
+  8-row passes over the same weights in L1); down writes one output row per user. Reference: gpt-oss DFlash union ops
+  (`models/demos/gpt_oss/tt/fused_decode/union.py`, `stream_*_union_*.cpp` on main). Do the split-pair gate|up
+  (each core streams only its own bank) at the same time. Keep, per width, whichever of fused / pairs / sorted wins.
+- 3. Boundary (all-reduce + residual + RMSNorm) for M rows from the start.
+- 4-8 as below, each multi-row.
+
 ## Plan (in order; each step ends with a measurement)
 
 1. **MoE quick wins.** (DONE: fused top-k + 1D router, MoE 177 -> 137 us, TPOT 19.20 -> 17.90 ms; the gate|up / shared
