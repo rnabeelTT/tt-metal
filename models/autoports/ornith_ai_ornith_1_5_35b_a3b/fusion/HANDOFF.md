@@ -207,6 +207,50 @@ Revised order (re-planned from the step 0-2 profiles):
 - 3. Boundary (all-reduce + residual + RMSNorm) for M rows from the start.
 - 4-8 as below, each multi-row.
 
+### Step 2b: multi-row fused MoE (decode widths 2..8) + the 2-chip layout
+
+Working setup from here (user's call, 2026-10-22): the published image runs as a p300 reference server on chips 0,1
+(port 20000, `DEVS=0,1`), development runs on chips 2,3 (`MESH=P300 DEVS=2,3` for trun / run_layer_prof, a p300 dev
+server on `PORT=20001`); milestones are measured on both p300x2 (all 4 chips, the reference numbers) and p300.
+Quality reference per numerics change: `tools/longctx_quality.py` (garble gate, prompts frozen in
+`results/quality_prompts`) + greedy; the 3-task scorecard only at packaging.
+
+- `moe_decode/union.py`: `RouteRows` (one core per row: top-k + softmax into a route table) -> `ExpertGateUpRows`
+  (union of the rows' experts; every union expert's columns read once for all rows on [Mp, 32] tiles, Mp = 2 / 4 / 8;
+  per-row weights through an identity matmul, as the gpt-oss DFlash union ops) -> `ExpertDownRows` (union slots
+  stacked along K, accumulated in chunks). Op test rows 2 / 3 / 4 / 8, TP4 and TP2 shapes: ids exact, worst-row PCC
+  >= 0.99996.
+- 2-chip / 122B layout (256 expert columns per device): an expert's up and gate columns share a bank, interleaved per
+  K row; now read as one contiguous [K, 2] block in 16 KB packets, one custom_mm with ct = 2 (was one 1 KB request
+  per tile: gate|up 225 -> 57 us max at 2 rows, 770 -> 149 at 8).
+- 2-chip per-layer (device 0), baseline -> fused, MoE us: b1 155.9 -> 56.2, b2 304.8 -> 93.9, b4 450.9 -> 157.8,
+  b8 721.9 -> 309.3; layer step GDN / attention: b1 511 / 419 -> 420 / 329, b2 681 / 594 -> 468 / 378,
+  b4 859 / 759 -> 564 / 457, b8 1335 / 1034 -> 773 / 596 us.
+- What bounds 8 rows: per union slot ~2.6 us of core time (unpack 1.7 us for the 2 x 64 bfp8 weight tiles, SFPU
+  0.7 us for silu / weights / rounding on 8 rows); 4 cores per pair. More cores per pair measured slower (the extra
+  cores sit off the banks' rows and their reads collapse). Next levers: a cheaper SFPU tail (fold the per-row weight
+  into the down op's input), K-split across a pair's cores with a partial-sum exchange.
+- Widths 9..32 still take the pairs (<= 16) / expert-sorted (32) paths.
+
+Milestone (2026-10-22, MTP off, 128/128, `results/qb2_steps12/`): TPOT ms / tok/s/u / total tok/s.
+
+| Mesh | Users | Published | Steps 1 + 2 + 2b (`QWEN35_MOE_FUSED_DECODE=1`) |
+|---|---|---|---|
+| p300x2 (4 chips) | 1 | 19.19 / 52.1 / 50.0 | 13.99 / 71.5 / 67.4 |
+| | 8 | 36.67 / 27.3 / 176.8 | 19.26 / 51.9 / 286.6 (+62%) |
+| | 32 | 61.98 / 16.1 / 346.6 | 60.87 / 16.4 / 352.1 |
+| p300 (2 chips) | 1 | 21.64 / 46.2 / 44.4 | 16.46 / 60.8 / 57.5 |
+| | 8 | 47.45 / 21.1 / 141.3 | 28.89 / 34.6 / 208.2 (+47%) |
+| | 32 | 84.86 / 11.8 / 273.8 | 86.91 / 11.5 / 265.7 (-3%, not yet explained) |
+
+Quality: garble gate (lower is better; the flagged "non-words" were all real technical terms, check `examples`, not only
+the score): p300x2 published 11.13 vs new 9.45; p300 reference 10.71 vs new 15.56 (one prose sample at 29.97 with
+only real words flagged; the reference's own two prose samples score 21.5 / 5.8). Greedy outputs coherent at 1 and 8
+users on both meshes. Step 2 v1 evals (p300x2, concurrency 1): GPQA-D 0.80, IFEval prompt-strict 0.72.
+
+Next: the 32-user width (expert-sorted path; union of 32 x 8 picks covers ~160 of 256 experts) and widths 9..16;
+the 8-row core-time levers above; then step 3 (boundary) for all widths.
+
 ## Plan (in order; each step ends with a measurement)
 
 1. **MoE quick wins.** (DONE: fused top-k + 1D router, MoE 177 -> 137 us, TPOT 19.20 -> 17.90 ms; the gate|up / shared

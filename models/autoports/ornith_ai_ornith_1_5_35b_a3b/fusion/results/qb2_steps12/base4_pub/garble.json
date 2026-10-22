@@ -1,0 +1,207 @@
+{
+ "tag": "base4_pub",
+ "summary": {
+  "t0.6_k20": {
+   "runs": 6,
+   "garble_per_1k_mean": 11.13,
+   "garble_per_1k_max": 29.67,
+   "nonword_total": 19
+  }
+ },
+ "rows": [
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "ctx_small",
+   "rep": 0,
+   "prompt_tokens": 7651,
+   "completion_tokens": 900,
+   "elapsed_s": 18.8,
+   "n_words": 520,
+   "nonword": 3,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 1,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 7.69,
+   "examples": {
+    "nonword": [
+     "datatypes",
+     "declaratively",
+     "runtime's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "# Architecture Overview: Precision and Decode Bucketing\n\nThese two modules form complementary halves of an optimized inference runtime for a large mixture-of-experts language model (Qwen3.5-122B-A10B) running on Tenstorrent hardware. One handles the *numerical* question of which datatypes and compute fidelities to use; the other handles the *scheduling* question of how to pack variable-width batches efficiently. They are independent files with no direct imports between them, but they converge on the same underlying model object, and both are consumed by a \"shared Generator\" that drives the actual forward passes.\n\n## `precision.py`: the precision policy engine\n\nThis file treats a precision policy as a plain JSON document. The idea is that the entire numerical configuration of the model\u2014every weight dtype, every compute fidelity, every activation and cache datatype\u2014can be described declaratively and then *applied* to a `MultichipConfig` object, or *read back* from a built model to prove correctness. There are several entry points that work together:\n\n- **`load_policy`** decides which JSON file to use. It consults an environment variable (`QWEN35_PRECISION_CONFIG`), falling back to a mesh-size-appropriate shipped file, and finally to a `BASELINE_POLICY` constant. The `QWEN35_PRECISION_CONFIG=none` shortcut forces the code defaults.\n- **`apply_policy`** takes a policy dict and returns a new `MultichipConfig` with the requested settings. Crucially, it *validates* every field against the runtime's actual capabilities, raising `ValueError` for anything the hardware cannot construct.\n- **`effective_policy`** does the reverse: it reads a *built* model and reconstructs the policy that was actually in effect, so a test can prove the measured run used what was requested.\n- **`check_effective`** compares a requested policy against the effective one and returns a list of mismatches.\n- **`describe_config`** renders the precision-relevant fields as human-readable names for logging.\n\nThe `BASELINE_POLICY` documents a stage-7 shipped runtime: bfp4 routed experts, bfp8 shared experts and LM head, bf16 router, bfp8 KV cache, bf16 GDN (Gated Delta Net) state, and bf16 activations. Several fields are *fixed* by the runtime and cannot be changed (embedding dtype, residual, logits, sampling). The `_FIXED` map enforces this.\n\n## `decode_buckets.py`: width-based batch scheduling\n\nThis module addresses a real performance problem. A decode trace was captured at maximum batch width (32), where a single user triggered a 32-wide MoE step taking 124 ms/token\u2014far slower than the 24 ms/token a batch size of 1 would take. Because the vLLM plugin keeps live requests front-packed and marks idle rows with `start_pos == -1`, the decode step only needs to cover the *active* prefix. So this module keeps one decode trace per power-of-two width (1, 2, 4, ... up to `max_batch_size`), and before every step selects the smallest width that covers the active prefix.\n\nKey functions:\n- **`widths`** and **`width_for`** compute the set of valid widths and pick the smallest power-of-two that fits the active count.\n- **`active_prefix`** counts live rows by finding the highest index with `start_pos >= 0`.\n- **`select`** binds the shared Generator's decode-trace dictionaries to the selected width's store and keys the sampler's trace namespace accordingly. It returns `True` when the width changed.\n- **`carry_over_inputs`** copies device-resident tokens and positions from the previous width's buffers into the selected width's buffers, since the shared Generator merges device tokens (one step ahead) with the host view.\n- **`slice_inputs`** slices the plugin's full-width host inputs to the selected width.\n\n## How they fit together\n\nBoth modules operate on a shared `Generator` object. `precision.py` configures the model's numerical behavior at build time; `decode_buckets.py` selects the right trace at each decode step."
+  },
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "ctx_small",
+   "rep": 1,
+   "prompt_tokens": 7651,
+   "completion_tokens": 900,
+   "elapsed_s": 18.8,
+   "n_words": 573,
+   "nonword": 1,
+   "intraword_dup": 0,
+   "dup_adjacent": 4,
+   "dup_punct": 0,
+   "delim_imbalance": 4,
+   "language_skip": false,
+   "garble_per_1k": 29.67,
+   "examples": {
+    "nonword": [
+     "convolutional"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "bf16",
+     "bf16",
+     "bf16",
+     "the"
+    ]
+   },
+   "text": "# Understanding the Qwen3.5 Autoport Infrastructure\n\n## The Two Files and How They Fit Together\n\nThese two modules address two separate but equally critical concerns in the deployment of the Qwen3.5-122B-A10B model on Tenstorrent hardware. The first, `decode_buckets.py`, is a performance-optimization layer that solves a batching problem. The second, `precision.py`, is a numerical-precision policy engine that lets engineers sweep through different dtype configurations and prove that the model actually ran the way they configured it. Together they represent the \"make it fast and make it verifiable\" pair that a production ML inference stack needs.\n\nThe `decode_buckets.py` module exists because of a mismatch between how the model was captured and how it actually runs. During stage-9 profiling, the server captured a single decode trace at the maximum batch width of 32 sequences, and that wide MoE step took 124 milliseconds per token. But in normal operation, the batch is usually narrow\u2014the common case is a single active sequence, and that B=1 step takes only 24 ms. The vLLM plugin keeps live requests \"front-packed,\" meaning active rows occupy the front of the buffer while idle rows are marked with `start_pos == -1`. This means the decode step only needs to cover the rows `[0:num_active)`, not the full 32. The module keeps one decode trace for each power-of-two width (1, 2, 4, 8, 16, 32), and before every step it selects the smallest width that is at least as large as the active prefix. Each width owns its own trace IDs, its own persistent device inputs (token buffer, positions, RoPE indices, page-table rows), and its own sampling-trace namespace. Crucially, the GDN recurrent/convolutional state is shared across all widths: the width-W step reads and writes only rows `[0:W)` and leaves the idle rows untouched, so switching widths doesn't corrupt the shared state.\n\nThe `precision.py` module is responsible for turning a JSON policy document into the `MultichipConfig` object the runtime consumes. Every field in the policy maps onto a real hardware knob. If a value the runtime cannot construct is requested, it raises an error rather than silently degrading. The `effective_policy` function reads the policy *back* from a built model\u2014examining tensor dtypes, kernel configs, and consumed arguments\u2014so a sweep can prove that the measured runtime actually used the requested policy. This read-back capability is what makes the whole precision sweep trustworthy.\n\n## How Numerical Precision Is Configured\n\nThe precision policy is a JSON document (the shipped one lives at `doc/datatype_sweep/selected_precision_config.json`). It names the weight dtype of every tensor group, per-layer exceptions, the compute fidelity of every matmul group, and the activation, residual, CCL, KV-cache, recurrent-state, logits, and sampling dtypes. The `BASELINE_POLICY` captures the stage-7 shipped runtime as a policy: bfp4 routed experts with LoFi fidelity, bfp8 shared experts and token mixers and LM head with HiFi2, a bf16 router with HiFi4, bfp8 paged KV cache, bf16 GDN state, and bf16 activations and residuals.\n\nThe `apply_policy` function is the workhorse. It first validates the fields the runtime *fixes*\u2014embedding, norms, residual, logits, and sampling dtypes are locked to bf16, bf16, bf16, bf16, and uint32 respectively. Any attempt to change them raises a `ValueError`. It then enforces that the attention and linear_attention fidelities must agree, because they're driven by a single `mixer_fidelity` knob. The activation dtype must be bf16, the CCL dtype must be bf16 or bfp8, and the linear state dtype must be bf16 or fp32. These constraints exist because the runtime physically cannot construct other combinations.\n\nA subtle point is documented in the `notes`: the `mixer_fidelity` knob drives *both* token-mixer kinds *and* everything the TP mixers run with. This is why the attention and linear_attention"
+  },
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "ctx_mid",
+   "rep": 0,
+   "prompt_tokens": 18964,
+   "completion_tokens": 900,
+   "elapsed_s": 20.8,
+   "n_words": 562,
+   "nonword": 3,
+   "intraword_dup": 0,
+   "dup_adjacent": 1,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 10.68,
+   "examples": {
+    "nonword": [
+     "accessor",
+     "runtime's",
+     "declaratively"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": [
+     "becomes"
+    ]
+   },
+   "text": "# Architecture Overview\n\nThis codebase implements a precision-aware port of a large mixture-of-experts language model (marketed here as \"Qwen3.5-122B-A10B\", backed by the `ornith-ai/Ornith-1.5-35B-A3B` checkpoint) onto Tenstorrent hardware. The three files form a coherent pipeline: `weights.py` handles the brutal reality of loading a 250 GB checkpoint that can never fit in a 249 GB RAM host, `precision.py` decides what numerical fidelity each operation should run at, and `moe.py` implements the actual mixture-of-experts forward pass that consumes both of those concerns. Before diving into the details, it is worth understanding the central tension that shapes all three files: the model is far too large to load all at once, and it is too large to run at full precision, so the engineering has to be clever about *what* gets loaded, *when*, and *how faithfully*.\n\n# What each file does and how they fit together\n\n`weights.py` is a streaming loader. The checkpoint lives on disk as 250 GB of bf16 safetensors across 39 shards, which is larger than the host's 249 GB of RAM, so materializing the entire state dict is impossible. `StreamingStateDict` is a lazy, read-only mapping from the model's *internal* key scheme to tensors that are pulled from the appropriate safetensors shard only on first access. Because `safe_open` is memory-mapped, each read costs a page-cache page rather than resident memory, so reading a tensor you already touched is cheap. The class rewrites HuggingFace key names into the framework's internal names: `lm_head.weight` becomes `output.weight`, `embed_tokens.weight` becomes `tok_embeddings.weight`, and the attention projections get renamed (`in_proj_qkv.weight` becomes `qkv_proj.weight`, with the fused conv weight sliced into separate q/k/v components). It also understands the multi-token-prediction head (`mtp.*`) and the vision tower (`model.visual.*`), exposing them through dedicated accessor methods rather than the main layer mapping. The key design decision here is laziness: nothing is loaded until it is actually needed, and the whole-dict iteration methods are deliberately *not* lazy-safe, forcing callers to use `layer()` to materialize one decoder layer at a time. This is what makes the 250 GB checkpoint tractable.\n\n`precision.py` is the policy engine. It defines what \"precision\" means for this model: the datatype of every weight group (embeddings, norms, attention, routers, shared experts, routed experts, the LM head), the compute fidelity of every matmul group, and the dtypes for activations, residuals, cross-device communication, the KV cache, and sampling. A policy is a JSON document, and the shipped default lives in `doc/datatype_sweep/`. The two most important functions are `apply_policy`, which converts a policy into the runtime's `MultichipConfig` (raising on any value the hardware cannot actually construct), and `effective_policy`, which reads the policy *back* from a built model by inspecting tensor dtypes and kernel configs. This round-trip lets the code *prove* that the runtime actually used the precision it claims to use\u2014a verification step that is unusual and valuable for a performance-sweep stage. A critical constraint baked into the policy is that many fields are fixed by the runtime: embeddings, norms, residual, logits, and sampling dtypes cannot be changed, and activation dtype is pinned to bf16. The policy also enforces that attention and linear-attention fidelity must agree, since a single knob drives both.\n\n`moe.py` is the mixture-of-experts block itself: a router, 256 routed experts with top-8 selection, and a gated shared expert. It reads its precision policy from `args.moe_precision` and applies per-layer exceptions. This is where the policy meets the hardware.\n\n# How numerical precision is configured and applied\n\nPrecision is configured declaratively as a policy document and then *enforced* rather than merely recorded. `apply_policy` walks the policy and raises `ValueError` for anything the runtime cannot construct\u2014so the policy"
+  },
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "ctx_mid",
+   "rep": 1,
+   "prompt_tokens": 18964,
+   "completion_tokens": 900,
+   "elapsed_s": 20.8,
+   "n_words": 645,
+   "nonword": 2,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 3.1,
+   "examples": {
+    "nonword": [
+     "Tenstorrent's",
+     "runtime's"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "# An Engineer's Guide to the Qwen3.5-Autoport Precision, MoE, and Weight-Loading System\n\nThis codebase is a carefully instrumented port of a large mixture-of-experts language model to Tenstorrent's hardware. The three files work together to solve three distinct problems: describing and enforcing a numerical policy, actually running the model's experts, and streaming enormous weights from disk without exhausting host memory. Understanding how they fit requires seeing them as a pipeline: the weights file feeds the model, the MoE file defines the model's most complex block, and the precision file governs the numerical choices that every block in the model obeys.\n\n## How the Files Fit Together\n\nThe weights file is the foundation. The checkpoint it reads is roughly 250 GB of `bf16` safetensors spread across 39 shards, which is far too large to ever load into the 249 GB of host RAM at once. `StreamingStateDict` solves this by acting as a lazy, read-only mapping. It parses the safetensors index once, building an internal key scheme that mirrors the model's own naming conventions, but it defers every actual tensor read until the moment a key is indexed. A tensor is only pulled from disk the first time it is touched, and `safe_open` is memory-mapped, so a read costs page-cache pressure rather than resident memory. It also knows how to reconstruct the multi-token-prediction head on demand, fusing per-expert tensors into the same layout the main layers use, and it can surface the vision-tower keys without ever loading them for the text model.\n\nThe MoE file defines the model's feed-forward block: a router, 256 routed experts, and one shared gated expert. When the block runs, the router picks the top-k experts for each token and the block computes only those experts, then sums their contributions together with the shared expert's output. Because only selected experts are computed, it relies on `ttnn.sparse_matmul` rather than a dense matmul, and it packs the gate and up projections onto a single weight so the SwiGLU activation can be fused in one operation. It handles both the decode path (few tokens per step) and the prefill path (many tokens processed in chunks), and it performs the device-side reduction needed when the intermediate dimension is sharded across multiple chips.\n\nThe precision file is the governance layer. It describes every numerical choice the model makes\u2014the dtype of each weight group, the compute fidelity of each matmul, and the dtypes of activations, residuals, the KV cache, and the sampler. It can translate a policy document into the runtime's configuration object, and it can read the policy *back* from a built model to prove that the runtime actually used what was requested. This read-back capability is what makes the datatype sweep trustworthy: it is not enough to declare a policy, the sweep must verify the measured runtime honored it.\n\n## How Numerical Precision Is Configured\n\nPrecision is controlled through a single policy dictionary. The shipped policy is stored as JSON, and the code defaults (called the \"baseline\") are spelled out in code as `BASELINE_POLICY`. The policy names the weight dtype for every tensor group: `bf16` for embeddings, norms, and the router; `bfp8` for attention, the shared expert, and the LM head; and `bfp4` for the routed experts. It also names the compute fidelity for each matmul group and the dtype for activations, residuals, the CCL payload, the KV cache, the linear attention state, the logits, and the sampler output.\n\nThe `apply_policy` function is the enforcement point. It is deliberately restrictive: it raises an error if you try to change anything the runtime cannot actually construct. Several fields are fixed by the hardware and cannot be overridden\u2014the embedding, norms, residual, logits, and sampling dtypes. The activation dtype must be `bf16`, the CCL dtype must be `bf16` or `bfp8`, and the linear attention state must be `bf16` or `fp32`. The attention and linear-attention fidelities must agree because they share a single \"mixer fidelity\" knob. This is not arbitrary rigidity; each constraint corresponds to a real hardware limitation. For example,"
+  },
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "prose_long",
+   "rep": 0,
+   "prompt_tokens": 78,
+   "completion_tokens": 900,
+   "elapsed_s": 17.4,
+   "n_words": 625,
+   "nonword": 5,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 8.0,
+   "examples": {
+    "nonword": [
+     "quantize",
+     "representable",
+     "representable",
+     "heteroscedastic",
+     "completions"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "# Why Quantized Language Models Occasionally Emit Wrong Words\n\nWhen you deploy a quantized language model on custom accelerator hardware, you're introducing several layers of approximation between the ideal mathematical specification and the physical computation that actually occurs. The wrong-word emissions you observe are almost always the cumulative result of these approximations, and understanding them requires tracing the signal from the floating-point ideal down to the fixed-point reality of your silicon.\n\n## The Root Cause: Quantization Error\n\nThe fundamental issue is that quantization maps a continuous value space onto a discrete grid. When you quantize weights from 32-bit floating point (FP32) to, say, 8-bit integers or even 4-bit, you're collapsing a vast dynamic range into a small set of representable values. Consider a weight that has the true value 0.123456789. In an 8-bit uniform quantization scheme with a symmetric range, this might get snapped to the nearest representable value, perhaps 0.125 or 0.1171875. That rounding error is per-element, and a transformer layer contains millions of these weights. During the matrix-vector multiplication that forms the backbone of attention and feed-forward computation, these errors don't cancel out neatly. They accumulate according to the statistics of the operands involved. The output of each matmul carries an error term that scales roughly with the magnitude of the inputs and the number of multiply-accumulate operations, which is why quantization error is often heteroscedastic\u2014it's larger for activations with larger magnitude and smaller for those near zero.\n\nHere's the subtle part that trips people up: the error is *deterministic* but *nonlinear*. For a given input token, the quantization error is fixed and reproducible. This means a model will emit the same wrong word for the same input every single time. This is critically different from the stochastic sampling behavior you get from temperature or top-k sampling, where the same prompt can yield different continuations across runs. If your engineer observes that a specific prompt always produces the same incorrect completion, you're looking at quantization artifacts, not sampling noise.\n\n## The Mechanism: Error Propagation Through the Transformer\n\nLet me walk through the forward pass to show how a tiny weight error becomes a wrong token.\n\nDuring the matmul in the attention mechanism, quantized weights multiply quantized activations. Each accumulate operation introduces rounding. In a transformer with, say, 48 layers and hidden dimension 4096, you're doing enormous numbers of these operations, and the errors compound across layers. The key insight is that errors can be *amplified*. Consider a token embedding that sits at a decision boundary in the vocabulary distribution. The logits feeding into the softmax are differences of large, partially-canceled quantities. If quantization pushes one logit up by 0.01 and its competitor down by 0.01, you've shifted the probability mass between two near-tied candidates. When the model is confident (a large logit gap), a 0.01 perturbation is harmless. When the model is uncertain (two candidates tied at logit 2.0 versus 1.98), that same perturbation flips the argmax. This is why quantization error manifests most dramatically on ambiguous inputs\u2014the model was already teetering on a decision boundary, and your approximation tipped it over.\n\nThere's also the phenomenon of *cascading errors*. Language models are autoregressive: each generated token becomes an input to the next step. If step 5 emits a slightly wrong token due to quantization, that token propagates forward, potentially corrupting the context for steps 6, 7, 8, and beyond. A single early quantization-induced error can derail an entire generation. This explains why you might see a model perform flawlessly on short completions but increasingly diverge on longer ones.\n\n## Specific Hardware Mechanisms\n\nNow let's get into the accelerator-specific issues, since this is where custom hardware gets interesting.\n\n**FP16/BF16 intermediate precision.** Many accelerators compute matmuls in half precision (FP16 or BF16) for throughput. FP16 has only a 10-bit mantissa and a tiny exponent range (max value ~65,504). If your activations"
+  },
+  {
+   "setting": "t0.6_k20",
+   "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "prompt": "prose_long",
+   "rep": 1,
+   "prompt_tokens": 78,
+   "completion_tokens": 900,
+   "elapsed_s": 17.4,
+   "n_words": 654,
+   "nonword": 5,
+   "intraword_dup": 0,
+   "dup_adjacent": 0,
+   "dup_punct": 0,
+   "delim_imbalance": 0,
+   "language_skip": false,
+   "garble_per_1k": 7.65,
+   "examples": {
+    "nonword": [
+     "representable",
+     "quantize",
+     "snapshotted",
+     "quantizing",
+     "representable"
+    ],
+    "intraword_dup": [],
+    "dup_adjacent": []
+   },
+   "text": "# Why Quantized Language Models Occasionally Emit Wrong Words\n\nWhen you deploy a quantized language model onto custom accelerator hardware, you're compressing the model's numerical representation to save memory and bandwidth, but this compression introduces several distinct pathways through which the model can produce an incorrect token. Let me walk through the mechanisms carefully, since understanding them precisely is essential to diagnosing and fixing the problem.\n\n## The Root Cause: Quantization Error\n\nAt the foundation, quantization maps continuous floating-point values to a discrete set of representable numbers. When you quantize weights and activations to, say, 8-bit integers with a chosen scale and zero-point, you introduce rounding error at every conversion. A weight value of 0.1337 might get snapshotted to 0.1328, and an activation that should be 2.718 might round to 2.703. Individually these errors are tiny, but a transformer is a deeply composed function. Each layer's output becomes the next layer's input, so rounding errors compound and can be amplified through the network's matrix multiplications and attention mechanisms. This is the fundamental source of divergence: the quantized model computes a function that is *approximately* the original, and at some point in the output distribution, the rounding error is large enough to flip the argmax selection or, more subtly, to shift the probability mass enough to change sampling outcomes.\n\nNot all layers are equally sensitive. Empirically, you'll often find that errors concentrate in specific layers\u2014frequently the early attention layers, where the activations span a wide dynamic range and where a small perturbation can rewire the attention pattern for the entire downstream computation. The final layers, operating on already-refined representations, tend to be more robust. This non-uniform sensitivity is why quantizing the same model with different strategies can produce wildly different quality outcomes.\n\n## Mechanism 1: Accumulation and Rounding in the Matmuls\n\nThe bulk of a transformer's computation is matrix multiplication. In the quantized setting, these are typically computed as integer multiply-accumulate operations. The accumulation itself is the critical detail. If you accumulate products in a narrower intermediate precision than the original, you can overflow or lose precision mid-summation. A dot product of two 1024-element vectors, each with values around 10, produces partial sums that can reach magnitudes near 10,000\u2014far outside what a small integer accumulator can represent without saturation. Engineers address this by using a wider accumulator (often 32-bit) for the dot-product accumulation, and by carefully choosing the output precision of the quantized matmul. If your custom accelerator's accumulation path is too narrow, you'll see saturation artifacts, which manifest as systematic errors rather than random ones.\n\n## Mechanism 2: Activation Rounding and the Chain Effect\n\nHere's a subtle but important point that often trips people up. If your model uses integer activations and you round them with truncation rather than rounding-to-nearest, you introduce a *biased* error\u2014on average, truncated values sit slightly below the true value. This bias accumulates across layers and shifts the entire distribution. The fix is usually straightforward: use round-to-nearest-even, and be careful about how you handle the rounding at the boundary of the representable range.\n\nMore importantly, the *order* of operations matters for floating-point and fixed-point arithmetic. Floating-point addition is not associative: (a + b) + c is not always equal to a + (b + c). If your accelerator reorders the accumulation to improve throughput\u2014say, by tiling the matmul and summing partial results in a different order than the reference implementation\u2014you can introduce tiny divergences that, in a long chain of layers, occasionally flip a decision. This is why reproducing a bug can be so frustrating: the hardware's parallelism changes the summation order, and the error only manifests when a specific combination of inputs lands near a decision boundary.\n\n## Mechanism 3: The Softmax and the Decision Boundary\n\nNow the crux of the \"wrong word\" phenomenon. The model produces a logit vector, which passes through softmax to yield a probability distribution over the vocabulary. The predicted token is the argmax of this distribution. Consider a case where the correct token has a probability of 0.3"
+  }
+ ]
+}
