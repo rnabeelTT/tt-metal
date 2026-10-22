@@ -504,7 +504,6 @@ using threading_primitives::Completion;
 using threading_primitives::NumaAwareExecutor;
 using threading_primitives::ParallelJob;
 
-// Runs every call on the calling thread in order, then rethrows the first exception.
 void run_on_caller(size_t num_calls, const std::function<void(size_t)>& fn) {
     std::exception_ptr exception;
     for (size_t call = 0; call < num_calls; call++) {
