@@ -54,6 +54,10 @@ Served vs standalone (the same build, one active request; TPOT): the serving ove
 
 Async decode on vs off, p300x2-long, same build and flags (`GLM53_VLLM_ASYNC_DECODE` 1 / 0): TPOT 49.84 / 50.89 ms,
 ITL P99 50.7 / 54.5 ms, CI TPOT 49.8 / 51.1 ms.
+Async TTFT trade-off (the same two runs, `../vllm/evidence/final/long-async{0,1}_*`): the primary TTFT is 238 ms (off) vs
+288 ms (on), one request each; the CI burst TTFTs (32 requests, queueing) are 82.3 s vs 80.3 s (median) and 162.4 s vs
+158.8 s (P99). Async saves 1.05 ms per output token; a +50 ms first-token cost, if real, breaks even after about 48
+output tokens. N >= 4 confirmation in the final scorecard run.
 
 Before stage 10 (stage-9 runs A4-A8, same flags apart from async off): p300x2 TPOT 119.3 ms, p300x2-long 56.5 ms,
 p300x2-1m 73.5 ms. On the stage-9 server the readiness benchmark and the sweep's 128-token row differed (119.3 vs
