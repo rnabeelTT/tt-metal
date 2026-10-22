@@ -46,11 +46,15 @@ void kernel_main() {
     constexpr uint32_t num_buffers = get_compile_time_arg_val(11);  // cb_w columns
     constexpr auto logits_args = TensorAccessorArgs<12>();
 
-    constexpr uint32_t col_bytes = kt * tile_bytes;
-    constexpr uint32_t pages_per_col = col_bytes / page_bytes;
-    static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the column");
     static_assert(n_tiles % banks == 0, "the column-in-one-bank layout needs N tiles to be a multiple of the banks");
     constexpr uint32_t m = n_tiles / banks;  // local columns per bank and expert
+    static_assert(m == 1 || m == 2, "up|gate column pairs: in two banks (m = 1) or one bank (m = 2)");
+    // a block: m == 1: one column (kt tiles; up and gate in banks j and j + banks / 2); m == 2: the pair's [kt, 2]
+    // run in bank j (up = local column 0, gate = local column 1, row-major), read whole
+    constexpr uint32_t blk_tiles = kt * m;
+    constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
+    constexpr uint32_t pages_per_col = col_bytes / page_bytes;
+    static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
     constexpr uint32_t lg_tiles = num_experts / 32 + 1;
 
     // ---- logits row ----
@@ -67,39 +71,29 @@ void kernel_main() {
     // ---- column stream: per slot, up column j then gate column j + n_tiles / 2 ----
     constexpr uint32_t extra_in_flight = num_buffers - 2;
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
-    cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
+    cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
     uint32_t l1_write = get_write_ptr(cb_w);
     const uint32_t cb_base = l1_write;
     const uint32_t cb_end = cb_base + num_buffers * col_bytes;
     uint32_t free_blocks = num_buffers;
     uint32_t trid = 1;
     uint32_t trid_to_wait = 1;
-    auto stream_column = [&](uint32_t base, uint32_t e, uint32_t n) {
-        const uint32_t bank = n % banks;
+    auto stream_block = [&](uint32_t base, uint32_t e, uint32_t n) {
         // page (e, k, n) = (e * kt + k) * n_tiles + n -> bank n % banks, bank-local page (e * kt + k) * m + n / banks
         uint32_t src = (e * kt * m + n / banks) * tile_bytes;
-        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(bank, base);
-        noc_async_read_one_packet_set_state<true>(bank_noc, m == 1 ? page_bytes : tile_bytes, vc);
+        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(n % banks, base);
+        noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
         noc_async_read_set_trid(trid);
-        if constexpr (m == 1) {
-            for (uint32_t p = 0; p < pages_per_col; ++p) {
-                noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
-                src += page_bytes;
-                l1_write += page_bytes;
-            }
-        } else {
-            // m > 1: the column's K tiles are m tiles apart in the bank
-            for (uint32_t k = 0; k < kt; ++k) {
-                noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
-                src += m * tile_bytes;
-                l1_write += tile_bytes;
-            }
+        for (uint32_t p = 0; p < pages_per_col; ++p) {
+            noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
+            src += page_bytes;
+            l1_write += page_bytes;
         }
         if (free_blocks == num_buffers - extra_in_flight) {
             noc_async_read_barrier_with_trid(trid_to_wait);
-            cb_push_back(cb_w, kt);
+            cb_push_back(cb_w, blk_tiles);
             trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
-            cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
+            cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
         } else {
             free_blocks -= 1;
         }
@@ -108,11 +102,16 @@ void kernel_main() {
             l1_write = cb_base;
         }
     };
+    auto stream_slot = [&](uint32_t base, uint32_t e) {
+        stream_block(base, e, pair);
+        if constexpr (m == 1) {
+            stream_block(base, e, pair + n_tiles / 2);
+        }
+    };
 
     uint32_t first = 0;
     if (num_slots > 0 && get_arg_val<uint32_t>(6) == 0) {  // the shared expert streams during the router tail
-        stream_column(ws_addr, 0, pair);
-        stream_column(ws_addr, 0, pair + n_tiles / 2);
+        stream_slot(ws_addr, 0);
         first = 1;
     }
 
@@ -141,13 +140,12 @@ void kernel_main() {
 
     for (uint32_t i = first; i < num_slots; ++i) {
         const uint32_t e = ids[get_arg_val<uint32_t>(6 + i) - 1];
-        stream_column(w_addr, e, pair);
-        stream_column(w_addr, e, pair + n_tiles / 2);
+        stream_slot(w_addr, e);
     }
     if (num_slots > 0) {
         for (uint32_t i = 0; i < num_buffers - free_blocks; ++i) {  // the columns still in flight
             noc_async_read_barrier_with_trid(trid_to_wait);
-            cb_push_back(cb_w, kt);
+            cb_push_back(cb_w, blk_tiles);
             trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
         }
     }

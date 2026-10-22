@@ -274,6 +274,24 @@ def main():
         if "topk" in what:
             check_topk(dev)
             check_topk(dev, E=512, k=10)
+        if "profrows" in what:  # eager multi-row ops for the device profiler: route / gate|up / down per row count
+            I = int(os.environ.get("TEST_I", "128"))
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "2,4,8").split(",")]:
+                (ug, ug_s, dn, dn_s), _ = expert_weights(dev, TEST_E, 2048, I, ttnn.bfloat8_b, True)
+                buf = RowsBuffers(dev, 2048, I, TEST_E, 8, m, ttnn.bfloat8_b)
+                ops = (RouteRows(dev, TEST_E, 8, m), ExpertGateUpRows(dev, 2048, I, TEST_E, 8, ttnn.bfloat8_b, m),
+                       ExpertDownRows(dev, 2048, I, TEST_E, 8, ttnn.bfloat8_b, m))
+                xr = torch.zeros(1, 1, 32, 2048)
+                xr[0, 0, :m] = torch.randn(m, 2048)
+                x = ttnn.from_torch(xr, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+                lg = ttnn.from_torch(torch.randn(1, 1, 32, TEST_E + 32), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                     device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+                for _ in range(2):
+                    ops[0](lg, buf.table)
+                    ops[1](x, buf.table, buf.identity, ug, ug_s, buf.act)
+                    ops[2](buf.act, buf.table, dn, dn_s, buf.out)
+                ttnn.synchronize_device(dev)
+            ttnn.ReadDeviceProfiler(dev)
         if "prof" in what:  # eager calls for the device profiler (TT_METAL_DEVICE_PROFILER=1)
             time_experts(dev, variants=((4, 2),), prof=True)
         if "rows" in what:

@@ -9,7 +9,8 @@
 // 2. Reads the identity tile twice into cb_id (the compute loads the per-row weight tiles into DST through it).
 // 3. Streams, for each union slot s = slot0, slot0 + step, ... this core owns, up column j and gate column
 //    j + N / 2 of the slot's expert, in place from the interleaved ttnn tensor (see gu_reader.cpp), one cb_w block of
-//    kt tiles per column, transaction-id pipelined.
+//    kt tiles per column (m == 1) or one [kt, 2] block per slot (m == 2, both columns in one bank),
+//    transaction-id pipelined.
 //
 // runtime args: [table_addr, w_addr, ws_addr, id_addr, pair j, slot0, vc]
 
@@ -42,10 +43,12 @@ void kernel_main() {
     constexpr auto table_args = TensorAccessorArgs<12>();
     constexpr auto id_args = TensorAccessorArgs<table_args.next_compile_time_args_offset()>();
 
-    constexpr uint32_t col_bytes = kt * tile_bytes;
-    constexpr uint32_t pages_per_col = col_bytes / page_bytes;
-    static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the column");
     constexpr uint32_t m = n_tiles / banks;
+    static_assert(m == 1 || m == 2, "up|gate column pairs: in two banks (m = 1) or one bank (m = 2)");
+    constexpr uint32_t blk_tiles = kt * m;  // a column (m == 1) or the pair's [kt, 2] run in one bank (m == 2)
+    constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
+    constexpr uint32_t pages_per_col = col_bytes / page_bytes;
+    static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
 
     // identity tile x 2 (custom_mm takes an even K)
     const auto s_id = TensorAccessor(id_args, id_addr, tile_bytes);
@@ -68,7 +71,7 @@ void kernel_main() {
 
     constexpr uint32_t extra_in_flight = num_buffers - 2;
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
-    cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
+    cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
     uint32_t l1_write = get_write_ptr(cb_w);
     const uint32_t cb_base = l1_write;
     const uint32_t cb_end = cb_base + num_buffers * col_bytes;
@@ -78,30 +81,22 @@ void kernel_main() {
     for (uint32_t s = slot0; s < U + 1; s += step) {
         const uint32_t base = s == 0 ? ws_addr : w_addr;
         const uint32_t e = s == 0 ? 0 : uni[s - 1];
-        for (uint32_t h = 0; h < 2; ++h) {
+        for (uint32_t h = 0; h < 3 - m; ++h) {
             const uint32_t n = pair + h * (n_tiles / 2);
             uint32_t src = (e * kt * m + n / banks) * tile_bytes;
             const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(n % banks, base);
-            noc_async_read_one_packet_set_state<true>(bank_noc, m == 1 ? page_bytes : tile_bytes, vc);
+            noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
             noc_async_read_set_trid(trid);
-            if constexpr (m == 1) {
-                for (uint32_t p = 0; p < pages_per_col; ++p) {
-                    noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
-                    src += page_bytes;
-                    l1_write += page_bytes;
-                }
-            } else {
-                for (uint32_t k = 0; k < kt; ++k) {
-                    noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
-                    src += m * tile_bytes;
-                    l1_write += tile_bytes;
-                }
+            for (uint32_t p = 0; p < pages_per_col; ++p) {
+                noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
+                src += page_bytes;
+                l1_write += page_bytes;
             }
             if (free_blocks == num_buffers - extra_in_flight) {
                 noc_async_read_barrier_with_trid(trid_to_wait);
-                cb_push_back(cb_w, kt);
+                cb_push_back(cb_w, blk_tiles);
                 trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
-                cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
+                cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
             } else {
                 free_blocks -= 1;
             }
@@ -115,7 +110,7 @@ void kernel_main() {
     const uint32_t pending = num_buffers - free_blocks;
     for (uint32_t i = 0; i < pending; ++i) {
         noc_async_read_barrier_with_trid(trid_to_wait);
-        cb_push_back(cb_w, kt);
+        cb_push_back(cb_w, blk_tiles);
         trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
     }
 }

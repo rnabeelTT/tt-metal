@@ -20,6 +20,7 @@
 #include "ckernel.h"
 #include "ckernel_defs.h"
 #include "router_topk.hpp"
+#include "tools/profiler/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -86,33 +87,49 @@ void kernel_main() {
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, mine);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, mine);
 
-    // per-row weight tiles of this core's slots (+ one zero tile each)
-    for (uint32_t s = slot0; s < U + 1; s += step) {
-        cb_reserve_back(cb_sc, 2);
-        volatile tt_l1_ptr uint32_t* t32 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_sc));
-        for (uint32_t i = 0; i < tb / 2; ++i) {  // both tiles: 2 x tb bytes
-            t32[i] = 0;
+    {
+        DeviceZoneScopedN("wtiles");
+        // every per-row weight tile of this core's slots (+ a zero tile each, custom_mm takes an even K): zeroed by
+        // NOC reads of the L1 zero region, then one pass over the route records writes the rows that routed to a slot
+        cb_reserve_back(cb_sc, 2 * mine);
+        const uint32_t sc = get_write_ptr(cb_sc);
+        const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
+        for (uint32_t off = 0; off < 2 * mine * tb; off += MEM_ZEROS_SIZE) {
+            const uint32_t n = 2 * mine * tb - off < MEM_ZEROS_SIZE ? 2 * mine * tb - off : MEM_ZEROS_SIZE;
+            noc_async_read(zeros, sc + off, n);
         }
-        for (uint32_t r = 0; r < rows; ++r) {
-            uint32_t w = 0;
-            if (s == 0) {
-                w = table[32 * r + 16];
-            } else {
-                for (uint32_t j = 0; j < topk; ++j) {
-                    if (table[32 * r + j] == uni[s - 1]) {
-                        w = table[32 * r + 17 + j];
-                    }
-                }
+        noc_async_read_barrier();
+        auto put = [&](uint32_t s, uint32_t r, uint32_t w) {
+            if (s < slot0 || (s - slot0) % step) {
+                return;
             }
             w = (w + 1) & 0xFFFE;  // 7 significant bits, half away from zero (the srcB width)
             const uint32_t w2 = w | (w << 16);
             // row r of a [trows, 32] tile: 16 values in face 0 (word 8 r ..), 16 in face 1 (word 8 (trows + r) ..)
+            volatile tt_l1_ptr uint32_t* t32 =
+                reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sc + 2 * ((s - slot0) / step) * tb);
             for (uint32_t q = 0; q < 8; ++q) {
                 t32[8 * r + q] = w2;
                 t32[8 * (trows + r) + q] = w2;
             }
+        };
+        for (uint32_t r = 0; r < rows; ++r) {
+            put(0, r, table[32 * r + 16]);  // shared expert
+            for (uint32_t j = 0; j < topk; ++j) {
+                const uint32_t e = table[32 * r + j];
+                uint32_t lo = 0, hi = U;  // uni is ascending
+                while (lo < hi) {
+                    const uint32_t mid = (lo + hi) / 2;
+                    if (uni[mid] < e) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                put(1 + lo, r, table[32 * r + 17 + j]);
+            }
         }
-        cb_push_back(cb_sc, 2);
+        cb_push_back(cb_sc, 2 * mine);
     }
 
     for (uint32_t s = slot0; s < U + 1; s += step) {

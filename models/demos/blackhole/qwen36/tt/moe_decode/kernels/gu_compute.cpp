@@ -78,19 +78,30 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act);
+#ifdef PAIR_JOINT
+    constexpr uint32_t ct = 2;  // up and gate columns of one [kt, 2] block (both in one bank)
+#else
+    constexpr uint32_t ct = 1;
+#endif
+    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
 
     const uint32_t num_slots = get_arg_val<uint32_t>(0);  // this core's slot count
 
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
         tile_regs_acquire();
+#ifdef PAIR_JOINT
+        cb_wait_front(cb_w, 2 * kt);
+        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
+        cb_pop_front(cb_w, 2 * kt);
+#else
         cb_wait_front(cb_w, kt);
         custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt);  // up
         cb_pop_front(cb_w, kt);
         cb_wait_front(cb_w, kt);
         custom_mm_block<true>(cb_x, cb_w, 0, 0, 1, kt);  // gate
         cb_pop_front(cb_w, kt);
+#endif
 
         silu_tile_init();
         silu_rows(1);
@@ -110,7 +121,7 @@ void kernel_main() {
         tile_regs_release();
         cb_push_back(cb_act, 1);
 
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act);
+        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
     }
     cb_pop_front(cb_x, kt);
     custom_mm_block_uninit<dense_packing>();

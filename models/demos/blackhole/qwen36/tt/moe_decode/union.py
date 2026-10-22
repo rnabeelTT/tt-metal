@@ -101,7 +101,10 @@ class ExpertGateUpRows:
     """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column pair; union slot s goes
     to core s % readers."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=4, buffers=5):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5):
+        """readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
+        SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
+        their reads collapse (8 rows, 4-chip shapes: 51 us median at 4 per pair, 89 at 22, 217 max at 8)."""
         self.banks = len(bank_workers(mesh_device))
         self.kt = hidden // TILE
         self.n_tiles = 2 * inter // TILE
@@ -109,12 +112,16 @@ class ExpertGateUpRows:
         assert self.n_tiles % self.banks == 0
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
         self.trows = tile_rows(rows)
-        self.readers, self.buffers = readers, buffers
         self.max_slots = min(num_experts, rows * k) + 1
+        if readers is None:
+            readers = 4
+        self.readers, self.buffers = readers, buffers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         m = self.n_tiles // self.banks
-        self.page_bytes = _page_bytes(self.kt, self.tile_bytes) if m == 1 else self.tile_bytes
+        assert m in (1, 2), f"{m} up|gate columns per bank and expert: the kernels read 1 (two banks) or 2 (one bank)"
+        self.joint = m == 2  # up and gate column of a pair in one bank: one contiguous [kt, 2] block per slot
+        self.page_bytes = _page_bytes(self.kt * m, self.tile_bytes)
         placed = place_along_rows(mesh_device, {j % self.banks: readers for j in range(self.pairs)})
         self.assign = [(c, j, r) for j in range(self.pairs) for r, c in enumerate(placed[j % self.banks])]
         self.cores = _range_set([c for c, _, _ in self.assign])
@@ -124,7 +131,7 @@ class ExpertGateUpRows:
         tb = 64 * self.trows
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, tb, self.kt, tiny=True, rows=self.trows),
-            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * (2 if self.joint else 1)),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             # every per-row weight tile of this core's slots at once: the writer builds them all before it drains the
@@ -145,7 +152,8 @@ class ExpertGateUpRows:
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt]
-        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), [("ROWS", str(self.trows))])
+        defines = [("ROWS", str(self.trows))] + ([("PAIR_JOINT", "1")] if self.joint else [])
+        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         return ttnn.generic_op([up_gate, shared_up_gate, identity, x, table, act], program)
 
@@ -154,10 +162,12 @@ class ExpertDownRows:
     """(act, table, down, shared_down, out) -> out. readers: cores per DRAM bank; chunk: union slots per weight
     block (the cb holds two)."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=2, chunk=8):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, chunk=8):
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.m = hidden // TILE // self.banks
+        if readers is None:  # 2 per bank (4 / 8 measured slower at 8 rows: 33 vs 24 us)
+            readers = 2 if self.m % 2 == 0 else 1
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
         self.cols = self.m // readers
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk

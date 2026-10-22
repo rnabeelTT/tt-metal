@@ -219,7 +219,9 @@ class ExpertGateUp:
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         m = self.n_tiles // self.banks
-        self.page_bytes = _page_bytes(self.kt, self.tile_bytes) if m == 1 else self.tile_bytes
+        assert m in (1, 2), f"{m} up|gate columns per bank and expert: the kernels read 1 (two banks) or 2 (one bank)"
+        self.joint = m == 2  # up and gate column of a pair in one bank: one contiguous [kt, 2] block per slot
+        self.page_bytes = _page_bytes(self.kt * m, self.tile_bytes)
         # each pair's cores sit around the up column's bank reader (around the gate column's: 28 vs 20 us for the
         # pair on banks 0 / 4, whose readers share logical row 9 on QuietBox 2)
         placed = place_along_rows(mesh_device, {j % self.banks: self.readers for j in range(self.pairs)}, used)
@@ -232,7 +234,7 @@ class ExpertGateUp:
         lg_tiles = self.E // TILE + 1
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, 64, self.kt, tiny=True),
-            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * (2 if self.joint else 1)),
             _cb(self.cores, cb_route, ttnn.uint16, 128, 1),
             _cb(self.cores, cb_scr, ttnn.bfloat16, 64 * lg_tiles, 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
@@ -254,6 +256,8 @@ class ExpertGateUp:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, self.kt]
         defines = [] if notify is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(notify[0]))]
+        if self.joint:
+            defines.append(("PAIR_JOINT", "1"))
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines), cbs
 
     def __call__(self, x, logits, up_gate, shared_up_gate, act, route):

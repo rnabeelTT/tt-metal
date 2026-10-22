@@ -67,7 +67,12 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act);
+#ifdef PAIR_JOINT
+    constexpr uint32_t ct = 2;  // up and gate columns of one [kt, 2] block (both in one bank)
+#else
+    constexpr uint32_t ct = 1;
+#endif
+    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
 
     uint32_t n = 0;
     UNPACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
@@ -78,12 +83,19 @@ void kernel_main() {
     cb_wait_front(cb_id, 2);
     for (uint32_t i = 0; i < n; ++i) {
         tile_regs_acquire();
+#ifdef PAIR_JOINT
+        cb_wait_front(cb_w, 2 * kt);
+        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
+        cb_pop_front(cb_w, 2 * kt);
+        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
+#else
         cb_wait_front(cb_w, kt);
         custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt);  // up
         cb_pop_front(cb_w, kt);
         cb_wait_front(cb_w, kt);
         custom_mm_block<true>(cb_x, cb_w, 0, 0, 1, kt);  // gate
         cb_pop_front(cb_w, kt);
+#endif
         cb_wait_front(cb_sc, 2);
         custom_mm_block<true>(cb_sc, cb_id, 0, 0, 2, 2);  // per-row weights
         cb_pop_front(cb_sc, 2);
@@ -102,7 +114,7 @@ void kernel_main() {
         tile_regs_release();
         cb_push_back(cb_act, 1);
 
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act);
+        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
     }
     cb_pop_front(cb_id, 2);
     cb_pop_front(cb_x, kt);
