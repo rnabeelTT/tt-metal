@@ -1,0 +1,54 @@
+[
+ {
+  "tag": "R0",
+  "secs": 13.8,
+  "finish": "stop",
+  "completion_tokens": 273,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 ",
+  "sha": "0c2de94671e21429",
+  "content": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle day trip, see markets and mosques |\n| 3 | Agra | Visit Taj Mahal, stay overnight |\n| 4 | Agra | Take a day trip to Jaen, visit markets and temples |\n| 5 | Jaen | Full-day visit to Jaen and explore markets and temples |\n| 6 | Jaen → Delhi | Return to Delhi, explore city museums and parks |\n| 7 | Delhi | Visit Delhi markets, departure |\n\n*******\n\n# 7-Day China Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Beijing | Arrive, explore Beijing markets and mosques |\n| 2 | Beijing | Explore Beijing palaces and temples |\n| 3 | Beijing → Shanghai | Travel to Shanghai |\n| 4 | Shanghai | Shanghai city tours and temples |\n| 5 | Shanghai | Shanghai Golden Triangle trip |\n| 6 | Shanghai → Beijing | Return to Beijing, visit Shanghai museums |\n| 7 | Beijing | Beijing day trip and departure |",
+  "reasoning": "Create two itineraries separated by exactly 6 asterisks.",
+  "doc": 65,
+  "same_as_eval": false,
+  "same_content_as_eval": false
+ },
+ {
+  "tag": "R1",
+  "secs": 13.8,
+  "finish": "stop",
+  "completion_tokens": 273,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 ",
+  "sha": "0c2de94671e21429",
+  "content": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle day trip, see markets and mosques |\n| 3 | Agra | Visit Taj Mahal, stay overnight |\n| 4 | Agra | Take a day trip to Jaen, visit markets and temples |\n| 5 | Jaen | Full-day visit to Jaen and explore markets and temples |\n| 6 | Jaen → Delhi | Return to Delhi, explore city museums and parks |\n| 7 | Delhi | Visit Delhi markets, departure |\n\n*******\n\n# 7-Day China Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Beijing | Arrive, explore Beijing markets and mosques |\n| 2 | Beijing | Explore Beijing palaces and temples |\n| 3 | Beijing → Shanghai | Travel to Shanghai |\n| 4 | Shanghai | Shanghai city tours and temples |\n| 5 | Shanghai | Shanghai Golden Triangle trip |\n| 6 | Shanghai → Beijing | Return to Beijing, visit Shanghai museums |\n| 7 | Beijing | Beijing day trip and departure |",
+  "reasoning": "Create two itineraries separated by exactly 6 asterisks.",
+  "doc": 65,
+  "same_as_eval": false,
+  "same_content_as_eval": false
+ },
+ {
+  "tag": "R2",
+  "secs": 13.9,
+  "finish": "stop",
+  "completion_tokens": 273,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 ",
+  "sha": "0c2de94671e21429",
+  "content": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle day trip, see markets and mosques |\n| 3 | Agra | Visit Taj Mahal, stay overnight |\n| 4 | Agra | Take a day trip to Jaen, visit markets and temples |\n| 5 | Jaen | Full-day visit to Jaen and explore markets and temples |\n| 6 | Jaen → Delhi | Return to Delhi, explore city museums and parks |\n| 7 | Delhi | Visit Delhi markets, departure |\n\n*******\n\n# 7-Day China Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Beijing | Arrive, explore Beijing markets and mosques |\n| 2 | Beijing | Explore Beijing palaces and temples |\n| 3 | Beijing → Shanghai | Travel to Shanghai |\n| 4 | Shanghai | Shanghai city tours and temples |\n| 5 | Shanghai | Shanghai Golden Triangle trip |\n| 6 | Shanghai → Beijing | Return to Beijing, visit Shanghai museums |\n| 7 | Beijing | Beijing day trip and departure |",
+  "reasoning": "Create two itineraries separated by exactly 6 asterisks.",
+  "doc": 65,
+  "same_as_eval": false,
+  "same_content_as_eval": false
+ },
+ {
+  "tag": "R3",
+  "secs": 13.9,
+  "finish": "stop",
+  "completion_tokens": 273,
+  "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 ",
+  "sha": "0c2de94671e21429",
+  "content": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city sights, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle day trip, see markets and mosques |\n| 3 | Agra | Visit Taj Mahal, stay overnight |\n| 4 | Agra | Take a day trip to Jaen, visit markets and temples |\n| 5 | Jaen | Full-day visit to Jaen and explore markets and temples |\n| 6 | Jaen → Delhi | Return to Delhi, explore city museums and parks |\n| 7 | Delhi | Visit Delhi markets, departure |\n\n*******\n\n# 7-Day China Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Beijing | Arrive, explore Beijing markets and mosques |\n| 2 | Beijing | Explore Beijing palaces and temples |\n| 3 | Beijing → Shanghai | Travel to Shanghai |\n| 4 | Shanghai | Shanghai city tours and temples |\n| 5 | Shanghai | Shanghai Golden Triangle trip |\n| 6 | Shanghai → Beijing | Return to Beijing, visit Shanghai museums |\n| 7 | Beijing | Beijing day trip and departure |",
+  "reasoning": "Create two itineraries separated by exactly 6 asterisks.",
+  "doc": 65,
+  "same_as_eval": false,
+  "same_content_as_eval": false
+ }
+]
