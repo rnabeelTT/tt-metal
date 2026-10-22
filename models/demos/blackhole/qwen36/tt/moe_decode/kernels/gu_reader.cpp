@@ -145,7 +145,7 @@ void kernel_main() {
         stream_column(w_addr, e, pair + n_tiles / 2);
     }
     if (num_slots > 0) {
-        for (uint32_t i = 0; i < extra_in_flight; ++i) {
+        for (uint32_t i = 0; i < num_buffers - free_blocks; ++i) {  // the columns still in flight
             noc_async_read_barrier_with_trid(trid_to_wait);
             cb_push_back(cb_w, kt);
             trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;

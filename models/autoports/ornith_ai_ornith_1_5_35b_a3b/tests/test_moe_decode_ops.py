@@ -6,6 +6,7 @@
     python test_moe_decode_ops.py topk
 """
 
+import os
 import sys
 
 import torch
@@ -13,8 +14,30 @@ import torch
 import ttnn
 from models.demos.blackhole.qwen36.tt.moe_decode.experts import ExpertDown, ExpertGateUp, ExpertMoE, MoEDecodeBuffers
 from models.demos.blackhole.qwen36.tt.moe_decode.topk import RouterTopK
+from models.demos.blackhole.qwen36.tt.moe_decode.union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers
 
 torch.manual_seed(0)
+# experts per test tensor: 64 keeps every kernel path (E % 64 == 0) and the per-expert shapes, at a quarter of the
+# host conversion time of the model's 256; TEST_E=256 for the full size
+TEST_E = int(os.environ.get("TEST_E", "64"))
+_WEIGHTS = {}
+
+
+def expert_weights(dev, E, H, I, dtype, rounded):
+    """(up_gate, shared_up_gate, down, shared_down) device tensors + their device-rounded torch copies, cached."""
+    key = (E, H, I, dtype, rounded)
+    if key not in _WEIGHTS:
+        from models.demos.blackhole.qwen36.tt.moe_decode.fused import round_sig
+
+        g = torch.Generator().manual_seed(1)
+        rnd = round_sig if rounded else (lambda t: t)
+        dev_t = [
+            ttnn.from_torch(rnd(torch.randn(*shape, generator=g) * 0.03), dtype=dtype, layout=ttnn.TILE_LAYOUT,
+                            device=dev, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            for shape in ((1, E, H, 2 * I), (1, 1, H, 2 * I), (1, E, I, H), (1, 1, I, H))
+        ]
+        _WEIGHTS[key] = (dev_t, [ttnn.to_torch(t).float() for t in dev_t])
+    return _WEIGHTS[key]
 
 
 def check_topk(dev, E=256, k=8, trials=20):
@@ -118,6 +141,80 @@ def check_experts(
             ttnn.deallocate(tt_)
 
 
+def check_rows(dev, rows, H=2048, I=128, E=None, k=8, dtype=ttnn.bfloat8_b, trials=2):
+    """Multi-row fused MoE (RouteRows -> ExpertGateUpRows -> ExpertDownRows) vs torch per row, weights pre-rounded to
+    5 significant bits (as the model stores them)."""
+    E = E or TEST_E
+    back = lambda t: ttnn.to_torch(t).float()
+    (ug, ug_s, dn, dn_s), (W_ug, W_ugs, W_dn, W_dns) = expert_weights(dev, E, H, I, dtype, True)
+    W_ug, W_ugs, W_dn, W_dns = W_ug[0], W_ugs[0, 0], W_dn[0], W_dns[0, 0]
+    buf = RowsBuffers(dev, H, I, E, k, rows, dtype)
+    route = RouteRows(dev, E, k, rows)
+    gu = ExpertGateUpRows(dev, H, I, E, k, dtype, rows)
+    dn_op = ExpertDownRows(dev, H, I, E, k, dtype, rows)
+    for t in range(trials):
+        xr = torch.zeros(1, 1, 32, H)
+        xr[0, 0, :rows] = torch.randn(rows, H)
+        xb = xr.bfloat16()
+        lg = torch.zeros(1, 1, 32, E + 32)
+        lg[0, 0, :rows, : E + 1] = torch.randn(rows, E + 1) * 2
+        lgb = lg.bfloat16()
+        x_tt = ttnn.from_torch(xb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+        lg_tt = ttnn.from_torch(lgb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+        route(lg_tt, buf.table)
+        ttnn.synchronize_device(dev)
+        print(f"rows {rows}: route done", flush=True)
+        gu(x_tt, buf.table, buf.identity, ug, ug_s, buf.act)
+        ttnn.synchronize_device(dev)
+        print(f"rows {rows}: gate|up done", flush=True)
+        dn_op(buf.act, buf.table, dn, dn_s, buf.out)
+        ttnn.synchronize_device(dev)
+        print(f"rows {rows}: down done", flush=True)
+        out = back(buf.out)[0, 0, :rows]
+        table = ttnn.to_torch(buf.table).reshape(rows, 32).long()
+        worst = 1.0
+        for r in range(rows):
+            row = lgb[0, 0, r, :E].float()
+            ids = torch.tensor(sorted(range(E), key=lambda i: (-row[i].item(), i))[:k])
+            assert torch.equal(table[r, :k], ids), (r, table[r, :k].tolist(), ids.tolist())
+            w = torch.cat([torch.sigmoid(lgb[0, 0, r, E].float()).reshape(1), torch.softmax(row[ids], -1)])
+            x = xb[0, 0, r].float()
+            Wg = [W_ugs] + [W_ug[e] for e in ids]
+            Wd = [W_dns] + [W_dn[e] for e in ids]
+            ref = sum(
+                (w[i] * torch.nn.functional.silu(x @ Wg[i][:, I:]) * (x @ Wg[i][:, :I])) @ Wd[i] for i in range(k + 1)
+            )
+            worst = min(worst, pcc(out[r], ref))
+        print(f"rows {rows} trial {t}: ids exact, worst row out pcc {worst:.5f}")
+        if worst < 0.99:  # debug: the activation buffer per union slot vs torch
+            mp = gu.trows
+            raw = ttnn.to_torch(buf.act).float().reshape(-1, mp * 32)  # page = slot * pairs + j: [face0 mp x 16 | face1]
+            pairs = I // 32
+            sel = [sorted(range(E), key=lambda i: (-lgb[0, 0, r, i].item(), i))[:k] for r in range(rows)]
+            uni = sorted(set(e for r in range(rows) for e in sel[r]))
+            for sl in range(min(4, len(uni) + 1)):
+                e = None if sl == 0 else uni[sl - 1]
+                got = torch.zeros(rows, I)
+                for j in range(pairs):
+                    pg = raw[sl * pairs + j]
+                    for r in range(rows):
+                        got[r, 32 * j : 32 * j + 16] = pg[16 * r : 16 * r + 16]
+                        got[r, 32 * j + 16 : 32 * j + 32] = pg[16 * mp + 16 * r : 16 * mp + 16 * r + 16]
+                W = W_ugs if e is None else W_ug[e]
+                ref = torch.zeros(rows, I)
+                for r in range(rows):
+                    row = lgb[0, 0, r, :E].float()
+                    ids = sel[r]
+                    sw = torch.softmax(row[torch.tensor(ids)], -1)
+                    w = torch.sigmoid(lgb[0, 0, r, E].float()) if e is None else (sw[ids.index(e)] if e in ids else 0.0)
+                    x = xb[0, 0, r].float()
+                    ref[r] = w * torch.nn.functional.silu(x @ W[:, I:]) * (x @ W[:, :I])
+                print(f"   slot {sl} expert {e}: pcc {pcc(got, ref):.4f} scale {(got * ref).sum().item() / max((ref * ref).sum().item(), 1e-12):.3f} "
+                      f"row-norms got {[round(v, 3) for v in got.norm(dim=1).tolist()]} ref {[round(v, 3) for v in ref.norm(dim=1).tolist()]}")
+        for tt_ in (x_tt, lg_tt):
+            ttnn.deallocate(tt_)
+
+
 def time_experts(
     dev, H=2048, I=128, E=256, k=8, dtype=ttnn.bfloat8_b, variants=((4, 2), (3, 2), (4, 4), (8, 2)), prof=False
 ):
@@ -179,6 +276,12 @@ def main():
             check_topk(dev, E=512, k=10)
         if "prof" in what:  # eager calls for the device profiler (TT_METAL_DEVICE_PROFILER=1)
             time_experts(dev, variants=((4, 2),), prof=True)
+        if "rows" in what:
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "2,3,4,8").split(",")]:
+                check_rows(dev, m)
+        if "tp2" in what:  # p300 (2 chips) / Qwen3.5-122B on 4 chips: 256 expert columns per device, strided up|gate reads
+            check_experts(dev, I=256, trials=1)
+            check_rows(dev, 4, I=256, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:

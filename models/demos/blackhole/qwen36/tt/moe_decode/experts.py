@@ -115,10 +115,11 @@ def _range_set(cores):
     return rs
 
 
-def _cb(cores, index, dtype, page, pages, tiny=False):
+def _cb(cores, index, dtype, page, pages, tiny=False, rows=1):
+    """tiny: [rows, 32] activation tiles."""
     kw = dict(buffer_index=index, data_format=dtype, page_size=page)
     if tiny:
-        kw["tile"] = ttnn.TileDescriptor(ttnn.Tile([1, TILE]))
+        kw["tile"] = ttnn.TileDescriptor(ttnn.Tile([rows, TILE]))
     return ttnn.CBDescriptor(total_size=page * pages, core_ranges=cores, format_descriptors=[ttnn.CBFormatDescriptor(**kw)])
 
 

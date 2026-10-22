@@ -180,4 +180,26 @@ inline void topk_softmax(const uint32_t* words, uint32_t* ids, uint16_t* weights
     topk_select<topk, n>(words, ids);
     softmax_selected<topk>(words, ids, weights);
 }
+// Union of the routed experts of M route records (route table rows: k ids at [0, k), BF16 shared weight at 16,
+// routed weights at [17, 17 + k)): uni[0 .. U) ascending; returns U (union slot 0 is the shared expert, slot 1 + i
+// union expert i).
+template <uint32_t topk>
+inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni) {
+    uint32_t mask[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    for (uint32_t r = 0; r < rows; ++r) {
+        for (uint32_t j = 0; j < topk; ++j) {
+            const uint32_t e = table[32 * r + j];
+            mask[e >> 5] |= 1u << (e & 31);
+        }
+    }
+    uint32_t u = 0;
+    for (uint32_t w = 0; w < 8; ++w) {
+        for (uint32_t m = mask[w]; m; m &= m - 1) {
+            const uint32_t e = 32 * w + __builtin_ctz(m);
+            uni[u] = static_cast<uint16_t>(e);
+            ++u;
+        }
+    }
+    return u;
+}
 }  // namespace moe_topk

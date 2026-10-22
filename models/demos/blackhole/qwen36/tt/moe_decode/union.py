@@ -1,0 +1,195 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Multi-row fused MoE decode (2..8 decode rows: concurrent users at small widths, the MTP verify's rows): every
+union expert's weights are read once for all rows.
+
+* ``RouteRows``: one core per row: the row's top-k + softmax and shared-gate sigmoid into the route table
+  ([M, 32] UINT16: k ids, the shared weight at 16, the routed weights at 17..).
+* ``ExpertGateUpRows``: the union of the rows' experts (ascending, slot 0 = the shared expert); each core streams its
+  column pair of its union slots in place (as ExpertGateUp), multiplies all rows ([Mp, 32] activation tiles,
+  Mp = 2 / 4 / 8 >= M), SwiGLU x the per-row weight (0 for rows that did not route to the expert).
+* ``ExpertDownRows``: the down columns of every union slot, accumulated over chunks of slots, M output rows.
+
+Design and the per-row weight load (identity matmul) follow the gpt-oss DFlash union ops
+(models/demos/gpt_oss/tt/fused_decode/union.py). Numerics as experts.py (weights stored at 5 significant bits,
+activations / weights rounded to 7 for the srcB operand).
+"""
+
+from __future__ import annotations
+
+import torch
+
+import ttnn
+
+from .experts import KERNEL_DIR, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, place_along_rows
+
+TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
+
+
+def tile_rows(m):
+    return next(r for r in TILE_ROWS if r >= m)
+
+
+class RowsBuffers:
+    """Per row count M (model-wide, consumed before the next layer's MoE): route table [M, 32] UINT16, activations
+    ([(U_max + 1) * I / 32] pages of one [Mp, 32] tile), output [1, 1, M, H] BF16 TILE in DRAM (zeros; rows 0..Mp-1 of
+    each tile are written), the identity tile in the weight dtype."""
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, rows, weight_dtype):
+        multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
+        rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
+        l1 = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
+        mp = tile_rows(rows)
+        self.max_slots = min(num_experts, rows * k) + 1
+        self.table = ttnn.from_torch(torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1)
+        self.act = ttnn.from_torch(
+            torch.zeros(self.max_slots * inter // TILE, TILE * mp, dtype=torch.bfloat16),
+            dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1,
+        )
+        self.out = ttnn.from_torch(
+            torch.zeros(1, 1, rows, hidden, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+            device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,
+        )
+        self.identity = ttnn.from_torch(
+            torch.eye(TILE)[None, None], dtype=weight_dtype, layout=ttnn.TILE_LAYOUT, device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,
+        )
+
+
+class RouteRows:
+    """(logits [M, E + 32], table) -> table, one core per row (NCRISC and BRISC each take half the logits)."""
+
+    def __init__(self, mesh_device, num_experts, k, rows):
+        self.E, self.k, self.rows = num_experts, k, rows
+        gx = mesh_device.compute_with_storage_grid_size().x
+        self.assign = [ttnn.CoreCoord(r % gx, r // gx) for r in range(rows)]
+        self.cores = _range_set(self.assign)
+
+    def __call__(self, logits, table):
+        cb_scr, cb_part, cb_lg = 0, 1, 2
+        lg_bytes = 64 * (self.E // TILE + 1)
+        cbs = [
+            _cb(self.cores, cb_scr, ttnn.uint16, lg_bytes + 64, 1),
+            _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
+            _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
+        ]
+        rd_rt, wr_rt = ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
+        for r, c in enumerate(self.assign):
+            rd_rt[c.x][c.y] = [logits.buffer_address(), table.buffer_address(), r]
+            wr_rt[c.x][c.y] = [logits.buffer_address(), r]
+        lg_ct = ttnn.TensorAccessorArgs(logits).get_compile_time_args()
+        rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct + ttnn.TensorAccessorArgs(table).get_compile_time_args()
+        wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
+        dm = ttnn.DataMovementConfigDescriptor
+        kernels = [
+            ttnn.KernelDescriptor(
+                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"), core_ranges=self.cores,
+                compile_time_args=rd_ct, runtime_args=rd_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"), core_ranges=self.cores,
+                compile_time_args=wr_ct, runtime_args=wr_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1),
+            ),
+        ]
+        ttnn.generic_op([logits, table], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        return table
+
+
+class ExpertGateUpRows:
+    """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column pair; union slot s goes
+    to core s % readers."""
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=4, buffers=5):
+        self.banks = len(bank_workers(mesh_device))
+        self.kt = hidden // TILE
+        self.n_tiles = 2 * inter // TILE
+        self.pairs = self.n_tiles // 2
+        assert self.n_tiles % self.banks == 0
+        self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
+        self.trows = tile_rows(rows)
+        self.readers, self.buffers = readers, buffers
+        self.max_slots = min(num_experts, rows * k) + 1
+        self.tile_bytes = TILE_BYTES[weight_dtype]
+        self.weight_dtype = weight_dtype
+        m = self.n_tiles // self.banks
+        self.page_bytes = _page_bytes(self.kt, self.tile_bytes) if m == 1 else self.tile_bytes
+        placed = place_along_rows(mesh_device, {j % self.banks: readers for j in range(self.pairs)})
+        self.assign = [(c, j, r) for j in range(self.pairs) for r, c in enumerate(placed[j % self.banks])]
+        self.cores = _range_set([c for c, _, _ in self.assign])
+
+    def __call__(self, x, table, identity, up_gate, shared_up_gate, act):
+        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_act = 0, 1, 2, 3, 4, 5, 16
+        tb = 64 * self.trows
+        cbs = [
+            _cb(self.cores, cb_x, ttnn.bfloat16, tb, self.kt, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
+            # every per-row weight tile of this core's slots at once: the writer builds them all before it drains the
+            # outputs, so a 2-slot ring deadlocked against cb_act at >= 6 slots per core
+            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * -(-self.max_slots // self.readers), tiny=True, rows=self.trows),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2, tiny=True, rows=self.trows),
+        ]
+        rd_rt, wr_rt = {}, {}
+        for c, j, r in self.assign:
+            rd_rt[(c.x, c.y)] = [table.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(),
+                                 identity.buffer_address(), j, r, (j + r) & 0x3]
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, r]
+        rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
+        rd_ct += [self.page_bytes, self.banks, self.buffers]
+        rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
+        wr_ct = [cb_x, cb_act, cb_sc, cb_tab, self.kt, self.k, self.rows, self.readers, self.pairs, self.trows]
+        for t in (x, act, table):
+            wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt]
+        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), [("ROWS", str(self.trows))])
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        return ttnn.generic_op([up_gate, shared_up_gate, identity, x, table, act], program)
+
+
+class ExpertDownRows:
+    """(act, table, down, shared_down, out) -> out. readers: cores per DRAM bank; chunk: union slots per weight
+    block (the cb holds two)."""
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=2, chunk=8):
+        self.banks = len(bank_workers(mesh_device))
+        self.kt = inter // TILE
+        self.m = hidden // TILE // self.banks
+        assert self.m * self.banks * TILE == hidden and self.m % readers == 0
+        self.cols = self.m // readers
+        self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
+        self.trows = tile_rows(rows)
+        self.max_slots = min(num_experts, rows * k) + 1
+        self.tile_bytes = TILE_BYTES[weight_dtype]
+        self.weight_dtype = weight_dtype
+        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+        self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
+        self.cores = _range_set([c for c, _, _ in self.assign])
+
+    def __call__(self, act, table, down, shared_down, out):
+        cb_in0, cb_w, cb_scr, cb_tab, cb_out = 0, 1, 3, 5, 16
+        tb = 64 * self.trows
+        cbs = [
+            _cb(self.cores, cb_in0, ttnn.bfloat16, tb, self.max_slots * self.kt, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.cols, tiny=True, rows=self.trows),
+        ]
+        rd_rt, wr_rt = {}, {}
+        for c, b, r in self.assign:
+            c0 = r * self.cols
+            rd_rt[(c.x, c.y)] = [down.buffer_address(), shared_down.buffer_address(), table.buffer_address(), b, c0, (b + r) & 0x3]
+            wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0]
+        rd_ct = [cb_w, cb_scr, self.kt, self.m, self.cols, self.k, self.tile_bytes, self.rows, self.chunk]
+        rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args()
+        wr_ct = [cb_in0, cb_out, cb_tab, self.kt, self.cols, self.banks, self.k, self.rows, self.trows]
+        for t in (act, out, table):
+            wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk]
+        kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), [("ROWS", str(self.trows))])
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        return ttnn.generic_op([down, shared_down, act, table, out], program)

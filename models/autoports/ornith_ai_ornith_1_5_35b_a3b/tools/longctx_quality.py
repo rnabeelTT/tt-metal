@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -34,7 +35,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from text_quality import score_text  # noqa: E402
 
 MODEL_DIR = Path(__file__).resolve().parents[1]
-TT = MODEL_DIR / "tt"
+# QWEN35_QUALITY_PROMPT_DIR: read the context files from a frozen copy (fusion/results/quality_prompts holds the
+# published c33d9745fa2 versions) so the prompts stay identical while tt/ is being edited
+TT = Path(os.environ.get("QWEN35_QUALITY_PROMPT_DIR", "")) if os.environ.get("QWEN35_QUALITY_PROMPT_DIR") else MODEL_DIR / "tt"
 
 # Real source files, so the probe is deterministic and needs no external corpus. Chosen to
 # straddle the gap between the 2048 tokens the datatype sweep validated and the 262144 the

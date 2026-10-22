@@ -35,7 +35,7 @@ def ask(p):
         "ignore_eos": True,
     }
     req = urllib.request.Request(
-        "http://localhost:20000/v1/chat/completions",
+        os.environ.get("URL", "http://localhost:20000") + "/v1/chat/completions",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )

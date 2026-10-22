@@ -60,6 +60,8 @@ ROUTER_DECODE_1D = os.environ.get("QWEN35_ROUTER_DECODE_1D", "1") == "1"
 # routed experts in place (models/demos/blackhole/qwen36/tt/moe_decode, fusion step 2). Rounds the stored routed
 # weights to the LoFi operand width (moe_decode.fused.WEIGHT_SIG_BITS), so prefill reads the same rounded weights.
 MOE_FUSED_DECODE = os.environ.get("QWEN35_MOE_FUSED_DECODE", "0") == "1"
+# decode widths 2..N take the multi-row fused MoE (expert union, moe_decode/union.py); 0 = one-token only
+MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "8") or 0)
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -362,6 +364,8 @@ class Qwen35MoE:
         )
         if self._fused is not None:
             self._fused.router_ckc = self.router_ckc
+            for m in range(2, min(MOE_FUSED_ROWS_MAX, 8) + 1):
+                self._fused.rows_ops(m)  # buffers uploaded before any trace capture
         if ROUTER_TOPK_FUSED:
             self._fused_topk()  # build the shared outputs now: no host upload once decode traces are captured
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
@@ -377,8 +381,9 @@ class Qwen35MoE:
             # interleaved inputs. One conversion at the block entry.
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
-        if self._fused is not None and T == 1 and list(x4.padded_shape)[-2] == TILE and mode != "prefill":
-            return self._forward_fused_decode(x4, orig)
+        if self._fused is not None and list(x4.padded_shape)[-2] == TILE and mode != "prefill":
+            if T == 1 or 2 <= T <= min(MOE_FUSED_ROWS_MAX, 8):
+                return self._forward_fused_decode(x4, orig)
         scores, ids = self._route(x4)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
             if T <= self.GATHER_MAX_TOKENS:
@@ -418,7 +423,8 @@ class Qwen35MoE:
     def _forward_fused_decode(self, x4, orig):
         """One decode token through moe_decode.FusedMoEDecode: the partial sum lands in a model-wide buffer that the
         reduce-scatter reads directly (tt_all_reduce would deallocate it)."""
-        partial = self._fused(x4, self.up_gate, self.down)
+        rows = int(x4.shape[-2])
+        partial = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
         if self.num_devices > 1:
             out = ttnn.experimental.reduce_scatter_minimal_async(
                 partial,
