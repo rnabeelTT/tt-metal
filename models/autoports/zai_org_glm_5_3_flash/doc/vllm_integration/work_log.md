@@ -4,6 +4,13 @@ Device jobs run from pinned snapshots under `~/glm53-flash-bringup/` (`git archi
 `MD5SUMS` in each snapshot). Every job takes one ticket in the FIFO device queue (`scripts/run-locked.sh`).
 Logs: `~/glm53-flash-bringup/logs/09/`. Scripts: `~/glm53-flash-bringup/scripts/`.
 
+Code change after the stage-9 runs: stage 10 (344195b5ef5) removed the DSA decode width buckets from the multi-slot
+builds (p300x2, p150x4, p300x2-wide), because the served check showed that they made a greedy output depend on the
+other active requests (`doc/optimized_vllm/README.md`, "Batch invariance of the DSA width buckets"). The re-probed
+capacities are 16 x 262,144 (p300x2, p150x4), 32 x 159,744 (wide) and 1 x 344,064 (long). Sections marked [DSA buckets
+on] measured p300x2 or p300x2-wide with the multi-slot DSA buckets on: the final serving run, the wide re-run, stage-10
+t17 and the preemption smoke. The final scorecard run re-measures them on the current code.
+
 ## A0: host checks (2026-10-20)
 
 - `tests/test_generator_vllm_host.py` passes on every snapshot. The count is now 22.
@@ -299,6 +306,10 @@ Evidence: `doc/vllm/evidence/slot_width_compare.txt`.
 
 ## Final serving run (review #1 P1-3, 2026-10-21, code freeze 0a2663d0b6b)
 
+[DSA buckets on] The multi-slot builds of this run used the DSA decode width buckets. Stage 10 (344195b5ef5)
+turned them off at S >= 2 (served batch invariance) and re-probed the capacities. See the caveat at the top of
+README.md; the final scorecard run re-measures these numbers.
+
 One device ticket: `~/glm53-flash-bringup/scripts/s9_final.sh <snapshot>` (snapshot s9k = pure `git archive` of
 0a2663d0b6b; `tt-smi -r` between parts; a leftover-process check after every server and probe: none). Evidence:
 `doc/vllm/evidence/final/` (`s9_final_summary.txt` is the condensed log).
@@ -411,6 +422,10 @@ python -m vllm.entrypoints.openai.api_server --model $GLM53_CKPT --served-model-
 
 ## p300x2-wide re-run after the stage-10 MoE-bucket fix (2026-10-21, 0bcf89f7fd6)
 
+[DSA buckets on] The multi-slot builds of this run used the DSA decode width buckets. Stage 10 (344195b5ef5)
+turned them off at S >= 2 (served batch invariance) and re-probed the capacities. See the caveat at the top of
+README.md; the final scorecard run re-measures these numbers.
+
 Command: `~/glm53-flash-bringup/scripts/s9_wide_rerun.sh <snapshot>` with REPROBE=1, one ticket (snapshot s9l = pure
 `git archive` of 3872b583092 = 0bcf89f7fd6 + stage-4 docs; tt/ code identical to 0bcf89f7fd6). Evidence:
 `doc/vllm/evidence/final/wide-r2_*`.
@@ -450,11 +465,17 @@ requests do not retain device memory or programs:
 
 ## Async decode with the stage-10 buckets (stage-10 t17)
 
+[DSA buckets on] (multi-slot build of 0a2663d0b6b).
+
 `tools/vllm_async_validate.py` on 0a2663d0b6b (the stage-10 DSA / MoE decode buckets and pool-key views active),
 `logs/s10/t17.log` (copied to `doc/vllm/evidence/t17_async_validate_buckets.txt`): all 5 streams equal to their solo
 controls, 413 steady / 7 reload / 13 page-table-only / 3 host steps, `ASYNC_RESULT PASS`.
 
 ## Preemption smoke, p300x2 (review #2 P3, 2026-10-22, code freeze 3993d5eecef, snapshot s9n)
+
+[DSA buckets on] The multi-slot builds of this run used the DSA decode width buckets. Stage 10 (344195b5ef5)
+turned them off at S >= 2 (served batch invariance) and re-probed the capacities. See the caveat at the top of
+README.md; the final scorecard run re-measures these numbers.
 
 `scripts/09-preempt.py` on a p300x2 server (16 x 239,616; the DSA pool is 1,890 blocks = 241,920 tokens). Two
 different 119,000-token prompts, greedy, `ignore_eos`, 3,000 output tokens. First each prompt runs alone (the
@@ -468,9 +489,13 @@ Evidence: `doc/vllm/evidence/p3_preempt_p300x2.txt` and `.json` (token ids).
 - B: the first divergence from its solo control is at output token 9 ("plans at all," / "plans, nor yet"). This is
   during the 2-row decode, about 1,824 steps before the preemption, so the preemption does not cause it. Concurrent B
   differs from solo B in model slot (1 vs 0), physical KV blocks, MoE row bucket (2 vs 1) and prefill timing. A shared
-  bucket 2 with B and stayed equal. Without logits we cannot tell which of these differences flips the token, so we do
-  not classify it further. The 32-stream burst gate on p300x2-wide (32/32 equal to solo, short prompts) does not show
-  this effect.
+  bucket 2 with B and stayed equal.
+  Attribution: the batch dependence of the multi-slot DSA width buckets, which 3993d5eecef still had. Stage 10 found
+  it with the served check on the same build (a 4,100-token request next to a ~70K decode: differs from solo at token
+  2 or 17 with the DSA buckets on, equal with them off and the MoE row buckets on; `doc/optimized_vllm/README.md`,
+  tickets t22-t24). 344195b5ef5 turns the buckets off at S >= 2. The final verification run on the current code
+  re-checks this concurrent pair. The 32-stream burst gate on p300x2-wide (32/32 equal to solo) used short prompts
+  only, where every request uses the smallest width bucket.
 - Recompute boundary: B's token stream continues with no dropped or repeated token. B is in a greedy repetition loop on
   both sides of the boundary ("and Madame Anarchist,"). A few tokens after the resume the loop word changes ("An
   aristocrat"). That is the expected effect of rebuilding the cache rows through prefill instead of decode.
@@ -487,4 +512,6 @@ The others (`s9_final.sh`, `s9_wide_rerun.sh`, `09-g9-probe.sh`, `09-diag.py`, `
 
 - Indexer cost: the sparse DSA indexer selects over all pools of the model context, not over the filled prefix. The
   model context comes from max_model_len (`pad_page_table` pads every block table to T/128 columns). So the decode
-  time grows with max_model_len. The A6 and A8 numbers are the baseline before the stage-10 DSA width buckets.
+  time grows with max_model_len. The A6 and A8 numbers are the baseline before the stage-10 DSA width buckets. On the
+  current code (344195b5ef5) this applies again to the multi-slot builds (no DSA buckets at S >= 2); one-slot builds
+  keep the buckets.

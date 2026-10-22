@@ -1,28 +1,40 @@
 # Stage 9: vLLM integration of GLM-5.3-Flash (E192) on p300x2
 
 Details, commands and every run: `work_log.md`. Design: `../vllm/DESIGN.md`. Gate artifact: `../../readiness_vllm/` (from the
-p300x2-1m server). The release code freeze is 0bcf89f7fd6 (stage-10 decode buckets with the MoE-bucket fix, async
-decode on). Each row names the commit it was measured on:
+p300x2-1m server). The serving runs used the code freeze 0bcf89f7fd6 (stage-10 decode buckets with the MoE-bucket fix,
+async decode on) or earlier commits; the current code is 344195b5ef5 (see below). Each row names the commit it was
+measured on:
 - [0a2663d0b6b]: the final serving run (`../vllm/evidence/final/`), on the freeze before the stage-10 fix. The fix
   changes the MoE path of the 32-slot build only (and frees two buffers), so the p300x2-long, p300x2 and p300x2-1m rows
   stand for the freeze.
 - [0bcf89f7fd6]: the p300x2-wide re-run (`../vllm/evidence/final/wide-r2_*`).
 - Rows marked "pre-fix wide build" describe the 32-slot build of 0a2663d0b6b and are kept as history.
 
+**Code change after these runs (stage 10, 344195b5ef5).** The multi-slot builds (p300x2, p150x4, p300x2-wide) no longer
+use DSA decode width buckets. A served check showed that the multi-slot DSA buckets made a greedy output depend on the
+other active requests (`doc/optimized_vllm/README.md`, "Batch invariance of the DSA width buckets";
+`tools/vllm_served_invariance.py`). One-slot builds keep them, and the MoE row buckets stay on. The re-probed capacities
+are p300x2 / p150x4 16 x 262,144, p300x2-wide 32 x 159,744 and p300x2-long 1 x 344,064 (`serving_profiles.json`). Rows
+marked [DSA buckets on] were measured on p300x2 or p300x2-wide with the multi-slot DSA buckets on (the final run, the
+wide re-run, the preemption run). They do not describe the current multi-slot builds: stage 10 estimates the decode
+about 4-5 ms slower per token without the buckets. The p300x2-long and p300x2-1m rows are not affected by the change
+(one slot; 1m has no buckets), but p300x2-long was measured at the old 325,632-token build. The final scorecard run
+re-measures every number on the current code.
+
 ## Summary
 
 | item | result |
 | --- | --- |
 | Supported context | 1,048,576 tokens (the advertised context), profile `p300x2-1m`, measured (G9 probe, copy 1.0) |
-| Long-context retrieval through vLLM | passkey needle PASS at 1,038,965 tokens (p300x2-1m, depth 0.08) and at 197,077 tokens (p300x2: replicated layout, DSA and MoE buckets active, depth 0.36) |
-| Plugin sampling suite, full profile | p300x2 (16 sequences) [0a2663d0b6b]: 69 passed, 4 failed, 4 skipped. p300x2-wide (32 sequences) [0a2663d0b6b, pre-fix wide build]: 70 passed, 3 failed, 4 skipped. All failures are known test-format and model-property failures (Known failures). The wide sampling smoke and qualitative on the fixed build run in the stage-11 verification. |
+| Long-context retrieval through vLLM | passkey needle PASS at 1,038,965 tokens (p300x2-1m, depth 0.08) and at 197,077 tokens (p300x2: replicated layout, DSA and MoE buckets active, depth 0.36) [DSA buckets on] |
+| Plugin sampling suite, full profile | [DSA buckets on] p300x2 (16 sequences) [0a2663d0b6b]: 69 passed, 4 failed, 4 skipped. p300x2-wide (32 sequences) [0a2663d0b6b, pre-fix wide build]: 70 passed, 3 failed, 4 skipped. All failures are known test-format and model-property failures (Known failures). The wide sampling smoke and qualitative on the fixed build run in the stage-11 verification. |
 | Plugin sampling suite, smoke profile, p300x2-1m | 3 passed, 1 skipped |
-| Qualitative (6 prompts, greedy and sampled) | coherent and on topic on every profile [0a2663d0b6b; for wide: pre-fix wide build]; the degenerate-output check is clean |
+| Qualitative (6 prompts, greedy and sampled) | coherent and on topic on every profile [0a2663d0b6b; for wide: pre-fix wide build; p300x2 and wide: DSA buckets on]; the degenerate-output check is clean |
 | Shipped mode (max reasoning effort) | 2 control prompts finish the reasoning and give correct content on every profile |
-| Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`: on 0bd45f315e1 + the P1-2 fix, on 4678d8fccf4, and with the stage-10 buckets on 0a2663d0b6b, stage-10 t17); -1.05 ms per token on p300x2-long |
+| Async decode | on by default; device stale-input test PASS (`tools/vllm_async_validate.py`: on 0bd45f315e1 + the P1-2 fix, on 4678d8fccf4, and with the stage-10 buckets on 0a2663d0b6b, stage-10 t17 [DSA buckets on]); -1.05 ms per token on p300x2-long |
 | Served = standalone | the 6 qualitative prompts give the same tokens through vLLM and through the standalone generator (p300x2-long build) |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
-| Concurrency determinism | a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2 |
+| Concurrency determinism | [DSA buckets on] a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2. Short prompts only: every request uses the smallest width bucket, alone or in the burst. Next to a long request the multi-slot DSA buckets made outputs batch-dependent (stage 10; Preemption below); the current code turns them off |
 
 ## Primary single user (128/128/1) and CI burst (100/100/32)
 
@@ -32,8 +44,8 @@ decode on). Each row names the commit it was measured on:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | p300x2-long [0a2663d0b6b] | 1 | 288 ms | 49.84 ms | 49.9 / 50.7 ms | 20.1 | 19.3 |
 | p300x2-1m (gate artifact) [0a2663d0b6b] | 1 | 290 ms | 71.52 ms | 71.5 / 72.6 ms | 14.0 | 13.7 |
-| p300x2 (default) [0a2663d0b6b] | 16 | 265 ms | 69.91 ms | 69.9 / 70.8 ms | 14.3 | 14.0 |
-| p300x2-wide [0bcf89f7fd6] | 32 | 278 ms | 120.89 ms | 120.9 / 121.9 ms | 8.3 | 8.2 |
+| p300x2 (default) [0a2663d0b6b] [DSA buckets on] | 16 | 265 ms | 69.91 ms | 69.9 / 70.8 ms | 14.3 | 14.0 |
+| p300x2-wide [0bcf89f7fd6] [DSA buckets on] | 32 | 278 ms | 120.89 ms | 120.9 / 121.9 ms | 8.3 | 8.2 |
 
 CI serving burst, 32 prompts of 100 input / 100 output tokens, no concurrency limit (queued on 1-slot profiles):
 
@@ -41,16 +53,16 @@ CI serving burst, 32 prompts of 100 input / 100 output tokens, no concurrency li
 | --- | ---: | ---: | ---: |
 | p300x2-long | 80.3 s / 158.8 s (queueing) | 49.8 ms | 19.4 |
 | p300x2-1m | 113.6 s / 224.7 s (queueing) | 71.4 / 71.5 ms | 13.7 |
-| p300x2 | 14.2 s / 24.6 s | 172.5 / 172.6 ms | 76.8 |
-| p300x2-wide | 7.8 s / 7.8 s | 161.1 / 161.5 ms | 134.6 |
+| p300x2 [DSA buckets on] | 14.2 s / 24.6 s | 172.5 / 172.6 ms | 76.8 |
+| p300x2-wide [DSA buckets on] | 7.8 s / 7.8 s | 161.1 / 161.5 ms | 134.6 |
 
 Served vs standalone (the same build, one active request; TPOT): the serving overhead is small or negative.
 
 | profile | served TPOT (vLLM, 128/128/1) | standalone TPOT (generator token-out, stage 10) |
 | --- | ---: | ---: |
 | p300x2-long [0a2663d0b6b] | 49.84 ms | 50.10 ms |
-| p300x2 [0a2663d0b6b] | 69.91 ms | 72.9 ms (t15b) |
-| p300x2-wide [0bcf89f7fd6] | 120.89 ms | 118.6 ms |
+| p300x2 [0a2663d0b6b] [DSA buckets on] | 69.91 ms | 72.9 ms (t15b) |
+| p300x2-wide [0bcf89f7fd6] [DSA buckets on] | 120.89 ms | 118.6 ms |
 
 Async decode on vs off, p300x2-long, same build and flags (`GLM53_VLLM_ASYNC_DECODE` 1 / 0): TPOT 49.84 / 50.89 ms,
 ITL P99 50.7 / 54.5 ms, CI TPOT 49.8 / 51.1 ms.
@@ -94,33 +106,40 @@ that must copy the passage (copy accuracy 1.0 on every probe).
 | profile | sequences | max_model_len | DSA cache layout | trace region | evidence |
 | --- | ---: | ---: | --- | ---: | --- |
 | p300x2-1m | 1 | 1,048,576 | block-sharded fp8 | 64 MiB | `../vllm/capacity/s1_p300x2-1m` |
-| p300x2-long | 1 | 325,632 | replicated fp8 | 64 MiB | `../vllm/capacity/s1` |
-| p300x2 (default) | 16 | 239,616 | replicated fp8 | 96 MiB | `../vllm/capacity/s16` |
-| p150x4 | 16 | 239,616 (derived from p300x2, not run on p150 boards) | replicated fp8 | 96 MiB | - |
-| p300x2-wide | 32 | 137,216 | replicated fp8 | 160 MiB | `../vllm/capacity/s32` |
+| p300x2-long | 1 | 344,064 | replicated fp8 | 64 MiB | `../vllm/capacity/s10_s1` |
+| p300x2 (default) | 16 | 262,144 | replicated fp8 | 96 MiB | `../vllm/capacity/s10_s16` |
+| p150x4 | 16 | 262,144 (derived from p300x2, not run on p150 boards) | replicated fp8 | 96 MiB | - |
+| p300x2-wide | 32 | 159,744 | replicated fp8 | 160 MiB | `../vllm/capacity/s10_s32` |
+
+The capacities come from the stage-10 re-probe (t21, 344195b5ef5 code: no DSA decode buckets at S >= 2; the pool is
+sized from the measured bytes per block). The stage-9 probes (`../vllm/capacity/s1`, `s16`, `s32`: 325,632 / 239,616
+/ 137,216) are history; the serving runs in this document used those builds.
 
 - The supported context is the advertised 1,048,576 tokens (`doc/context_contract.json`). The profile `p300x2-1m`
   serves it.
 - The other profiles use the replicated DSA cache, which holds fewer tokens per die but decodes faster. Their
-  max_model_len values (325,632 / 239,616 / 137,216) are the measured limits of that layout at their sequence counts.
+  max_model_len values (344,064 / 262,144 / 159,744) are the measured limits of that layout at their sequence counts.
   They are not caps on the 1M context.
-- Trace regions (stage 10): the multi-slot builds need room for the MoE row-bucket point traces. At 16 slots the
-  capture uses 97.7 MB of the 96 MiB region (100.7 MB); at 32 slots 107.3 MiB of 160 MiB (96 MiB overflowed).
+- Trace regions (stage 10): the multi-slot builds need room for the MoE row-bucket point traces. Re-probe (no DSA
+  buckets at S >= 2): 16 slots 87.3 MiB of 96 MiB, 32 slots 101.6 MiB of 160 MiB, 1 slot 44.9 MiB of 64 MiB. With the
+  multi-slot DSA buckets on, 16 slots used 97.7 MB of 100.7 MB and 32 slots 107.3 MiB (96 MiB overflowed).
 - Prompts of any valid length are served. Non-aligned prompts of 1, 3, 127, 129, 2049, 2051, 2381 and 4223 tokens
   answer on every profile. Prompts near each profile limit answer: 239,360 (p300x2 sweep), 325,568 (long, stage 9),
-  1,048,000 (1m).
+  1,048,000 (1m). These are the limits of the stage-9 builds; the re-probed limits get their near-limit prompt in the
+  final scorecard run.
 
 ## Serving profile choice
 
 TPOT / total output tok/s at a 128-token input, greedy, from the sweeps (`../vllm/evidence/final/*_sweep.json`) and the
-1-slot primary benchmarks.
+1-slot primary benchmarks. The p300x2 and p300x2-wide rows are [DSA buckets on]; the context column is the current
+capacity.
 
 | profile | 1 user | 8 users | 16 users | 32 users | context per sequence |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| p300x2-long | 49.8 / 19.3 | - | - | - | 325,632 |
+| p300x2-long | 49.8 / 19.3 | - | - | - | 344,064 |
 | p300x2-1m | 71.5 / 13.7 | - | - | - | 1,048,576 |
-| p300x2 (default) | 69.9 / 14.0 | 119.9 / 59.6 | 172.6 / 79.4 | - | 239,616 |
-| p300x2-wide | 121.0 / 8.2 | 130.0 / 55.2 | 145.8 / 91.2 | 160.1 / 144.8 | 137,216 |
+| p300x2 (default) | 69.9 / 14.0 | 119.9 / 59.6 | 172.6 / 79.4 | - | 262,144 |
+| p300x2-wide | 121.0 / 8.2 | 130.0 / 55.2 | 145.8 / 91.2 | 160.1 / 144.8 | 159,744 |
 
 - One user, fastest decode: p300x2-long.
 - One user, the full 1M context: p300x2-1m.
@@ -129,8 +148,9 @@ TPOT / total output tok/s at a 128-token input, greedy, from the sweeps (`../vll
   slots every MoE row bucket runs the expert-sorted path (stage-10 fix), which keeps the greedy output independent of
   the number of active requests.
 
-Single-user TPOT grows slowly with the filled context on the bucketed builds: p300x2 69.9 ms at 128 tokens, 73.9 ms at
-16K, 79.3 ms at 239,360.
+Single-user TPOT grew slowly with the filled context on the bucketed build [DSA buckets on]: p300x2 69.9 ms at 128
+tokens, 73.9 ms at 16K, 79.3 ms at 239,360. Without the multi-slot DSA buckets the indexer selects over the full
+model context at every position (Notes in the work log), so this no longer applies to p300x2 and p300x2-wide.
 
 ## Known failures (plugin sampling suite)
 
@@ -194,6 +214,10 @@ and all rows of one build agree. Bounded numerics of the decode path above 16 ro
 
 ## Concurrency and greedy determinism (p300x2-wide)
 
+[DSA buckets on] for every run in this section. The burst prompts are short, so every request uses the smallest DSA
+width bucket, alone or in the burst. Stage 10 found the batch dependence of the multi-slot buckets with a short request
+next to a long one (`doc/optimized_vllm/README.md`, "Batch invariance of the DSA width buckets").
+
 On the freeze 0a2663d0b6b the 32-slot build ran the expert-sorted MoE path for the 32-row bucket and the pairs path for
 the smaller buckets. The two paths are not bit-exact, so a greedy output depended on the number of active requests: a
 burst of 32 equaled the solo outputs on 4 of 32 streams (stage 9 before the buckets: 32 of 32). Stage 10's fix
@@ -202,15 +226,18 @@ burst of 32 equaled the solo outputs on 4 of 32 streams (stage 9 before the buck
 tokens, copy 1.0), the burst gate 32/32, the benchmark and the short sweep (8/8 rows). The full plugin suite at 32
 sequences (70 / 3 / 4) ran on 0a2663d0b6b before the fix; the fix changes only the MoE path of the 32-slot build.
 
-## Preemption (p300x2, 3993d5eecef)
+## Preemption (p300x2, 3993d5eecef) [DSA buckets on]
 
 Two 119,000-token prompts, each with 3,000 greedy output tokens, ran concurrently on p300x2. Together they need more
-than the 241,920-token DSA pool. vLLM preempted one request (`num_preemptions` +1) after 1,833 output tokens and
-re-prefilled it at 120,833 tokens. Both requests finished with 3,000 tokens. The request that was not preempted equals
-its solo greedy control for all 3,000 tokens. The preempted request leaves its solo control at output token 9, during
-the 2-request decode and long before the preemption. That divergence comes from concurrent decode at 119K context, not
-from the recompute; its cause is not isolated (work log). Its stream continues across the recompute with no dropped or
-repeated token (`../vllm/evidence/p3_preempt_p300x2.txt`).
+than the 241,920-token DSA pool of that build (239,616-token profile). vLLM preempted one request (`num_preemptions` +1)
+after 1,833 output tokens and re-prefilled it at 120,833 tokens. Both requests finished with 3,000 tokens. The request
+that was not preempted equals its solo greedy control for all 3,000 tokens. The preempted request leaves its solo
+control at output token 9, during the 2-request decode and long before the preemption. So the recompute does not cause
+it. We attribute it to the batch dependence of the multi-slot DSA width buckets, which this build still had. Stage 10
+showed the same kind of divergence: a 4,100-token request next to a ~70K decode differs from its solo run at token 2 or
+17 with the buckets on, and is equal with them off. 344195b5ef5 turns them off at S >= 2. The final verification run on
+the current code re-checks it. The preempted request's stream continues across the recompute with no dropped or repeated
+token (`../vllm/evidence/p3_preempt_p300x2.txt`).
 
 ## Readiness runs and reasoning effort
 

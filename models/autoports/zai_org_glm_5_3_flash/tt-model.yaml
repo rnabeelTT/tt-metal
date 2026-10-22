@@ -210,6 +210,10 @@ card:
     `p300x2-1m`: 1,038,965 tokens in 2,310 s. More users: `p300x2` reaches 79 output tokens/s at 16 users (172.6 ms per
     token per user); `p300x2-wide` reaches 145 output tokens/s at 32 users (160 ms per token per user). Per-profile
     tables: doc/vllm_integration/README.md in the autoport.
+    The `p300x2` and `p300x2-wide` numbers were measured before a stage-10 change: these multi-slot builds no longer
+    use DSA decode width buckets (they made a greedy output depend on the other active requests), and their contexts
+    grew to 262,144 and 159,744 tokens. Stage 10 estimates their decode about 4-5 ms slower per token. The final
+    scorecard run re-measures every number in this section.
 
     ### Limitations
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
