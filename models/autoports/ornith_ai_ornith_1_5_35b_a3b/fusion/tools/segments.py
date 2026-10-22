@@ -1,11 +1,13 @@
 """Per-layer device time of the signposted traced decode windows (device 0), split into boundary / mixer / MoE.
 
-    python segments.py <ops_perf csv> [iters] [--ops]
+    python segments.py <ops_perf csv> [iters] [--ops] [--dev=N] [--labels=gdn_b1,gdn_b16,...]
 
 Segments are found from the collectives, so they survive op-count changes: the boundary is the attention-norm
 all-gather + norm + its sharded->interleaved copy, the mixer reduce-scatter + residual add, the ffn-norm all-gather +
 norm + copy, and the MoE reduce-scatter + residual add; the mixer is everything between the first boundary and the
-first reduce-scatter; the MoE everything between the ffn-norm block and the last reduce-scatter. The first op's gap
+first reduce-scatter; the MoE everything between the ffn-norm block and the last reduce-scatter. With the replicated
+residual (two all-reduces) the boundary is the norms, the partial -> BFP8 shard copies, the all-reduces and the adds,
+and the per-layer harness's entry all-gather / exit partition is reported apart and left out of the layer total. The first op's gap
 (the idle time between trace replays) is capped at 20 us. --ops prints the MoE ops of one step.
 """
 
@@ -14,7 +16,7 @@ import re
 import sys
 
 
-def windows(path):
+def windows(path, dev="0"):
     rows = list(csv.DictReader(open(path)))
     wins, cur = [], None
     for x in rows:
@@ -24,7 +26,7 @@ def windows(path):
                 cur = None
             else:
                 cur = []
-        elif cur is not None and x["DEVICE ID"] == "0":
+        elif cur is not None and x["DEVICE ID"] == dev:
             cur.append(x)
     return wins
 
@@ -35,6 +37,18 @@ def name(x):
 
 def segments(step):
     names = [name(x) for x in step]
+    ar = [i for i, n in enumerate(names) if n.startswith("AllReduce")]
+    if ar:  # replicated residual (QWEN35_DECODE_REPLICATED=1): the harness gathers in and partitions out
+        assert len(ar) == 2, ar
+        nrm = 2 if names[2] == "ShardedToInterleaved" else 1  # attention norm (+ the mixer's interleaved copy)
+        ffn = ar[0] + 2 + (2 if names[ar[0] + 3] == "ShardedToInterleaved" else 1)
+        tail = [i for i in range(ar[1] + 2, len(step))]
+        return {
+            "harness": [0] + tail,
+            "boundary": list(range(1, 1 + nrm)) + list(range(ar[0] - 1, ffn)) + [ar[1] - 1, ar[1], ar[1] + 1],
+            "mixer": list(range(1 + nrm, ar[0] - 1)),
+            "moe": list(range(ffn, ar[1] - 1)),
+        }
     ag = [i for i, n in enumerate(names) if n.startswith("AllGather")]
     rs = [i for i, n in enumerate(names) if n.startswith("ReduceScatter")]
     assert len(ag) == 2 and len(rs) == 2, (ag, rs)
@@ -57,7 +71,9 @@ def us(x, k):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     iters = int(args[1]) if len(args) > 1 else 5
-    for label, w in zip(["gdn", "attn"], windows(args[0])):
+    dev = next((a.split("=")[1] for a in sys.argv if a.startswith("--dev=")), "0")
+    labels = next((a.split("=")[1].split(",") for a in sys.argv if a.startswith("--labels=")), ["gdn", "attn"])
+    for label, w in zip(labels, windows(args[0], dev)):
         n = len(w) // iters
         print(f"== {label}: {n} ops/step")
         tot = 0.0
@@ -70,9 +86,10 @@ def main():
                     g = us(step[i], "OP TO OP LATENCY [ns]")
                     to += min(g, 20) if i == 0 else g
             k, g = tk / (iters - 1), to / (iters - 1)
-            tot += k + g
+            if seg != "harness":
+                tot += k + g
             print(f"  {seg:9s} ops {len(idx):3d} kernel {k:6.1f} us gaps {g:6.1f} us total {k + g:6.1f} us")
-        print(f"  {'layer':9s} {'':7s} {'':6s}{'':10s}{'':14s} total {tot:6.1f} us")
+        print(f"  {'layer':9s} {'':7s} {'':6s}{'':10s}{'':14s} total {tot:6.1f} us (without the harness ops)")
         if "--ops" in sys.argv:
             step = w[2 * n : 3 * n]
             for i in segments(step)["moe"]:

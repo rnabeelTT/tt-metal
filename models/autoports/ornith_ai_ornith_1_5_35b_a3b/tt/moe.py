@@ -372,8 +372,10 @@ class Qwen35MoE:
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
 
     # ------------------------------------------------------------------------------------------------
-    def forward(self, x, mode=None):
-        """x: [B, T, H] (single device prefill/decode) or [1, 1, T, H]. Returns the same shape."""
+    def forward(self, x, mode=None, partial=False):
+        """x: [B, T, H] (single device prefill/decode) or [1, 1, T, H]. Returns the same shape. partial (TP decode):
+        return this device's [1, 1, T, H] partial sum instead of the reduce-scattered output (the replicated-residual
+        decode boundary all-reduces it, models/demos/blackhole/qwen36/tt/decode_boundary.py)."""
         orig = list(x.shape)
         H = orig[-1]
         T = math.prod(orig[:-1])
@@ -384,7 +386,7 @@ class Qwen35MoE:
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
         if self._fused is not None and list(x4.padded_shape)[-2] == TILE and mode != "prefill":
             if T == 1 or 2 <= T <= min(MOE_FUSED_ROWS_MAX, 32):
-                return self._forward_fused_decode(x4, orig)
+                return self._forward_fused_decode(x4, orig, partial)
         scores, ids = self._route(x4)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
             if T <= self.GATHER_MAX_TOKENS:
@@ -400,6 +402,8 @@ class Qwen35MoE:
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
         ttnn.deallocate(shared)
+        if self.num_devices > 1 and partial:
+            return ttnn.reshape(out, orig) if list(out.shape) != orig else out
         if self.num_devices > 1:
             # TP on the expert intermediate dim: every device holds a partial [.., H] sum (routed + shared); the layer
             # contract wants the FRACTURED residual [.., H / tp], so reduce-scatter along the hidden dim (the same
@@ -421,14 +425,19 @@ class Qwen35MoE:
             out = ttnn.reshape(out, orig)
         return out
 
-    def _forward_fused_decode(self, x4, orig):
+    def _forward_fused_decode(self, x4, orig, partial=False):
         """One decode token through moe_decode.FusedMoEDecode: the partial sum lands in a model-wide buffer that the
         reduce-scatter reads directly (tt_all_reduce would deallocate it)."""
         rows = int(x4.shape[-2])
-        partial = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
+        part = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
+        if partial:  # a copy (the fused ops' output buffer is model-wide), already in the boundary's all-reduce input layout
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            out = decode_boundary(self.args, self.device).to_partial(part)
+            return ttnn.reshape(out, orig) if list(out.shape) != orig else out
         if self.num_devices > 1:
             out = ttnn.experimental.reduce_scatter_minimal_async(
-                partial,
+                part,
                 persistent_output_buffers=None,
                 dim=3,
                 multi_device_global_semaphore=self.tt_ccl.get_and_cycle_rs_semaphore_handles(),
@@ -443,7 +452,7 @@ class Qwen35MoE:
             )
             orig = orig[:-1] + [out.shape[-1]]
         else:
-            out = ttnn.clone(partial, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            out = ttnn.clone(part, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         if list(out.shape) != orig:
             out = ttnn.reshape(out, orig)
         return out

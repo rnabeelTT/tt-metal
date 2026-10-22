@@ -34,6 +34,13 @@ class Qwen36DecoderLayer:
         # (tp_modules_single_device: the TP modules at degree 1, CCLs are no-ops; used by the autoports' single-die serving)
         self._tp_modules = self.num_devices > 1 or bool(getattr(args, "tp_modules_single_device", False))
         self.is_full_attention = args.is_full_attention_layer(layer_num)
+        # args.decode_replicated (TP): decode keeps the residual replicated, one all-reduce per boundary
+        # (decode_boundary.py); built here so its buffers / semaphores exist before any trace capture
+        self._decode_replicated = self.num_devices > 1 and bool(getattr(args, "decode_replicated", False))
+        if self._decode_replicated:
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            decode_boundary(args, mesh_device)
 
         prefix = f"layers.{layer_num}"
 
@@ -204,6 +211,8 @@ class Qwen36DecoderLayer:
         valid_len=None,
         gdn_collect=False,
     ):
+        if mode == "decode" and self._decode_replicated:
+            return self._forward_decode_replicated(x, cos, sin, position_tensor, page_table)
         _norm_mode = Mode.PREFILL if mode == "prefill" else Mode.DECODE
         if self.num_devices > 1:
             # TP: DistributedNorm uses the framework's per-norm memory configs.
@@ -308,3 +317,25 @@ class Qwen36DecoderLayer:
         ttnn.deallocate(ff_output)
 
         return output
+
+    def _forward_decode_replicated(self, x, cos, sin, position_tensor, page_table):
+        """TP decode with the replicated residual (decode_boundary.py): x is [1, 1, B, dim] on every device in the
+        boundary's residual layout; local norms, the token mixer and the feed-forward return per-device partial sums,
+        and each boundary is residual + all_reduce(partial). Returns the residual in the same layout."""
+        from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+        bnd = decode_boundary(self.args, self.device)
+        nc = bnd.norm_config
+        attn_input = self.attention_norm.norm(x, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        if self.is_full_attention:
+            part = self.attention.forward_decode(attn_input, position_tensor, cos, sin, page_table=page_table, partial=True)
+        else:
+            part = self.attention.forward_decode(attn_input, partial=True)
+        ttnn.deallocate(attn_input)
+        h = bnd.reduce_add(part, x, "mixer")
+        ff_input = self.ffn_norm.norm(h, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        ff_part = self.feed_forward.forward(ff_input, mode="decode", partial=True)
+        ttnn.deallocate(ff_input)
+        out = bnd.reduce_add(ff_part, h, "mlp")
+        ttnn.deallocate(h)
+        return out

@@ -1488,7 +1488,7 @@ class TPGatedDeltaNet:
             cache[key] = masks
         self._active_masks = cache[key]
 
-    def _forward_decode_fused(self, x):
+    def _forward_decode_fused(self, x, partial=False):
         tw, Nk, Nv, Dv = self.tw, self.Nk, self.Nv, self.Dv
         Bmax = self.B
         _L1 = ttnn.L1_MEMORY_CONFIG
@@ -1557,18 +1557,22 @@ class TPGatedDeltaNet:
         gated = _silu_mul(out_f, z, _L1)
         ttnn.deallocate(out_f)
         ttnn.deallocate(z)
-        return self._decode_out_proj(gated, B)
+        return self._decode_out_proj(gated, B, partial)
 
-    def _decode_out_proj(self, gated, B):
+    def _decode_out_proj(self, gated, B, partial=False):
+        """partial: return this device's [1, 1, B, dim] out-projection partial sum (the replicated-residual decode
+        boundary all-reduces it, decode_boundary.py) instead of reduce-scattering it."""
         tw = self.tw
-        if getattr(self.args, "fuse_out_mmrs_decode", False):
+        if getattr(self.args, "fuse_out_mmrs_decode", False) and not partial:
             # Stage-5 candidate: out-proj matmul fused with the reduce-scatter (one op, persistent buffers per B).
             return self._out_mmrs_decode(gated, tw["out"], B)
-        partial = self._row_proj(gated, tw["out"])
+        part = self._row_proj(gated, tw["out"])
         ttnn.deallocate(gated)
-        partial = ttnn.reshape(partial, (1, 1, B, partial.shape[-1]))
+        part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
+        if partial:
+            return part
         return tt_all_reduce(
-            partial,
+            part,
             self.mesh,
             self.tt_ccl,
             cluster_axis=0,
@@ -1577,9 +1581,10 @@ class TPGatedDeltaNet:
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
 
-    def forward_decode(self, x):
+    def forward_decode(self, x, partial=False):
+        """partial: return the out-projection's per-device partial sum instead of the reduce-scattered output."""
         if self._fused_decode:
-            return self._forward_decode_fused(x)
+            return self._forward_decode_fused(x, partial)
         tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
         Bmax = self.B
         _L1 = ttnn.L1_MEMORY_CONFIG  # keep decode conv→recurrence→norm/gate chain L1-resident
@@ -1712,14 +1717,16 @@ class TPGatedDeltaNet:
         ttnn.deallocate(out_f)
         ttnn.deallocate(z)
 
-        if getattr(self.args, "fuse_out_mmrs_decode", False):
+        if getattr(self.args, "fuse_out_mmrs_decode", False) and not partial:
             # Stage-5 candidate: out-proj matmul fused with the reduce-scatter (one op, persistent buffers per B).
             return self._out_mmrs_decode(gated, tw["out"], B)
-        partial = self._row_proj(gated, tw["out"])
+        part = self._row_proj(gated, tw["out"])
         ttnn.deallocate(gated)
-        partial = ttnn.reshape(partial, (1, 1, B, partial.shape[-1]))
+        part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
+        if partial:
+            return part
         out = tt_all_reduce(
-            partial,
+            part,
             self.mesh,
             self.tt_ccl,
             cluster_axis=0,

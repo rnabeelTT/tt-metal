@@ -722,11 +722,22 @@ class MultichipDecoder(OptimizedDecoder):
     # ---------------------------------------------------------------------------------------------
     def decode_forward(self, hidden_states, *, current_pos, page_table=None, cos=None, sin=None):
         x, orig = self._as_4d(hidden_states, rows_first=False)
+        replicated = bool(getattr(self.args, "decode_replicated", False))
+        if replicated:  # this contract is fractured: gather in, partition out (decode_boundary.py)
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            bnd = decode_boundary(self.args, self.mesh_device)
+            x = bnd.gather(x, self.tt_ccl)
         if self.layer.is_full_attention:
             assert page_table is not None and cos is not None and sin is not None
             out = self.layer.forward(x, cos, sin, mode="decode", position_tensor=current_pos, page_table=page_table)
         else:
             out = self.layer.forward(x, mode="decode")
+        if replicated:
+            ttnn.deallocate(x)
+            rep = out
+            out = bnd.fracture(rep)
+            ttnn.deallocate(rep)
         if len(orig) != 4:
             out = ttnn.reshape(out, orig)
         return out

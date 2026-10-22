@@ -541,7 +541,7 @@ class TPAttention:
         ttnn.deallocate(gated)
         return out
 
-    def forward_decode(self, x, cur_pos_tt, cos_tt, sin_tt, page_table=None):
+    def forward_decode(self, x, cur_pos_tt, cos_tt, sin_tt, page_table=None, partial=False):
         tw, NH, NKV, HD = self.tw, self.NH, self.NKV, self.HD
         # Active decode width, taken from the input (x is [1,1,B,dim_frac]). Normally == self.B.
         # BUCKETED decode: a request feeds B<self.B users; every shape/reshape/rope/head-split and
@@ -747,12 +747,14 @@ class TPAttention:
         else:
             gated_flat = ttnn.reshape(gated, (1, B, NH * HD))
             ttnn.deallocate(gated)
-        if getattr(self.args, "fuse_out_mmrs_decode", False):
+        if getattr(self.args, "fuse_out_mmrs_decode", False) and not partial:
             # Stage-5 candidate: wo matmul fused with the reduce-scatter (one op, persistent buffers per B).
             return self._out_mmrs_decode(gated_flat, tw["wo"], B)
         wo_partial = self._wo_proj(gated_flat, tw["wo"])
         ttnn.deallocate(gated_flat)
         wo_partial = ttnn.reshape(wo_partial, (1, 1, B, wo_partial.shape[-1]))
+        if partial:  # the replicated-residual decode boundary all-reduces it (decode_boundary.py)
+            return wo_partial
         return tt_all_reduce(
             wo_partial,
             self.mesh,

@@ -55,7 +55,7 @@ def main():
                 part = ttnn.clone(x, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # tt_all_reduce deallocates its input
                 frac = tt_all_reduce(part, mesh, ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Ring,
                                      memory_config=ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.bfloat16)
-                full = tt_all_gather(frac, mesh, ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Ring,
+                full = tt_all_gather(frac, mesh, ccl, cluster_axis=None, dim=3, topology=ttnn.Topology.Ring,
                                      memory_config=ttnn.L1_MEMORY_CONFIG)
                 ttnn.deallocate(frac)
                 ttnn.deallocate(full)
@@ -63,7 +63,7 @@ def main():
             bench(mesh, "clone + reduce-scatter + all-gather", rs_ag)
             bench(mesh, "clone only", lambda: ttnn.deallocate(ttnn.clone(x, memory_config=ttnn.DRAM_MEMORY_CONFIG)))
 
-            for cores in (8, 16):
+            for cores in (8, 16, 32):  # 32: the decode norm's act_shard_hidden layout (4 x 8 cores, [32, 64] shards)
                 shard = ttnn.create_sharded_memory_config(
                     shape=(32, H // cores), core_grid=ttnn.CoreGrid(x=min(cores, 8), y=max(1, cores // 8)),
                     strategy=ttnn.ShardStrategy.WIDTH, orientation=ttnn.ShardOrientation.ROW_MAJOR,
@@ -74,7 +74,7 @@ def main():
                     strategy=ttnn.ShardStrategy.WIDTH, orientation=ttnn.ShardOrientation.ROW_MAJOR,
                     use_height_and_width_as_shard_shape=True,
                 )
-                for dt in (ttnn.bfloat16, ttnn.bfloat8_b):
+                for dt in (ttnn.bfloat8_b,):
                     xs = ttnn.to_memory_config(x, shard, dtype=dt)
                     scratch = ttnn.empty([1, 1, 32, H * nd], dt, ttnn.TILE_LAYOUT, mesh, scratch_cfg)
                     sem = ttnn.create_global_semaphore(mesh, sem_cores, 0)
