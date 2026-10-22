@@ -1,0 +1,10 @@
+# Profiling image: the POC serving image + Tracy capture/csvexport (from the POC builder stage) + pytest / tt-perf-report.
+FROM ornith-gdnpoc-builder AS tools
+FROM tt-model/ornith-1.5-35b-a3b-v2:gdnpoc
+USER root
+COPY --from=tools /opt/tt-metal/build_Release/tools/profiler/bin/ /opt/tt-metal/build_Release/tools/profiler/bin/
+COPY --from=tools /opt/tt-metal/build_Release/bin/tracy-capture /opt/tt-metal/build_Release/bin/tracy-csvexport /opt/tt-metal/build_Release/bin/
+COPY --from=tools /opt/venv/bin/uv /usr/local/bin/uv
+RUN mkdir -p /opt/tt-metal/build/tools/profiler && ln -sf /opt/tt-metal/build_Release/tools/profiler/bin /opt/tt-metal/build/tools/profiler/bin \
+ && uv pip install --python /opt/tt-venv/bin/python pytest tt-perf-report
+USER tt

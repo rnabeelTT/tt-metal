@@ -1,0 +1,139 @@
+{
+  "results": {
+    "r1_gpqa_diamond": {
+      "alias": "r1_gpqa_diamond",
+      "exact_match,none": 0.775,
+      "exact_match_stderr,none": 0.06686668711812965
+    }
+  },
+  "group_subtasks": {
+    "r1_gpqa_diamond": []
+  },
+  "configs": {
+    "r1_gpqa_diamond": {
+      "task": "r1_gpqa_diamond",
+      "tag": "gpqa",
+      "dataset_path": "Idavidrein/gpqa",
+      "dataset_name": "gpqa_diamond",
+      "training_split": "train",
+      "validation_split": "train",
+      "process_docs": "def process_gpqa_docs(dataset):\n    return process_docs(dataset)\n",
+      "doc_to_text": "What is the correct answer to this question:{{Question}}\nChoices:\n(A) {{choice1}}\n(B) {{choice2}}\n(C) {{choice3}}\n(D) {{choice4}}\nPlease reason step by step, and your final answer must be only (A,B,C or D) within \\boxed\nAnswer:",
+      "doc_to_target": "answer",
+      "unsafe_code": false,
+      "process_results": "def process_results_gpqa(doc: dict, results: List[str]) -> Dict[str, int]:\n\n    # Expose the choice texts under \"choices\" so the extractor can also match an\n    # answer written out as the choice text rather than a letter. The GPQA doc\n    # carries choice1..choice4 (no \"choices\" list), so build it here.\n    extract_doc = dict(doc)\n    if not extract_doc.get(\"choices\"):\n        choice_texts = [doc.get(f\"choice{i}\") for i in range(1, 5)]\n        choice_texts = [c for c in choice_texts if c]\n        if choice_texts:\n            extract_doc[\"choices\"] = choice_texts\n\n    candidate = choice_answer_clean(\n        _BOXED_CHOICE.apply([[results[0]]], [extract_doc])[0][0]\n    )\n    gold = choice_answer_clean(postprocess_target(doc[\"answer\"]))\n    retval = 0\n\n    if not gold:\n        print(doc, candidate, gold)\n\n    retval = exact_match_fn(gold, candidate)\n\n    results = {\n        \"exact_match\": retval,\n\n    }\n    return results\n",
+      "description": "",
+      "target_delimiter": " ",
+      "fewshot_delimiter": "\n\n",
+      "fewshot_config": {
+        "sampler": "default",
+        "split": null,
+        "process_docs": "<function process_gpqa_docs at 0x7532f70b27a0>",
+        "fewshot_indices": null,
+        "samples": null,
+        "doc_to_text": "What is the correct answer to this question:{{Question}}\nChoices:\n(A) {{choice1}}\n(B) {{choice2}}\n(C) {{choice3}}\n(D) {{choice4}}\nPlease reason step by step, and your final answer must be only (A,B,C or D) within \\boxed\nAnswer:",
+        "doc_to_choice": null,
+        "doc_to_target": "answer",
+        "gen_prefix": null,
+        "fewshot_delimiter": "\n\n",
+        "target_delimiter": " "
+      },
+      "num_fewshot": 0,
+      "metric_list": [
+        {
+          "metric": "exact_match",
+          "aggregation": "mean",
+          "higher_is_better": true
+        }
+      ],
+      "output_type": "generate_until",
+      "generation_kwargs": {
+        "until": [
+          "<|end_of_text|>",
+          "<|endoftext|>",
+          "<|im_end|>"
+        ],
+        "do_sample": true,
+        "max_gen_toks": 4096,
+        "temperature": 0.6,
+        "top_k": 20,
+        "top_p": 0.95,
+        "n": 1
+      },
+      "repeats": 1,
+      "should_decontaminate": false,
+      "metadata": {
+        "version": 1.0,
+        "model": "ornith-ai/Ornith-1.5-35B-A3B",
+        "base_url": "http://localhost:20000/v1/chat/completions",
+        "num_concurrent": 8,
+        "max_retries": 3,
+        "tokenized_requests": false,
+        "timeout": 3600
+      }
+    }
+  },
+  "versions": {
+    "r1_gpqa_diamond": 1.0
+  },
+  "n-shot": {
+    "r1_gpqa_diamond": 0
+  },
+  "higher_is_better": {
+    "r1_gpqa_diamond": {
+      "exact_match": true
+    }
+  },
+  "n-samples": {
+    "r1_gpqa_diamond": {
+      "original": 198,
+      "effective": 40
+    }
+  },
+  "config": {
+    "model": "local-chat-completions",
+    "model_args": {
+      "model": "ornith-ai/Ornith-1.5-35B-A3B",
+      "base_url": "http://localhost:20000/v1/chat/completions",
+      "num_concurrent": 8,
+      "max_retries": 3,
+      "tokenized_requests": false,
+      "timeout": 3600
+    },
+    "batch_size": 1,
+    "batch_sizes": [],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 40.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {
+      "do_sample": true,
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "max_gen_toks": 4096
+    },
+    "random_seed": 42,
+    "numpy_seed": 42,
+    "torch_seed": 42,
+    "fewshot_seed": 42
+  },
+  "git_hash": "be23028b",
+  "date": 1792638953.6181283,
+  "pretty_env_info": "N/A (torch not installed)",
+  "transformers_version": "N/A",
+  "lm_eval_version": "0.4.10.dev0",
+  "upper_git_hash": null,
+  "task_hashes": {
+    "r1_gpqa_diamond": "548c3255c3e3a4f0eb93a868999b10d5d9606dc78c6c10562f0d94e6afa42dc4"
+  },
+  "model_source": "local-chat-completions",
+  "model_name": "ornith-ai/Ornith-1.5-35B-A3B",
+  "model_name_sanitized": "ornith-ai__Ornith-1.5-35B-A3B",
+  "system_instruction": null,
+  "system_instruction_sha": null,
+  "fewshot_as_multiturn": true,
+  "chat_template": "",
+  "chat_template_sha": null,
+  "total_evaluation_time_seconds": "289.42985706799664"
+}

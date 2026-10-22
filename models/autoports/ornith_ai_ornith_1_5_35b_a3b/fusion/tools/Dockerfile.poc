@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7-labs
+# Ornith GDN fused-decode POC image: the published raahemnabeel/ornith-1.5-35b-a3b runtime (image 0fe927ac6e21, vLLM +
+# vllm-tt-plugin untouched) with tt-metal's C++ libraries rebuilt from the POC branch, which adds
+# ttnn.experimental.kda.recurrent_decode (GQA + per-head decay) and ttnn.experimental.deepseek_prefill.kda_decode_conv.
+# The builder stages mirror tt-model's own container Dockerfile (prep venv before build_metal.sh, ccache + CPM cache
+# mounts, a git stub tagged with the host describe string).
+
+ARG BASE_IMAGE=ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-22.04-dev-amd64:latest
+ARG RUNTIME_IMAGE=tt-model/ornith-1.5-35b-a3b-v2:0fe927ac6e21
+
+FROM ${BASE_IMAGE} AS prep
+ENV UV_HTTP_RETRIES=10
+ENV UV_NO_CACHE=1
+ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv
+ENV VENV=/opt/tt-venv
+RUN uv venv --python 3.12 --relocatable --link-mode copy "$VENV" \
+    && uv pip install --python "$VENV/bin/python" setuptools==80.10.2 setuptools-scm==8.1.0 wheel
+ENV VIRTUAL_ENV=$VENV
+ENV PATH=$VENV/bin:$PATH
+
+FROM prep AS builder
+COPY --from=metalsrc \
+    --exclude=.git --exclude=.cpmcache --exclude=build_Release* --exclude=build \
+    --exclude=built --exclude=python_env --exclude=.venv* --exclude=generated \
+    --exclude=models --exclude=docs --exclude=tech_reports \
+    --exclude=tt-train --exclude=model_tracer --exclude=.github \
+    . /opt/tt-metal
+WORKDIR /opt/tt-metal
+RUN git init -q /opt/tt-metal \
+    && git -C /opt/tt-metal -c user.email=tt-model@tenstorrent.com -c user.name=tt-model \
+       commit -q --allow-empty -m "tt-model version stub" \
+    && git -C /opt/tt-metal tag "v0.79.0-dev20260909-195-gc33d9745fa"
+RUN --mount=type=cache,target=/root/.cache/ccache \
+    --mount=type=cache,target=/cpm \
+    ./build_metal.sh --enable-ccache --cpm-source-cache /cpm
+
+FROM ${RUNTIME_IMAGE} AS runtime
+USER root
+COPY --from=builder --chown=tt:tt /opt/tt-metal/build_Release/lib/ /opt/tt-metal/build_Release/lib/
+COPY --from=builder --chown=tt:tt /opt/tt-metal/build_Release/lib/ /opt/tt-metal/build/lib/
+COPY --from=builder --chown=tt:tt /opt/tt-metal/ttnn/ttnn/_ttnn.so /opt/tt-metal/ttnn/ttnn/_ttnn.so
+# JIT-compiled device kernels of the new / changed ops (read from the source tree at serve time)
+COPY --from=builder --chown=tt:tt /opt/tt-metal/ttnn/cpp/ttnn/operations/experimental/kda/ /opt/tt-metal/ttnn/cpp/ttnn/operations/experimental/kda/
+COPY --from=builder --chown=tt:tt /opt/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/kda_decode_conv/ /opt/tt-metal/ttnn/cpp/ttnn/operations/experimental/deepseek_prefill/kda_decode_conv/
+# The fused decode path in Python (QWEN35_GDN_FUSED_DECODE=1); the builder excludes models/, so take them from the source
+COPY --from=metalsrc --chown=tt:tt models/demos/blackhole/qwen36/tt/gdn/tp.py /opt/tt-metal/models/demos/blackhole/qwen36/tt/gdn/tp.py
+COPY --from=metalsrc --chown=tt:tt models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt/model.py /opt/tt-metal/models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt/model.py
+LABEL org.tenstorrent.tt-model.poc="ornith_gdn_fused_poc"
+USER tt

@@ -1,0 +1,16 @@
+# Scorecard slice: code_generation_lite test6.jsonl (175 problems dated 2025-01-04..2025-04-06), pass@1.
+include: livecodebench.yaml
+task: livecodebench_v6
+dataset_kwargs:
+  data_files:
+    test:
+      - "hf://datasets/livecodebench/code_generation_lite/test6.jsonl"
+generation_kwargs:
+  until:
+  - "<|endoftext|>"
+  - "<|im_end|>"
+  do_sample: true
+  temperature: 0.6
+  top_p: 0.95
+  top_k: 20
+  max_gen_toks: 4096
