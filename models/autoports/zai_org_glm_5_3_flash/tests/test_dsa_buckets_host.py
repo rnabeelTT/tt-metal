@@ -23,6 +23,17 @@ def test_bucket_contexts_rules(monkeypatch):
     assert B.bucket_contexts(280576) is None
 
 
+@pytest.mark.parametrize("S,T", [(2, 65536), (16, 239616), (16, 243712), (32, 137216), (32, 151552), (8, 131072)])
+def test_multi_slot_dsa_widths_one_topk_mode(monkeypatch, S, T):
+    """S >= 2: every DSA decode bucket width is above 32 top-k chunks of 512 pools (the classic mode), so a request's
+    selection does not depend on the other slots' positions (review #1 P2-2, t20). 1 slot keeps the 4,096 start."""
+    monkeypatch.delenv("GLM53_DSA_BUCKETS", raising=False)
+    monkeypatch.delenv("GLM53_DSA_BUCKET_MIN_T", raising=False)
+    ctx = B.bucket_contexts(T, slots=S)
+    assert ctx is not None and all(B.width_of(t) > 32 * 512 for t in ctx), ctx
+    assert B.bucket_contexts(T, slots=1)[0] == 4096
+
+
 def test_install_gates_sharded_layers(monkeypatch):
     """install(): a sharded DSA model takes no DSA decode buckets (MoE / views decide the rest)."""
     monkeypatch.delenv("GLM53_DSA_BUCKETS", raising=False)

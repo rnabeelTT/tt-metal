@@ -1,0 +1,60 @@
+{
+  "stage": "optimized_vllm",
+  "model": "zai-org/GLM-5.3-Flash (E192)",
+  "measured_path": "vLLM TT plugin serving through tt/generator_vllm.py (vllm bench serve)",
+  "primary_single_user": {
+    "profile": "p300x2 (16 x 239,616)",
+    "workload": "random 128 in / 128 out, 1 request, concurrency 1, temperature 0",
+    "before": {
+      "ttft_ms": 263.0,
+      "tpot_ms": 119.27,
+      "decode_tps_user": 8.38,
+      "evidence": "doc/vllm/evidence/bench_p300x2.log.txt"
+    },
+    "after": {
+      "ttft_ms": 265.3,
+      "tpot_ms": 69.91,
+      "decode_tps_user": 14.3,
+      "evidence": "doc/vllm/evidence/final/p300x2_vllm_benchmark.json",
+      "code": "0a2663d0b6b (holds for 0bcf89f7fd6 at <= 16 slots, see README)"
+    }
+  },
+  "ci_serving_burst": {
+    "profile": "p300x2",
+    "workload": "random 100 / 100, 32 prompts",
+    "before": {
+      "ttft_median_ms": 14485,
+      "tpot_ms": 179.6,
+      "output_tok_s": 74.6
+    },
+    "after": {
+      "ttft_median_ms": 14164,
+      "tpot_ms": 172.5,
+      "output_tok_s": 76.8
+    }
+  },
+  "other_profiles": {
+    "p300x2-wide": {
+      "before_tpot_ms_1user": 120.4,
+      "after_tpot_ms_1user": 120.9,
+      "after_burst_identity": "32/32",
+      "evidence": "doc/vllm/evidence/final/wide-r2_*"
+    },
+    "p300x2-long": {
+      "after_tpot_ms": 49.84,
+      "async_off_tpot_ms": 50.89,
+      "async_on_ttft_ms": 288.1,
+      "async_off_ttft_ms": 238.3
+    },
+    "p300x2-1m": {
+      "before_tpot_ms": 73.54,
+      "after_tpot_ms": 71.52,
+      "after_ttft_ms": 290.0
+    }
+  },
+  "device_time_us": null,
+  "device_kernel_breakdown": null,
+  "op_count": null,
+  "device_time_reason": "vllm_serving_profiler_disabled_to_protect_hardware",
+  "notes": "Device time is not collected on the serving path (stage-10 goal). Standalone token-out evidence: doc/optimized_vllm/README.md (t5, t14, t15b, t18)."
+}

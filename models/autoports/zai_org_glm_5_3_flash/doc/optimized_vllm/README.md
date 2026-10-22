@@ -6,15 +6,28 @@ Workload: `vllm bench serve`, random dataset, 128 input / 128 output tokens, 1 r
 `--ignore-eos`, `sample_on_device_mode=all`, mesh (1, 4) P300x2, served profile p300x2 (max-num-seqs 16,
 max-model-len 243,712, replicated DSA cache). Before: the stage-9 A6 readiness benchmark on p300x2
 (`doc/vllm/evidence/bench_p300x2.log.txt`). After: the same command and profile on the stage-10 HEAD in the combined
-stage-9 ticket (`~/glm53-flash-bringup/logs/09/final/readiness-p300x2/vllm_benchmark.json`, HEAD 0a2663d0b6b +
-the slot-aware fit; the p300x2 max-model-len after the G9 re-probe is 239,616).
+stage-9 ticket, run on the code freeze 0a2663d0b6b (`doc/vllm/evidence/final/p300x2_vllm_benchmark.json`, server
+command `doc/vllm/evidence/final/p300x2_servercmd.txt`; the p300x2 max-model-len after the G9 re-probe is 239,616).
+Why these numbers also hold for the shipped 0bcf89f7fd6:
+- 0bcf89f7fd6 changes the MoE bucket paths only where the build's own path is sorted, which is 32 slots. At 16 slots and
+  below the family is pairs, the same paths as 0a2663d0b6b.
+- Its dealloc fixes change only frees: `force=False` on the pairs ids loop and `del q_rm` in the sharded path.
+- t19 ran the probe and the invariance checks on the fixed tree.
+- Wide (32 slots) was re-measured on the fix (wide-r2, 3872b583092).
+The slot-aware trace-region fit (044dbeaa3fd) picks the same bucket lists for p300x2 and long.
+
+Settings that changed between before and after:
+- Async decode is on (stage 9, 4678d8fccf4; the before runs had it off). It moves the TTFT, see "Async decode and
+  TTFT" below.
+- The p300x2 trace region is 96 MiB (was 64 MiB).
+- The p300x2 max-model-len is 239,616 (was 243,712).
 
 | Metric | Before | After |
 |---|---|---|
 | TTFT (median) | 263.0 ms | **265.3 ms** |
 | TPOT (mean) | 119.27 ms | **69.91 ms** |
 | ITL (median) | 119.04 ms | **69.90 ms** |
-| Decode t/s/u (1000 / TPOT) | 8.38 | **14.30** |
+| Decode t/s/u (1000 / TPOT) | 8.38 (the A6 sweep's 128 / 128 row: 9.10; run-to-run range 8.38-9.10) | **14.30** |
 | Output throughput | 8.31 tok/s | **14.0 tok/s** |
 
 Secondary, the CI serving burst on p300x2 (100 input / 100 output tokens, 32 prompts; capacity and nightly parity, not
@@ -24,8 +37,9 @@ median 14,164 ms, TPOT mean 172.5 ms, output 76.8 tok/s.
 
 Separate row, profile p300x2-1m (1 slot, 1,048,576, block-sharded DSA cache). The DSA and MoE buckets are off there by
 design (sharded layout, 1 slot), so the after value reflects async decode / stage-9 changes only.
-- Before (`readiness_vllm/vllm_benchmark.json`): TPOT 73.54 ms, TTFT 234.5 ms.
-- After: not re-measured in the combined ticket (the 1m path is unchanged by stage 10).
+- Before (`readiness_vllm/vllm_benchmark.json`, async off): TPOT 73.54 ms, TTFT 234.5 ms.
+- After (`doc/vllm/evidence/final/1m_vllm_benchmark.json`, server `1m_servercmd.txt`, async on): TPOT 71.52 ms
+  (13.98 t/s/u), TTFT 290.0 ms. CI burst: TPOT 71.38 ms, TTFT median 113,622 ms.
 
 Full-model comparison for comparable work (standalone traced decode, token-out):
 - 1 slot: 50.10 ms (280,576);
@@ -91,7 +105,9 @@ Switches:
 - `GLM53_DSA_BUCKETS=auto` (default) | `0` (the full-width code, unchanged) | a comma list of bucket contexts;
 - `GLM53_DSA_BUCKET_MIN_T`.
 
-The sharded DSA layout (`GLM53_DSA_SHARD`) uses the same `GlmDSA` selection code, so the buckets apply there too.
+The block-sharded DSA layout (`GLM53_DSA_SHARD`, the 1m profile) takes no DSA decode buckets and no prefill views:
+`bucket_contexts(T, sharded=True)` returns None, and the sharded pool allocation does not set the views (see the next
+steps).
 
 API change: with buckets on, `Glm53Generator.trace_id` is a `DsaBuckets` object. Replay through
 `dsa_buckets.replay_decode(g)`. A direct `ttnn.execute_trace(mesh, g.trace_id)` fails. `tools/s7_probe.py` uses
@@ -187,6 +203,16 @@ Ticket t7: reduced model, vLLM-style pool (1 slot, 65,536, num_blocks = 513):
 
 The capacity gain enters the serving profile through a G9 re-probe with this code (stage 9 owner).
 
+## Evidence note
+
+- Primary evidence for the served numbers is the benchmark JSON and logs in `doc/vllm/evidence/final/`, with the server
+  commands in `*_servercmd.txt` (`p300x2_servercmd.txt`, `wide-r2_servercmd.txt`, `long-async{0,1}_servercmd.txt`,
+  `1m_servercmd.txt`).
+- The `wide_*` files without `-r2` (`wide_smoke.log.txt`, `wide_sweep.json`, `wide_vllm_benchmark.json`, ...) and their
+  qualitative copy were measured BEFORE the batch-invariance fix. They are stale (4 of 32 burst identity). Only the
+  `wide-r2_*` files are final evidence for wide.
+- No device profiler ran on the serving path. `perf_summary.json` records that (device-time fields null).
+
 ## Files
 
 - `tt/dsa_buckets.py` (new): DSA width buckets, MoE row buckets (compaction, `fit_row_buckets`), warm-up, segmented
@@ -267,8 +293,13 @@ Ticket t15b (full model, 16 slots, max_seq_len 16,384, default precision):
 | 96 MiB region: buckets 1, 2, 4, 8, 16 | **72.9 ms** | **77.7** | **92.9** | **122.9** | 175.6 |
 | 96 MiB, 8-row bucket on the sorted path (not exact) | 72.9 ms | 77.7 | 92.9 | 125.7 | 175.6 |
 
-- The 1-slot build is 49.95 ms. The rest of the 16-slot cost at 1 active is the KDA update over 16 slots (about 5.7 ms,
-  profile above) plus about 1.7 ms of segment replays. That 1.7 ms is also the cost at the S bucket (16 active).
+- The 1-slot build is 49.95 ms, so the 16-slot build at 1 active is 22.95 ms slower (72.9 ms). Of that gap:
+  - the KDA update over 16 slots is about 5.7 ms (profile above);
+  - segment replays are about 1.7 ms (this is also the cost at the S bucket, 16 active);
+  - **15.5 ms is unattributed.** Likely sources, not measured separately: work that still runs on all 16 rows (router,
+    shared expert, the DSA / KDA projections and the mHC mixing are tile-padded to 32 rows either way, but their
+    element-wise and relayout glue grows with S); the MoE compaction ops (to_layout, embedding gather / scatter, 42
+    layers); the 16-row sampler; and the inactive-skip ops.
 - One row-bucket point trace is 254 KB of trace region, so each bucket below S costs about 10.7 MB for 42 MoE layers.
   `fit_row_buckets` keeps only the buckets the trace region holds: 64 MiB keeps the 1-row bucket, 96 MiB keeps 1 / 2 / 4 / 8.
 - An explicit `GLM53_MOE_BUCKETS` list is taken as given.
@@ -395,6 +426,12 @@ long-prompt TTFT about 0.8x (views, t14: 8K 5.6 -> 4.4 s at 243,712). Long conte
 
 ## Next step, measured but not landed (code freeze)
 
+DSA decode buckets on the block-sharded layout (1m profile). They are off there today
+(`bucket_contexts(T, sharded=True)`). At 1,048,576 the full-width selection runs over 262,176 pools in every DSA
+layer. Extrapolating probe1 (0.537 ms per layer at 70,176 pools, about linear in the width) gives about 19-20 ms per
+token at short positions. Needs its own measurement and exactness evidence on the sharded path.
+
+
 KDA state compaction. In the 16-slot build at 1 active, the KDA recurrent update and the conv run over all 16 slots:
 +167 us per KDA layer against the 1-slot build (t12: recurrent 172 vs 60 us, conv 93 vs 39 us per layer), 34 KDA
 layers = about 5.7 ms per token. The fix: compact the active slots' KDA state in the same row buckets as the MoE
@@ -406,7 +443,8 @@ this release, so the v4b evidence and the combined serving ticket stay valid.
 
 At 32 slots the build's own MoE path for 32 rows is the expert-sorted path (QWEN35_DECODE_SORTED_MIN_ROWS 32). The row
 buckets below 32 ran the pairs path. A request's routed math therefore depended on how many slots were active. The two
-paths are each row-exact but differ in the last bits. Served wide burst: 4 of 32 greedy streams matched solo (32 of 32
+paths are each exact against itself, but they differ from each other far beyond rounding. Measured: max logit delta 1.63
+(reduced model, t13, top-1 66 of 71) and 6.88 (full model, t15b 8-row bucket, top-1 32 of 34). Served wide burst: 4 of 32 greedy streams matched solo (32 of 32
 before stage 10). After the fix (36f3dd30b61): 32 of 32 (`doc/vllm/evidence/final/wide-r2_smoke.log.txt`).
 
 Rule (`moe_family`, `moe_bucket_paths`, `GLM53_MOE_BUCKET_PATH=family`, the default): every row bucket, the S bucket
@@ -426,6 +464,42 @@ prompt sets. Bit-identical means the target row matched its A = 1 run exactly.
 Pairs everywhere is faster at 1 active but doubles the full-occupancy step (284 vs 147 ms). The wide profile exists for
 high concurrency, so it ships the sorted family. It is invariant, matches buckets off at 32 active, and is 46 ms faster
 than buckets off at 1 active.
+
+## Async decode and TTFT (a changed setting)
+
+Stage 9 turned async decode on (4678d8fccf4). It lowers TPOT slightly but adds TTFT. A new request's first token
+waits for the decode step already in flight, and with two requests the first waits for the second's prefill:
+- long profile, same code, async off / on (`doc/vllm/evidence/final/long-async{0,1}_vllm_benchmark.json`): TTFT 238.3
+  -> 288.1 ms (+21 %), TPOT 50.89 -> 49.84 ms. CI burst TTFT median 82,318 -> 80,321 ms.
+- p300x2, 2 users at the same time (sweep rows): TTFT 365 -> 491 ms (128 input) and 1,146 -> 1,534 ms (1,024 input),
+  both +34 %. Part of that rise is async, part is the different code; they are not separated here.
+- Stage 9 is running an async TTFT A/B with N >= 4 runs per arm; its result goes here when it lands.
+
+## Batch invariance of the DSA width buckets (review #1 P2-2, ticket t20)
+
+The DSA decode bucket is keyed on the batch's largest position. A 4,000-token request decoded next to a 70,000-token
+request runs its selection at the larger width. Below 16,384 pools the top-k runs its fused mode (at most 32 chunks of
+512); above, it runs the classic mode. The two modes order tied scores differently.
+
+t20 (reduced model, 2 slots, 131,072): the 4,000-token target, alone vs next to a 70,000-token filler (2 filler sets).
+
+| DSA buckets | Target alone vs with the filler | Full model, 1 slot, 262,144: token-out at positions 300 / 5,000 / 20,000 |
+|---|---|---|
+| auto (1,056 ... 32,800) | **not identical**: max logit delta 1.73, tokens differ | 50.11 / 53.56 / 54.08 ms |
+| classic only (16,416 / 32,800) | bit-identical, tokens equal | 51.45 / 54.76 / 54.76 ms |
+| off | bit-identical | - |
+
+Rule (shipped): with S >= 2 slots the auto bucket contexts start at 65,536 (`MULTI_SLOT_MIN_CONTEXT`: width 16,416
+pools, 33 chunks), so every bucket is in the classic mode.
+- Cost: +0.7 to +1.3 ms per token below position 65,536 (t20); nothing above.
+- One slot (long) keeps the 4,096 start: one request at a time, so there is no cross-request effect.
+- An explicit `GLM53_DSA_BUCKETS` list is taken as given.
+- Prefill views are unchanged: each prefill is one request.
+- Host test: `test_multi_slot_dsa_widths_one_topk_mode`.
+- Proof on the fixed code: PROOF_PENDING.
+
+The async validator with a bucket switch (`GLM53_DSA_BUCKETS=4096` at 8,192, a 4,100-token request crossing position
+4,227) passes (t20, ASYNC_RESULT PASS).
 
 ## Trace region (part of the optimization)
 

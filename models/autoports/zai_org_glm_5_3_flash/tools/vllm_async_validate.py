@@ -40,7 +40,9 @@ from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles  # noqa: 
 
 B, MLEN, NBLK, BLK = 4, 8192, 160, 128
 STEPS, FINISH_A, PREFILL_E, HOST_STEPS = 420, 120, 121, (200, 201, 202)
-LENS = {"A": 37, "B": 300, "C": 1000, "D": 2051, "E": 129}
+LENS = {"A": 37, "B": 300, "C": 1000, "D": int(os.environ.get("GLM53_AV_LEN_D", "2051")), "E": 129}
+# GLM53_AV_LEN_D (stage 10, review #1 P3-10): a longer D (e.g. 4,100 with GLM53_DSA_BUCKETS=4096 at 8,192) makes the
+# decode cross a DSA width-bucket switch (position 4,227) under async decode
 
 
 def sp(n):

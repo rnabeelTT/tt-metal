@@ -520,6 +520,25 @@ def run_capacity(a):
         free = dram.total() - dram.alloc()
         ws = int(a.workspace_mib * MiB)
         nb_fit = int((free - ws) // per_block)
+        if a.free_after_bind_mib > 0:
+            # stage 10 (review #1 P2-1): size the pool by what the bind really allocates. The theoretical per-block
+            # bytes (latent + pool keys) miss the bind's other allocations and the stage-10 changes (smooth pool-key run,
+            # shared iotas), so a fixed workspace left 860-906 MB free after the bind (243,712 / 151,552 ran with
+            # 678 / 778 MB). The effective bytes per block of an earlier probe of this slot count (bind bytes / blocks,
+            # its fixed part included: conservative for a larger pool) give the blocks that leave the target free.
+            prev = json.loads(Path(a.per_block_from).read_text()) if a.per_block_from else None
+            eff = (
+                int(prev["dsa_pool_bytes_measured"]) / int(prev["num_blocks"])
+                if prev and prev.get("dsa_pool_bytes_measured")
+                else per_block * 1.15
+            )
+            nb_fit = int((free - a.free_after_bind_mib * MiB) // eff)
+            report["sizing"] = {
+                "rule": "free_after_bind",
+                "target_free_after_bind_bytes": int(a.free_after_bind_mib * MiB),
+                "effective_bytes_per_block": eff,
+                "from": a.per_block_from,
+            }
         nb_cap = a.slots * (a.max_context // 128) + 1  # vLLM's null block 0 + every slot at max_seq_len
         nb = max(2, min(nb_fit, nb_cap))
         report.update(
@@ -537,6 +556,7 @@ def run_capacity(a):
         g.bind_kv_cache(nb)
         report["dsa_pool_bytes_measured"] = dram.alloc() - a0
         report["after_bind"] = dram.snapshot()
+        report["free_after_bind_bytes"] = int(report["after_bind"]["free"])
         save()
         ttnn.synchronize_device(mesh)
         dram.start()
@@ -674,6 +694,17 @@ def main():
     )
     ap.add_argument("--moe-rows", type=int, default=1024, help="reduced: GLM53_MOE_SORTED_ROWS after the A/B")
     ap.add_argument("--workspace-mib", type=float, default=1024.0, help="capacity: DRAM kept free besides the pool")
+    ap.add_argument(
+        "--free-after-bind-mib",
+        type=float,
+        default=0.0,
+        help="capacity: size the pool to leave this much DRAM free after the bind (stage 10; 0 = --workspace-mib rule)",
+    )
+    ap.add_argument(
+        "--per-block-from",
+        default=None,
+        help="capacity: an earlier capacity.json of this slot count (bind bytes / blocks)",
+    )
     ap.add_argument("--decode-steps", type=int, default=24)
     ap.add_argument("--tail-gap", type=int, default=37, help="capacity: tokens left unused below the pool top")
     ap.add_argument("--weight-cache", type=int, default=1, help="capacity: 1 = GLM53_CACHE_DIR weight cache, 0 = none")

@@ -126,9 +126,11 @@ def record(a):
 
 def _invariance(g, a, ctl):
     """Batch invariance: one fixed request in slot 0, decoded with A active slots (fillers in spread slots, filler
-    prompts by seed). Its prefill + traced decode logits must not depend on A or on the fillers' content."""
+    prompts by seed and --filler-len). Its prefill + traced decode logits must not depend on A or on the fillers."""
     V, S = g.model.vocab, a.slots
-    target = torch.randint(100, V - 100, (a.prompt_len + 13,), generator=torch.Generator().manual_seed(777))
+    tlen = a.target_len or a.prompt_len + 13
+    target = torch.randint(100, V - 100, (tlen,), generator=torch.Generator().manual_seed(777))
+    flen = lambda s: a.filler_len or a.prompt_len + 5 * s  # noqa: E731
     out, ref = [], None
     for spec in a.invariance.split(","):
         A, fs = (int(x) for x in spec.split(":")) if ":" in spec else (int(spec), 0)
@@ -137,42 +139,42 @@ def _invariance(g, a, ctl):
         g.reset()
         pre = None
         for s in slots:
-            ids = (
-                target
-                if s == 0
-                else torch.randint(
-                    100,
-                    V - 100,
-                    (a.prompt_len + 5 * s,),
-                    generator=torch.Generator().manual_seed(fs * 100000 + 100 * A + s),
-                )
-            )
+            seed = torch.Generator().manual_seed(fs * 100000 + 100 * A + s)
+            ids = target if s == 0 else torch.randint(100, V - 100, (flen(s),), generator=seed)
             lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[len(ids)], slots=[s])
             if s == 0:
                 pre = lg.reshape(-1)[:V].to(torch.bfloat16)
-        pos = torch.tensor([len(target) if s == 0 else a.prompt_len + 5 * s for s in slots])
-        tok = None
-        steps = []
+        pos = torch.tensor([tlen if s == 0 else flen(s) for s in slots])
+        tok, steps, toks, dsa_b = None, [], [], []
         for i in range(a.steps):
             if tok is None:
                 tok = torch.tensor([int(torch.argmax(pre.float()))] + [1000] * (len(slots) - 1))
-            o = g.decode_forward(tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True)[
-                :, :V
-            ]
+            if ctl is not None and ctl.widths:
+                dsa_b.append(ctl.bucket([int(p) for p in pos.tolist()]))
+            o = g.decode_forward(tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True)
+            o = o[:, :V]
             steps.append(o[0].to(torch.bfloat16))
             tok = torch.argmax(o.float(), dim=-1)
+            toks.append(int(tok[0]))
             pos = pos + 1
         bucket = ctl.moe_bucket([0] * len(slots) + [-1] * (S - len(slots))) if ctl is not None and ctl.tbs else None
-        cur = {"A": A, "filler_seed": fs, "bucket": bucket, "prefill": pre, "steps": steps}
+        cur = {"A": A, "filler_seed": fs, "steps": steps, "prefill": pre, "toks": toks}
         if ref is None:
             ref = cur
+        per = [float((x.float() - y.float()).abs().max()) for x, y in zip(steps, ref["steps"])]
         same = torch.equal(pre, ref["prefill"]) and all(torch.equal(x, y) for x, y in zip(steps, ref["steps"]))
-        dmax = max(float((x.float() - y.float()).abs().max()) for x, y in zip(steps, ref["steps"]))
-        print(
-            f"INVARIANCE A {A} fillers {fs} bucket {bucket}: identical to A={ref['A']}: {same} max|d| {dmax}",
-            flush=True,
-        )
-        out.append({"A": A, "filler_seed": fs, "bucket": bucket, "identical": bool(same), "max_abs_d": dmax})
+        r = {
+            "A": A,
+            "filler_seed": fs,
+            "moe_bucket": bucket,
+            "dsa_buckets": sorted(set(dsa_b)),
+            "identical": bool(same),
+            "max_abs_d": max(per),
+            "per_step_max_abs_d": per,
+            "tokens_equal": toks == ref["toks"],
+        }
+        print(f"INVARIANCE {json.dumps({k: v for k, v in r.items() if k != 'per_step_max_abs_d'})}", flush=True)
+        out.append(r)
     return out
 
 
@@ -222,6 +224,12 @@ def main():
     r.add_argument("--seq-len", type=int, default=16384)
     r.add_argument("--actives", default="1,2,3,5,8,16")
     r.add_argument("--invariance", default="", help="A[:filler_seed],...: target-row batch invariance (slot 0)")
+    r.add_argument(
+        "--target-len", type=int, default=0, help="invariance: target prompt tokens (default prompt_len + 13)"
+    )
+    r.add_argument(
+        "--filler-len", type=int, default=0, help="invariance: filler prompt tokens (default prompt_len + 5 s)"
+    )
     r.add_argument("--prompt-len", type=int, default=300)
     r.add_argument("--steps", type=int, default=6)
     r.add_argument("--time-actives", default="1,2,4,8,16")
