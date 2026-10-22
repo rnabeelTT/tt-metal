@@ -215,8 +215,11 @@ card:
     - Expert-pruned model (E192), not the full 288-expert GLM-5.3-Flash.
     - Context is DRAM-limited per DSA cache layout (see Profiles): the full 1,048,576 tokens need `p300x2-1m` (one
       sequence); the replicated profiles hold fewer tokens per sequence but decode faster.
-    - `p300x2-1m`: a request's cache blocks map to dies by block id, so a greedy output can differ in a near-tie token
-      from the same request on other blocks (bounded numerics; the same blocks give bit-identical logits).
+    - `p300x2-1m`: a request's cache blocks map to dies by block id (block b on die b % 4), so the same request can
+      give a different output on other blocks: logits differ by up to about 0.5, a greedy output can flip a near-tie
+      token, and a seeded sampled output (`seed` with temperature > 0) reproduces only for the same block placement
+      (the same blocks give bit-identical logits). Back-to-back identical seeded requests can therefore differ. The
+      replicated profiles (`p300x2`, `p300x2-long`, `p300x2-wide`) do not depend on block ids.
     - One decode trace width for all slots: a profile with more sequences decodes slower per user, also with one
       active request.
     - The device sampler keeps at most the 32 most likely tokens: a sampled request without `top_k`, or with `top_k`

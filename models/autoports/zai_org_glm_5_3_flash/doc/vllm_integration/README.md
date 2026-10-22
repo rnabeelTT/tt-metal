@@ -165,6 +165,23 @@ Verdict: placement-only numerics, not a state bug. The same placement gives bit-
 placement changes them, by a bounded amount. A near-tie greedy token can flip with the block allocation on
 `p300x2-1m`. The replicated p300x2 build does not depend on block ids (burst 8/8 equal to solo on the freeze code).
 
+Seeded sampling (stage 11, `doc/tti_release/RUN_NOTES.md`, evidence `doc/tti_release/seeddiag/`). The same seeded
+request (seed 42, temperature 1.0, top_p 0.95; ifeval doc 65) sent 4 times back to back on a fresh server:
+
+| profile | async decode | outputs | block lists of the 4 runs |
+| --- | --- | --- | --- |
+| p300x2-1m (sharded) | on | A B A B | A: [6,2,3,4,5,6] twice; B: [1,5,4,3,2,1], [6,5,4,3,2,1] |
+| p300x2-1m (sharded) | off | A B A B (same two texts) | same pattern |
+| p300x2-long (replicated) | on | 4/4 identical | [3,2,3], [1,2,1], [3,2,3], [3,2,1] |
+
+The per-step device seeds and counters are identical in every run, so the sampler draws the same random values. A and
+B are identical until about sequence token 128, where the second block (block 2 on die 2 vs block 5 on die 1) comes
+into use. A replay of an eval session's 65 earlier requests in order reproduces that session's outputs bit-for-bit
+(66/66), because vLLM then hands out the same block ids. So on `p300x2-1m` a seeded sampled output reproduces only for
+the same block placement, like a greedy output. This is not a seed or async defect. Follow-up (not in this release):
+die placement by the request's logical block index instead of the global block id, or a placement-invariant cross-die
+reduction.
+
 ## Slot count and decode numerics
 
 Measured on 0bd45f315e1 (before the stage-10 buckets), reduced model. The same request in builds with 1, 8, 16 and 32 slots (reduced model, `../vllm/evidence/slot_width_compare.txt`): 8 and
