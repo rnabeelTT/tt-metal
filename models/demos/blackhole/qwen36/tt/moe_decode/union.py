@@ -38,17 +38,16 @@ def row_groups(m):
 ACT_PAGE = 64 * 8  # one [8, 32] BF16 tile: every width's [Mp, 32] tile fits a page
 
 
-def act_buffer(mesh_device, inter, num_experts, k, max_rows):
-    """The activations of every width (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
+def act_buffer(mesh_device, inter, num_experts, k, rows):
+    """The activations of a `rows`-row step (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
     interleaved: every down core reads all of it, which from DRAM cost more than the weights at 32 rows (2.7 MB x 64
-    cores per device on 2 chips). Sized for max_rows (32 rows: 1.3 / 2.7 MB per device at 4 / 2 chips, spread over
-    the L1 banks)."""
-    multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
-    rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
-    slots = min(num_experts, max_rows * k) + 1
-    return ttnn.from_torch(
-        torch.zeros(slots * inter // TILE * row_groups(max_rows), ACT_PAGE // 2, dtype=torch.bfloat16),
-        dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep,
+    cores per device on 2 chips). Allocated per step on the device (ttnn.empty: no host upload, trace-safe) and freed
+    after the down op: a persistent buffer of the 32-row size (2.7 MB per device on 2 chips) left too little L1 for the
+    model's other programs' circular buffers. Every page the down op reads is written by the gate|up op first."""
+    slots = min(num_experts, rows * k) + 1
+    return ttnn.empty(
+        [slots * inter // TILE * row_groups(rows), ACT_PAGE // 2], ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, mesh_device,
+        ttnn.L1_MEMORY_CONFIG,
     )
 
 
@@ -58,13 +57,13 @@ class RowsBuffers:
     each tile are written), the identity tile in the weight dtype."""
 
     def __init__(self, mesh_device, hidden, inter, num_experts, k, rows, weight_dtype, act=None):
-        """act: the activation buffer (act_buffer), shared by every width."""
+        """act: a persistent activation buffer (op tests); the model allocates one per step (act_buffer)."""
         multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
         rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
         l1 = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
         self.max_slots = min(num_experts, rows * k) + 1
         self.table = ttnn.from_torch(torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1)
-        self.act = act if act is not None else act_buffer(mesh_device, inter, num_experts, k, rows)
+        self.act = act
         self.out = ttnn.from_torch(
             torch.zeros(1, 1, rows, hidden, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
             device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,

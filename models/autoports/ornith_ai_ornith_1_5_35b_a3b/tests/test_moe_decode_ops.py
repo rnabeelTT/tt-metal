@@ -14,7 +14,7 @@ import torch
 import ttnn
 from models.demos.blackhole.qwen36.tt.moe_decode.experts import ExpertDown, ExpertGateUp, ExpertMoE, MoEDecodeBuffers
 from models.demos.blackhole.qwen36.tt.moe_decode.topk import RouterTopK
-from models.demos.blackhole.qwen36.tt.moe_decode.union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers
+from models.demos.blackhole.qwen36.tt.moe_decode.union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer
 
 torch.manual_seed(0)
 # experts per test tensor: 64 keeps every kernel path (E % 64 == 0) and the per-expert shapes, at a quarter of the
@@ -148,7 +148,7 @@ def check_rows(dev, rows, H=2048, I=128, E=None, k=8, dtype=ttnn.bfloat8_b, tria
     back = lambda t: ttnn.to_torch(t).float()
     (ug, ug_s, dn, dn_s), (W_ug, W_ugs, W_dn, W_dns) = expert_weights(dev, E, H, I, dtype, True)
     W_ug, W_ugs, W_dn, W_dns = W_ug[0], W_ugs[0, 0], W_dn[0], W_dns[0, 0]
-    buf = RowsBuffers(dev, H, I, E, k, rows, dtype)
+    buf = RowsBuffers(dev, H, I, E, k, rows, dtype, act=act_buffer(dev, I, E, k, rows))
     route = RouteRows(dev, E, k, rows)
     gu = ExpertGateUpRows(dev, H, I, E, k, dtype, rows)
     dn_op = ExpertDownRows(dev, H, I, E, k, dtype, rows)
@@ -278,7 +278,7 @@ def main():
             I = int(os.environ.get("TEST_I", "128"))
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "2,4,8").split(",")]:
                 (ug, ug_s, dn, dn_s), _ = expert_weights(dev, TEST_E, 2048, I, ttnn.bfloat8_b, True)
-                buf = RowsBuffers(dev, 2048, I, TEST_E, 8, m, ttnn.bfloat8_b)
+                buf = RowsBuffers(dev, 2048, I, TEST_E, 8, m, ttnn.bfloat8_b, act=act_buffer(dev, I, TEST_E, 8, m))
                 ops = (RouteRows(dev, TEST_E, 8, m), ExpertGateUpRows(dev, 2048, I, TEST_E, 8, ttnn.bfloat8_b, m),
                        ExpertDownRows(dev, 2048, I, TEST_E, 8, ttnn.bfloat8_b, m))
                 xr = torch.zeros(1, 1, 32, 2048)

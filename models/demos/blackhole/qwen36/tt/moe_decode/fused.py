@@ -109,14 +109,11 @@ class FusedMoEDecode:
         key = self._key + ("rows", rows)
         if key not in self._cache:
             H, Il, E, k, dtype = self._key
-            act_key = self._key + ("act",)
-            if act_key not in self._cache:
-                self._cache[act_key] = act_buffer(self._mesh, Il, E, k, 32)
             self._cache[key] = (
                 RouteRows(self._mesh, E, k, rows),
                 ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows),
                 ExpertDownRows(self._mesh, H, Il, E, k, dtype, rows),
-                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype, act=self._cache[act_key]),
+                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
         return self._cache[key]
 
@@ -130,8 +127,11 @@ class FusedMoEDecode:
         )
         route(logits, b.table)
         ttnn.deallocate(logits)
-        gu(x, b.table, b.identity, up_gate, self.shared_up_gate, b.act)
-        dn(b.act, b.table, down, self.shared_down, b.out)
+        H, Il, E, k, _ = self._key
+        act = act_buffer(self._mesh, Il, E, k, m)
+        gu(x, b.table, b.identity, up_gate, self.shared_up_gate, act)
+        dn(act, b.table, down, self.shared_down, b.out)
+        ttnn.deallocate(act)
         return b.out
 
     def __call__(self, x, up_gate, down):

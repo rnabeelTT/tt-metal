@@ -248,7 +248,27 @@ the score): p300x2 published 11.13 vs new 9.45; p300 reference 10.71 vs new 15.5
 only real words flagged; the reference's own two prose samples score 21.5 / 5.8). Greedy outputs coherent at 1 and 8
 users on both meshes. Step 2 v1 evals (p300x2, concurrency 1): GPQA-D 0.80, IFEval prompt-strict 0.72.
 
-Next: the 32-user width (expert-sorted path; union of 32 x 8 picks covers ~160 of 256 experts) and widths 9..16;
+Milestone 2 (fused MoE at every decode width, 2..32 rows in groups of 8, `QWEN35_MOE_FUSED_ROWS_MAX` = 32):
+
+| Mesh | Users | Published | New |
+|---|---|---|---|
+| p300x2 | 1 | 19.19 / 52.1 / 50.0 | 13.95 / 71.7 / 67.2 |
+| | 8 | 36.67 / 27.3 / 176.8 | 18.89 / 52.9 / 290.6 (+64%) |
+| | 16 | 54.73 / 18.3 / 226.3 | 24.54 / 40.7 / 393.5 (+74%) |
+| | 32 | 61.98 / 16.1 / 346.6 | 38.25 / 26.1 / 467.9 (+35%) |
+| p300 | 1 | 21.64 / 46.2 / 44.4 | 16.47 / 60.7 / 57.5 |
+| | 8 | 47.45 / 21.1 / 141.3 | 28.91 / 34.6 / 210.9 (+49%) |
+| | 16 | 75.02 / 13.3 / 174.0 | 40.23 / 24.9 / 278.3 (+60%) |
+| | 32 | 84.86 / 11.8 / 273.8 | 59.69 / 16.8 / 344.0 (+26%) |
+
+Garble gate p300 new 8.05 (reference 10.71; flagged words all real); greedy coherent at 8 concurrent. 2-chip per-layer
+MoE (GDN layer): b16 1291 -> 541 us (gate|up 376 + down 149), b32 ~1570 -> 948 us (561 + 370); DRAM floors ~390 /
+~620 us. At 32 rows the union approach computes all 32 rows for every union expert although ~1.6 rows routed to each:
+a per-expert row gather (custom_mm with the routed rows only) is the next MoE lever there. The activation buffer is
+allocated per step (a persistent 32-row buffer, 2.7 MB per device on 2 chips, made the model's other programs' circular
+buffers clash with L1 buffers at boot).
+
+Next: step 3 (boundary) for all widths;
 the 8-row core-time levers above; then step 3 (boundary) for all widths.
 
 ## Plan (in order; each step ends with a measurement)
