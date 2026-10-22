@@ -42,10 +42,6 @@ namespace {
 constexpr tt::tt_metal::KernelHandle kReaderKernelIndex = 0;
 constexpr tt::tt_metal::KernelHandle kWriterKernelIndex = 1;
 
-// Circular buffer holding the fabric mux's L1 map on the mux cores. all_gather_matmul_async builds its matmul into
-// the same Program, so take the top index rather than one the matmul's circular buffers start from.
-constexpr uint8_t kMuxL1CbIndex = tt::CBIndex::c_31;
-
 uint32_t all_gather_async_core_count_per_link(
     uint32_t num_workers_per_direction,
     uint32_t num_directions_per_link,
@@ -417,7 +413,7 @@ tt::tt_metal::ProgramDescriptor build_all_gather_async_minimal_default_program_d
         buffer_size_bytes_full_size_channel,
         /*base_l1_address=*/0);
     if (!mux_core_range_set.empty()) {
-        mux_kernel_config.place_in_program_local_l1(desc, mux_core_range_set, kMuxL1CbIndex);
+        mux_kernel_config.place_in_program_local_l1(desc, mux_core_range_set);
     }
 
     // Create Reader Kernels
@@ -1104,7 +1100,7 @@ AllGatherProgramArtifacts build_all_gather_async_minimal_default_program_artifac
         buffer_size_bytes_full_size_channel,
         /*base_l1_address=*/0);
     if (!mux_core_range_set.empty()) {
-        mux_kernel_config.place_in_program_local_l1(program, mux_core_range_set, kMuxL1CbIndex);
+        mux_kernel_config.place_in_program_local_l1(program, mux_core_range_set);
     }
 
     // Create Reader Kernels
