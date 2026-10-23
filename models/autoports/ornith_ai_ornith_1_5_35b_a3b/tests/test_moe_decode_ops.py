@@ -267,6 +267,77 @@ def time_experts(
               f"gate|up {t_gu:5.1f} us, down {t_dn:5.1f} us, both {t_both:5.1f} us, one program {t_one:5.1f} us")
 
 
+def check_ep(dev, rows, H=2048, I=768, E=128, EL=32, off=32, k=8, dtype=ttnn.bfloat4_b, trials=3):
+    """Expert parallelism (Qwen3-Coder-30B shapes, one die = experts [off, off + EL) of E, [gate | up] packing, no
+    shared expert): the fused ops vs torch over this die's window of the global top-k. Trial 1 routes nothing to the
+    window (zero partial), trial 2 everything it can."""
+    from models.demos.blackhole.qwen36.tt.moe_decode.fused import round_sig as rnd5
+
+    dram = ttnn.DRAM_MEMORY_CONFIG
+    back = lambda t: ttnn.to_torch(t).float()  # noqa: E731
+    g = torch.Generator().manual_seed(7)
+    ug = ttnn.from_torch(rnd5(torch.randn(1, EL, H, 2 * I, generator=g) * 0.03), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=dram)
+    dn = ttnn.from_torch(rnd5(torch.randn(1, EL, I, H, generator=g) * 0.03), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=dram)
+    W_ug, W_dn = back(ug)[0], back(dn)[0]
+    offt = torch.zeros(1, 1, 1, 32, dtype=torch.int32)
+    offt[0, 0, 0, 0] = off
+    ep_off = ttnn.from_torch(offt, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
+    if rows == 1:
+        buf = MoEDecodeBuffers(dev, H, I, k)
+        gu = ExpertGateUp(dev, H, I, E, k, dtype, shared=False, ep_experts=EL, gate_first=True)
+        dn_op = ExpertDown(dev, H, I, E, k, dtype, shared=False, ep_experts=EL)
+    else:
+        buf = RowsBuffers(dev, H, I, E, k, rows, dtype, act=act_buffer(dev, I, E, k, rows))
+        route_op = RouteRows(dev, E, k, rows)
+        gu = ExpertGateUpRows(dev, H, I, E, k, dtype, rows, shared=False, ep_experts=EL, gate_first=True)
+        dn_op = ExpertDownRows(dev, H, I, E, k, dtype, rows, shared=False, ep_experts=EL)
+    for t in range(trials):
+        torch.manual_seed(50 + t)
+        xr = torch.zeros(1, 1, 32, H)
+        xr[0, 0, :rows] = torch.randn(rows, H)
+        xb = xr.bfloat16()
+        lg = torch.zeros(1, 1, 32, E + 32)
+        lg[0, 0, :rows, :E] = torch.randn(rows, E) * 2
+        if t == 1:
+            lg[0, 0, :rows, off : off + EL] -= 20  # nothing in this die's window
+        if t == 2:
+            lg[0, 0, :rows, off : off + EL] += 20  # the whole top-k in the window
+        lgb = lg.bfloat16()
+        x_tt = ttnn.from_torch(xb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+        lg_tt = ttnn.from_torch(lgb, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+        if rows == 1:
+            gu(x_tt, lg_tt, ug, ug, buf.act, buf.route, ep_offset=ep_off)
+            dn_op(buf.act, buf.route, dn, dn, buf.out)
+        else:
+            route_op(lg_tt, buf.table)
+            gu(x_tt, buf.table, buf.identity, ug, ug, buf.act, ep_offset=ep_off)
+            dn_op(buf.act, buf.table, dn, dn, buf.out, ep_offset=ep_off)
+        out = back(buf.out)[0, 0, :rows]
+        worst, n_live = 1.0, []
+        for r in range(rows):
+            row = lgb[0, 0, r, :E].float()
+            ids = sorted(range(E), key=lambda i: (-row[i].item(), i))[:k]
+            w = torch.softmax(row[torch.tensor(ids)], -1)
+            x = xb[0, 0, r].float()
+            ref = torch.zeros(H)
+            live = [(j, e - off) for j, e in enumerate(ids) if off <= e < off + EL]
+            n_live.append(len(live))
+            for j, le in live:
+                gate, up_ = x @ W_ug[le][:, :I], x @ W_ug[le][:, I:]
+                ref += (w[j] * torch.nn.functional.silu(gate) * up_) @ W_dn[le]
+            if not live:
+                assert out[r].abs().max().item() == 0.0, (r, out[r].abs().max().item())
+                continue
+            worst = min(worst, pcc(out[r], ref))
+        if rows == 1:
+            route = ttnn.to_torch(buf.route).reshape(-1).long()
+            assert route[15].item() == n_live[0], (route[15].item(), n_live[0])
+        print(f"ep rows {rows} trial {t}: live experts per row {n_live}, worst row out pcc {worst:.5f}")
+        assert worst > 0.999, worst
+        for tt_ in (x_tt, lg_tt):
+            ttnn.deallocate(tt_)
+
+
 def check_route_sigb(dev, rows, E=128, k=8, trials=3):
     """GLM-4.5-Air router (RouteScores, sigb): ids / weights vs torch fp64 (s = sigmoid(logit), top-k of s + centred
     bias, s / sum s). An id mismatch is allowed only where the torch keys tie within 2e-5 (the fixed-point sigmoid)."""
@@ -339,6 +410,9 @@ def main():
         if "cn" in what:  # Qwen3-Coder-Next shapes: 512 experts, top-10, 256 expert columns per device (TP2)
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
                 check_rows(dev, m, I=256, E=512, k=10, trials=1)
+        if "ep" in what:  # expert parallelism (Qwen3-Coder-30B): one die's window, [gate | up], no shared expert
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,32").split(",")]:
+                check_ep(dev, m)
         if "sigb" in what:  # GLM-4.5-Air router (sigmoid + selection bias) for its own expert paths
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,32").split(",")]:
                 check_route_sigb(dev, m)

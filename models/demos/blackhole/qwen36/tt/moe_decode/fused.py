@@ -21,7 +21,7 @@ import torch
 
 import ttnn
 
-from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers
+from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets
 from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer, upload_selection_bias
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
@@ -56,19 +56,24 @@ class FusedMoEDecode:
 
     def __init__(self, mesh_device, args, *, hidden, inter_local, num_experts, k, tp, dtype, router_weight,
                  shared_gate_weight, shared_gate_proj, shared_up_proj, shared_down_proj, cache_name, router_ckc,
-                 router="softmax", selection_bias=None, down_dtype=None, router_logits=None):
+                 router="softmax", selection_bias=None, down_dtype=None, router_logits=None, ep_experts=None,
+                 gate_first=False):
         """router_weight [E, H], shared_gate_weight [1, H], shared_{gate,up}_proj [S, H], shared_down_proj [H, S]
         (HF layouts, S = I * tp); cache_name(name) -> tensor cache path or None.
 
         router "sigb" (GLM-4.5-Air): sigmoid + selection_bias ([E] e_score_correction_bias) top-k, normalized weights;
         router_logits(x) -> the port's FP32 [rows, E] router logits (its own router matmul); no shared-gate column.
         shared_* None: routed experts only (the port adds its shared expert). down_dtype: the routed down weights' dtype
-        when it differs from the gate|up dtype."""
+        when it differs from the gate|up dtype. ep_experts (expert parallelism, Qwen3-Coder-30B): each die holds the
+        whole experts [d * ep_experts, (d + 1) * ep_experts) as its up_gate / down tensors (inter_local = the full
+        expert width), num_experts is the global count the router ranks, tp the die count; shared_gate_weight None
+        means no shared-gate column logit (a zero column). gate_first: [gate | up] packed weights."""
         self.mesh_device = mesh_device
         self.tp = tp
         self.router_ckc = router_ckc
         self.router, self.router_logits = router, router_logits
         self.shared = shared_up_proj is not None
+        self.ep_experts = ep_experts
         down_dtype = down_dtype or dtype
         E, H, Il = num_experts, hidden, inter_local
         rep = ttnn.ReplicateTensorToMesh(mesh_device) if tp > 1 else None
@@ -94,7 +99,8 @@ class FusedMoEDecode:
             self.bias = None
             rw = torch.zeros(H, E + TILE)
             rw[:, :E] = router_weight.T.float()
-            rw[:, E] = shared_gate_weight.reshape(-1).float()
+            if shared_gate_weight is not None:
+                rw[:, E] = shared_gate_weight.reshape(-1).float()
             self.router_w = upload(rw, ttnn.bfloat16, "fused_decode.router", rep)
             grid_w = mesh_device.compute_with_storage_grid_size().x
             from models.demos.blackhole.qwen36.tt import tp_common as tpc
@@ -114,14 +120,18 @@ class FusedMoEDecode:
                 round_sig(shared_down_proj.T.float()).reshape(1, 1, -1, H), down_dtype, "fused_decode.shared_down" + CACHE_SUFFIX, shard(-2)
             )
         cache = args.__dict__.setdefault("_qwen35_fused_moe_decode", {})
-        key = (H, Il, E, k, dtype, down_dtype, router, self.shared)
+        key = (H, Il, E, k, dtype, down_dtype, router, self.shared, ep_experts, gate_first)
         if key not in cache:
+            ep = dict(ep_experts=ep_experts)
             cache[key] = (
-                ExpertGateUp(mesh_device, H, Il, E, k, dtype, router=router, shared=self.shared),
-                ExpertDown(mesh_device, H, Il, E, k, down_dtype, shared=self.shared),
+                ExpertGateUp(mesh_device, H, Il, E, k, dtype, router=router, shared=self.shared, gate_first=gate_first, **ep),
+                ExpertDown(mesh_device, H, Il, E, k, down_dtype, shared=self.shared, **ep),
                 MoEDecodeBuffers(mesh_device, H, Il, k),
             )
+            if ep_experts:
+                cache[key + ("ep_offset",)] = ep_offsets(mesh_device, ep_experts)
         self.gate_up, self.down_op, self.buf = cache[key]
+        self.ep_offset = cache.get(key + ("ep_offset",))
         self._cache, self._key, self._mesh = cache, key, mesh_device
 
     def rows_ops(self, rows):
@@ -129,11 +139,12 @@ class FusedMoEDecode:
         every width the server traces before capturing (host uploads)."""
         key = self._key + ("rows", rows)
         if key not in self._cache:
-            H, Il, E, k, dtype, down_dtype, router, shared = self._key
+            H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
+            ep = dict(ep_experts=ep_experts)
             self._cache[key] = (
                 RouteRows(self._mesh, E, k, rows, router=router),
-                ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared),
-                ExpertDownRows(self._mesh, H, Il, E, k, down_dtype, rows, shared=shared),
+                ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared, gate_first=gate_first, **ep),
+                ExpertDownRows(self._mesh, H, Il, E, k, down_dtype, rows, shared=shared, **ep),
                 RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
         return self._cache[key]
@@ -160,8 +171,8 @@ class FusedMoEDecode:
         H, Il, E, k = self._key[:4]
         sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
-        gu(x, b.table, b.identity, up_gate, sug, act)
-        dn(act, b.table, down, sdn, b.out)
+        gu(x, b.table, b.identity, up_gate, sug, act, ep_offset=self.ep_offset)
+        dn(act, b.table, down, sdn, b.out, ep_offset=self.ep_offset)
         ttnn.deallocate(act)
         return b.out
 
@@ -171,7 +182,7 @@ class FusedMoEDecode:
         logits = self._logits(x)
         b = self.buf
         sug, sdn = self._shared_tensors(up_gate, down)
-        self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias)
+        self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset)
         ttnn.deallocate(logits)
         self.down_op(b.act, b.route, down, sdn, b.out)
         return b.out
