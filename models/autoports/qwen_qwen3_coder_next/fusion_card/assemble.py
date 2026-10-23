@@ -39,7 +39,7 @@ def main():
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), "card_cnnew", "card_cnpub", *profiles],
         check=True, capture_output=True, text=True,
-        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0"},
+        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
     ).stdout
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     src = YAML.read_text()

@@ -19,7 +19,7 @@ docker logs $C 2>&1 | grep -E "decode bucket widths|MTP|program cache entries af
 URL=http://localhost:$PORT RUNS=$RUNS python3 "$T/greedy.py" run $L > /dev/null 2>&1 && echo "$L: greedy done"
 if [ "${GARBLE:-1}" = 1 ]; then
   (cd $METAL && QWEN35_QUALITY_PROMPT_DIR=$METAL/models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/results/quality_prompts \
-    python3 -m models.autoports.ornith_ai_ornith_1_5_35b_a3b.tools.longctx_quality --url http://127.0.0.1:$PORT --tag $L \
+    python3 -m models.autoports.ornith_ai_ornith_1_5_35b_a3b.tools.longctx_quality --url http://127.0.0.1:$PORT --model ${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B} --tag $L \
     --settings t0.6_k20 --out $RUNS/$L/garble.json 2>&1 | grep -A2 "=== $L" | tail -n 1)
 fi
 ROWS=${ROWS:-"128:128:1:16 128:128:8:32 128:128:16:64 128:128:32:128 2048:128:1:8 8192:64:1:4"}
