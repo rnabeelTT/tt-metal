@@ -263,22 +263,25 @@ card:
       sample on the host (slower).
     - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
     - Rare repetition loops, seen at temperature 1.0 and 0.6: a sampled answer can repeat one token, a character pair
-      or a phrase until `max_tokens` (1.7 % of 353 TTI eval answers; prompt-dependent, up to 6 of 32 seeded draws on
-      one Vietnamese prompt).
+      or a phrase until `max_tokens` (1.7 % of 353 TTI eval answers; prompt-dependent; on one Vietnamese prompt 6 of 32 seeded
+      draws at temperature 1.0 and 9 of 32 at 0.6).
       Most other seeds of the same prompt do not loop (greedy did not loop in one run per prompt). In a probe of
       two looping prompts, neither `repetition_penalty` 1.05 or 1.10 nor temperature 0.6 removed the loops.
       Mitigation: set `max_tokens`, detect a loop in the client, and retry with another seed. An HF reference check
-      of one loop: the reference also repeats once the loop has started; the TT deviation at the loop entry comes
-      from the bfp4 routed experts (see Languages).
+      of one loop: the reference also repeats once the loop has started; at the loop entry the TT next-token
+      distribution deviates from the reference (see Languages).
     - Languages: English is the validated language (the accuracy evals and the teacher-forcing gate are English).
       Non-English output sampled at temperature 1.0 can be garbled (mixed scripts, word salad) and can loop: seen on
       Vietnamese, Persian, Kannada and Marathi prompts. Teacher forcing against the HF reference (stage-11 review)
-      shows a deviation of the TT next-token distribution in every language (top-1 agreement 0.70-0.86 on
-      hand-written text, English 0.80), more for Persian and Chinese than for English. The cause is the bfp4 routed
-      experts: an HF reference with only the experts rounded to bfp4 reproduces TT (top-1 vs TT 0.92; vs plain HF
-      0.79), so the deviation is the bfp4 expert quantization needed to fit p300x2. bfp8 experts do not
-      fit in DRAM, and no other precision setting removes it (LM head bfp8 and the all-bfp8 non-expert policy were
-      tested). It is not fixed in this release.
+      shows a deviation of the TT next-token distribution in every language (top-1 agreement 0.70-0.80 with the
+      shipped precision on hand-written text, English 0.80), more for Persian and Chinese than for English. On one Vietnamese
+      trajectory (38 positions), an HF reference with only the routed experts rounded to bfp4 deviates from the
+      plain HF reference by the same amount as TT (top-1 0.79), and a TT build with bfp8 non-expert weights (policy
+      `none`) tracks it closely (0.92). So the bfp4 routed experts, which are needed to fit p300x2, are enough to
+      cause a deviation of this size. The shipped bfp4 non-expert weights and fp8 DSA latent add a deviation of
+      similar size (shipped vs HF-bfp4 top-1 0.82, the same as vs plain HF). The all-bfp8 non-expert policy and a
+      bfp8 LM head do not bring TT closer to the HF reference, and bfp8 experts do not fit in DRAM. It is not fixed
+      in this release.
       Chinese, which the E192 card claims, was checked on TT by teacher forcing only (top-1 0.73-0.79), not by
       sampled output.
     - No multi-token prediction (the MTP layer is not served).

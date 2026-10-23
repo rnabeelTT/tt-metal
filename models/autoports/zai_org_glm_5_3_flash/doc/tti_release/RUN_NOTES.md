@@ -448,17 +448,24 @@ Benchmark rows (p300x2-1m, concurrency 1):
       0.23), as the TT none policy does (" " 0.69, ' "' 0.67 / 0.16).
     - TT none vs HF-bfp4: top-1 0.88 at positions 24-31 (decode) and 0.92 over all. TT shipped vs HF-bfp4: 0.38 /
       0.82 (the stage-8 bfp4 non-expert groups move this fragile prefix again, but not toward HF).
-    - Conclusion: **the deviation at the loop entry comes from the bfp4 routed experts** (bfp4 weights alone, with
-      bf16 math, reproduce it). bfp8 experts in all layers do not fit in DRAM, so it is not fixable by a precision
-      setting in this release.
-    - Summary: HF with bfp4-rounded routed experts reproduces TT (top-1 vs TT 0.92; vs plain HF 0.79), so the
-      deviation is the bfp4 expert quantization needed to fit p300x2.
+    - Conclusion (one 38-token Vietnamese trajectory): **the bfp4 routed experts are enough to cause a deviation of
+      this size** (bfp4 expert weights alone, with bf16 math, deviate from HF as much as TT, and the TT `none`
+      policy tracks HF-bfp4 at 0.92). The shipped policy's bfp4 / LoFi non-expert groups and fp8 DSA latent add a
+      second deviation of similar size: TT shipped vs HF-bfp4 is 0.82 / 0.38, the same as vs plain HF. bfp8
+      experts in all layers do not fit in DRAM, and the all-bfp8 non-expert policy does not bring TT closer to
+      HF, so no precision setting fixes it in this release.
+    - Raw per-position rows: `nonenglish/hf_bfp4exp.json` (HF-bfp4), `nonenglish/cmp_bfp4.json` (summary).
+    - HF-bfp4 run: `11r2-tf-hf.py --expert-fmt bfp4`, doc 106 only, unbatched, under `systemd-run --user -p
+      MemoryMax=40G` (unit glm53-s11-r2hfq2), 2,547 s, peak RSS about 32 GB. A first batched 5-text attempt (unit
+      glm53-s11-r2hfb) was OOM-killed at the 40 GB cap.
+    - `nonenglish/11r2-langprobe.py` (sampled non-English re-probe) was not run: the shipped precision did not
+      change, so a re-probe cannot change the result. The earlier probe evidence stands.
     - The English control on HF-bfp4 was stopped after doc 106 (lead decision: it cannot change the conclusion).
 - Decision: **the default precision does not change.** No candidate restores agreement, so a precision change has
   no benefit to pay for.
 - What is still true: non-English sampled output at temperature 1.0 can be garbled (mixed scripts, word salad) and
-  can enter loops; the TT next-token distribution deviates from the HF reference in every language (top-1 0.70-0.86
-  on hand-written text), more for Persian and Chinese than for English. Chinese (claimed by the E192 card) was
+  can enter loops; the TT next-token distribution deviates from the HF reference in every language (top-1 0.70-0.80
+  with the shipped precision on hand-written text), more for Persian and Chinese than for English. Chinese (claimed by the E192 card) was
   checked on TT by this teacher forcing only: top-1 0.73-0.79, top-5 mass slightly below HF; sampled Chinese output
   was not probed.
 
@@ -788,7 +795,9 @@ The fix (stage-11 review, P2-1):
 
 ## Stage-11 review #2 fixes (2026-10-23)
 - P2 non-English output: device precision A/B and HF controls, see "Non-English output: device precision A/B and
-  HF controls (stage-11 review #2)". Cause: the bfp4 routed experts (needed to fit p300x2). Default precision
+  HF controls (stage-11 review #2)". Cause: the bfp4 routed experts (needed to fit p300x2)
+  are a sufficient cause; the shipped bfp4 non-expert groups and fp8 latent add a deviation of similar size (see the
+  conclusion in that section; measured on one Vietnamese trajectory). Default precision
   unchanged. Card: a Languages limitation.
 - Loop scan: character rule (16-character substring >= 1,000 times); release ifeval 3/109 (doc 87 added), shipped
   policy 6/353 = 1.7 %, all valid 12/446 = 2.7 % (`loopdiag/loopscan.json`). The C-Eval explanation is replaced by
