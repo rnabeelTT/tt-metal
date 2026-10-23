@@ -508,7 +508,9 @@ weighting / sum.
   `GATE_FIRST` ([gate | up] packing). bfp4 experts need no re-rounding (LoFi reads 4 significant bits exactly).
   `QWEN3_MOE_FUSED_DECODE=1` in tt/multichip_decoder.py (decode widths <= QWEN3_MOE_FUSED_ROWS_MAX, before the sorted
   path); `tt-model-fast.yaml` -> raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast. Op test mode `ep`; `runs/c30_chain.sh`
-  (op tests, decode vs HF fused off / on, package, card rows both bundles).
+  (op tests, decode vs HF fused off / on, package, card rows both bundles on p300x2 + evals HumanEval / MBPP / GSM8K /
+  IFEval, p300 (the default profile), p150 single-user + greedy (one die: all 128 experts in one window)). Card sources
+  in `qwen3_coder_30b_a3b/fusion_card` (c30_fusion 13ff64c527e): fill the eval placeholders, `python assemble.py`.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
