@@ -470,9 +470,21 @@ chips_busy`), so a model TT Studio deploys still blocks them; one started mid-ru
 
 Expert-parallel (32 whole experts per die at TP4, 64 at TP2, bfp4), no shared expert, softmax top-8 of 128; decode
 < 4 rows: sparse_matmul over the local slots, >= 4 rows: sorted. Card: 1 user 20.2 ms, 32 users 37.2 ms (585 total):
-the multi-user path is already strong, single user is the gap. Fused path needs: m = 6 (done), shared=False (done), a
-global top-k with per-die expert windows (device-varying offset from a per-device tensor; runtime args are identical
-on every device), variable local slot counts in the down op.
+the multi-user path is already strong, single user is the gap. Its decode MoE per layer: the replicated router chain
+(~12 ops, 88.9 us by its own docstring) + two dynamic sparse matmuls over the 32 local slots (~83 us) + SwiGLU /
+weighting / sum.
+- Implemented 2026-10-23 (branch c30_fusion off ornith_fusion, worktree ~/tt-metal-c30): `EP_EXPERTS` in the moe_decode
+  kernels (per-die window of the global top-k; the offset from a per-device [1,1,1,32] UINT32 tensor in bank 0 at the
+  same address on every die; live slot count in route[15] / the mailboxes; zero partials when the window is empty),
+  `GATE_FIRST` ([gate | up] packing). bfp4 experts need no re-rounding (LoFi reads 4 significant bits exactly).
+  `QWEN3_MOE_FUSED_DECODE=1` in tt/multichip_decoder.py (decode widths <= QWEN3_MOE_FUSED_ROWS_MAX, before the sorted
+  path); `tt-model-fast.yaml` -> raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast. Op test mode `ep`; `runs/c30_chain.sh`
+  (op tests, decode vs HF fused off / on, package, card rows both bundles).
+
+### Run queue (2026-10-23)
+
+`~/ornith-fusion/runs/run_queue.sh`: after the 122B chain, in order: q122_card_chain (package + card rows + scorecard
+subsets), c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers).
 
 ## Plan (in order; each step ends with a measurement)
 
