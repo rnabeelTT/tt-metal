@@ -8,6 +8,9 @@ temperature 0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness through the serve
 | IFEval prompt-level strict (100) | {IFE_PUB} | {IFE_NEW} |
 | LiveCodeBench v6 (50) | {LCB_PUB} | {LCB_NEW} |
 
+GPQA: 12 questions right only with blackhole-fast, 16 only with the published bundle (McNemar p 0.57); the difference
+is within one standard error (+-0.033). A 40-question subset had shown 0.65 vs 0.775, which is why the full set ran.
+
 Layer-level PCC against Hugging Face (real weights, 4 dies, shipped precision policy), published -> fused decode: Gated
 DeltaNet layer 0.99967 -> 0.99965, attention layer 0.99477 -> 0.99471; 32 concurrent users, worst user 0.99717 ->
 0.99719 / 0.99548 -> 0.99532. Prefill is unchanged (identical PCC).
