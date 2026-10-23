@@ -301,6 +301,9 @@ def main():
             check_experts(dev, I=256, trials=1)
             check_rows(dev, 4, I=256, trials=1)
             check_rows(dev, 16, I=256, trials=1)
+        if "cn" in what:  # Qwen3-Coder-Next shapes: 512 experts, top-10, 256 expert columns per device (TP2)
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
+                check_rows(dev, m, I=256, E=512, k=10, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:

@@ -45,6 +45,7 @@ def supported(num_experts, hidden, inter_local, dtype, banks=8):
         and (2 * inter_local // TILE) // banks in (1, 2)
         and (hidden // TILE) % banks == 0
         and num_experts % TILE == 0
+        and num_experts <= 512  # router_topk.hpp route_union's expert mask
     )
 
 
