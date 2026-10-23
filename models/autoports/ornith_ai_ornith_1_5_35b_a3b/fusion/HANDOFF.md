@@ -443,6 +443,13 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
   the fused max (14.4) is technical vocabulary the word list lacks (outlier, ablation, rescale). Greedy text differs
   (rounded weights), coherent. Card chain `runs/q122_card_chain.sh` running (queue).
 
+### Scorecards (user request 2026-10-23)
+
+One page for every finished model (before / after throughput, what changed, quality):
+https://claude.ai/artifact/KX1BqBmjfm5GnYnYonZv63 (private to the user until shared; source
+`/tmp/claude-1004/.../scratchpad/scorecards.html` in the session that made it). Update it as each model's card lands
+(122B next, then Coder-30B / GLM, then the MTP decisions).
+
 ### Shared box (2026-10-23)
 
 Another user (`hous`) runs TT Studio v2.12 on qb2-120-p06t08 (containers `tt_studio_*`, the backend maps
