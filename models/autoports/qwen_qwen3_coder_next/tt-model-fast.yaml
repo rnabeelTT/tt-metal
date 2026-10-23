@@ -16,7 +16,7 @@ image:
   registry: hf
 
 source:
-  tt_metal: /home/raahem/tt-metal-bringups   # branch coder_next_fusion
+  tt_metal: /home/raahem/tt-metal-codernext   # worktree, branch coder_next_fusion
   code:  # the autoport's import closure (checked with a symlinked tree of exactly these paths); the autoport ships its
          # runtime files only (not the per-stage doc/ evidence with profiler CSVs, not tests/)
     - models/autoports/qwen_qwen3_coder_next/__init__.py
