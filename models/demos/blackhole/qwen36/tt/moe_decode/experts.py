@@ -269,15 +269,17 @@ class ExpertGateUp:
 
 class ExpertDown:
     """(act, route, down, shared_down, out) -> out. readers: cores per DRAM bank, each with m / readers of the bank's
-    m output columns."""
+    m output columns (None: <= 4 per core)."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=2, used=None):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=None, used=None):
         self.mesh_device = mesh_device
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.h_tiles = hidden // TILE
         assert self.h_tiles % self.banks == 0, f"{self.h_tiles} hidden tiles do not split over {self.banks} banks"
         self.m = self.h_tiles // self.banks
+        if readers is None:  # <= 4 columns per core (half-sync FP32 DST): 122B hidden 3072 = 12 per bank -> 3 readers
+            readers = max(2, -(-self.m // 4))
         assert self.m % readers == 0, f"{self.m} columns per bank do not split over {readers} readers"
         self.cols = self.m // readers
         self.E, self.k, self.inter = num_experts, k, inter
