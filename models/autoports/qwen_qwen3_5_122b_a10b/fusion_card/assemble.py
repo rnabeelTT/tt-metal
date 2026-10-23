@@ -40,7 +40,10 @@ def main():
         [sys.executable, str(TOOLS / "card_tables.py"), "card_q122new", "card_q122pub", *profiles],
         check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "published"},
     ).stdout
-    tables = tables.replace("#### longctx", "#### p300x2-longctx (MTP off, chunked prefill at 4096 tokens)")
+    head, sep, lc = tables.partition("#### longctx")
+    lc = lc.replace("temperature 0, MTP on;", "temperature 0, MTP off;")
+    tables = head + sep.replace("#### longctx", "#### p300x2-longctx (MTP off, chunked prefill at 4096 tokens)") + lc
+    tables = tables.replace("| longctx |", "| p300x2-longctx |")
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     assert "{" not in perf.split("### Performance")[0] and "{SPEED" not in (HERE / "quickstart.md").read_text(), "fill the placeholders"
     src = YAML.read_text()

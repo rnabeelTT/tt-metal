@@ -4,9 +4,9 @@ temperature 0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness through the serve
 
 | Eval | published | blackhole-fast |
 | --- | ---: | ---: |
-| GPQA-Diamond (all 198 questions) | {GPQA_PUB} | {GPQA_NEW} |
-| IFEval prompt-level strict (100) | {IFE_PUB} | {IFE_NEW} |
-| LiveCodeBench v6 (50) | {LCB_PUB} | {LCB_NEW} |
+| GPQA-Diamond (all 198 questions) | 0.697 | 0.677 |
+| IFEval prompt-level strict (100) | 0.85 | 0.87 |
+| LiveCodeBench v6 (50) | 0.54 | 0.54 |
 
 GPQA: 12 questions right only with blackhole-fast, 16 only with the published bundle (McNemar p 0.57); the difference
 is within one standard error (+-0.033). A 40-question subset had shown 0.65 vs 0.775, which is why the full set ran.

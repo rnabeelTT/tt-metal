@@ -32,14 +32,14 @@ Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to a
 `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackhole-fast --profile <name>` (p300x2 names below; the same four exist
 as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
 - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
-  Speculative decoding gives a single user about {SPEED_MTP} tok/s on chat text; images and tool calls work; thinking on.
+  Speculative decoding gives a single user about 66 tok/s on chat text; images and tool calls work; thinking on.
 - `p300x2-burst` - many short prompts arriving together (chat front-ends with dozens of users, batch classification,
   extraction jobs): up to four prompts are prefilled per pass, so a 32-request burst gets its first token in 3.8 s
   instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
   of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
 - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
   ones: prefill runs in 4096-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
-  upload. Speculative decoding is off in this profile (about {SPEED_LONGCTX} tok/s for a lone user), and running users still pause
+  upload. Speculative decoding is off in this profile (about 57 tok/s for a lone user), and running users still pause
   while prefill chunks run.
 - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled
   tokens for 32 users) for longer conversations at high occupancy; image requests are rejected at the front end.
