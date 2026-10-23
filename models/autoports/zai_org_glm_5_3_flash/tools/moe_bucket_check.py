@@ -32,6 +32,22 @@ def _slots(A, S):
     return sorted({min(S - 1, int(i * step + step / 2)) for i in range(A)})
 
 
+def _pages(g, slots, lens, steps):
+    """--serving-blocks: contiguous pool blocks (from 1; block 0 = vLLM's null block) for each slot's prompt + decode
+    steps; rows in `slots` order (None without a pool)."""
+    cols = getattr(g, "_pt_cols", None)
+    if cols is None:
+        return None
+    pt = torch.zeros(len(slots), cols, dtype=torch.int32)
+    nxt = 1
+    for r, L in enumerate(lens):
+        n = -(-(L + steps + 1) // 128)
+        assert nxt + n <= g.num_blocks, f"pool of {g.num_blocks} blocks too small"
+        pt[r, :n] = torch.arange(nxt, nxt + n, dtype=torch.int32)
+        nxt += n
+    return pt
+
+
 def record(a):
     from models.autoports.zai_org_glm_5_3_flash.tests.harness import close_mesh
     from models.autoports.zai_org_glm_5_3_flash.tt import dsa_buckets
@@ -47,7 +63,15 @@ def record(a):
     ok = False
     try:
         t0 = time.perf_counter()
-        g = Glm53Generator(mesh, max_batch_size=a.slots, max_seq_len=a.seq_len)
+        if a.serving_blocks:  # vLLM-style shared block pool: a long max_seq_len (the served DSA width) at S slots
+            g = Glm53Generator(
+                mesh, max_batch_size=a.slots, max_seq_len=a.seq_len, defer_caches=True, budget_check=False
+            )
+            g.bind_kv_cache(a.serving_blocks)
+            g.capture_traces()
+            g._pt_cols = a.seq_len // 128
+        else:
+            g = Glm53Generator(mesh, max_batch_size=a.slots, max_seq_len=a.seq_len)
         rec["build_s"] = time.perf_counter() - t0
         ctl = g.__dict__.get("_dsa_buckets")
         rec["buckets"] = None if ctl is None else {"tbs": ctl.tbs, "paths": ctl.paths, "widths": ctl.widths}
@@ -63,18 +87,24 @@ def record(a):
             slots = _slots(A, S)
             g.reset()
             pre = []
-            for s in slots:
+            pt = _pages(g, slots, [a.prompt_len + 7 * s for s in slots], a.steps)
+            for r, s in enumerate(slots):
                 ids = torch.randint(
                     100, V - 100, (a.prompt_len + 7 * s,), generator=torch.Generator().manual_seed(1000 * A + s)
                 )
-                lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[len(ids)], slots=[s])
+                lg = g.prefill_forward(
+                    ids.reshape(1, -1),
+                    prompt_lens=[len(ids)],
+                    slots=[s],
+                    page_table=None if pt is None else pt[r : r + 1],
+                )
                 pre.append(lg.reshape(-1)[:V].to(torch.bfloat16))
             tok = torch.tensor([int(torch.argmax(p.float())) for p in pre])
             pos = torch.tensor([a.prompt_len + 7 * s for s in slots])
             steps = []
             for i in range(a.steps):
                 out = g.decode_forward(
-                    tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True
+                    tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True, page_table=pt
                 )[:, :V]
                 b = ctl.moe_bucket(list(g.model.inputs.positions)) if ctl is not None and ctl.tbs else None
                 steps.append({"pos": pos.tolist(), "bucket": b, "logits": out.to(torch.bfloat16)})
@@ -138,10 +168,13 @@ def _invariance(g, a, ctl):
         slots = [0] + [s + 1 for s in others]
         g.reset()
         pre = None
-        for s in slots:
+        pt = _pages(g, slots, [tlen if s == 0 else flen(s) for s in slots], a.steps)
+        for r, s in enumerate(slots):
             seed = torch.Generator().manual_seed(fs * 100000 + 100 * A + s)
             ids = target if s == 0 else torch.randint(100, V - 100, (flen(s),), generator=seed)
-            lg = g.prefill_forward(ids.reshape(1, -1), prompt_lens=[len(ids)], slots=[s])
+            lg = g.prefill_forward(
+                ids.reshape(1, -1), prompt_lens=[len(ids)], slots=[s], page_table=None if pt is None else pt[r : r + 1]
+            )
             if s == 0:
                 pre = lg.reshape(-1)[:V].to(torch.bfloat16)
         pos = torch.tensor([tlen if s == 0 else flen(s) for s in slots])
@@ -151,7 +184,9 @@ def _invariance(g, a, ctl):
                 tok = torch.tensor([int(torch.argmax(pre.float()))] + [1000] * (len(slots) - 1))
             if ctl is not None and ctl.widths:
                 dsa_b.append(ctl.bucket([int(p) for p in pos.tolist()]))
-            o = g.decode_forward(tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True)
+            o = g.decode_forward(
+                tok.reshape(-1, 1), pos, slots=slots, on_device_sampling=False, enable_trace=True, page_table=pt
+            )
             o = o[:, :V]
             steps.append(o[0].to(torch.bfloat16))
             tok = torch.argmax(o.float(), dim=-1)
@@ -235,6 +270,9 @@ def main():
     r.add_argument("--time-actives", default="1,2,4,8,16")
     r.add_argument("--time-steps", type=int, default=20)
     r.add_argument("--trace-region", type=int, default=64 << 20)
+    r.add_argument(
+        "--serving-blocks", type=int, default=0, help="vLLM-style shared pool of N blocks (defer_caches build)"
+    )
     r.add_argument("--out", required=True)
     c = sub.add_parser("compare")
     c.add_argument("a")

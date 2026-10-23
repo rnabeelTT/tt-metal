@@ -21,8 +21,10 @@ plus the small selection traces.
 Prefill (eager): a sparse chunk scores W_b keys (indexer_score_dsa kv_len = W_b) for the smallest W_b that covers the
 chunk's last position, and ranks only those columns.
 
-GLM53_DSA_BUCKETS: "auto" (default; on for max_seq_len >= GLM53_DSA_BUCKET_MIN_T; 1-slot builds only, S >= 2 takes
-none) | "0" / "off" (the full-width code, unchanged) | comma list of bucket contexts (forces it on).
+GLM53_DSA_BUCKETS: "auto" (default; on for max_seq_len >= GLM53_DSA_BUCKET_MIN_T) | "0" / "off" (the full-width code,
+unchanged) | comma list of bucket contexts (forces it on). 1 slot: the bucket of the batch's largest position. S >= 2
+(stage 12, GLM53_DSA_ROW_BUCKETS=1 default): per-row buckets (DsaBuckets row mode, contexts GLM53_DSA_ROW_CONTEXTS,
+default 16,384 then T): every row selects at its own bucket width, so the selection does not depend on the other slots.
 Every bucket program is compiled by install() (eager, before any capture).
 """
 
@@ -40,7 +42,7 @@ from .dsa import DENSE_MAX_POSITION, KPOOL, TOPK_POOLS
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
-# Multi-slot builds (S >= 2) take no auto DSA decode buckets. With mixed top-k modes (fused <= 16,384 pools, classic
+# Multi-slot builds (S >= 2) took no auto DSA decode buckets before stage 12 (now: per-row buckets, DsaBuckets row mode). With mixed top-k modes (fused <= 16,384 pools, classic
 # above; they order tied scores differently) a request's selection depended on the other slots' positions (stage-10
 # review #1 P2-2, ticket t20). Classic-only buckets (contexts from 65,536) passed the reduced proof (t22) but not the
 # served one: a 4,100-token greedy request differed solo vs next to a ~70K decode (t22, t23 runs ii / iii, async on and
@@ -60,8 +62,16 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
         # saves there): GLM53_DSA_BUCKET_MIN_T, default 65536. Measured at 16,384 (stage-10 ticket t4, full model, 1
         # slot): segmented 50.08 / 53.45 / 53.69 ms vs single trace 49.95 / 53.23 / 53.24 ms at positions 300 / 5000 /
         # 15000 (+0.1 to +0.45 ms); the selection at P_alloc 4,128 costs only 0.08 ms per layer
-        if slots >= 2 or T < int(os.environ.get("GLM53_DSA_BUCKET_MIN_T", "65536")):
+        if T < int(os.environ.get("GLM53_DSA_BUCKET_MIN_T", "65536")):
             return None
+        if slots >= 2:
+            # stage 12: per-row buckets (DsaBuckets row mode): each row selects at its OWN bucket width, so its
+            # selection does not depend on the other slots' positions (served batch invariance)
+            if os.environ.get("GLM53_DSA_ROW_BUCKETS", "1") != "1":
+                return None
+            env_r = os.environ.get("GLM53_DSA_ROW_CONTEXTS", ",".join(str(t) for t in ROW_CONTEXTS_DEFAULT))
+            ctx = sorted({int(x) for x in env_r.split(",") if x.strip() and int(x) < T})
+            return (ctx + [T]) if ctx else None
         ctx, t = [], 4096
         while t < T:
             ctx.append(t)
@@ -74,6 +84,13 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
             t % 128 == 0 and t // KPOOL >= TOPK_POOLS
         ), f"bucket context {t}: multiple of 128, >= {TOPK_POOLS * KPOOL}"
     return ctx + [T]
+
+
+# Multi-slot row-mode bucket contexts (below T; T itself is the last bucket). Few buckets: a step computes the selection
+# at every width between the smallest and the largest bucket of its active rows, and every (lo, hi) range is a point
+# trace per DSA layer. Measured (stage 12, 16 slots, 243,712): 3 widths = 6 ranges x 11 layers took +11.7 MiB of trace
+# region and overflowed the 96 MiB p300x2 region; 2 widths = 3 ranges.
+ROW_CONTEXTS_DEFAULT = (16384,)
 
 
 def width_of(T_b: int) -> int:
@@ -221,9 +238,14 @@ class DsaBuckets:
         )
         self.S = S
         self.max_context = max_context
+        # row mode (S >= 2): a DSA variant is a bucket range (lo, hi); every active row selects at its own bucket width
+        # (the smallest W_b >= its visible pools), so a row's pool ids are the ones it gets alone (batch invariance)
+        self.row_mode = bool(self.widths) and S >= 2
+        nw = len(self.widths or [])
+        self.dsa_keys = [(lo, hi) for lo in range(nw) for hi in range(lo, nw)] if self.row_mode else list(range(nw))
         self.mode = None  # "warm" | "capture" while the hooks are installed
         self.main, self.points = [], []  # points: [(kind, [trace id per variant])]
-        self.hits = {"dsa": [0] * len(self.widths or []), "moe": [0] * len(tbs or [])}
+        self.hits = {"dsa": [0] * len(self.dsa_keys), "moe": [0] * len(tbs or [])}
         self._open = None
         self._active = None  # host copy of the active-slot list behind the compaction inputs
 
@@ -350,8 +372,45 @@ class DsaBuckets:
     def _select(self, dsa, qi, wi, inputs):
         """GlmDSA.decode_forward hook: the step's pool ids in the layer's persistent buffer."""
         buf = dsa._sel_buf
+        if self.row_mode:
+            self._point("dsa", [lambda k=k: self._select_rows(dsa, qi, wi, inputs, k, buf) for k in self.dsa_keys])
+            return buf
         self._point("dsa", [lambda W=W: _into_buf(select_at(dsa, qi, wi, inputs, W), buf) for W in self.widths])
         return buf
+
+    def _select_rows(self, dsa, qi, wi, inputs, key, buf):
+        """Row mode: the selection at every width of the bucket range key = (lo, hi); row r keeps the ids of its own
+        bucket b (W_{b-1} < limit_r <= W_b; inactive rows: limit 0, any). One width: the plain selection."""
+        lo, hi = key
+        if lo == hi:
+            _into_buf(select_at(dsa, qi, wi, inputs, self.widths[lo]), buf)
+            return
+        lim = inputs["limit"]  # [1,1,S,1] fp32: visible complete pools of each row (0 = inactive)
+        acc = None
+        for b in range(lo, hi + 1):
+            ids = select_at(dsa, qi, wi, inputs, self.widths[b])
+            idf = ttnn.typecast(ids, ttnn.float32, memory_config=DRAM)  # pool ids < 2**24: exact
+            ttnn.deallocate(ids)
+            conds = []
+            if b > lo:
+                conds.append(ttnn.gt(lim, float(self.widths[b - 1]), memory_config=DRAM))
+            if b < hi:
+                conds.append(ttnn.le(lim, float(self.widths[b]), memory_config=DRAM))
+            sel = conds[0] if len(conds) == 1 else ttnn.multiply(conds[0], conds[1], memory_config=DRAM)
+            term = ttnn.multiply(idf, sel, memory_config=DRAM)  # one bucket per row: the terms add exactly
+            for t in set(conds + [sel, idf]):
+                ttnn.deallocate(t)
+            if acc is None:
+                acc = term
+            else:
+                nxt = ttnn.add(acc, term, memory_config=DRAM)
+                ttnn.deallocate(acc)
+                ttnn.deallocate(term)
+                acc = nxt
+        out = ttnn.typecast(acc, buf.dtype, memory_config=DRAM)
+        ttnn.deallocate(acc)
+        ttnn.copy(out, buf)
+        ttnn.deallocate(out)
 
     def _routed(self, moe, x4, scores, ids, full):
         """Routed-experts hook of a MoE layer (decode rows = S): every row bucket writes the step's routed output
@@ -522,7 +581,7 @@ class DsaBuckets:
         self.trace_bytes = _trace_bytes(self.mesh) - tb0
         logger.info(
             f"decode buckets: decode captured as {len(self.main)} segments + {len(self.layers) if self.widths else 0} DSA x "
-            f"{len(self.widths or [])} + {len(self.moe_layers)} MoE x {len(self.tbs or [])} point traces, "
+            f"{len(self.dsa_keys)} + {len(self.moe_layers)} MoE x {len(self.tbs or [])} point traces, "
             f"{self.trace_bytes / 2**20:.1f} MiB of trace region"
         )
         return out
@@ -532,7 +591,12 @@ class DsaBuckets:
         """DSA width bucket of the batch."""
         if not self.widths:
             return None
-        need = max([(p + 1) // KPOOL for p in positions if p >= 0], default=0)
+        T = self.max_context
+        needs = [(p + 1) // KPOOL for p in positions if p >= 0 and (T is None or p < T)]
+        if self.row_mode:
+            bs = [pick(self.widths, n) for n in needs] or [0]
+            return self.dsa_keys.index((min(bs), max(bs)))
+        need = max(needs, default=0)
         return pick(self.widths, need)
 
     def moe_bucket(self, positions) -> int:

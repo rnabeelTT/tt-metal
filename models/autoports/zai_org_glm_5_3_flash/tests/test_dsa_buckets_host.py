@@ -29,10 +29,36 @@ def test_multi_slot_takes_no_auto_dsa_buckets(monkeypatch, S, T):
     (review #1 P2-2: t20 mixed modes, t23 served). 1 slot keeps the 4,096 start; an explicit list still applies."""
     monkeypatch.delenv("GLM53_DSA_BUCKETS", raising=False)
     monkeypatch.delenv("GLM53_DSA_BUCKET_MIN_T", raising=False)
+    monkeypatch.setenv("GLM53_DSA_ROW_BUCKETS", "0")
     assert B.bucket_contexts(T, slots=S) is None
     assert B.bucket_contexts(T, slots=1)[0] == 4096
     monkeypatch.setenv("GLM53_DSA_BUCKETS", "65536")
     assert B.bucket_contexts(T, slots=S) == ([65536, T] if T > 65536 else [T])
+
+
+@pytest.mark.parametrize("S,T", [(16, 243712), (32, 151552), (8, 131072), (2, 65536)])
+def test_multi_slot_row_mode_contexts(monkeypatch, S, T):
+    """Stage 12 row mode (GLM53_DSA_ROW_BUCKETS=1): S >= 2 takes the few row-mode contexts below T, then T."""
+    monkeypatch.delenv("GLM53_DSA_BUCKETS", raising=False)
+    monkeypatch.delenv("GLM53_DSA_BUCKET_MIN_T", raising=False)
+    monkeypatch.delenv("GLM53_DSA_ROW_CONTEXTS", raising=False)
+    monkeypatch.setenv("GLM53_DSA_ROW_BUCKETS", "1")
+    assert B.bucket_contexts(T, slots=S) == [t for t in B.ROW_CONTEXTS_DEFAULT if t < T] + [T]
+    monkeypatch.setenv("GLM53_DSA_ROW_CONTEXTS", "16384")
+    assert B.bucket_contexts(T, slots=S) == [16384, T]
+
+
+def test_row_mode_bucket_key():
+    """Row mode: the variant is the (smallest, largest) bucket of the ACTIVE rows; each row then keeps the ids of its
+    own bucket (inactive and overrun rows do not widen the range)."""
+    c = B.DsaBuckets.__new__(B.DsaBuckets)
+    c.widths, c.row_mode, c.max_context = [B.width_of(8192), B.width_of(65536), B.width_of(262144)], True, 262144
+    c.dsa_keys = [(lo, hi) for lo in range(3) for hi in range(lo, 3)]
+    assert c.dsa_keys[c.bucket([-1] * 16)] == (0, 0)
+    assert c.dsa_keys[c.bucket([5000] + [-1] * 15)] == (0, 0)
+    assert c.dsa_keys[c.bucket([5000, 70000] + [-1] * 14)] == (0, 2)
+    assert c.dsa_keys[c.bucket([20000, 70000, 262144] + [-1] * 13)] == (1, 2)  # 262,144 = max_context: inactive
+    assert c.dsa_keys[c.bucket([30000, 40000] + [-1] * 14)] == (1, 1)
 
 
 def test_install_gates_sharded_layers(monkeypatch):
