@@ -376,7 +376,24 @@ Its `moe.py` was identical to Ornith's published one; the four Ornith diffs (moe
 multichip_decoder) applied cleanly. Layer PCC (real weights, 2 chips) found a shared bug: the multi-row union mask
 (`router_topk.hpp route_union`) was 256 bits, so Coder-Next's experts 256..511 fell out of the union (attention b32
 per-user min 0.99197 vs 0.99957 unfused). Fixed on coder_next_fusion (512-bit mask): 0.99959; merge into
-ornith_fusion after the Ornith release (it cannot change Ornith's 256-expert results).
+ornith_fusion after the Ornith release (it cannot change Ornith's 256-expert results). Merged (631b45db5f2).
+Package: `qwen_qwen3_coder_next/tt-model-fast.yaml` -> raahemnabeel/qwen3-coder-next-blackhole-fast, built from the
+worktree (submodules initialised with `--reference` to the main checkout). Its p300 profile runs bfp4 experts at TP2
+(2 columns per bank): supported, but only the bfp8 TP2 shapes were op-tested; check p300 greedy / PCC before the card.
+
+### Port: Qwen3.5-122B-A10B (branch q122_fusion, worktree ~/tt-metal-q122)
+
+- Latest published = raahemnabeel/qwen3-5-122b-a10b, built from tt-metal 8fec52c4cb (origin/qwen3_5_122b_a10b_mtp_fix;
+  the Hub `code/` matches it) with plugin 92403f3 = `~/vllm-tt-plugin-pub` (identical files). This tree's 122B autoport
+  was older (no MTP context-end guard / fresh-slot phase entry): q122_fusion takes the autoport from 8fec52c4cb, then the
+  Coder-Next port diff (moe / model / model_config / multichip_decoder) applied with one hand-merged hunk.
+- Shapes: hidden 3072 (12 tiles per bank, new), 256 experts top-8, moe_intermediate 1024 -> 256 columns per die at TP4
+  (2 per bank), routed experts bfp4. Op test mode `q122`; layer PCC via its test_multichip_decoder.py (pinned to 1x4).
+- Dev serving: the Ornith fast image (same C++ as q122_fusion) with q122's models/ mounted (`serve.sh` recipe sets
+  EXTRA_MODELS_DIR); reference = the published image tt-model/qwen3-5-122b-a10b-blackholex4:cb33207c2577.
+- `~/ornith-fusion/runs/q122_chain.sh`: Ornith Hub smoke test, then 122B op test, PCC fused vs unfused, served new vs
+  published (greedy, garble, rows, real text). Manifest draft `qwen_qwen3_5_122b_a10b/tt-model-fast.yaml`
+  -> raahemnabeel/qwen3-5-122b-a10b-blackhole-fast.
 
 ## Plan (in order; each step ends with a measurement)
 
