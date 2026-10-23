@@ -5,8 +5,8 @@
 # PORT (default 20000) / DEVS (TT_VISIBLE_DEVICES, default 0,1 for p300): two p300 servers side by side on the two chip
 # pairs, e.g. the published reference on 0,1 :20000 and a development build on DEVS=2,3 PORT=20001.
 # MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
-# MODEL_ID (default Ornith) picks the serving recipe (Qwen/Qwen3-Coder-Next, Qwen/Qwen3.5-122B-A10B too); CACHE_NAME the
-# host cache dir.
+# MODEL_ID (default Ornith) picks the serving recipe (Qwen/Qwen3-Coder-Next, Qwen/Qwen3.5-122B-A10B,
+# zai-org/GLM-4.5-Air too); CACHE_NAME the host cache dir.
 set -e
 NAME=$1; IMAGE=$2; PROFILE=$3; shift 3
 MODEL_ID=${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B}
@@ -20,12 +20,15 @@ case $MODEL_ID in  # each bundle's serving recipe (its tt-model.yaml)
   ornith-ai/*) MENV="--env QWEN35_BATCHED_PREFILL=0 --env QWEN35_VISION=$QV --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304"
     MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning_parser qwen3
            --default-chat-template-kwargs '{"enable_thinking": false}' --limit-mm-per-prompt "$MM");;
+  Qwen/Qwen3-Coder-Next) MENV="--env QWEN35_CHUNKED_PREFILL=1"
+    MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_coder --enable-chunked-prefill --max-num-batched-tokens 2048);;
   Qwen/Qwen3.5-122B-A10B) MENV="--env QWEN35_BATCHED_PREFILL=0 --env QWEN35_VISION=1 --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304"
     MENV+=" --env EXTRA_MODELS_DIR=/opt/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle"  # any image (MODELS=1)
     MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning_parser qwen3
            --default-chat-template-kwargs '{"enable_thinking": false}' --limit-mm-per-prompt '{"image": 4, "video": 0}');;
-  Qwen/Qwen3-Coder-Next) MENV="--env QWEN35_CHUNKED_PREFILL=1"
-    MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_coder --enable-chunked-prefill --max-num-batched-tokens 2048);;
+  zai-org/GLM-4.5-Air) MENV="--env QWEN35_BATCHED_PREFILL=0"; MAXLEN=131072
+    MARGS=(--enable-auto-tool-choice --tool-call-parser glm45 --reasoning-parser glm45
+           --default-chat-template-kwargs '{"enable_thinking": false}');;
   *) echo "serve.sh: no recipe for $MODEL_ID"; exit 1;;
 esac
 KCACHE=${KCACHE:-$CACHE/cache}
@@ -41,6 +44,6 @@ docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --
   --volume $CACHE/tensors:/tensor-cache --env TT_CACHE_PATH=/tensor-cache \
   $MNT --publish ${PORT:-20000}:20000 --env ARCH_NAME=blackhole --env HF_MODEL=$MODEL_ID --env MESH_DEVICE=$MESH \
   --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_TRACE_REGION_MIB=768 $VIS --env VLLM_ENGINE_READY_TIMEOUT_S=3600 $MENV \
-  "$@" $IMAGE vllm serve $MODEL_ID --max-model-len 262144 --max-num-seqs 32 --block-size 64 \
+  "$@" $IMAGE vllm serve $MODEL_ID --max-model-len ${MAXLEN:-262144} --max-num-seqs 32 --block-size 64 \
   --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", \"trace_region_size\": 805306368, \"l1_small_size\": 24576, \"fabric_config\": \"$FAB\"}}" \
   "${MARGS[@]}" --port 20000

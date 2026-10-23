@@ -14,6 +14,8 @@ RUNS = Path(os.environ.get("RUNS", Path.home() / "ornith-fusion" / "runs"))
 # measure only adaptive-MTP run-to-run variance, so the latency table is replaced by SAME_DECODE_NOTE.
 SAME_DECODE = set(filter(None, os.environ.get("SAME_DECODE", "").split(",")))
 SAME_DECODE_NOTE = os.environ.get("SAME_DECODE_NOTE", "Decode code unchanged on this profile; single-user rows omitted.")
+PUB_LABEL = os.environ.get("PUB_LABEL", "published v2")  # the published bundle's name in the table captions
+REALTEXT_DESC = os.environ.get("REALTEXT_DESC", "12 chat prompts x 384 output tokens, temperature 0, MTP on")
 
 
 def load(label):
@@ -58,7 +60,7 @@ def section(profile, new, pub):
         lines += [SAME_DECODE_NOTE]
     else:
         lines += [
-            "Latency, batch 1 (single user): published v2 -> blackhole-fast",
+            f"Latency, batch 1 (single user): {PUB_LABEL} -> blackhole-fast",
             "",
             "| Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |",
             "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -73,7 +75,7 @@ def section(profile, new, pub):
             f"| {a['e2el']:.2f} -> {b['e2el']:.2f} |"
         )
     if real_n and real_p:
-        lines += ["", f"Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): "
+        lines += ["", f"Real text, single user ({REALTEXT_DESC}; median per prompt): "
                       f"{real_p[0]:.1f} -> **{real_n[0]:.1f} tok/s** ({pct(real_n[0], real_p[0])})."]
     for isl, osl in ((128, 128), (1024, 256)):
         conc = sorted(k for k in rn if k[0] == isl and k[1] == osl and k[2] > 1)
@@ -81,7 +83,7 @@ def section(profile, new, pub):
             continue
         lines += [
             "",
-            f"Concurrency, {isl} input / {osl} output tokens: published v2 -> blackhole-fast",
+            f"Concurrency, {isl} input / {osl} output tokens: {PUB_LABEL} -> blackhole-fast",
             "",
             "| Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |",
             "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
