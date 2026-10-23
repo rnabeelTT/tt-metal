@@ -88,7 +88,14 @@ void kernel_main() {
     constexpr uint32_t ct = m;  // one bank block's columns
     custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
 
+#ifdef EP_EXPERTS
+    uint32_t num_slots = 0;  // this die's window of the top-k: the live slot count from BRISC
+    UNPACK(num_slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+    MATH(num_slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+    PACK(num_slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+#else
     const uint32_t num_slots = get_arg_val<uint32_t>(0);  // this core's slot count
+#endif
 
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
@@ -102,7 +109,11 @@ void kernel_main() {
         silu_tile_init();
         gu_layout::static_for<np>([&](auto p) {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+#ifdef GATE_FIRST
+            silu_rows(u);  // [gate | up] packing: the first-half column is the gate
+#else
             silu_rows(gu_layout::gate_dst<m, banks>(u));
+#endif
         });
         mul_binary_tile_init();
         gu_layout::static_for<np>([&](auto p) {

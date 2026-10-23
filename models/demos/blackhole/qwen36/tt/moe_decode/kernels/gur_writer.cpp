@@ -17,7 +17,9 @@
 //    (s * pairs + p) * groups + g for each column pair p of the core's group, gu_layout.hpp): interleaved so neither
 //    cb fills up.
 //
-// runtime args: [x_addr, act_addr, table_addr, group q, slot0]
+// EP_EXPERTS: only this die's window of the union (local ids); other dies' experts get no weight.
+//
+// runtime args: [x_addr, act_addr, table_addr, group q, slot0, (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
 
@@ -103,7 +105,12 @@ void kernel_main() {
 
     const uint16_t* table = reinterpret_cast<const uint16_t*>(tab);
     uint16_t uni[rows * topk];
+#ifdef EP_EXPERTS
+    const uint32_t ep_off = moe_topk::read_ep_offset(get_arg_val<uint32_t>(5), tab + 64 * rows);
+    const uint32_t U = moe_topk::window_union(uni, moe_topk::route_union<topk>(table, rows, uni), ep_off, EP_EXPERTS);
+#else
     const uint32_t U = moe_topk::route_union<topk>(table, rows, uni);
+#endif
     uint32_t mine = 0;
     for (uint32_t s = slot0; s < U + 1; s += step) {
         ++mine;
@@ -125,7 +132,14 @@ void kernel_main() {
     for (uint32_t r = 0; r < rows; ++r) {
         put(0, r, table[32 * r + 16]);  // shared expert
         for (uint32_t j = 0; j < topk; ++j) {
+#ifdef EP_EXPERTS
+            if (table[32 * r + j] - ep_off >= EP_EXPERTS) {
+                continue;  // another die's expert
+            }
+            const uint32_t e = table[32 * r + j] - ep_off;
+#else
             const uint32_t e = table[32 * r + j];
+#endif
             uint32_t lo = 0, hi = U;  // uni is ascending
             while (lo < hi) {
                 const uint32_t mid = (lo + hi) / 2;

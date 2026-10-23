@@ -19,7 +19,11 @@
 // ROUTER_SIGB (GLM-4.5-Air): FP32 logits [32, E], sigmoid + selection-bias top-k, normalized weights, shared weight 1
 // (router_topk.hpp); the bias (Q23 int32 [E], one DRAM page in bank 0) follows the slot list in the runtime args.
 //
-// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot..., (ROUTER_SIGB) bias_addr]
+// EP_EXPERTS (expert parallelism, router_topk.hpp): this die keeps its window of the global top-k, compacted; the
+// route record carries the local ids / weights and their count (route[15]); slot positions beyond it are skipped.
+//
+// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot..., (ROUTER_SIGB) bias_addr,
+//                (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
 
@@ -71,12 +75,20 @@ void kernel_main() {
     }
     const int32_t* bias = nullptr;
 #ifdef ROUTER_SIGB
-    const uint32_t bias_l1 = lg + lg_tiles * moe_topk::LG_TILE_L1;
+    const uint32_t bias_l1 = moe_topk::align64(lg + lg_tiles * moe_topk::LG_TILE_L1);
     noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(6 + num_slots)), bias_l1, 4 * num_experts);
     bias = reinterpret_cast<const int32_t*>(bias_l1);
 #endif
     noc_async_read_barrier();
     invalidate_l1_cache();
+#ifdef EP_EXPERTS
+#ifdef ROUTER_SIGB
+    constexpr uint32_t a_ep = 7, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1 + 4 * num_experts + 64;
+#else
+    constexpr uint32_t a_ep = 6, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1;
+#endif
+    const uint32_t ep_off = moe_topk::read_ep_offset(get_arg_val<uint32_t>(a_ep + num_slots), lg + ep_l1_off);
+#endif
 
     // ---- column stream: per slot, up column j then gate column j + n_tiles / 2 ----
     constexpr uint32_t extra_in_flight = num_buffers - 2;
@@ -125,6 +137,7 @@ void kernel_main() {
     }
 
     uint32_t keys[topk], ids[topk];
+    uint32_t n_live = topk;  // the routed experts this die streams (EP_EXPERTS: its window of the top-k)
     {
         DeviceZoneScopedN("tail");
     // ---- router tail: top-k of [0, E / 2) here, of [E / 2, E) on the writer, merged ----
@@ -136,19 +149,26 @@ void kernel_main() {
     cb_pop_front(cb_part, 1);
     uint16_t w[topk];
     const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
+#ifdef EP_EXPERTS
+    n_live = moe_topk::local_window<topk>(ids, w, ep_off, EP_EXPERTS);  // local ids, compacted
+#endif
     cb_reserve_back(cb_route, 1);
     volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_write_ptr(cb_route));
     for (uint32_t j = 0; j < topk; ++j) {
-        route[j] = static_cast<uint16_t>(ids[j]);
-        route[16 + 1 + j] = w[j];
+        route[j] = static_cast<uint16_t>(j < n_live ? ids[j] : 0);
+        route[16 + 1 + j] = j < n_live ? w[j] : 0;
     }
+    route[15] = static_cast<uint16_t>(n_live);
     route[16] = w_shared;
     cb_push_back(cb_route, 1);
     }
 
     for (uint32_t i = first; i < num_slots; ++i) {
-        const uint32_t e = ids[get_arg_val<uint32_t>(6 + i) - 1];
-        stream_slot(w_addr, e);
+        const uint32_t s = get_arg_val<uint32_t>(6 + i);
+        if (s > n_live) {  // EP: this die holds fewer of the top-k (positions ascend per core)
+            break;
+        }
+        stream_slot(w_addr, ids[s - 1]);
     }
     if (num_slots > 0) {
         for (uint32_t i = 0; i < num_buffers - free_blocks; ++i) {  // the columns still in flight
