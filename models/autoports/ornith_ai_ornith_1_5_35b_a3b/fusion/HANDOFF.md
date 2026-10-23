@@ -403,7 +403,10 @@ compare), then `runs/cn_gsm8k.sh` (GSM8K on both, p300x2). Then: `fusion_card/pe
 Card runs (as shipped, 2026-10-23): p300x2 real text 42.8 -> 69.8 tok/s, 1 user 23.35 -> 14.28 ms at 128 in and
 25.98 -> 16.87 ms at 130816 in, 32 users 111.23 -> 54.80 ms (288 -> 584 tok/s total), 1024/256 32 users 127.66 ->
 71.20 ms; p300 real text 39.4 -> 58.2, 1 user 25.36 -> 17.16 ms, 32 users 134.43 -> 67.80 ms; TTFT unchanged on both.
-HumanEval (humaneval_chat) 0.939 -> 0.945, MBPP 0.826 -> 0.820, GSM8K strict 0.955 (fused; published run pending).
+HumanEval (humaneval_chat) 0.939 -> 0.945, MBPP 0.826 -> 0.820, GSM8K strict 0.954 -> 0.955, IFEval strict 0.799 -> 0.782.
+**Published 2026-10-23**: https://huggingface.co/raahemnabeel/qwen3-coder-next-blackhole-fast (public + catalog),
+image tt-model/qwen3-coder-next-blackhole-fast:25e9f20fe4f2 (its models/ tree byte-identical to the benchmarked
+349324dd4450). Hub smoke test queued (`runs/cn_hub_smoke.sh`).
 Greedy text differs from the published build's (rounded weights), coherent on both meshes (p300 = bfp4 experts).
 
 ### Port: Qwen3.5-122B-A10B (branch q122_fusion, worktree ~/tt-metal-q122)
@@ -419,6 +422,12 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
 - `~/ornith-fusion/runs/q122_chain.sh`: Ornith Hub smoke test, then 122B op test, PCC fused vs unfused, served new vs
   published (greedy, garble, rows, real text). Manifest draft `qwen_qwen3_5_122b_a10b/tt-model-fast.yaml`
   -> raahemnabeel/qwen3-5-122b-a10b-blackhole-fast.
+
+### Shared box (2026-10-23)
+
+Another user (`hous`) runs TT Studio v2.12 on qb2-120-p06t08 (containers `tt_studio_*`, the backend maps
+/dev/tenstorrent). The run chains treat only non-`tt_studio_*` containers as "chips busy" (`~/ornith-fusion/bin/
+chips_busy`), so a model TT Studio deploys still blocks them; one started mid-run would collide.
 
 ### Kernel generalization for the remaining ports (2026-10-23)
 
