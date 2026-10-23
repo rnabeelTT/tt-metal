@@ -22,7 +22,7 @@ import torch
 import ttnn
 
 from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers
-from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer
+from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer, upload_selection_bias
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
 CACHE_SUFFIX = f".r{WEIGHT_SIG_BITS}"
@@ -55,12 +55,21 @@ class FusedMoEDecode:
     """Per-layer decode state + the model-wide ops/buffers (cached on `args`)."""
 
     def __init__(self, mesh_device, args, *, hidden, inter_local, num_experts, k, tp, dtype, router_weight,
-                 shared_gate_weight, shared_gate_proj, shared_up_proj, shared_down_proj, cache_name, router_ckc):
+                 shared_gate_weight, shared_gate_proj, shared_up_proj, shared_down_proj, cache_name, router_ckc,
+                 router="softmax", selection_bias=None, down_dtype=None, router_logits=None):
         """router_weight [E, H], shared_gate_weight [1, H], shared_{gate,up}_proj [S, H], shared_down_proj [H, S]
-        (HF layouts, S = I * tp); cache_name(name) -> tensor cache path or None."""
+        (HF layouts, S = I * tp); cache_name(name) -> tensor cache path or None.
+
+        router "sigb" (GLM-4.5-Air): sigmoid + selection_bias ([E] e_score_correction_bias) top-k, normalized weights;
+        router_logits(x) -> the port's FP32 [rows, E] router logits (its own router matmul); no shared-gate column.
+        shared_* None: routed experts only (the port adds its shared expert). down_dtype: the routed down weights' dtype
+        when it differs from the gate|up dtype."""
         self.mesh_device = mesh_device
         self.tp = tp
         self.router_ckc = router_ckc
+        self.router, self.router_logits = router, router_logits
+        self.shared = shared_up_proj is not None
+        down_dtype = down_dtype or dtype
         E, H, Il = num_experts, hidden, inter_local
         rep = ttnn.ReplicateTensorToMesh(mesh_device) if tp > 1 else None
         shard = (lambda dim: ttnn.ShardTensorToMesh(mesh_device, dim=dim)) if tp > 1 else (lambda dim: None)
@@ -77,33 +86,39 @@ class FusedMoEDecode:
                 **kw,
             )
 
-        # router [H, E + 32]: column E = the shared-expert gate logit (read by ExpertGateUp)
-        rw = torch.zeros(H, E + TILE)
-        rw[:, :E] = router_weight.T.float()
-        rw[:, E] = shared_gate_weight.reshape(-1).float()
-        self.router_w = upload(rw, ttnn.bfloat16, "fused_decode.router", rep)
-        grid_w = mesh_device.compute_with_storage_grid_size().x
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        if router == "sigb":
+            assert router_logits is not None and selection_bias is not None
+            self.bias = upload_selection_bias(mesh_device, selection_bias)
+        else:
+            # router [H, E + 32]: column E = the shared-expert gate logit (read by ExpertGateUp)
+            self.bias = None
+            rw = torch.zeros(H, E + TILE)
+            rw[:, :E] = router_weight.T.float()
+            rw[:, E] = shared_gate_weight.reshape(-1).float()
+            self.router_w = upload(rw, ttnn.bfloat16, "fused_decode.router", rep)
+            grid_w = mesh_device.compute_with_storage_grid_size().x
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
-        self.router_pc = tpc.create_matmul_1d_decode_progcfg(
-            TILE, H, E + TILE, (E + TILE) // TILE, fp32_acc=True, grid_w=grid_w,
-            in0_block_w=16 if (H // TILE) % 16 == 0 else None,
-        )
-        # shared expert in the routed layout: [1, 1, H, tp * 2 I] packed [up_d | gate_d] per shard, [1, 1, tp * I, H]
-        g, u = shared_gate_proj.T.float(), shared_up_proj.T.float()  # [H, S]
-        packed = torch.cat(
-            [torch.cat([u[:, d * Il : (d + 1) * Il], g[:, d * Il : (d + 1) * Il]], dim=-1) for d in range(tp)], dim=-1
-        )
-        self.shared_up_gate = upload(round_sig(packed).reshape(1, 1, H, -1), dtype, "fused_decode.shared_up_gate" + CACHE_SUFFIX, shard(-1))
-        self.shared_down = upload(
-            round_sig(shared_down_proj.T.float()).reshape(1, 1, -1, H), dtype, "fused_decode.shared_down" + CACHE_SUFFIX, shard(-2)
-        )
+            self.router_pc = tpc.create_matmul_1d_decode_progcfg(
+                TILE, H, E + TILE, (E + TILE) // TILE, fp32_acc=True, grid_w=grid_w,
+                in0_block_w=16 if (H // TILE) % 16 == 0 else None,
+            )
+        if self.shared:
+            # shared expert in the routed layout: [1, 1, H, tp * 2 I] packed [up_d | gate_d] per shard, [1, 1, tp * I, H]
+            g, u = shared_gate_proj.T.float(), shared_up_proj.T.float()  # [H, S]
+            packed = torch.cat(
+                [torch.cat([u[:, d * Il : (d + 1) * Il], g[:, d * Il : (d + 1) * Il]], dim=-1) for d in range(tp)], dim=-1
+            )
+            self.shared_up_gate = upload(round_sig(packed).reshape(1, 1, H, -1), dtype, "fused_decode.shared_up_gate" + CACHE_SUFFIX, shard(-1))
+            self.shared_down = upload(
+                round_sig(shared_down_proj.T.float()).reshape(1, 1, -1, H), down_dtype, "fused_decode.shared_down" + CACHE_SUFFIX, shard(-2)
+            )
         cache = args.__dict__.setdefault("_qwen35_fused_moe_decode", {})
-        key = (H, Il, E, k, dtype)
+        key = (H, Il, E, k, dtype, down_dtype, router, self.shared)
         if key not in cache:
             cache[key] = (
-                ExpertGateUp(mesh_device, H, Il, E, k, dtype),
-                ExpertDown(mesh_device, H, Il, E, k, dtype),
+                ExpertGateUp(mesh_device, H, Il, E, k, dtype, router=router, shared=self.shared),
+                ExpertDown(mesh_device, H, Il, E, k, down_dtype, shared=self.shared),
                 MoEDecodeBuffers(mesh_device, H, Il, k),
             )
         self.gate_up, self.down_op, self.buf = cache[key]
@@ -114,41 +129,49 @@ class FusedMoEDecode:
         every width the server traces before capturing (host uploads)."""
         key = self._key + ("rows", rows)
         if key not in self._cache:
-            H, Il, E, k, dtype = self._key
+            H, Il, E, k, dtype, down_dtype, router, shared = self._key
             self._cache[key] = (
-                RouteRows(self._mesh, E, k, rows),
-                ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows),
-                ExpertDownRows(self._mesh, H, Il, E, k, dtype, rows),
+                RouteRows(self._mesh, E, k, rows, router=router),
+                ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared),
+                ExpertDownRows(self._mesh, H, Il, E, k, down_dtype, rows, shared=shared),
                 RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
         return self._cache[key]
+
+    def _logits(self, x):
+        if self.router_logits is not None:
+            return self.router_logits(x)
+        return ttnn.linear(
+            x, self.router_w, compute_kernel_config=self.router_ckc, program_config=self.router_pc,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+
+    def _shared_tensors(self, up_gate, down):
+        """Routed-only: the routed tensors stand in for the shared ones (their addresses are passed, never read)."""
+        return (self.shared_up_gate, self.shared_down) if self.shared else (up_gate, down)
 
     def rows(self, x, up_gate, down):
         """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
-        logits = ttnn.linear(
-            x, self.router_w, compute_kernel_config=self.router_ckc, program_config=self.router_pc,
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
-        route(logits, b.table)
+        logits = self._logits(x)
+        route(logits, b.table, bias=self.bias)
         ttnn.deallocate(logits)
-        H, Il, E, k, _ = self._key
+        H, Il, E, k = self._key[:4]
+        sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
-        gu(x, b.table, b.identity, up_gate, self.shared_up_gate, act)
-        dn(act, b.table, down, self.shared_down, b.out)
+        gu(x, b.table, b.identity, up_gate, sug, act)
+        dn(act, b.table, down, sdn, b.out)
         ttnn.deallocate(act)
         return b.out
 
     def __call__(self, x, up_gate, down):
         """x: the normed hidden [1, 1, 1, H] BF16 TILE (interleaved). Returns this device's partial sum (routed +
         shared) in the model-wide [1, 1, 1, H] buffer: consume it (the layer reduce) before the next layer's MoE."""
-        logits = ttnn.linear(
-            x, self.router_w, compute_kernel_config=self.router_ckc, program_config=self.router_pc,
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        logits = self._logits(x)
         b = self.buf
-        self.gate_up(x, logits, up_gate, self.shared_up_gate, b.act, b.route)
+        sug, sdn = self._shared_tensors(up_gate, down)
+        self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias)
         ttnn.deallocate(logits)
-        self.down_op(b.act, b.route, down, self.shared_down, b.out)
+        self.down_op(b.act, b.route, down, sdn, b.out)
         return b.out

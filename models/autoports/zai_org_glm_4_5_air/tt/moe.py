@@ -63,6 +63,14 @@ ROUTER_L1 = (
 # selection-bias top-k + normalized weights on the data-movement cores) instead of the 12-op sigmoid / add / topk /
 # one-hot / sum / div / typecast chain; the router matmul keeps its FP32 output.
 ROUTER_FUSED_SIGB = os.environ.get("QWEN35_ROUTER_FUSED_SIGB", "0") == "1"
+# Fused routed-expert decode (moe_decode/fused.py FusedMoEDecode, router "sigb", routed experts only; the shared expert
+# keeps its ttnn path) for decode widths 1..QWEN35_MOE_FUSED_ROWS_MAX. The kernels read each expert's up|gate columns
+# in place, which needs 2 I_local / 32 a multiple of the DRAM banks: QWEN35_MOE_PAD_INTER zero-pads I_local (352 -> 384
+# at TP4; zero columns / rows contribute exactly 0) for prefill and decode alike. Weights are stored rounded to the
+# fused matmul's 5 significant bits (prefill reads the same rounded weights).
+MOE_FUSED_DECODE = os.environ.get("QWEN35_MOE_FUSED_DECODE", "0") == "1"
+MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "32") or 0)
+MOE_PAD_INTER = int(os.environ.get("QWEN35_MOE_PAD_INTER", "0") or 0)
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -253,31 +261,58 @@ class Qwen35MoE:
         assert tuple(gate_up.shape) == (E, 2 * N, H) and tuple(down.shape) == (E, H, N)
         gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
         up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
-        # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
         Nl = self.inter_local
+        Nlp = max(Nl, MOE_PAD_INTER)  # padded local intermediate (MOE_PAD_INTER)
+        from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
+
+        self._fused_ok = (
+            MOE_FUSED_DECODE
+            and self.router_kind == "sigb"
+            and getattr(args, "gather_gate_up_output_tile", None) is None
+            and self.prec.routed_down in (ttnn.bfloat8_b, ttnn.bfloat4_b)
+            and moe_fused.supported(
+                self.num_experts, self.hidden, Nlp, self.prec.routed_gate_up, banks=len(moe_fused.bank_workers(mesh_device))
+            )
+        )
+        rnd = moe_fused.round_sig if self._fused_ok else (lambda t: t)
+        sfx = (f".p{Nlp}" if Nlp != Nl else "") + (moe_fused.CACHE_SUFFIX if self._fused_ok else "")
+        self.inter_local = Nlp
+
+        def pad_cols(t):  # [E, H, Nl] -> [E, H, Nlp] (zero columns)
+            return t if Nlp == Nl else torch.nn.functional.pad(t, (0, Nlp - Nl))
+
+        # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
         packed = torch.cat(
             [
-                torch.cat([up_t[:, :, d * Nl : (d + 1) * Nl], gate_t[:, :, d * Nl : (d + 1) * Nl]], dim=-1)
+                torch.cat(
+                    [pad_cols(up_t[:, :, d * Nl : (d + 1) * Nl]), pad_cols(gate_t[:, :, d * Nl : (d + 1) * Nl])], dim=-1
+                )
                 for d in range(tp)
             ],
             dim=-1,
-        )  # [E, H, tp*2*Nl]
+        )  # [E, H, tp*2*Nlp]
         # stage-5 probe: a 16-wide output tile on the gather-mode gate/up needs the weight stored with 16-wide tiles
         # (matmul: out_tile_shape[1] % in1_tile_w == 0).
         _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
         self.up_gate = upload(
-            packed.unsqueeze(0).contiguous(),
+            rnd(packed).unsqueeze(0).contiguous(),
             self.prec.routed_gate_up,
-            "experts.up_gate",
+            "experts.up_gate" + sfx,
             dim=-1,
             tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
         )
-        down_t = down.transpose(1, 2).unsqueeze(0).contiguous()  # [1, E, N, H]
+        down_t = down.transpose(1, 2)  # [E, N, H]
+        if Nlp != Nl:  # per shard: Nl rows + (Nlp - Nl) zero rows
+            down_t = torch.cat(
+                [torch.nn.functional.pad(down_t[:, d * Nl : (d + 1) * Nl, :], (0, 0, 0, Nlp - Nl)) for d in range(tp)], dim=1
+            )
+        down_t = rnd(down_t).unsqueeze(0).contiguous()  # [1, E, tp * Nlp, H]
+        Nl = Nlp  # the stored width from here on (program configs, the decode / prefill paths via self.inter_local)
         # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
         self.down = upload(
             down_t,
             self.prec.routed_down,
-            "experts.down",
+            "experts.down" + sfx,
             dim=-2,
             tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
         )
@@ -348,6 +383,18 @@ class Qwen35MoE:
             self.PREFILL_CHUNK, H, Nl, target_cores=max(8, min(32, union // 4)), in0_block_w_cap=32
         )
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
+        self._fused = None
+        if self._fused_ok:
+            self._fused = moe_fused.FusedMoEDecode(
+                mesh_device, args, hidden=H, inter_local=self.inter_local, num_experts=E, k=self.top_k, tp=tp,
+                dtype=self.prec.routed_gate_up, down_dtype=self.prec.routed_down, router_weight=None,
+                shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None, shared_down_proj=None,
+                cache_name=cache_name, router_ckc=self.router_ckc, router="sigb",
+                selection_bias=state_dict["gate.e_score_correction_bias"],
+                router_logits=lambda x4: self._router_logits(x4, ttnn.L1_MEMORY_CONFIG, dtype=ttnn.float32),
+            )
+            for m in range(2, min(MOE_FUSED_ROWS_MAX, TILE) + 1):
+                self._fused.rows_ops(m)  # buffers uploaded before any trace capture
 
     # ------------------------------------------------------------------------------------------------
     def forward(self, x, mode=None):
@@ -360,20 +407,30 @@ class Qwen35MoE:
             # interleaved inputs. One conversion at the block entry.
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
-        scores, ids = self._route(x4)
-        if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
-            if T <= self.GATHER_MAX_TOKENS:
-                routed = self._routed_gather(x4, scores, ids, T)
-            else:
-                routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
+        fused = (
+            getattr(self, "_fused", None) is not None
+            and mode != "prefill"
+            and list(x4.padded_shape)[-2] == TILE
+            and T <= min(MOE_FUSED_ROWS_MAX, TILE)
+        )
+        if fused:  # routed experts in 3 ops (route+gate|up, down); a model-wide [1, 1, T, H] buffer, not freed here
+            routed = self._fused(x4, self.up_gate, self.down) if T == 1 else self._fused.rows(x4, self.up_gate, self.down)
         else:
-            routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
-        if not getattr(self, "_route_persistent", False):  # the fused router's outputs are model-wide buffers
-            ttnn.deallocate(scores)
-            ttnn.deallocate(ids)
+            scores, ids = self._route(x4)
+            if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
+                if T <= self.GATHER_MAX_TOKENS:
+                    routed = self._routed_gather(x4, scores, ids, T)
+                else:
+                    routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
+            else:
+                routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
+            if not getattr(self, "_route_persistent", False):  # the fused router's outputs are model-wide buffers
+                ttnn.deallocate(scores)
+                ttnn.deallocate(ids)
         shared = self._shared(x4)
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        ttnn.deallocate(routed)
+        if not fused:
+            ttnn.deallocate(routed)
         ttnn.deallocate(shared)
         if self.num_devices > 1:
             # TP on the expert intermediate dim: every device holds a partial [.., H] sum (routed + shared); the layer
