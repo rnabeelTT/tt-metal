@@ -350,7 +350,25 @@ changes, recovered from the image), every v2 profile. Image built from `ornith_f
 - Evals, p300, MTP on, thinking off, the step-0 settings (`tools/eval.sh`): GPQA-D (40) 0.85 (published 0.775),
   IFEval prompt-strict (100) 0.77 / loose 0.82 (0.76), LiveCodeBench v6 (50) 0.40 (0.36).
 - Card: `tools/card_bench.sh` serves each bundle exactly as shipped (`tt-model serve <bundle> --profile P`) and runs the
-  published card's rows + the real-text row; `tools/card_tables.py` renders published -> new tables.
+  published card's rows + the real-text row; `tools/card_tables.py` renders published -> new tables;
+  `card/assemble.py p300x2 p300 p150` writes the yaml `card:` block (validated by tt-model's `load_container_manifest`:
+  no publish / performance gaps). Raw runs: `~/ornith-fusion/runs/card_{new,pub}_<profile>`.
+- Card results (2026-10-23, served as shipped, MTP on; real text = median per prompt, 12 prompts x 384 tokens):
+
+  | profile | real text tok/s (v2 -> fast) | 128/128 total out tok/s, 2 / 8 / 32 users | 1024/256, 32 users | TTFT |
+  | --- | --- | --- | --- | --- |
+  | p300x2 | 58.5 -> 84.0 (+44 %) | +61..+83 % at 2-16 users, 32 users 345.8 -> 464.6 (+34 %) | 353.8 -> 481.5 (+36 %) | unchanged |
+  | p300 | 52.6 -> 76.6 (+46 %) | 64.4 -> 95.4, 140.0 -> 214.5, 270.8 -> 352.0 | 271.1 -> 347.1 (+28 %) | unchanged |
+  | p150 | 42.6 -> 44.1 (same code) | +-0 % | 193.0 -> 194.7 | unchanged |
+
+  p150 single-user random-token rows are not reproducible with adaptive MTP on one die: the same v2 build measured
+  15.9 (v2 card), 52.4 (milestone) and 27.0 ms (card run) TPOT at 128/128, so the card replaces that table with a
+  parity note (`SAME_DECODE` in card_tables.py). The p300 / p300x2 single-user rows improve in every row
+  (p300x2 +5..+44 %, p300 +25..+121 %), but carry the same MTP noise; trust real text and the MTP-off numbers for single-user claims.
+- Package re-built from bf9c8cbd7 (runtime code = 034604dac; only tooling / the card changed), then
+  `tt-model push build/ornith-1.5-35b-a3b-blackhole-fast --publish` (2026-10-23: public + catalog,
+  https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast). To do: a pull-and-serve smoke test of the
+  Hub artifact (its image was rebuilt from the same sources).
 
 ### Port: Qwen3-Coder-Next (branch coder_next_fusion, worktree ~/tt-metal-codernext)
 
