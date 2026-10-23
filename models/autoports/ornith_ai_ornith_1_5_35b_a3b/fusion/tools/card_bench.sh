@@ -26,5 +26,5 @@ if [ ${#ROWS[@]} -eq 0 ]; then
 fi
 RUNS=$RUNS "$T/bench.sh" $C $L "${ROWS[@]}" 2>&1 | grep -E "==|TTFT|TPOT"
 URL=http://localhost:20000 python3 "$T/realtext.py" 384 | tee $RUNS/$L/realtext.txt
-[ -n "${EVALS:-}" ] && PORT=20000 RUNS=$RUNS "$T/eval_coder.sh" $L $EVALS 2>&1 | grep -E "^==|\|.*(pass|exact_match|strict|loose)"
+[ -n "${EVALS:-}" ] && PORT=20000 RUNS=$RUNS "$T/eval_coder.sh" $L $EVALS 2>&1 | grep -E "^==|\|.*(pass|exact_match|strict|loose)|chat extractor"
 docker rm -f $C > /dev/null
