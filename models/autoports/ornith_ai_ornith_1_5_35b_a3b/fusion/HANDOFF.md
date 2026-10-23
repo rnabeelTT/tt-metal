@@ -441,7 +441,12 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
 
   1 user 128/128 random tokens: 21.49 -> 21.22 ms (adaptive MTP, noisy). Garble gate: mean 5.86 -> 4.21 per 1k,
   the fused max (14.4) is technical vocabulary the word list lacks (outlier, ablation, rescale). Greedy text differs
-  (rounded weights), coherent. Card chain `runs/q122_card_chain.sh` running (queue).
+  (rounded weights), coherent. Card chain `runs/q122_card_chain.sh`: p300x2 card rows done for both bundles (pub
+  realtext median 45.9); new-bundle evals GPQA 0.65, IFEval strict 0.87 / loose 0.90 (LCB + pub evals running).
+  The shipped `p300x2-longctx` / `p150x4-longctx` profiles do not boot (both bundles): the plugin disables chunked MM
+  input and one image item (4096 tokens) exceeds the 2048-token budget. q122_fusion b7e15dd9876 sets the budget to
+  4096 (intermediate chunks stay whole 2048-token segments); `runs/q122_longctx.sh` re-packages and reruns the longctx
+  rows (published bundle with `SERVE_ARGS="--max-num-batched-tokens 4096"`, card_bench now passes vLLM args through).
 
 ### Scorecards (user request 2026-10-23)
 
@@ -518,7 +523,7 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 ### Run queue (2026-10-23)
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
-c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
+q122_longctx, c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
 (ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
 multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
 profile picks one; that choice stays).
