@@ -148,7 +148,7 @@ card:
     other operand reads. Output quality is checked below.
 
     On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout yet, so those profiles keep
-    the v2 MoE and gain only the router change.
+    the v2 MoE and gain only the fused router top-k (1-row steps; the 1D router matmul needs a mesh).
 
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -279,7 +279,7 @@ card:
 
     #### p150
 
-    One die keeps the v2 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or more dies, and the replicated boundary needs a mesh), so p150 decode is the v2 code and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not repeat on one die (the v2 build measured 15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs); the v2 card's p150 latency rows still describe this bundle.
+    One die keeps the v2 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or more dies, and the replicated boundary needs a mesh): p150 decode is the v2 MoE plus the fused router top-k on 1-row steps, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not repeat on one die (the v2 build measured 15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs); the v2 card's p150 latency rows still describe this bundle.
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): 42.6 -> **44.1 tok/s** (+4 %).
 

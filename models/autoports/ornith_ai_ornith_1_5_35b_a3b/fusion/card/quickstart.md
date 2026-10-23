@@ -19,7 +19,7 @@ matmul reads, so the rounding is no longer a bias), activations / routing weight
 other operand reads. Output quality is checked below.
 
 On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout yet, so those profiles keep
-the v2 MoE and gain only the router change.
+the v2 MoE and gain only the fused router top-k (1-row steps; the 1D router matmul needs a mesh).
 
 ### Use with your client
 Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model

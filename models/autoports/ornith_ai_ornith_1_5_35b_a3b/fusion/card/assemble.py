@@ -38,8 +38,8 @@ RELATED = (
 
 P150_NOTE = (
     "One die keeps the v2 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or "
-    "more dies, and the replicated boundary needs a mesh), so p150 decode is the v2 code and the tables below show "
-    "parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not "
+    "more dies, and the replicated boundary needs a mesh): p150 decode is the v2 MoE plus the fused router top-k on "
+    "1-row steps, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not "
     "repeat on one die (the v2 build measured 15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs); the v2 card's p150 "
     "latency rows still describe this bundle."
 )
