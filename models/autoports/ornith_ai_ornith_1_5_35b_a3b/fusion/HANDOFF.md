@@ -367,8 +367,9 @@ changes, recovered from the image), every v2 profile. Image built from `ornith_f
   (p300x2 +5..+44 %, p300 +25..+121 %), but carry the same MTP noise; trust real text and the MTP-off numbers for single-user claims.
 - Package re-built from bf9c8cbd7 (runtime code = 034604dac; only tooling / the card changed), then
   `tt-model push build/ornith-1.5-35b-a3b-blackhole-fast --publish` (2026-10-23: public + catalog,
-  https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast). To do: a pull-and-serve smoke test of the
-  Hub artifact (its image was rebuilt from the same sources).
+  https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast). Hub smoke test 2026-10-23: `tt-model serve
+  raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast --profile p300x2` pulled image 26053285ad0b, up after 440 s, all 16
+  greedy requests answered (thinking on by default: the 256 tokens were reasoning; greedy.py now keeps that text).
 
 ### Port: Qwen3-Coder-Next (branch coder_next_fusion, worktree ~/tt-metal-codernext)
 
@@ -436,7 +437,9 @@ chips_busy`), so a model TT Studio deploys still blocks them; one started mid-ru
   DST = m (even) / 2 m (odd) tiles (+1 at multi-row widths), full-sync above 4; ring sized by `RING_BYTES`. m = 1 / 2
   keep the same reads, DST tiles and ring sizes. Unblocks one die (Ornith p150, m = 4), Coder-30B (EP, m = 6), GLM TP4
   (m = 3 only with I padded 352 -> 384). DST indices must be compile-time (`static_for`): runtime ones crashed the SFPI
-  compiler (internal compiler error in gimple-rvtt-synth, m = 2 rows). Op test mode `mcols` (queued).
+  compiler (internal compiler error in gimple-rvtt-synth, m = 2 rows). Op test `mcols` (2026-10-23, synthetic weights
+  rounded as stored, bfp4): m = 3 / 4 / 6 single-row, one-program and 2 / 8 / 32 rows all out PCC >= 0.99997, ids
+  exact; the m = 1 / 2 regression checks unchanged (`runs/mcols_op.log`).
 - **ExpertDown readers default** = enough for <= 4 output columns per core: the 122B (hidden 3072, 12 columns per bank)
   ran 6 per core in a 4-tile half-sync FP32 DST with the old default of 2 (fixed on q122_fusion too, 1af7c3de943).
 - **sigb router** (GLM-4.5-Air: sigmoid + selection bias, normalized; `ROUTER_SIGB` in the routing kernels): FP32
