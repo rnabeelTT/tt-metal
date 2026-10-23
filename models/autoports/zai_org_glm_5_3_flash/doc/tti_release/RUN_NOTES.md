@@ -452,8 +452,9 @@ Benchmark rows (p300x2-1m, concurrency 1):
       this size** (bfp4 expert weights alone, with bf16 math, deviate from HF as much as TT, and the TT `none`
       policy tracks HF-bfp4 at 0.92). The shipped policy's bfp4 / LoFi non-expert groups and fp8 DSA latent add a
       second deviation of similar size: TT shipped vs HF-bfp4 is 0.82 / 0.38, the same as vs plain HF. bfp8
-      experts in all layers do not fit in DRAM, and the all-bfp8 non-expert policy does not bring TT closer to
-      HF, so no precision setting fixes it in this release.
+      experts in all layers do not fit in DRAM, and the all-bfp8 non-expert policy (`none`; it does not fit the
+      vLLM serving budget) gains about 0.05 top-1 on the English and Chinese paragraphs only, and nothing on
+      Vietnamese, Persian or the doc-106 loop entry, so no precision setting that can ship fixes it in this release.
     - Raw per-position rows: `nonenglish/hf_bfp4exp.json` (HF-bfp4), `nonenglish/cmp_bfp4.json` (summary).
     - HF-bfp4 run: `11r2-tf-hf.py --expert-fmt bfp4`, doc 106 only, unbatched, under `systemd-run --user -p
       MemoryMax=40G` (unit glm53-s11-r2hfq2), 2,547 s, peak RSS about 32 GB. A first batched 5-text attempt (unit
@@ -461,8 +462,9 @@ Benchmark rows (p300x2-1m, concurrency 1):
     - `nonenglish/11r2-langprobe.py` (sampled non-English re-probe) was not run: the shipped precision did not
       change, so a re-probe cannot change the result. The earlier probe evidence stands.
     - The English control on HF-bfp4 was stopped after doc 106 (lead decision: it cannot change the conclusion).
-- Decision: **the default precision does not change.** No candidate restores agreement, so a precision change has
-  no benefit to pay for.
+- Decision: **the default precision does not change.** No shippable candidate restores agreement: the LM-head
+  bfp8 policies gain at most 0.04 top-1 on some texts, and `none` (about 0.05 on English and Chinese) does not fit the
+  vLLM serving budget.
 - What is still true: non-English sampled output at temperature 1.0 can be garbled (mixed scripts, word salad) and
   can enter loops; the TT next-token distribution deviates from the HF reference in every language (top-1 0.70-0.80
   with the shipped precision on hand-written text), more for Persian and Chinese than for English. Chinese (claimed by the E192 card) was
@@ -817,5 +819,5 @@ The fix (stage-11 review, P2-1):
   hub-p300x2-r3.**
 - The precision did not change, so the scorecard and the teacher-forcing gate rows stand. The non-English re-probe
   was skipped (lead decision: the model math is unchanged).
-- The card text in this commit adds the bfp4-expert attribution after the publish. The Hub card of rev 0a807cdf
-  has the A/B result without the attribution; it is not wrong, so it was not republished (card / docs only).
+- The bfp4-expert attribution (scoped by review #3 and #4) is published with the card-only rebuild of
+  add66f08a3e's successor; see "Stage-11 final republish" for the image, the Hub revision and the short verify.

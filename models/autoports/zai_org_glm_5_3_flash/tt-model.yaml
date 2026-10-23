@@ -279,9 +279,10 @@ card:
       plain HF reference by the same amount as TT (top-1 0.79), and a TT build with bfp8 non-expert weights (policy
       `none`) tracks it closely (0.92). So the bfp4 routed experts, which are needed to fit p300x2, are enough to
       cause a deviation of this size. The shipped bfp4 non-expert weights and fp8 DSA latent add a deviation of
-      similar size (shipped vs HF-bfp4 top-1 0.82, the same as vs plain HF). The all-bfp8 non-expert policy and a
-      bfp8 LM head do not bring TT closer to the HF reference, and bfp8 experts do not fit in DRAM. It is not fixed
-      in this release.
+      similar size (shipped vs HF-bfp4 top-1 0.82, the same as vs plain HF). Higher precision outside the experts does
+      not remove it: the all-bfp8 non-expert policy gains about 0.05 top-1 on English and Chinese text and nothing on
+      Vietnamese, Persian or the loop entry, and it does not fit the serving memory budget. A bfp8 LM head gains
+      nothing. bfp8 experts do not fit in DRAM. It is not fixed in this release.
       Chinese, which the E192 card claims, was checked on TT by teacher forcing only (top-1 0.73-0.79), not by
       sampled output.
     - No multi-token prediction (the MTP layer is not served).
