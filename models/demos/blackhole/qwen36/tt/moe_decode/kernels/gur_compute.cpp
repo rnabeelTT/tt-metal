@@ -91,32 +91,30 @@ void kernel_main() {
         cb_wait_front(cb_sc, 2 * groups);
         for (uint32_t g = 0; g < groups; ++g) {
             tile_regs_acquire();
-            for (uint32_t h = 0; h < nb; ++h) {
-                custom_mm_block<true>(cb_x, cb_w, g * kt, h * kt * m, h * m, kt, m);
-            }
+            gu_layout::static_for<nb>([&](auto h) {
+                constexpr uint32_t hb = decltype(h)::value;
+                custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+            });
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
             silu_tile_init();
-            for (uint32_t p = 0; p < np; ++p) {
-                silu_rows(gu_layout::gate_dst<m, banks>(gu_layout::up_dst<m, banks>(p)));
-            }
+            gu_layout::static_for<np>([&](auto p) {
+                constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+                silu_rows(gu_layout::gate_dst<m, banks>(u));
+            });
             mul_binary_tile_init();
-            for (uint32_t p = 0; p < np; ++p) {
-                const uint32_t u = gu_layout::up_dst<m, banks>(p);
+            gu_layout::static_for<np>([&](auto p) {
+                constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
                 mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
                 mul_rows(u, wdst, u);
-            }
-            for (uint32_t p = 0; p < np; ++p) {
-                round_rows(gu_layout::up_dst<m, banks>(p));
-            }
+            });
+            gu_layout::static_for<np>([&](auto p) { round_rows(gu_layout::up_dst<m, banks>(decltype(p)::value)); });
             tile_regs_commit();
 
             cb_reserve_back(cb_act, np);
             tile_regs_wait();
-            for (uint32_t p = 0; p < np; ++p) {
-                pack_tile(gu_layout::up_dst<m, banks>(p), cb_act);
-            }
+            gu_layout::static_for<np>([&](auto p) { pack_tile(gu_layout::up_dst<m, banks>(decltype(p)::value), cb_act); });
             tile_regs_release();
             cb_push_back(cb_act, np);
 

@@ -93,38 +93,35 @@ void kernel_main() {
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
         tile_regs_acquire();
-        for (uint32_t h = 0; h < nb; ++h) {
+        gu_layout::static_for<nb>([&](auto h) {
             cb_wait_front(cb_w, kt * m);
-            custom_mm_block<true>(cb_x, cb_w, 0, 0, h * m, kt, m);
+            custom_mm_block<true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
             cb_pop_front(cb_w, kt * m);
-        }
+        });
 
         silu_tile_init();
-        for (uint32_t p = 0; p < np; ++p) {
-            silu_rows(gu_layout::gate_dst<m, banks>(gu_layout::up_dst<m, banks>(p)));
-        }
+        gu_layout::static_for<np>([&](auto p) {
+            constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+            silu_rows(gu_layout::gate_dst<m, banks>(u));
+        });
         mul_binary_tile_init();
-        for (uint32_t p = 0; p < np; ++p) {
-            const uint32_t u = gu_layout::up_dst<m, banks>(p);
+        gu_layout::static_for<np>([&](auto p) {
+            constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
             mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
-        }
+        });
         binop_with_scalar_tile_init();
         // the slot weight arrives once the router tail is done; the shared expert's matmuls run before that
         uint32_t score = 0;
         MATH(score = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
-        for (uint32_t p = 0; p < np; ++p) {
-            scalar_rows<MUL_UNARY>(gu_layout::up_dst<m, banks>(p), score);
-        }
-        for (uint32_t p = 0; p < np; ++p) {
-            round_rows(gu_layout::up_dst<m, banks>(p));
-        }
+        gu_layout::static_for<np>([&](auto p) {
+            scalar_rows<MUL_UNARY>(gu_layout::up_dst<m, banks>(decltype(p)::value), score);
+        });
+        gu_layout::static_for<np>([&](auto p) { round_rows(gu_layout::up_dst<m, banks>(decltype(p)::value)); });
         tile_regs_commit();
 
         cb_reserve_back(cb_act, np);
         tile_regs_wait();
-        for (uint32_t p = 0; p < np; ++p) {
-            pack_tile(gu_layout::up_dst<m, banks>(p), cb_act);
-        }
+        gu_layout::static_for<np>([&](auto p) { pack_tile(gu_layout::up_dst<m, banks>(decltype(p)::value), cb_act); });
         tile_regs_release();
         cb_push_back(cb_act, np);
 

@@ -15,6 +15,8 @@
 
 #include <stdint.h>
 
+#include <type_traits>
+
 namespace gu_layout {
 
 template <uint32_t m>
@@ -61,6 +63,16 @@ constexpr uint32_t gate_dst(uint32_t d) {
 template <uint32_t m, uint32_t banks>
 constexpr uint32_t pair_index(uint32_t q, uint32_t i) {
     return q + col_off<m, banks>(up_dst<m, banks>(i));
+}
+
+// f(std::integral_constant<uint32_t, i>) for i = 0 .. n - 1: compile-time DST indices for the SFPU calls (runtime
+// indices computed by these helpers crashed the SFPI compiler: internal compiler error in gimple-rvtt-synth)
+template <uint32_t n, uint32_t i = 0, typename F>
+inline __attribute__((always_inline)) void static_for(F&& f) {
+    if constexpr (i < n) {
+        f(std::integral_constant<uint32_t, i>{});
+        static_for<n, i + 1>(f);
+    }
 }
 
 }  // namespace gu_layout
