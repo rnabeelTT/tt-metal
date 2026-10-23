@@ -198,8 +198,42 @@ Benchmark rows (p300x2-1m, concurrency 1):
     - Indicative only: on the 77 docs completed before the crash, stage-7 got 61/77 and the shipped policy 55/77
       on the same docs (10 right only with stage 7, 4 right only with the shipped policy).
     - H1 is rerun after the preemption fix (`scripts/11-h1.sh`).
-  - H2 (the card's prompt and dataset, fingertap/GPQA-Diamond, "ANSWER: X" after `</think>`):
-    `scripts/11-h2.sh` / `11-h2-cardprompt.py`, prepared, not run.
+  - H1 rerun, chemistry only (the user's efficiency decision; the 93 questions whose High-level domain is Chemistry,
+    where the shipped policy scored 54.8 %):
+    - Code: release worktree 09842218b22, plugin 16febac (the preemption fix).
+    - Policy `stage7_fp8kv_h1`, 8 slots, max_model_len 70,016, same settings as the 66.7 run.
+    - Layout: block-sharded DSA (pool 3,366 blocks, about 431K tokens). A replicated attempt was pool-starved
+      (85K tokens; 37/93 after 65 min) and was stopped.
+    - Run 2026-10-22 18:56-23:10. 0 inference errors; the engine survived the full load, which is also field
+      evidence for the plugin fix.
+    - **Result: 54/93 = 58.1 % (stderr 5.1) vs the shipped policy's 51/93 = 54.8 % on the same questions.**
+      Paired: both right 39, stage-7 only 15, shipped only 12 (27 discordant; McNemar not significant).
+    - 7/93 hit the 65,536 budget with stage 7 (shipped: in the full set, 4/198 overall).
+    - Conclusion (lead's decision rule): the precision policy is ruled out as the main cause of the GPQA gap.
+      The shipped precision stays.
+  - H2, the card's own protocol (`scripts/11-h2-cardprompt.py`):
+    - Dataset fingertap/GPQA-Diamond (198 questions); prompt "Think step by step, then give your final answer as
+      'ANSWER: X'"; the letter is taken from the content after `</think>`; no letter counts as wrong.
+    - Effort low, 65,536 tokens, temperature 1.0, top_p 0.95, seed 42.
+    - Shipped policy, release worktree 09842218b22, plugin 16febac; p300x2, 16 slots, block-sharded DSA (same
+      weights; chosen for the pool size), max_model_len 70,016.
+    - Run 2026-10-22 23:17 to 2026-10-23 about 02:40.
+    - **Result: 147/198 = 74.24 %** (0 errors; 14 answers without an extracted ANSWER, 8 of them budget cuts).
+      Against the card's 79.8: -5.6 points (about 1.8 sigma). That is within the card's stated +/-2-3 points of
+      run noise plus NVFP4 vs bfp4 weights.
+    - Per subject (card protocol vs the lm-eval run, same questions): Physics 72/86 vs 69/86, Chemistry 63/93 vs
+      51/93, Biology 12/19 vs 12/19.
+    - Paired: both right 111, card protocol only 36, lm-eval only 21.
+    - Conclusion: most of the lm-eval gap (66.7) is the harness prompt / answer format. Chemistry recovers
+      12 questions under the card's prompt.
+- **GPQA row classification: issue-waived (lead decision, 2026-10-23).** Evidence:
+  - lm-eval full set 66.67 %, CI subset 70.0 %.
+  - Card protocol 74.24 % against the card's 79.8 % (same model, effort, budget and sampling).
+  - Precision ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant).
+  - Answer extraction, effort rendering and budget handling checked: no misses, template-correct effort,
+    budget-cut rate as in the card.
+  - The residual 5.6 points sit within the card's single-run noise plus the quantization difference.
+  - No bug hunt (user decision).
   - These data cannot separate the methodology gap from a port quality gap. The row is classified
     **readiness-fail pending a lead / owner waiver decision**. Per the lead's instruction it was not retried.
 
