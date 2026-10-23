@@ -3,7 +3,8 @@
 Status: final (2026-10-23). The release workflow ran to completion (acceptance FAIL with one blocker, the GPQA CI
 subset). The GPQA row is issue-waived after the full-set and card-protocol runs; the re-aggregated report passes
 (see "Stage-11 status"). The bundle is built, verified on a fresh device and published to the Hub, then republished
-after the stage-11 review fixes (see "Stage-11 review fixes").
+after the stage-11 review fixes (see "Stage-11 review fixes") and again after the review #2 fixes (Hub rev
+0a807cdf; see "Stage-11 review #2 fixes").
 
 ## Server mode, host, versions
 - Topology: external server, no Docker. The autoport vLLM server runs from this tt-metal code. TTI v0.22.0 is a
@@ -439,10 +440,20 @@ Benchmark rows (p300x2-1m, concurrency 1):
     0.70-0.80).
   - So the deviation comes from a part that every policy shares. The parts outside the stage-8 policy are the bfp4
     LoFi routed experts (bfp8 experts in all layers do not fit), the fp32 KDA / mHC kernels and the DSA kernels.
-    The attribution to the bfp4 experts is by elimination (non-expert precision, LM head and decode path ruled out);
-    the direct test, an HF reference with the routed experts rounded to bfp4, is in the next item.
-  - HF with bfp4-rounded routed experts (`11r2-tf-hf.py --expert-fmt bfp4`, the port's block grid from
-    `tests/hf_ref/bfp.py`, doc 106 + English only, 40 GB memory cap): pending at this commit.
+  - Direct test of the bfp4 experts: the HF reference with every routed expert weight rounded to bfp4 on the port's
+    grid (`11r2-tf-hf.py --expert-fmt bfp4`; `tests/hf_ref/bfp.py`, bit-exact to ttnn's packing; everything else
+    bf16), 2026-10-23 12:48-13:31, 40 GB cap, expert cache 4 GB. On doc 106 (`nonenglish/cmp_bfp4.json`):
+    - HF-bfp4 vs HF: top-1 0.38 at positions 24-31 and 0.79 over all 38, the same as TT vs HF (0.38 / 0.74-0.82).
+    - At position 28 HF-bfp4 also predicts " " (0.17; HF " may" 0.64), and at 29 / 30 it predicts ' "' (0.90 /
+      0.23), as the TT none policy does (" " 0.69, ' "' 0.67 / 0.16).
+    - TT none vs HF-bfp4: top-1 0.88 at positions 24-31 (decode) and 0.92 over all. TT shipped vs HF-bfp4: 0.38 /
+      0.82 (the stage-8 bfp4 non-expert groups move this fragile prefix again, but not toward HF).
+    - Conclusion: **the deviation at the loop entry comes from the bfp4 routed experts** (bfp4 weights alone, with
+      bf16 math, reproduce it). bfp8 experts in all layers do not fit in DRAM, so it is not fixable by a precision
+      setting in this release.
+    - Summary: HF with bfp4-rounded routed experts reproduces TT (top-1 vs TT 0.92; vs plain HF 0.79), so the
+      deviation is the bfp4 expert quantization needed to fit p300x2.
+    - The English control on HF-bfp4 was stopped after doc 106 (lead decision: it cannot change the conclusion).
 - Decision: **the default precision does not change.** No candidate restores agreement, so a precision change has
   no benefit to pay for.
 - What is still true: non-English sampled output at temperature 1.0 can be garbled (mixed scripts, word salad) and
@@ -774,3 +785,28 @@ The fix (stage-11 review, P2-1):
     (3695747), `pull --with-weights` and the auto-pull of `serve <repo>` call `snapshot_download` into
     `huggingface_hub.constants.HF_HUB_CACHE`, the directory the container mounts at `/hf` (see "Weights on the
     host"); the in-container path is covered by the host test only.
+
+## Stage-11 review #2 fixes (2026-10-23)
+- P2 non-English output: device precision A/B and HF controls, see "Non-English output: device precision A/B and
+  HF controls (stage-11 review #2)". Cause: the bfp4 routed experts (needed to fit p300x2). Default precision
+  unchanged. Card: a Languages limitation.
+- Loop scan: character rule (16-character substring >= 1,000 times); release ifeval 3/109 (doc 87 added), shipped
+  policy 6/353 = 1.7 %, all valid 12/446 = 2.7 % (`loopdiag/loopscan.json`). The C-Eval explanation is replaced by
+  the control result.
+- P3: card loop wording (seen at temperature 1.0 and 0.6), warm-start range 196-245 s, a note that the generated
+  README's "several minutes" does not hold for the first start; `resolve_checkpoint` re-points stale or broken
+  overlay symlinks, and the snapshot errors name the missing shard files (host tests, 26 passed); the checkpoint
+  log lines of the Hub verifies in `bundle/hub-p300x2-r{2,3}-checkpoint.log`; PLAN records reviews #1 and #2.
+- Commit 75134275232. Release worktree fast-forwarded (clean). `11-package-watch.sh`, 13:00-13:11: host tests 26
+  passed, `package exit=0`, image `tt-model/glm-5.3-flash-e192-blackhole:b9e8208f95ce`, vllm-tt-plugin 16febac
+  (`bundle/package-rel-r3.log`).
+- Republish (`11-publish.sh`, same flags), 13:12: Hub rev **0a807cdf243c2b081cf4666565913d8d5f567da5**, public,
+  tt-model catalog; 876 staged files, 0 missing, 0 LFS mismatches (`bundle/publish-r3.log`).
+- Hub verify, 13:31-13:40 (`TAGSUF=-r3 LONG=8192 11-verify-rel.sh <repo> p300x2`, `bundle/verify-hub-r3.chain.log`):
+  `pull --with-weights` rc 0 in 31 s; warm serve healthy after 227 s (same weight cache key, no conversion);
+  smokes PASS (burst 16/16 identical to solo, 66.5 tok/s); `tt-model curl` exit 0. **VERIFY_RESULT PASS
+  hub-p300x2-r3.**
+- The precision did not change, so the scorecard and the teacher-forcing gate rows stand. The non-English re-probe
+  was skipped (lead decision: the model math is unchanged).
+- The card text in this commit adds the bfp4-expert attribution after the publish. The Hub card of rev 0a807cdf
+  has the A/B result without the attribution; it is not wrong, so it was not republished (card / docs only).

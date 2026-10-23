@@ -1,0 +1,21 @@
+=== package-rel 2026-10-23T13:00:28+00:00 worktree /home/raahem/tt-metal-rel-glm53 head 75134275232998625116b946a5cabf652454ff83 dirty 0
+check: OK
+============================= 26 passed in 18.63s ==============================
+23:  tt_metal: /home/raahem/tt-metal-rel-glm53   # hermetic: packages the working tree, incl. the new kda / dsa / mhc C++ ops
+package exit=0
+exporting the image as an OCI layout…
+✓ exporting the image as an OCI layout  34.5s
+  • image/ 2.0 GB as content-addressed blobs
+  ✓ packaged glm-5.3-flash-e192-blackhole →
+  /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-black
+  hole
+  → serve it locally:  tt-model serve
+  /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-black
+  hole/tt_kernel_manifest.json
+  → publish it:        tt-model push
+  /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-black
+  hole
+glm-5.3-flash-e192-blackhole
+provenance {"image": {"registry": "hf", "repository": "glm-5.3-flash-e192-blackhole", "tag": "tt-model/glm-5.3-flash-e192-blackhole:b9e8208f95ce", "digest": "sha256:b9e8208f95ce29bfde63334ba49d601ab51979907a0d1062a1ffb0e11ce075ee"}, "kind": "vllm-plugin", "runtime": {"vllm": {"version": "0.26.0"}, "plugin": {"path": "/home/raahem/vllm-tt-plugin", "sha": "16febacfcde5921f1ab3b709021c76b6392f9b95", "dirty": false}, "extra_models_dir": "models/autoports/zai_org_glm_5_3_flash/vllm_bundle", "overrides": ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.19.0", "tokenizers==0.23.3", "huggingface
+=== done 2026-10-23T13:11:41+00:00
+package-watch done rc=0 2026-10-23T13:11:43+00:00

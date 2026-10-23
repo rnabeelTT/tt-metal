@@ -1,0 +1,21 @@
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-ba865e8b4884e094', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 16 ok, 1024 tokens in 15.4s = 66.5 tok/s; 16/16 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple, so a short response is best. I could just give the haiku itself. Format: three lines, no headers needed.' | content 'Data flows like streams,\nPatterns hidden in the noise—\nThe machine awakes.'
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo 3 hours minus 25 minutes = 2 hours 35 minutes.\n\nCheck: 3:40 + 2 hours = 5:40. 5:40 + 35 minutes = 6:15. ✓' | content '**2 hours and 35 minutes**\n\n(3:40 → 6:40 would be 3 hours, but the train arrives 25 minutes earlier, at 6:15.)'
+SMOKE_LONG 8192 wall 6.2s 'tower of some kind.\nUntil he got his napkin to his left arm,'
+SMOKE_RESULT PASS

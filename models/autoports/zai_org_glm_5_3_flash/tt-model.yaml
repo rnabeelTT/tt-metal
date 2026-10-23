@@ -268,14 +268,17 @@ card:
       Most other seeds of the same prompt do not loop (greedy did not loop in one run per prompt). In a probe of
       two looping prompts, neither `repetition_penalty` 1.05 or 1.10 nor temperature 0.6 removed the loops.
       Mitigation: set `max_tokens`, detect a loop in the client, and retry with another seed. An HF reference check
-      of one loop: the reference also repeats once the loop has started, but at the loop entry the TT next-token
-      distribution was flatter than the reference (not fixed in this release).
+      of one loop: the reference also repeats once the loop has started; the TT deviation at the loop entry comes
+      from the bfp4 routed experts (see Languages).
     - Languages: English is the validated language (the accuracy evals and the teacher-forcing gate are English).
       Non-English output sampled at temperature 1.0 can be garbled (mixed scripts, word salad) and can loop: seen on
       Vietnamese, Persian, Kannada and Marathi prompts. Teacher forcing against the HF reference (stage-11 review)
       shows a deviation of the TT next-token distribution in every language (top-1 agreement 0.70-0.86 on
-      hand-written text, English 0.80), more for Persian and Chinese than for English. No precision setting that fits
-      removes it (LM head bfp8 and the all-bfp8 non-expert policy were tested); it is not fixed in this release.
+      hand-written text, English 0.80), more for Persian and Chinese than for English. The cause is the bfp4 routed
+      experts: an HF reference with only the experts rounded to bfp4 reproduces TT (top-1 vs TT 0.92; vs plain HF
+      0.79), so the deviation is the bfp4 expert quantization needed to fit p300x2. bfp8 experts do not
+      fit in DRAM, and no other precision setting removes it (LM head bfp8 and the all-bfp8 non-expert policy were
+      tested). It is not fixed in this release.
       Chinese, which the E192 card claims, was checked on TT by teacher forcing only (top-1 0.73-0.79), not by
       sampled output.
     - No multi-token prediction (the MTP layer is not served).

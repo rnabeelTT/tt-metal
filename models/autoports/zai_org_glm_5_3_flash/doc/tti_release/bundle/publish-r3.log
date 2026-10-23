@@ -1,0 +1,20 @@
+manifest repo None name glm-5.3-flash-e192-blackhole
+=== tt-model push /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole --repo raahemnabeel/glm-5.3-flash-e192-blackhole --public --publish 2026-10-23T13:12:08+00:00
+================================================================================
+  _api().upload_large_folder(
+No files have been modified since last commit. Skipping to prevent empty commit.
+No files have been modified since last commit. Skipping to prevent empty commit.
+No files have been modified since last commit. Skipping to prevent empty commit.
+---------- 2026-10-23 13:12:10 (0:00:00) ----------
+Files:   hashed 1/876 (7.6K/2.0G) | pre-uploaded: 0/0 (0.0/2.0G) (+876 unsure) | committed: 0/876 (0.0/2.0G) | ignored: 0
+Workers: hashing: 4 | get upload mode: 0 | pre-uploading: 0 | committing: 0 | waiting: 0
+---------------------------------------------------
+✓ uploading to raahemnabeel/glm-5.3-flash-e192-blackhole  36.8s
+  ✓ pushed raahemnabeel/glm-5.3-flash-e192-blackhole
+  → consumers:  tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole
+  ✓ listed raahemnabeel/glm-5.3-flash-e192-blackhole in the community catalog
+  (pointer only; content stays yours) — delist with `tt-model unpublish
+  raahemnabeel/glm-5.3-flash-e192-blackhole`
+after: raahemnabeel/glm-5.3-flash-e192-blackhole 0a807cdf243c2b081cf4666565913d8d5f567da5 public catalog
+hub vs staged: 876 staged files, missing on hub 0, LFS mismatches 0 [] []
+=== publish done rc=0 2026-10-23T13:12:52+00:00
