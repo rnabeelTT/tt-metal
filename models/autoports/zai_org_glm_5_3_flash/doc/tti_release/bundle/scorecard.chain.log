@@ -1,0 +1,90 @@
+=== start Fri Oct 23 07:48:37 AM UTC 2026 : timeout -k 60 43200 env GLM53_LOCKED=1 /home/raahem/glm53-flash-bringup/scripts/11-scorecard.sh
+=== p300x2 (16 x 262144) 2026-10-23T07:48:37+00:00 free 118G
+p300x2 healthy after 196 s
+MODELS [('zai-org/GLM-5.3-Flash', 262144)]
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:20000 profile=p300x2 max_model_len=262144 tokenizer=/home/raahem/glm53-flash-bringup/tokenizer_glm53 rows=5
+ROW {"input": 128, "output": 128, "users": 1, "N": 4, "temperature": 0.0, "ttft_ms": 259.4, "ttft_p99_ms": 267.8, "tpot_ms": 75.22, "decode_tps_user": 13.3, "total_out_tps": 13.0, "e2el_s": 9.81, "wall_s": 39.3, "prefill_tps": 494.0, "out_tokens_total": 512, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 8192, "output": 256, "users": 1, "N": 2, "temperature": 0.0, "ttft_ms": 4898.6, "ttft_p99_ms": 4901.0, "tpot_ms": 79.03, "decode_tps_user": 12.7, "total_out_tps": 10.2, "e2el_s": 25.05, "wall_s": 50.1, "prefill_tps": 1672.0, "out_tokens_total": 512, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 131072, "output": 256, "users": 1, "N": 1, "temperature": 0.0, "ttft_ms": 93767.5, "ttft_p99_ms": 93767.5, "tpot_ms": 79.82, "decode_tps_user": 12.5, "total_out_tps": 2.2, "e2el_s": 114.12, "wall_s": 114.1, "prefill_tps": 1398.0, "out_tokens_total": 256, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 128, "output": 128, "users": 16, "N": 64, "temperature": 0.0, "ttft_ms": 3874.2, "ttft_p99_ms": 3898.9, "tpot_ms": 178.03, "decode_tps_user": 5.6, "total_out_tps": 77.3, "e2el_s": 26.49, "wall_s": 105.9, "prefill_tps": null, "out_tokens_total": 8192, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 1024, "output": 256, "users": 16, "N": 64, "temperature": 0.0, "ttft_ms": 12168.4, "ttft_p99_ms": 12198.9, "tpot_ms": 179.82, "decode_tps_user": 5.6, "total_out_tps": 70.6, "e2el_s": 58.02, "wall_s": 232.1, "prefill_tps": null, "out_tokens_total": 16384, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+=== sweep done 5 rows
+ci 100/100/32 rc=0
+Successful requests:                     64
+Failed requests:                         0
+Output token throughput (tok/s):         74.91
+Mean TTFT (ms):                          19769.69
+Median TTFT (ms):                        25085.65
+P99 TTFT (ms):                           25141.17
+Mean TPOT (ms):                          177.94
+Median TPOT (ms):                        177.94
+SLOTLEAK t2 solo 15: 512 tokens, 53.2 s, ok True
+SLOTLEAK t2 concurrent: 16/16 finished with 512 tokens; num_preemptions 0.0 -> 1.0; errors []
+SLOTLEAK t2 prompt 15: concurrent equal to solo True, first divergence None, wall 349.5 s
+SLOTLEAK RESULT t2 PASS wall 402.8 s -> /home/raahem/glm53-flash-bringup/artifacts/s11/scorecard/preempt_t2_p300x2.json
+  ✓ stopped 1 container(s)
+=== p300x2-wide (32 x 159744) 2026-10-23T08:11:48+00:00 free 118G
+p300x2-wide healthy after 241 s
+MODELS [('zai-org/GLM-5.3-Flash', 159744)]
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:20000 profile=p300x2-wide max_model_len=159744 tokenizer=/home/raahem/glm53-flash-bringup/tokenizer_glm53 rows=3
+ROW {"input": 128, "output": 128, "users": 1, "N": 4, "temperature": 0.0, "ttft_ms": 274.4, "ttft_p99_ms": 364.2, "tpot_ms": 124.53, "decode_tps_user": 8.0, "total_out_tps": 7.9, "e2el_s": 16.09, "wall_s": 64.4, "prefill_tps": 466.0, "out_tokens_total": 512, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 128, "output": 128, "users": 32, "N": 128, "temperature": 0.0, "ttft_ms": 7978.8, "ttft_p99_ms": 8005.3, "tpot_ms": 165.53, "decode_tps_user": 6.0, "total_out_tps": 141.1, "e2el_s": 28.98, "wall_s": 116.1, "prefill_tps": null, "out_tokens_total": 16384, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+ROW {"input": 1024, "output": 256, "users": 32, "N": 128, "temperature": 0.0, "ttft_ms": 24650.4, "ttft_p99_ms": 24664.4, "tpot_ms": 166.0, "decode_tps_user": 6.0, "total_out_tps": 122.3, "e2el_s": 66.96, "wall_s": 268.0, "prefill_tps": null, "out_tokens_total": 32768, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+=== sweep done 3 rows
+SMOKE_CHAT stop reasoning 0 content '```python\nreversed_s = s[::-1]\n```\n\nThis uses slice notation with a step of `-1` to walk through the string backwards.'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-a16cbc319485efa0', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0,1\n    while b <n:\n        print(b,'
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    else: \n '
+SMOKE_SEEDED ' #define a function to generate a list of fibonacci numbers up to n\n    if n == '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_cross_entropy_with'
+SMOKE_NONALIGNED 1 1 'Scoped-Scoped-Scoped-Scoped-'
+SMOKE_NONALIGNED 3 3 ' Gutenberg eBook of The I. W.'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, and can\nact'
+SMOKE_PAGE_GROWTH 400 'he burial-places of this city through\nwhich I pass, is there'
+SMOKE_BURST 16 ok, 1024 tokens in 14.0s = 72.9 tok/s; 16/16 identical to solo greedy
+SMOKE_MAXEFFORT stop 743 tokens; reasoning 2263 chars: 'The user wants a haiku about machine learning. A haiku is a poem with three lines following a 5-7-5 syllable pattern.\n\nL' ... 's or explanatio
+SMOKE_MAXEFFORT stop 178 tokens; reasoning 345 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... ' 2 hours = 5:40.
+SMOKE_LONG 159680 wall 120.8s ' is my brother\'s wife,\' said the boy.\n\n"The boy\'s eyes came '
+SMOKE_RESULT PASS
+SERVED_INV text: solo repeat equal True (first diff None); concurrent equal True (first diff None); long still decoding True; solo ' the\nyear 1780. It was very large, very ' concurrent ' the\nyear 1780. It was very large, very '
+SERVED_INV random: solo repeat equal True (first diff None); concurrent equal True (first diff None); long still decoding True; solo '\t631\t631\t631\t631\t631\t631\t631\t631\t631\t631' concurrent '\t631\t631\t631\t631\t631\t631\t631\t631\t631\t631'
+SERVED_INV RESULT PASS
+  ✓ stopped 2 container(s)
+=== p300x2-long (1 x 344064) 2026-10-23T08:38:09+00:00 free 118G
+p300x2-long healthy after 226 s
+MODELS [('zai-org/GLM-5.3-Flash', 344064)]
+=== sweep zai-org/GLM-5.3-Flash at http://127.0.0.1:20000 profile=p300x2-long max_model_len=344064 tokenizer=/home/raahem/glm53-flash-bringup/tokenizer_glm53 rows=1
+ROW {"input": 128, "output": 128, "users": 1, "N": 4, "temperature": 0.0, "ttft_ms": 244.9, "ttft_p99_ms": 250.7, "tpot_ms": 49.87, "decode_tps_user": 20.1, "total_out_tps": 19.5, "e2el_s": 6.58, "wall_s": 26.3, "prefill_tps": 523.0, "out_tokens_total": 512, "short_outputs": 0, "failed_requests": 0, "prompt_token_mismatch": 0}
+=== sweep done 1 rows
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which w
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-b9f5a63f0d6d0099', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 1 ok, 64 tokens in 3.4s = 18.9 tok/s; 1/1 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple,
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo
+SMOKE_LONG 344000 wall 310.8s ' small, dim, crooked shop, kept in a tortuous, up-h'
+SMOKE_RESULT PASS
+  ✓ stopped 2 container(s)
+=== scorecard done RC=0 2026-10-23T08:50:07+00:00 free 118G
+=== exit code: 0 Fri Oct 23 08:50:07 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

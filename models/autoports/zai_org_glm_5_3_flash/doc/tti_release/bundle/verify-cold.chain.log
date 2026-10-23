@@ -1,0 +1,52 @@
+=== start Fri Oct 23 06:24:27 AM UTC 2026 : timeout -k 60 28800 env GLM53_LOCKED=1 COLD=1 MIN_FREE_GB=200 /home/raahem/glm53-flash-bringup/scripts/11-verify-rel.sh /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole/tt_kernel_manifest.json p300x2
+=== verify /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole/tt_kernel_manifest.json profile p300x2 (16 x 262144) cold=1 disk free 239G 2026-10-23T06:24:27+00:00
+tt-smi -ls exit=0
+device holders before serve: 0
+bundle kernel + weight caches removed
+disk free before serve: 240 GB 2026-10-23T06:24:28+00:00
+weights fetch start 2026-10-23T06:24:28+00:00 free 240G
+weights at /home/raahem/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b69215804f2d2036a8867f6ce44848e278dcda
+weights fetch rc=0 after 0 s; free 240G
+serve exit=0
+bundle healthy after 1730 s (first boot incl. download/convert when cold) 2026-10-23T06:53:18+00:00; disk free 119G
+2.9G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/cache
+121G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights
+MODELS [('zai-org/GLM-5.3-Flash', 262144)]
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-8ea031383f5fbc3e', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 16 ok, 1024 tokens in 15.4s = 66.6 tok/s; 16/16 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple, so a short response
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo 3 hours minus 25 mi
+SMOKE_LONG 262080 wall 218.6s 'of the sun brought into strong relief, removed beauties of a'
+SMOKE_RESULT PASS
+tt-model curl exit=0
+(EngineCore pid=110) 2026-10-23 06:25:04.857 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:get_max_tokens_all_users:346 - GLM53 KV pool (replicated DSA layout): 16 slots -> 2073 blocks = 265344 to
+(EngineCore pid=110) 2026-10-23 06:25:04.932 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/opt/tt-metal/models/autoports/zai_org_
+(EngineCore pid=110) 2026-10-23 06:25:04.932 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/opt/tt-metal/models/autoports/zai_org_
+(EngineCore pid=110) 2026-10-23 06:25:04.986 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /weight-cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e
+(EngineCore pid=110) 2026-10-23 06:48:03.815 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 1378.9s (weight cache /weight-cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50a
+(EngineCore pid=110) 2026-10-23 06:48:20.050 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:allocate_kv_cache:437 - DSA pools: 2072 vLLM blocks + 1 dummy x 128 tokens in 11 DSA layers (vLLM spec la
+(EngineCore pid=110) 2026-10-23 06:52:59.720 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_prefill:463 - warm-up phase 1 (programs) done in 280s
+(EngineCore pid=110) 2026-10-23 06:53:00.316 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_decode:480 - warm-up phase 2 (model + sampler traces) done in 1s; PROGRAM_GUARD active
+=== stop 2026-10-23T07:00:57+00:00
+  ✓ stopped 1 container(s)
+device holders after stop: 0
+disk free after verify: 119G 2026-10-23T07:01:05+00:00
+VERIFY_RESULT PASS staged-p300x2-cold
+=== exit code: 0 Fri Oct 23 07:01:05 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

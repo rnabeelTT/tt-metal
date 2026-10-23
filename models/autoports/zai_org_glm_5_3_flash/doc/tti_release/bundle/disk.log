@@ -1,0 +1,14 @@
+/dev/nvme0n1p2  3.6T  3.3T  131G  97% /
+after deletions 2026-10-23T05:00:02+00:00 /dev/nvme0n1p2  3.6T  3.0T  476G  87% /
+disk free before serve: 569 GB 2026-10-23T05:01:14+00:00
+disk free before serve: 567 GB 2026-10-23T05:13:26+00:00
+disk free before serve: 567 GB 2026-10-23T05:24:38+00:00
+weights fetch rc=0 after 2859 s; free 261G
+disk free before serve: 240 GB 2026-10-23T06:24:28+00:00
+weights fetch rc=0 after 0 s; free 240G
+disk free after verify: 119G 2026-10-23T07:01:05+00:00
+disk free before serve: 119 GB 2026-10-23T07:02:32+00:00
+weights fetch rc=0 after 0 s; free 119G
+disk free after verify: 118G 2026-10-23T07:47:11+00:00
+disk free before serve: 96 GB 2026-10-23T09:03:43+00:00
+disk free after verify: 96G 2026-10-23T09:11:47+00:00

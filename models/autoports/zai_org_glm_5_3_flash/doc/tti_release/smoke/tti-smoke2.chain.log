@@ -1,0 +1,72 @@
+=== start Wed Oct 21 03:24:57 PM UTC 2026 : timeout -k 60 10800 env GLM53_LOCKED=1 GLM53_EVAL_TASKS=gpqa_diamond_cot_zeroshot /home/raahem/glm53-flash-bringup/scripts/11-tti.sh smoke
+=== 11-tti smoke profile p300x2-1m port 8141 worktree 0a2663d0b6bf2143b3ecf086d16617d0041741d2 dirty=0 2026-10-21T15:24:57+00:00
+kernel/ttnn sources in /home/raahem/tt-metal identical to 0a2663d0b6bf2143b3ecf086d16617d0041741d2 (main tree HEAD 0bcf89f7fd6)
+profile env: GLM53_DSA_SHARD=1
+profile env: GLM53_MOE_SORTED_ROWS=512
+profile env: GLM53_DSA_INDEX_BLOCK_MB=32
+SERVER_CMD: python -m vllm.entrypoints.openai.api_server --model /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --served-model-name /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 zai-org/GLM-5.3-Flash --tokenizer /home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8 --hf-overrides \{\"architectures\":\ \[\"TTGlm5NextForConditionalGeneration\"\]\} --block-size 128 --max-num-seqs 1 --max-model-len 1048576 --port 8141 --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --additional-config \{\"tt\":\ \{\"sample_on_device_mode\":\ \"all\"\,\ \"trace_region_size\":\ 67108864\,\ \"l1_small_size\":\ 24576\,\ \"fabric_config\":\ \"FABRIC_1D\"\}\}
+SERVER_CWD: /home/raahem/tt-metal-rel-glm53
+SERVER_ENV: EXTRA_MODELS_DIR=/home/raahem/tt-metal-rel-glm53/models/autoports/zai_org_glm_5_3_flash/vllm_bundle
+SERVER_ENV: GLM53_CACHE_DIR=/home/raahem/.cache/glm53_flash
+SERVER_ENV: GLM53_CKPT=/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8
+SERVER_ENV: GLM53_DSA_INDEX_BLOCK_MB=32
+SERVER_ENV: GLM53_DSA_SHARD=1
+SERVER_ENV: GLM53_EVAL_TASKS=gpqa_diamond_cot_zeroshot
+SERVER_ENV: GLM53_LOCKED=1
+SERVER_ENV: GLM53_MOE_SORTED_ROWS=512
+SERVER_ENV: GLM53_PROGRAM_GUARD=1
+SERVER_ENV: GLM53_TRACE_REGION=67108864
+SERVER_ENV: HF_MODEL_ID=zai-org/GLM-5.3-Flash
+SERVER_ENV: HF_MODEL=zai-org/GLM-5.3-Flash
+SERVER_ENV: MESH_DEVICE=P300x2
+SERVER_ENV: PYTHONPATH=/home/raahem/glm53-flash-bringup/serve_overlay:/home/raahem/tt-metal-rel-glm53:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:/home/raahem/tt-metal:/home/raahem/.claude/plugins/cache/tenstorrent-skills/tt-model-bringup/0.1.3/runtime:
+SERVER_ENV: TT_METAL_HOME=/home/raahem/tt-metal
+SERVER_ENV: TT_METAL_LOGGER_LEVEL=Error
+SERVER_ENV: VLLM_ENGINE_READY_TIMEOUT_S=3600
+md5 daa701ea8bbd25979f06737bb11dc173  models/autoports/zai_org_glm_5_3_flash/tt/ckpt.py
+md5 b6d033397b4ba991bae572324d19b882  models/autoports/zai_org_glm_5_3_flash/tt/decode_inputs.py
+md5 a12853e1449d78c62a6da08856a9c1e4  models/autoports/zai_org_glm_5_3_flash/tt/dsa_buckets.py
+md5 a4c9f4d08d92271a679dac4df820528e  models/autoports/zai_org_glm_5_3_flash/tt/dsa.py
+md5 83750f1d9f44c6a244046a522024ccbc  models/autoports/zai_org_glm_5_3_flash/tt/dsa_shard.py
+md5 e6b204abc32736574fad8b00b1ca71f7  models/autoports/zai_org_glm_5_3_flash/tt/functional_decoder.py
+md5 9950ff43360f1cb6f78ca85a7bec8923  models/autoports/zai_org_glm_5_3_flash/tt/fused_decoder.py
+md5 db1beb810482092fd11f9b3edc3ee67c  models/autoports/zai_org_glm_5_3_flash/tt/generator.py
+md5 8ad31c094aa985f3e79ca71d5e331088  models/autoports/zai_org_glm_5_3_flash/tt/generator_vllm.py
+md5 53fbca0cafb2411040165520a35a3537  models/autoports/zai_org_glm_5_3_flash/tt/__init__.py
+md5 2e7dde09ee2af3f2c701eb2f712c430b  models/autoports/zai_org_glm_5_3_flash/tt/kda.py
+md5 6acd0fb3c3ad4c3f7370ddf8b5e14de6  models/autoports/zai_org_glm_5_3_flash/tt/mhc.py
+md5 952a9a2ad222304455d797cae94a5b50  models/autoports/zai_org_glm_5_3_flash/tt/mlp.py
+md5 ee8d91a079d077851c66cd250f8a62f8  models/autoports/zai_org_glm_5_3_flash/tt/model.py
+md5 f1bc95c39a49d1abe5030e48fdf447f0  models/autoports/zai_org_glm_5_3_flash/tt/moe_dispatch.py
+md5 9b06feb1a5fc715e1d686371fcaee5ea  models/autoports/zai_org_glm_5_3_flash/tt/moe_opt.py
+md5 6e6482118b1b2eef44b8ecaa552cd335  models/autoports/zai_org_glm_5_3_flash/tt/moe.py
+md5 15aae97d18fa9d41722727cf9d3a07f0  models/autoports/zai_org_glm_5_3_flash/tt/multichip_decoder.py
+md5 3bda6fd3efeec9bc16caf6b2de3ebfda  models/autoports/zai_org_glm_5_3_flash/tt/optimized_decoder.py
+md5 0681dd4cf6b4f0a193c31c52266093d1  models/autoports/zai_org_glm_5_3_flash/tt/precision.py
+md5 aba8c52dc0c1c87f43ede810ec051366  models/autoports/zai_org_glm_5_3_flash/tt/serving_profiles.py
+md5 446ac30d4ad54640d96c43e37d80a3ab  models/autoports/zai_org_glm_5_3_flash/tt/serving_state.py
+md5 5c661837e53588a78ad78c86f49ddd6f  models/autoports/zai_org_glm_5_3_flash/tt/synthetic.py
+md5 3ece3bff0670d7400f4dbfcfd1ccbc9a  models/autoports/zai_org_glm_5_3_flash/tt/weight_cache.py
+md5 e794dab4bc90b90f2521c6801ac8d00c  models/autoports/zai_org_glm_5_3_flash/serving_profiles.json
+md5 44fd9de04add8d260d1b9fbec67c76dd  models/autoports/zai_org_glm_5_3_flash/doc/datatype_sweep/selected_precision_config.json
+server healthy after 150 s 2026-10-21T15:27:27+00:00
+server cwd /home/raahem/tt-metal-rel-glm53
+(EngineCore pid=3121576) 2026-10-21 15:25:13.403 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:get_max_tokens_all_users:346 - GLM53 KV pool (sharded DSA layout): 1 slots -> 8194 blocks = 1048832 tokens per die incl.
+(EngineCore pid=3121576) 2026-10-21 15:25:13.442 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/tt-metal-rel-glm53/models/autoports/zai_or
+(EngineCore pid=3121576) 2026-10-21 15:25:13.443 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/home/raahem/tt-metal-rel-glm53/models/autoports/zai_or
+(EngineCore pid=3121576) 2026-10-21 15:25:13.480 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bbd7a14bd
+(EngineCore pid=3121576) 2026-10-21 15:26:46.434 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 93.0s (weight cache /home/raahem/.cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckpt5bb
+(EngineCore pid=3121576) 2026-10-21 15:26:47.240 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:initialize_vllm_model:415 - Glm5NextForConditionalGeneration: B=1 max_model_len=1048576 (model context 1048576, DSA layou
+(EngineCore pid=3121576) 2026-10-21 15:26:52.658 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:allocate_kv_cache:437 - DSA pools: 8193 vLLM blocks + 1 dummy x 128 tokens in 11 DSA layers (vLLM spec layers 45); page-t
+(EngineCore pid=3121576) 2026-10-21 15:27:11.067 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_decode:480 - warm-up phase 2 (model + sampler traces) done in 0s; PROGRAM_GUARD active
+MODELS [('/home/raahem/glm53-flash-bringup/ckpt/glm53_flash_e192_fp8', 1048576), ('zai-org/GLM-5.3-Flash', 1048576)]
+CHAT finish stop usage {'prompt_tokens': 25, 'total_tokens': 31, 'completion_tokens': 6, 'prompt_tokens_details': None} reasoning chars 6 content 'Paris.'
+openai smoke rc=0
+tti benchmarks exit=0 (0 min) log /home/raahem/glm53-flash-bringup/logs/11/tti-smoke-20261021T1524-benchmarks.log
+tti spec_tests exit=0 (22 min) log /home/raahem/glm53-flash-bringup/logs/11/tti-smoke-20261021T1524-spec_tests.log
+tti evals exit=0 (1 min) log /home/raahem/glm53-flash-bringup/logs/11/tti-smoke-20261021T1524-evals.log
+removing /home/raahem/glm53-flash-bringup/tti/.env written by run.py
+=== 11-tti smoke done rc=0 2026-10-21T15:51:35+00:00
+=== exit code: 0 Wed Oct 21 03:51:40 PM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

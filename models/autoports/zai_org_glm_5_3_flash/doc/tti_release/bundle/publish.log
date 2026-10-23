@@ -1,0 +1,21 @@
+manifest repo None name glm-5.3-flash-e192-blackhole
+=== tt-model push /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole --repo raahemnabeel/glm-5.3-flash-e192-blackhole --public --publish 2026-10-23T09:02:01+00:00
+`upload_large_folder` is DEPRECATED and will be removed in a future release.
+Use `upload_folder` instead:
+    api.upload_folder(repo_id="raahemnabeel/glm-5.3-flash-e192-blackhole", repo_type="model", folder_path="/home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole")
+================================================================================
+  _api().upload_large_folder(
+---------- 2026-10-23 09:02:02 (0:00:00) ----------
+Files:   hashed 3/876 (22.6K/2.0G) | pre-uploaded: 0/0 (0.0/2.0G) (+876 unsure) | committed: 0/876 (0.0/2.0G) | ignored: 0
+Workers: hashing: 4 | get upload mode: 0 | pre-uploading: 0 | committing: 0 | waiting: 0
+---------------------------------------------------
+✓ uploading to raahemnabeel/glm-5.3-flash-e192-blackhole  35.9s
+  ✓ pushed raahemnabeel/glm-5.3-flash-e192-blackhole
+  → consumers:  tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole
+  ✓ listed raahemnabeel/glm-5.3-flash-e192-blackhole in the community catalog
+  (pointer only; content stays yours) — delist with `tt-model unpublish
+  raahemnabeel/glm-5.3-flash-e192-blackhole`
+after: raahemnabeel/glm-5.3-flash-e192-blackhole 8b8a71f8428fabeadfd30bb4a48c69c4df743d89 public catalog
+hub vs staged: 2630 staged files, missing on hub 1754, LFS mismatches 0 ['.cache/huggingface/CACHEDIR.TAG', '.cache/huggingface/.gitignore', '.cache/huggingface/upload/requirements.lock.lock'] []
+=== publish done rc=1 2026-10-23T09:02:40+00:00
+corrected recount 2026-10-23T09:03:10+00:00: 876 staged files (excluding the uploader's .cache metadata), 877 on the Hub (+.gitattributes), missing 0, LFS mismatches 0; rev 8b8a71f8428fabeadfd30bb4a48c69c4df743d89 public, tt-model-catalog

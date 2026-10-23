@@ -276,10 +276,10 @@ index c68ad267..889b0dae 100644
      "tt_transformers": tt_transformers_impl,
      "llama3_70b_galaxy": llama3_70b_galaxy_impl,
 diff --git a/workflows/model_specs/dev/llm.yaml b/workflows/model_specs/dev/llm.yaml
-index d8859322..7df8c3c8 100644
+index d8859322..5cb35d8a 100644
 --- a/workflows/model_specs/dev/llm.yaml
 +++ b/workflows/model_specs/dev/llm.yaml
-@@ -2687,3 +2687,47 @@ templates:
+@@ -2687,3 +2687,51 @@ templates:
      Qwen/Qwen3.5-27B:
        reasoning_parser_name: qwen3
        tool_call_parser_name: qwen3_coder
@@ -320,6 +320,10 @@ index d8859322..7df8c3c8 100644
 +      trace_region_size: 67108864
 +      l1_small_size: 24576
 +      sample_on_device_mode: all
++    known_issues:
++      - workflow_type: EVALS
++        task_name: gpqa_diamond_cot_zeroshot
++        reason: "Issue-waived (stage 11, lead/user decision 2026-10-23; models/autoports/zai_org_glm_5_3_flash/doc/tti_release/RUN_NOTES.md). lm-eval full set 66.67 %, CI subset 70.0 %; card protocol 74.24 % against the card's 79.8 % (same model, effort, budget and sampling); precision ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant); answer extraction, effort rendering and budget handling checked (no misses, template-correct effort, budget-cut rate as in the card); the residual 5.6 points sit within the card's single-run noise plus the quantization difference."
 +  # FUNCTIONAL (not EXPERIMENTAL): eval failures must block acceptance for this model's reports
 +  status: FUNCTIONAL
 +  has_builtin_warmup: true

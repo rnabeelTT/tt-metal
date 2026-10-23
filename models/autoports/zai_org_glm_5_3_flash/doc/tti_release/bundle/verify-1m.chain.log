@@ -1,0 +1,43 @@
+=== start Fri Oct 23 07:02:32 AM UTC 2026 : timeout -k 60 14400 env GLM53_LOCKED=1 LONG=1040000 SMOKE_TMO=7200 MIN_FREE_GB=60 /home/raahem/glm53-flash-bringup/scripts/11-verify-rel.sh /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole/tt_kernel_manifest.json p300x2-1m
+=== verify /home/raahem/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole/tt_kernel_manifest.json profile p300x2-1m (1 x 1048576) cold=0 disk free 119G 2026-10-23T07:02:32+00:00
+tt-smi -ls exit=0
+device holders before serve: 0
+disk free before serve: 119 GB 2026-10-23T07:02:32+00:00
+weights fetch start 2026-10-23T07:02:32+00:00 free 119G
+weights at /home/raahem/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b69215804f2d2036a8867f6ce44848e278dcda
+weights fetch rc=0 after 0 s; free 119G
+serve exit=0
+bundle healthy after 211 s (first boot incl. download/convert when cold) 2026-10-23T07:06:03+00:00; disk free 118G
+3.3G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/cache
+121G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights
+MODELS [('zai-org/GLM-5.3-Flash', 1048576)]
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\nreversed_s = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-aad43c098f076d3b', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    """Print a Fibonacci se' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    """Print a Fibonacci series up to n."""\n   '
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    else: \n '
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef sigmoid(x):\n    return 1/('
+SMOKE_NONALIGNED 1 1 'Scoped tables for the current user. The'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry air of that high altitude, which'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 'n any of the burial-places of this city through which I\npass'
+SMOKE_BURST 1 ok, 64 tokens in 4.8s = 13.5 tok/s; 0/1 identical to solo greedy
+SMOKE_MAXEFFORT stop 942 tokens; reasoning 2850 chars: 'The user wants a haiku about machine learning. A haiku is a poem with three lines following a 5-7-5 syllable pattern.\n\nL' ... ' (1) = 7 ✓\n- "The machine awakes
+SMOKE_MAXEFFORT stop 177 tokens; reasoning 341 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... ' 2 hours = 5:40. 5:40 + 20 minutes =
+SMOKE_LONG 1040000 wall 2291.0s ' it is a curious thing that she is\ngoing to marry the nephew'
+SMOKE_RESULT FAIL
+tt-model curl exit=0
+=== stop 2026-10-23T07:47:04+00:00
+  ✓ stopped 2 container(s)
+device holders after stop: 0
+disk free after verify: 118G 2026-10-23T07:47:11+00:00
+VERIFY_RESULT FAIL staged-p300x2-1m
+=== exit code: 1 Fri Oct 23 07:47:11 AM UTC 2026
+Resetting all PCI devices: [0, 1, 2, 3]
+[95m Re-initializing boards after reset.... [0m

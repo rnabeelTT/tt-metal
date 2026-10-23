@@ -1,0 +1,716 @@
+{
+    "metadata": {
+        "model_name": "GLM-5.3-Flash",
+        "model_repo": "zai-org/GLM-5.3-Flash",
+        "device": "P300X2",
+        "generated_at": "2026-10-21T20:17:51+00:00",
+        "report_id": "id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04_waiver-regen",
+        "workflow": "release",
+        "server_mode": "API",
+        "run_command": "python run.py --dev-mode --model zai-org/GLM-5.3-Flash --tt-device p300x2 --workflow release --service-port 8141 --no-auth --skip-system-sw-validation --limit-samples-mode ci-nightly",
+        "runtime_model_spec_json": "/home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_16-42-31_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_ZSiaE1Ol.json",
+        "model_id": "id_glm53-flash-autoport_GLM-5.3-Flash_p300x2",
+        "inference_engine": "vLLM",
+        "tt_metal_commit": null,
+        "vllm_commit": null,
+        "model_impl": "glm53-flash-autoport"
+    },
+    "sections": [
+        {
+            "kind": "evals",
+            "data": {
+                "task_name": "ifeval",
+                "tolerance": 0.05,
+                "published_score": null,
+                "published_score_ref": "none: no IFEval number for GLM-5.3-Flash or its E192 subset",
+                "gpu_reference_score": null,
+                "gpu_reference_score_ref": "none: no same-setting reference of the E192 model",
+                "score": 74.31192660550458,
+                "ratio_to_published": "N/A",
+                "ratio_to_reference": "N/A",
+                "accuracy_check": 1,
+                "priority": "must",
+                "mean_seconds_per_task": 100.20866270018357
+            },
+            "title": "LLM Eval \u2014 ifeval",
+            "task_type": "llm",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "task_name": "ifeval",
+                "tolerance": 0.05,
+                "published_score": null,
+                "published_score_ref": "none: no IFEval number for GLM-5.3-Flash or its E192 subset"
+            }
+        },
+        {
+            "kind": "evals",
+            "data": {
+                "task_name": "gpqa_diamond_cot_zeroshot",
+                "tolerance": 0.05,
+                "published_score": 79.8,
+                "published_score_ref": "https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens)",
+                "gpu_reference_score": null,
+                "gpu_reference_score_ref": null,
+                "score": 70.0,
+                "ratio_to_published": 0.8771929824561404,
+                "ratio_to_reference": "N/A",
+                "accuracy_check": 3,
+                "priority": "must",
+                "mean_seconds_per_task": 49.88178821747424
+            },
+            "title": "LLM Eval \u2014 gpqa_diamond_cot_zeroshot",
+            "task_type": "llm",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "task_name": "gpqa_diamond_cot_zeroshot",
+                "tolerance": 0.05,
+                "published_score": 79.8,
+                "published_score_ref": "https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens)"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 8,
+                "input_sequence_length": 128,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 251.2239,
+                "p50_ttft": 249.7908,
+                "p99_ttft": 260.4874,
+                "mean_tpot_ms": 71.5131,
+                "mean_e2el_ms": 9333.3933,
+                "tps_input_throughput": 13.7139,
+                "tps_output_throughput": 13.7139,
+                "tps_total_throughput": 27.4277,
+                "request_throughput": 0.1071,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:19:22"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 128,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 248.3807,
+                "p50_ttft": 248.438,
+                "p99_ttft": 253.5387,
+                "mean_tpot_ms": 72.9745,
+                "mean_e2el_ms": 74901.2724,
+                "tps_input_throughput": 1.7089,
+                "tps_output_throughput": 13.6713,
+                "tps_total_throughput": 15.3802,
+                "request_throughput": 0.0134,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:25:45"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 1024,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 824.6308,
+                "p50_ttft": 814.3174,
+                "p99_ttft": 860.4447,
+                "mean_tpot_ms": 74.3814,
+                "mean_e2el_ms": 10271.0735,
+                "tps_input_throughput": 99.6949,
+                "tps_output_throughput": 12.4619,
+                "tps_total_throughput": 112.1568,
+                "request_throughput": 0.0974,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:26:44"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 2048,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 1401.1524,
+                "p50_ttft": 1388.5057,
+                "p99_ttft": 1441.8962,
+                "mean_tpot_ms": 77.4871,
+                "mean_e2el_ms": 11242.0102,
+                "tps_input_throughput": 182.1697,
+                "tps_output_throughput": 11.3856,
+                "tps_total_throughput": 193.5553,
+                "request_throughput": 0.089,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:27:48"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 4,
+                "input_sequence_length": 4096,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 5989.2764,
+                "p50_ttft": 5987.9318,
+                "p99_ttft": 5999.8803,
+                "mean_tpot_ms": 77.5574,
+                "mean_e2el_ms": 15839.0612,
+                "tps_input_throughput": 258.5971,
+                "tps_output_throughput": 8.0812,
+                "tps_total_throughput": 266.6783,
+                "request_throughput": 0.0631,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:29:15"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 15079.1299,
+                "p50_ttft": 15079.1299,
+                "p99_ttft": 15087.4803,
+                "mean_tpot_ms": 77.6723,
+                "mean_e2el_ms": 24943.517,
+                "tps_input_throughput": 328.418,
+                "tps_output_throughput": 5.1315,
+                "tps_total_throughput": 333.5495,
+                "request_throughput": 0.0401,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:30:38"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 8192,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 15097.139,
+                "p50_ttft": 15097.139,
+                "p99_ttft": 15104.7786,
+                "mean_tpot_ms": 77.7509,
+                "mean_e2el_ms": 94636.2725,
+                "tps_input_throughput": 86.5627,
+                "tps_output_throughput": 10.8203,
+                "tps_total_throughput": 97.3831,
+                "request_throughput": 0.0106,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:35:30"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 10000,
+                "output_sequence_length": 1024.0,
+                "mean_ttft_ms": 19626.3473,
+                "p50_ttft": 19626.3473,
+                "p99_ttft": 19651.6914,
+                "mean_tpot_ms": 77.7695,
+                "mean_e2el_ms": 99184.5395,
+                "tps_input_throughput": 100.8219,
+                "tps_output_throughput": 10.3242,
+                "tps_total_throughput": 111.146,
+                "request_throughput": 0.0101,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:40:36"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 2,
+                "input_sequence_length": 16384,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 33350.9705,
+                "p50_ttft": 33350.9705,
+                "p99_ttft": 33408.8383,
+                "mean_tpot_ms": 77.6854,
+                "mean_e2el_ms": 43217.0113,
+                "tps_input_throughput": 379.1072,
+                "tps_output_throughput": 2.9618,
+                "tps_total_throughput": 382.069,
+                "request_throughput": 0.0231,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:42:53"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 32768,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 69716.6885,
+                "p50_ttft": 69716.6885,
+                "p99_ttft": 69716.6885,
+                "mean_tpot_ms": 77.5795,
+                "mean_e2el_ms": 79569.281,
+                "tps_input_throughput": 411.8151,
+                "tps_output_throughput": 1.6087,
+                "tps_total_throughput": 413.4238,
+                "request_throughput": 0.0126,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:45:41"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 65536,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 142672.5446,
+                "p50_ttft": 142672.5446,
+                "p99_ttft": 142672.5446,
+                "mean_tpot_ms": 77.516,
+                "mean_e2el_ms": 152517.0791,
+                "tps_input_throughput": 429.6952,
+                "tps_output_throughput": 0.8392,
+                "tps_total_throughput": 430.5344,
+                "request_throughput": 0.0066,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 20:50:54"
+            }
+        },
+        {
+            "kind": "benchmarks",
+            "data": {
+                "concurrency": 1,
+                "num_requests": 1,
+                "input_sequence_length": 131072,
+                "output_sequence_length": 128.0,
+                "mean_ttft_ms": 288528.3208,
+                "p50_ttft": 288528.3208,
+                "p99_ttft": 288528.3208,
+                "mean_tpot_ms": 77.3284,
+                "mean_e2el_ms": 298349.0305,
+                "tps_input_throughput": 439.3238,
+                "tps_output_throughput": 0.429,
+                "tps_total_throughput": 439.7528,
+                "request_throughput": 0.0034,
+                "goodput_pct": null,
+                "error_request_count": null,
+                "status": "na",
+                "target_check": 1
+            },
+            "title": "vLLM Benchmark",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "tool": "vllm",
+                "model": "zai-org/GLM-5.3-Flash",
+                "device": "P300X2",
+                "timestamp": "2026-10-21 21:00:59"
+            }
+        },
+        {
+            "kind": "spec_tests",
+            "data": {
+                "success": true,
+                "child_result": "OK",
+                "status": "pass",
+                "attempts": 1,
+                "logs": [],
+                "elapsed_seconds": 0.004384804051369429,
+                "test_name": "LoggerForkSafetyTest",
+                "description": "Test for logging fork safety to prevent deadlocks"
+            },
+            "title": "Logger Fork Safety",
+            "task_type": "unit",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "num_of_devices": 4
+            }
+        },
+        {
+            "kind": "spec_tests",
+            "data": {
+                "endpoint_url": "http://127.0.0.1:8141/v1/chat/completions",
+                "model_name": "zai-org/GLM-5.3-Flash",
+                "task_name": "vllm_chat_completions",
+                "parameter_conformance_summary": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "status": "\u2705 PASS",
+                        "summary": "3/3 passed"
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_n",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "status": "\u2705 PASS",
+                        "summary": "9/9 passed"
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "status": "\u2705 PASS",
+                        "summary": "1/1 passed"
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "status": "\u2705 PASS",
+                        "summary": "2/2 passed"
+                    }
+                ],
+                "detailed_test_results": [
+                    {
+                        "test_case": "test_coherence_verbatim_echo",
+                        "parametrization": "test_coherence_verbatim_echo",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[temperature-0.0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_k-1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_determinism_parameters",
+                        "parametrization": "test_determinism_parameters[top_p-0.01]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_logprobs",
+                        "parametrization": "test_logprobs",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[10]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_max_tokens",
+                        "parametrization": "test_max_tokens[5]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_n",
+                        "parametrization": "test_n[3]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_non_uniform_seeding",
+                        "parametrization": "test_non_uniform_seeding",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[frequency_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[presence_penalty-1.2-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-natural_repetition-messages1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-repeat_trap-messages0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_penalties",
+                        "parametrization": "test_penalties[repetition_penalty-1.5-semantic_repetition-messages2]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_seed_reproducibility",
+                        "parametrization": "test_seed_reproducibility",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq0]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    },
+                    {
+                        "test_case": "test_stop",
+                        "parametrization": "test_stop[stop_seq1]",
+                        "status": "\u2705 PASSED",
+                        "message": ""
+                    }
+                ],
+                "success": true,
+                "status": "pass",
+                "attempts": 1,
+                "logs": [
+                    "/home/raahem/tt-inference-server/.workflow_venvs/.venv_workflow_run_script/lib/python3.10/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \"asyncio_default_fixture_loop_scope\" is unset.",
+                    "The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \"function\", \"class\", \"module\", \"package\", \"session\"",
+                    "",
+                    "  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))",
+                    "......................                                                   [100%]",
+                    "22 passed in 1324.17s (0:22:04)"
+                ],
+                "elapsed_seconds": 1324.3469318151474,
+                "test_name": "VLLMParamConformanceTest",
+                "description": "vLLM chat/completions parameter conformance"
+            },
+            "title": "Vllm Chat Completions",
+            "task_type": "functional",
+            "id": "zai-org__GLM-5.3-Flash_P300X2",
+            "targets": {
+                "num_of_devices": 4,
+                "num_concurrent_requests": 4
+            }
+        }
+    ],
+    "acceptance_criteria": true,
+    "acceptance_blockers": {},
+    "acceptance_criteria_metadata": {
+        "enforcement_result": "PASS",
+        "model_status": "FUNCTIONAL",
+        "categories": [
+            {
+                "name": "Benchmarks",
+                "status": "NA",
+                "total": 12,
+                "passed": 0,
+                "failed": 0,
+                "na": 12,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Evals",
+                "status": "PASS",
+                "total": 2,
+                "passed": 0,
+                "failed": 0,
+                "na": 1,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {
+                    "evals:LLM Eval \u2014 gpqa_diamond_cot_zeroshot": "Accuracy check failed. (waived: Issue-waived (stage 11, lead/user decision 2026-10-23; models/autoports/zai_org_glm_5_3_flash/doc/tti_release/RUN_NOTES.md). lm-eval full set 66.67 %, CI subset 70.0 %; card protocol 74.24 % against the card's 79.8 % (same model, effort, budget and sampling); precision ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant); answer extraction, effort rendering and budget handling checked (no misses, template-correct effort, budget-cut rate as in the card); the residual 5.6 points sit within the card's single-run noise plus the quantization difference.)"
+                }
+            },
+            {
+                "name": "Spec Tests",
+                "status": "PASS",
+                "total": 1,
+                "passed": 1,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            },
+            {
+                "name": "Agentic Targets",
+                "status": "NA",
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "na": 0,
+                "skipped": 0,
+                "blockers": {},
+                "waived": {}
+            }
+        ]
+    },
+    "acceptance_summary_markdown": "### Acceptance Criteria\n\n- Acceptance status: \u2705 `PASS`\n- Model status: `FUNCTIONAL`\n- Benchmarks: \ud83d\udfe8 `NA` (0/12 passed, 12 NA)\n- Evals: \u2705 `PASS` (0/2 passed, 1 waived, 1 NA)\n- Spec Tests: \u2705 `PASS` (1/1 passed)\n- Agentic Targets: \ud83d\udfe8 `NA` (no blocks present)\n- All acceptance criteria passed."
+}

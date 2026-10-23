@@ -1,0 +1,113 @@
+2026-10-21 15:49:53,112 - run.py:1218 - INFO: TT-Inference version: 0.22.0
+2026-10-21 15:49:53,112 - run.py:1219 - INFO: TT-Inference SHA: 9ef9d6602669
+2026-10-21 15:49:53,112 - run.py:1220 - INFO:
+============================================================
+tt-inference-server run.py CLI args summary
+============================================================
+
+Model Options:
+  model:                      zai-org/GLM-5.3-Flash
+  device:                     p300x2
+  impl:                       glm53-flash-autoport
+  engine:                     vLLM
+  workflow:                   evals
+  tools:                      vllm
+
+Optional args:
+  dev_mode:                   True
+  docker_server:              False
+  local_server:               False
+  no_auth:                    True
+  tt_metal_python_venv_dir:   None
+  tt_metal_home:              /home/raahem/tt-metal
+  service_port:               8141
+  bind_host:                  0.0.0.0
+  docker_override_image:      None
+  docker_interactive:         False
+  device_id:                  None
+  disable_trace_capture:      False
+  override_tt_config:         None
+  vllm_override_args:         None
+  workflow_args:              None
+  limit_samples_mode:         smoke-test
+  eval_samples:               None
+  skip_system_sw_validation:  True
+
+Host Storage Options:
+  host_volume:                None
+  host_hf_cache:              None
+  host_weights_dir:           None
+  quetzal_package_root:       None
+  image_user:                 1000
+
+============================================================
+2026-10-21 15:49:53,112 - run.py:1226 - INFO: Runtime model spec saved to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_15-49-53_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_jKfd8AQa.json
+2026-10-21 15:49:53,113 - target_pack.py:137 - DEBUG: No TargetPack registered; using Tenstorrent reference_config.
+2026-10-21 15:49:53,117 - validate_setup.py:341 - INFO: Starting local setup validation
+2026-10-21 15:49:53,118 - validate_setup.py:377 - INFO: ✅ validating local setup completed
+2026-10-21 15:49:53,118 - run.py:1343 - INFO: Model GLM-5.3-Flash (model_type=LLM) routes through the workflow engine.
+2026-10-21 15:49:53,118 - runner.py:31 - INFO: → command=evals
+2026-10-21 15:49:53,118 - venv_provisioner.py:73 - DEBUG: No VenvProvisioner registered; using Tenstorrent VENV_CONFIGS.
+2026-10-21 15:49:53,118 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python --index-strategy unsafe-best-match -r /home/raahem/glm53-flash-bringup/tti/requirements/workflow-run-script.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_workflow_run_script
+Checked 19 packages in 3ms
+2026-10-21 15:49:53,126 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_bootstrap_uv/bin/uv pip install --managed-python --python /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_evals_common/bin/python --index-strategy unsafe-best-match -r /home/raahem/glm53-flash-bringup/tti/requirements/evals-common.txt
+Using Python 3.10.21 environment at: .workflow_venvs/.venv_evals_common
+Resolved 104 packages in 804ms
+Checked 104 packages in 0.77ms
+2026-10-21 15:49:53,941 - proc.py:75 - INFO: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_workflow_run_script/bin/python /home/raahem/glm53-flash-bringup/tti/run_workflows.py --model zai-org/GLM-5.3-Flash --workflow evals --device p300x2 --service-port 8141 --runtime-model-spec-json /home/raahem/glm53-flash-bringup/tti/workflow_logs/runtime_model_specs/runtime_model_spec_2026-10-21_15-49-53_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_jKfd8AQa.json --output-dir /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals
+2026-10-21 15:49:54,187 [INFO] workflow_module.runner: → command=workflow
+2026-10-21 15:49:54,187 [INFO] workflow.evals: === Workflow start: evals | model=GLM-5.3-Flash device=P300X2 port=8141 output=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/zai-org__GLM-5.3-Flash_p300x2_evals ===
+2026-10-21 15:49:54,198 [INFO] workflow.evals: → task=llm_eval
+2026-10-21 15:49:54,199 [INFO] llm_module.eval_configs: Smoke-test mode enabled; running only first eval task: gpqa_diamond_cot_zeroshot
+2026-10-21 15:49:54,199 [INFO] llm_module.server_control: Waiting for inference server at http://127.0.0.1:8141/health (timeout 3600s)
+2026-10-21 15:49:54,200 [INFO] llm_module.server_control: ✅ Inference server is healthy at http://127.0.0.1:8141/health
+2026-10-21 15:49:54,201 [INFO] llm_module.eval_command: Clamping gpqa_diamond_cot_zeroshot num_concurrent: 16 -> 1 (device_model_spec.max_concurrency=1)
+2026-10-21 15:49:54,201 [INFO] test_module.llm_tests.llm_eval_tests: task=gpqa_diamond_cot_zeroshot will preserve reasoning_content in sample logs.
+2026-10-21 15:49:54,201 [INFO] test_module.llm_tests.llm_eval_tests: Running eval task=gpqa_diamond_cot_zeroshot
+2026-10-21 15:49:54,201 [INFO] test_module.llm_tests.llm_eval_tests: Running command: /home/raahem/glm53-flash-bringup/tti/.workflow_venvs/.venv_evals_common/bin/lm_eval --tasks gpqa_diamond_cot_zeroshot --model local-chat-completions --model_args model=zai-org/GLM-5.3-Flash,base_url=http://127.0.0.1:8141/v1/chat/completions,tokenizer_backend=huggingface,timeout=21600,max_length=1048576,num_concurrent=1 --gen_kwargs 'max_gen_toks=65536,until=['"'"'<|endoftext|>'"'"'],do_sample=true,temperature=1.0,top_p=0.95,stream=false,reasoning_effort=low,seed=42' --output_path /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/zai-org__GLM-5.3-Flash_p300x2_evals/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2 --seed 42 --num_fewshot 0 --batch_size 1 --log_samples --show_config --apply_chat_template --trust_remote_code --confirm_run_unsafe_code --limit 3
+2026-10-21 15:49:54,364 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:54 WARNING  [config.evaluate_config:281] --limit SHOULD ONLY BE USED FOR TESTING. REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.
+2026-10-21 15:49:54,365 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:54 INFO     [config.evaluate_config:301] Using default fewshot_as_multiturn=True.
+2026-10-21 15:49:57,561 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:57 INFO     [_cli.run:376] Selected Tasks: ['gpqa_diamond_cot_zeroshot']
+2026-10-21 15:49:58,207 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 INFO     [evaluator:210] Setting random seed to 42 | Setting numpy seed to 42 | Setting torch manual seed to 42 | Setting fewshot manual seed to 42
+2026-10-21 15:49:58,207 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 WARNING  [evaluator:222] generation_kwargs: {'max_gen_toks': 65536, 'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42} specified through cli, these settings will update set parameters in yaml tasks. Ensure 'do_sample=True' for non-greedy decoding!
+2026-10-21 15:49:58,207 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 INFO     [evaluator:235] Initializing local-chat-completions model, with arguments: {'model': 'zai-org/GLM-5.3-Flash', 'base_url': 'http://127.0.0.1:8141/v1/chat/completions', 'tokenizer_backend': 'huggingface', 'timeout': 21600, 'max_length': 1048576, 'num_concurrent': 1, 'trust_remote_code': True}
+2026-10-21 15:49:58,213 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 INFO     [models.api_models:310] Using max length 1048576 - 1
+2026-10-21 15:49:58,213 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 INFO     [models.api_models:313] Concurrent requests are disabled. To enable concurrent requests, set `num_concurrent` > 1.
+2026-10-21 15:49:58,213 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:49:58 INFO     [models.api_models:331] Using tokenizer huggingface
+2026-10-21 15:50:01,430 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [tasks:700] Selected tasks:
+2026-10-21 15:50:01,430 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [tasks:691] Task: gpqa_diamond_cot_zeroshot (gpqa/cot_zeroshot/gpqa_diamond_cot_zeroshot.yaml)
+2026-10-21 15:50:01,430 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [evaluator:313] gpqa_diamond_cot_zeroshot: Using gen_kwargs: {'until': ['<|endoftext|>'], 'do_sample': True, 'temperature': 1.0, 'max_gen_toks': 65536, 'top_p': 0.95, 'stream': False, 'reasoning_effort': 'low', 'seed': 42}
+2026-10-21 15:50:01,430 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [evaluator:328] num_fewshot has been set to 0 for gpqa_diamond_cot_zeroshot in its config. Manual configuration will be ignored.
+2026-10-21 15:50:01,430 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 WARNING  [evaluator:489] Chat template formatting change affects loglikelihood and multiple-choice tasks. See docs/chat-template-readme.md for details.
+2026-10-21 15:50:01,431 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [api.task:310] Building contexts for gpqa_diamond_cot_zeroshot on rank 0...
+2026-10-21 15:50:01,435 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 15:50:01,437 [INFO] test_module.llm_tests.llm_eval_tests: 0%|          | 0/3 [00:00<?, ?it/s]
+2026-10-21 15:50:01,437 [INFO] test_module.llm_tests.llm_eval_tests: 100%|██████████| 3/3 [00:00<00:00, 2446.61it/s]
+2026-10-21 15:50:01,437 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [evaluator:583] Running generate_until requests
+2026-10-21 15:50:01,437 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:50:01 INFO     [models.api_models:1006] Tokenized requests are disabled. Context + generation length is not checked.
+2026-10-21 15:50:01,437 [INFO] test_module.llm_tests.llm_eval_tests:
+2026-10-21 15:50:22,963 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:   0%|          | 0/3 [00:00<?, ?it/s]
+2026-10-21 15:51:12,525 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  33%|███▎      | 1/3 [00:21<00:43, 21.53s/it]
+2026-10-21 15:51:34,469 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API:  67%|██████▋   | 2/3 [01:11<00:38, 38.02s/it]
+2026-10-21 15:51:34,469 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 3/3 [01:33<00:00, 30.68s/it]
+2026-10-21 15:51:34,469 [INFO] test_module.llm_tests.llm_eval_tests: Requesting API: 100%|██████████| 3/3 [01:33<00:00, 31.01s/it]
+2026-10-21 15:51:34,615 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:51:34 INFO     [loggers.evaluation_tracker:269] Saving results aggregated
+2026-10-21 15:51:34,615 [INFO] test_module.llm_tests.llm_eval_tests: 2026-10-21:15:51:34 INFO     [loggers.evaluation_tracker:119] Saving per-task samples to /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/zai-org__GLM-5.3-Flash_p300x2_evals/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2/zai-org__GLM-5.3-Flash/*.jsonl
+2026-10-21 15:51:35,338 [INFO] workflow_module.blocks_sink: BlockAccumulator: +1 block(s), total=1
+2026-10-21 15:51:35,338 [INFO] workflow_module.blocks_sink:   - kind=evals id=zai-org__GLM-5.3-Flash_P300X2 targets={'task_name': 'gpqa_diamond_cot_zeroshot', 'tolerance': 0.05, 'published_score': 79.8, 'published_score_ref': 'https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens)'}
+2026-10-21 15:51:35,339 [INFO] workflow.evals: ✅ llm_eval blocks=1 kind=evals (101.1s)
+2026-10-21 15:51:35,339 [INFO] workflow.evals: Acceptance: PASS (0 blocker(s))
+2026-10-21 15:51:35,339 [INFO] report_module.report_file_saver: Saved markdown to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/report_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.md
+2026-10-21 15:51:35,339 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/data/report_data_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.json
+2026-10-21 15:51:35,339 [INFO] report_module.report_file_saver: Saved JSON to: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/data/report_data_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.json
+2026-10-21 15:51:35,340 [INFO] report_module.generator: Generated report: md=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/report_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.md, json=/home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/data/report_data_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.json
+2026-10-21 15:51:35,340 [INFO] workflow.evals: Wrote markdown: /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/report_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.md
+2026-10-21 15:51:35,340 [INFO] workflow.evals: Wrote json:     /home/raahem/glm53-flash-bringup/tti/workflow_logs/reports_output/evals/data/report_data_zai-org__GLM-5.3-Flash_2026-10-21T155135+0000.json
+2026-10-21 15:51:35,340 [INFO] workflow.evals: === Workflow done: evals (rc=0) ===
+2026-10-21 15:51:35,340 [INFO] workflow_module.runner: ✅ command=workflow rc=0
+2026-10-21 15:51:35,364 - runner.py:42 - INFO: ✅ command=evals rc=0
+2026-10-21 15:51:35,364 - run.py:1374 - INFO: Completed run.py.
+2026-10-21 15:51:35,364 - run.py:1380 - INFO: The output of the workflows is not checked and any errors will be in the logs above and in the saved log file.
+2026-10-21 15:51:35,364 - run.py:1384 - INFO: If you encounter any issues please share the log file in a GitHub issue and server log if available.
+2026-10-21 15:51:35,364 - run.py:1388 - INFO: This log file is saved on local machine at: /home/raahem/glm53-flash-bringup/tti/workflow_logs/run_logs/run_2026-10-21_15-49-53_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_evals_gLNRD-qM.log

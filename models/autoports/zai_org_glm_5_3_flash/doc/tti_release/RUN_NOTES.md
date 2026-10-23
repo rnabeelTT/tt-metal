@@ -454,14 +454,58 @@ Benchmark rows (p300x2-1m, concurrency 1):
   near-limit 344,000-token prompt in 310.8 s.
 - p300x2-1m: the TTI release benchmark rows above (128 / 128 TTFT 251 ms, TPOT 71.5 ms), plus the warm verify's
   1,040,000-token prompt in 2,291 s.
-- Note: multi-user TPOT on p300x2 (178 ms at 16 users) is slower than the stage-10 sweep (about 110-114 ms before
-  the S >= 2 DSA-bucket removal in 344195b5ef5, plus the batch-invariance fixes); the card states the measured value.
+- Multi-user TPOT on p300x2 (178 ms at 16 users) is in line with stage 10 (172.6 ms at 16 users, doc/optimized_vllm README).
 - The card's Performance, First-start and Accuracy sections are updated from these numbers (hunk
   `artifacts/s11/hunks/tt-model-card-perf.diff`, lead commits).
 
-## Pending (to be filled)
-- Loop diagnostic result and classification.
-- Full GPQA (198) result.
-- Supplementary p300x2 benchmark (outside this directory).
-- Bundle build from the final HEAD, fresh-device cold verify, warm 1m verify, Hub publish, Hub verify.
-- Stage-11 status line and row classification.
+## Release report with the GPQA waiver (aggregation only)
+- TTI v0.22.0 has no standalone `reports` workflow. The release report is assembled in-process from the run's
+  blocks.
+- The waiver is recorded the TTI way: a `known_issues` entry (workflow_type EVALS, task gpqa_diamond_cot_zeroshot)
+  in the GLM dev-catalog entry of `tti_local_integration.patch`. Its reason quotes the RUN_NOTES evidence above.
+- The release report was then re-aggregated from its saved report data with TTI's own
+  `acceptance_criteria_check` + `build_acceptance_export` + `ReportGenerator` (`11-tti-regen-report.py`). No
+  device, no server, and no raw output was re-collected.
+- Command: `MODEL_SPECS_ENV=dev PYTHONPATH=<tti> .workflow_venvs/.venv_workflow_run_script/bin/python
+  11-tti-regen-report.py workflow_logs/reports_output/release/data/report_data_..._21-23-04.json
+  workflow_logs/reports_output/release_waiver`
+- Result: EXIT_CODE=0, **Acceptance PASS**.
+  - Evals: PASS (gpqa_diamond_cot_zeroshot waived with the quoted reason; ifeval NA, no reference).
+  - Spec tests: PASS (22/22). Benchmarks: NA (no targets).
+- Report: `release/report_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04_waiver-regen.md`
+  (+ `reports_output/release/data/`). The original Acceptance FAIL report stays next to it.
+
+## Stage-11 status
+**release-readiness-ci-subset-pass, with the GPQA row issue-waived.**
+- The TTI release workflow (ci-nightly subset, p300x2-1m = the 1,048,576 contract) ran end to end against the
+  autoport, with no Docker.
+- Accuracy rows are CI-subset results, not full-set accuracy (except the supplementary full GPQA runs):
+
+| row | result | classification |
+|---|---|---|
+| ifeval (109 docs, effort low) | 74.31 % prompt-strict | no reference exists anywhere; reported as measured (decision (b)); 2/109 loops = model repetition attractor |
+| gpqa_diamond_cot_zeroshot | 70.0 % (CI subset); full set 66.67 %; card protocol 74.24 % vs card 79.8 % | issue-waived (evidence above) |
+| spec tests | 22/22 | pass (3 recorded TTI harness patches) |
+| benchmarks (12 rows) | all requests completed | informational (no targets) |
+
+- Bundle: built from 6853aab7971 (plugin 16febac). The cold fresh-device verify passed on p300x2. The p300x2-1m
+  warm verify passed, with the documented placement exception. The scorecard passed on every profile.
+
+## Hub publish
+- `scripts/11-publish.sh`: `tt-model push <staged> --repo raahemnabeel/glm-5.3-flash-e192-blackhole --public --publish`
+  (lead go, 2026-10-23 09:02). Upload took 35.9 s.
+- Result: https://huggingface.co/raahemnabeel/glm-5.3-flash-e192-blackhole rev
+  **8b8a71f8428fabeadfd30bb4a48c69c4df743d89**, public, in the tt-model catalog (`tt-model-catalog` tag).
+- Bundle: image `tt-model/glm-5.3-flash-e192-blackhole:34ec4c80e68b`, from tt-metal 6853aab7971 + vllm-tt-plugin
+  16febac.
+- The script's post-push check first reported rc 1. This was a checker bug: it counted the uploader's own
+  `.cache/huggingface` metadata as staged files. Corrected recount (checker fixed to skip `.cache/`): 876 staged
+  files, 877 on the Hub (+ .gitattributes), 0 missing, 0 LFS sha256 mismatches. Not re-pushed.
+
+## Hub verify (2026-10-23 09:03-09:11, `scripts/11-verify-rel.sh raahemnabeel/glm-5.3-flash-e192-blackhole p300x2`)
+- `tt-model pull raahemnabeel/glm-5.3-flash-e192-blackhole`: rc 0 in 35 s (the weights were already cached).
+- Warm serve of the Hub bundle on p300x2: healthy after 231 s; `/v1/models` 262,144.
+- Smokes PASS: chat, tool, sampling parameters, non-aligned lengths, burst 16/16 identical to solo (66.9 tok/s),
+  max-effort thinking, an 8,192-token prompt.
+- `tt-model curl`: "Hello, it's wonderful to see you here!".
+- VERIFY_RESULT PASS hub-p300x2. The container was stopped and the device reset by run-locked.
