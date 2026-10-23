@@ -38,7 +38,7 @@ as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 board
   instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
   of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
 - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
-  ones: prefill runs in 2048-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
+  ones: prefill runs in 4096-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
   upload. Speculative decoding is off in this profile (about {SPEED_LONGCTX} tok/s for a lone user), and running users still pause
   while prefill chunks run.
 - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled

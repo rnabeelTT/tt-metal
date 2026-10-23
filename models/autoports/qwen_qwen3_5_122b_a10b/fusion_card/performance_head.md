@@ -4,7 +4,7 @@ temperature 0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness through the serve
 
 | Eval | published | blackhole-fast |
 | --- | ---: | ---: |
-| GPQA-Diamond (40 questions) | {GPQA_PUB} | {GPQA_NEW} |
+| GPQA-Diamond (all 198 questions) | {GPQA_PUB} | {GPQA_NEW} |
 | IFEval prompt-level strict (100) | {IFE_PUB} | {IFE_NEW} |
 | LiveCodeBench v6 (50) | {LCB_PUB} | {LCB_NEW} |
 

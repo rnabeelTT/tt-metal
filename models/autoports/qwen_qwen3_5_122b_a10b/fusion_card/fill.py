@@ -41,6 +41,11 @@ def decode_tok_s(label, isl=128, osl=128):
 
 def main():
     new, pub = evals("q122ev_new"), evals("q122ev_pub")
+    # GPQA from the full 198-question runs (runs/q122_gpqa.sh); the 40-question subset was too small to compare
+    for vals, label in ((new, "q122gp_new"), (pub, "q122gp_pub")):
+        full = evals(label)
+        assert "GPQA" in full, f"no full GPQA run in {label}"
+        vals["GPQA"] = full["GPQA"]
     head = (HERE / "performance_head.md").read_text()
     for key in ("GPQA", "IFE", "LCB"):
         for side, vals in (("NEW", new), ("PUB", pub)):
