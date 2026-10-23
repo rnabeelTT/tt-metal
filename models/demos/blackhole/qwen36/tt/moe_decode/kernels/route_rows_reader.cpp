@@ -60,8 +60,9 @@ void kernel_main() {
     }
     const int32_t* bias = nullptr;
 #ifdef ROUTER_SIGB
-    noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(3)), rec + 64, 4 * num_experts);
-    bias = reinterpret_cast<const int32_t*>(rec + 64);
+    const uint32_t bias_l1 = moe_topk::align64(rec + 64);
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(3)), bias_l1, 4 * num_experts);
+    bias = reinterpret_cast<const int32_t*>(bias_l1);
 #endif
     noc_async_read_barrier();
     invalidate_l1_cache();
