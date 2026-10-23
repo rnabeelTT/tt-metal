@@ -2,7 +2,7 @@
 # card_bench.sh <label> <bundle> <profile> [rows...]: the model card's measurement for one bundle + profile, served
 # exactly as shipped (`tt-model serve <bundle> --profile <profile> --detach`, port 20000): the published card's rows
 # (batch-1 latency ladder, 128/128 and 1024/256 concurrency ladders; random-token prompts, ignore_eos), then the
-# real-text single-user row (realtext.py); GREEDY=1 first runs greedy.py; EVALS="<tasks>" runs eval_coder.sh last. Results in runs/<label>/. One server at a time on an otherwise idle box.
+# real-text single-user row (realtext.py); SERVE_ARGS="<vllm args>" appends to the profile's (last wins); GREEDY=1 first runs greedy.py; EVALS="<tasks>" runs eval_coder.sh last. Results in runs/<label>/. One server at a time on an otherwise idle box.
 set -u
 L=$1; B=$2; P=$3; shift 3
 T=$(cd "$(dirname "$0")" && pwd)
@@ -10,7 +10,7 @@ RUNS=${RUNS:-$HOME/ornith-fusion/runs}; mkdir -p $RUNS/$L
 NAME=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['name'])" "$B" 2>/dev/null || tt-model info "$B" 2>/dev/null | python3 -c "import sys,re; print(re.search(r'\"name\": \"([^\"]+)\"', sys.stdin.read()).group(1))")
 C=tt-model-$NAME-$P
 docker rm -f $C >/dev/null 2>&1
-tt-model serve "$B" --profile $P --detach --port 20000 --no-update-check > $RUNS/$L/serve.log 2>&1
+tt-model serve "$B" --profile $P --detach --port 20000 --no-update-check ${SERVE_ARGS:+-- $SERVE_ARGS} > $RUNS/$L/serve.log 2>&1
 t0=$(date +%s)
 until curl -sf localhost:20000/v1/models >/dev/null; do
   docker ps --format '{{.Names}}' | grep -qx $C || { echo "$L: server died"; docker logs $C 2>&1 | grep -v DEBUG | tail -n 30 > $RUNS/$L/boot_fail.log; exit 1; }
