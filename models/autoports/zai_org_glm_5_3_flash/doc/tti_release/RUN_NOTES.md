@@ -324,6 +324,40 @@ Benchmark rows (p300x2-1m, concurrency 1):
   slots, plus `tests/test_seed_stream_host.py`) is WITHDRAWN. The seed streams were already identical. It is kept
   only as a hardening note, the same rule as the shared `tt_transformers` generator (#51981).
 
+## Known limitation found by the bundle verify (no bundle change in this release)
+- `tt-model serve <staged tt_kernel_manifest.json>` does not fetch the pinned weights. Only `tt-model pull` does
+  (`tt_kernel.container_cli._download_weights` into the host HF cache).
+- The container cannot fetch them itself: the adapter (`generator_vllm.resolve_checkpoint`) reads the local
+  snapshot at `GLM53_WEIGHTS_REVISION` and builds the E192 overlay from it.
+- Without the snapshot, the container fails at boot with an opaque `FileNotFoundError` for
+  `/weight-cache/glm53_ckpt_overlay/<rev>/model.safetensors.index.json` (stage-11 cold-verify attempt 2,
+  2026-10-23).
+- A failed host fetch (attempt 1: a wrong PYTHONPATH broke huggingface_hub's import) is printed by `serve`, but the
+  command still exits 0.
+- Users who follow the Hub path (`tt-model pull` / `serve <repo>`) are not affected.
+- The staged verify does the pull-equivalent fetch itself (`scripts/11-verify-rel.sh`).
+
+## Bundle parent-snapshot path: first exercised by the stage-11 cold verify (bug fixed in da072e3719b)
+- The bundle reads the 288-expert parent snapshot @91b69215 through `tt/e192_mask.json`. The env has
+  `GLM53_CKPT_OVERLAY_DIR`, no `GLM53_CKPT`; `generator_vllm.resolve_checkpoint` builds a symlink overlay.
+- Every earlier device run (stages 1-10, every stage-11 TTI / GPQA / diagnostic server) set `GLM53_CKPT` to the
+  pruned E192 build, whose 192 experts are already renumbered (`CheckpointReader.mask` = None). So the parent path
+  had never run on a device.
+- No earlier `tt-model serve` of this bundle exists: the stage-11 verifies (2026-10-23) are its first container
+  boots; logs/11 has no older staged / hub verify logs.
+- Host coverage was the fake-config test of the overlay in `test_generator_vllm_host.py`, without a
+  layer read.
+- Cold-verify attempt 3 (06:13): the container died at the first `layer_state(0)` with
+  `KeyError: 0` in `CheckpointReader._expert_name`. The mask has rows for the MoE layers 3-44 only, and dense
+  layer 0 was looked up.
+- Fix da072e3719b: `layer in self.mask`.
+- Host checks on the downloaded parent through the overlay (lead; repeated here): all 46 layers list correctly.
+  Dense 0-2 have no experts; layers 3-44 have 192 experts, every mapped name exists, and the router has 192 rows;
+  MTP has 288. `build_e192_ckpt.py` copied the tensors verbatim, so the parent path reads the same tensors as the
+  pruned build.
+- A host regression test for the dense-layer case (`tests/test_ckpt_mask_host.py`) was offered to the lead
+  (`artifacts/s11/maskfix.patch`). It fails on the old code with KeyError 0 and passes with the fix.
+
 ## Autoport implementation check
 - The TTI-written run spec (`run_specs/runtime_model_spec_release.json`) has:
   - `impl.impl_id=glm53_flash_autoport`
@@ -348,6 +382,82 @@ Benchmark rows (p300x2-1m, concurrency 1):
 - No leftover server: process-group stop and the trap in the chain script. No tmux sessions. No TTI Docker
   containers.
 - Not copied: eval sample dumps (1.1-1.4 MB each, kept in the TTI worktree `workflow_logs`), weights, caches, `.env`.
+
+## tt-model bundle: build and fresh-device verification
+- Build: `scripts/11-package-rel.sh` (via `11-package-watch.sh`, host-RAM guard) from the clean release worktree.
+  - Manifest copy with only `source.tt_metal` pointed at the worktree.
+  - Final build from da072e3719b with plugin 16febac -> image `tt-model/glm-5.3-flash-e192-blackhole:e279dbf74b34`,
+    staged at `~/glm53-flash-bringup/pkgbuild-rel/build/glm-5.3-flash-e192-blackhole/`.
+  - The in-image verify steps pass. An earlier build from 09842218b22 (image 51370e9e44ad) is superseded by the
+    ckpt fix.
+- Disk: deleted the bring-up E192 checkpoint (212 GB), the bring-up weight cache (134 GB) with its symlink, and
+  ~/.cache/tt-metal-cache (94 GB), lead-approved. Free went 131 -> 569 GB before the download.
+- Cold verify, p300x2 (`scripts/11-verify-rel.sh`, `COLD=1`; attempt 4, 2026-10-23):
+  - Fresh device: `tt-smi -r`, no holders. Bundle weight and kernel caches wiped, no host JIT cache.
+  - Parent snapshot zai-org/GLM-5.3-Flash @91b69215 fetched the way `tt-model pull` does: 328 GB in 2,859 s
+    (attempt 3).
+  - First boot to healthy: **1,730 s**, of which the weight conversion took 1,379 s and wrote the 121 GB cache.
+  - Served `max_model_len` 262,144 = serving_profiles.json.
+  - Smokes PASS:
+    - chat and glm47 tool call
+    - logprobs, repetition penalty, min_p and seeded requests
+    - greedy repeat identical
+    - non-aligned prompt lengths 1-4,223
+    - page growth
+    - burst 16/16 identical to solo (66.6 tok/s)
+    - max-effort thinking (haiku, train question)
+    - near-limit 262,080-token prompt (218.6 s)
+    - `tt-model curl`
+  - VERIFY_RESULT PASS.
+- Warm verify, p300x2-1m (staged bundle, same weight cache, 2026-10-23 07:0x-07:47):
+  - Healthy after 211 s (warm); served `max_model_len` 1,048,576.
+  - All smokes pass as in the cold run, and the near-limit **1,040,000-token prompt answers coherently in
+    2,291 s** (`SMOKE_LONG 1040000 wall 2291.0s`).
+  - `tt-model curl` OK.
+  - The script's verdict is `VERIFY_RESULT FAIL staged-p300x2-1m`. The only failing gate is
+    `SMOKE_BURST 1 ok, 64 tokens in 4.8s = 13.5 tok/s; 0/1 identical to solo greedy`. That is the documented
+    block-placement numerics of the sharded layout (doc/vllm_integration/README.md "Block-sharded layout: greedy
+    outputs and block placement"; stage 9 recorded burst 1/2), not a defect.
+  - **Classified PASS with this documented exception (lead decision); not rerun.**
+  - Attempts 1-3 failed before serving and are recorded above (verify-script PYTHONPATH leak, staged serve does not
+    fetch weights, ckpt mask KeyError).
+
+## Scorecard run on the bundle (`scripts/11-scorecard.sh`, 2026-10-23 07:48-08:50, one ticket, `tt-model serve` per profile)
+- Method: the staged bundle (image e279dbf74b34), warm cache. Rows from `10-perf-sweep.py`: greedy, random-token
+  prompts as token ids, output length pinned. JSONs in `~/glm53-flash-bringup/artifacts/s11/scorecard/` (kept out
+  of this directory: they carry per-profile context values).
+- p300x2 (16 x 262,144), healthy after 196 s:
+
+  | input / output, users | TTFT | TPOT | output tok/s |
+  |---|---:|---:|---:|
+  | 128 / 128, 1 | 259 ms | 75.2 ms | 13.0 |
+  | 8,192 / 256, 1 | 4.90 s | 79.0 ms | 10.2 |
+  | 131,072 / 256, 1 | 93.8 s | 79.8 ms | 2.2 |
+  | 128 / 128, 16 | 3.87 s | 178.0 ms | 77.3 |
+  | 1,024 / 256, 16 | 12.2 s | 179.8 ms | 70.6 |
+
+  - CI-style 100 / 100 at 32 concurrency (`vllm bench serve`, 64 prompts, 16 slots): 64/64 succeeded, 74.9 output
+    tok/s, mean TTFT 19.8 s (queueing), mean TPOT 177.9 ms.
+  - Preemption load test (09-slotleak t2: 16 x 20,000-token prompts x 512 tokens, beyond the pool): PASS. 16/16
+    finished with 512 tokens, num_preemptions 0 -> 1, the control prompt is equal to its solo run, 402.8 s.
+- p300x2-wide (32 x 159,744), healthy after 241 s:
+
+  | input / output, users | TTFT | TPOT | output tok/s |
+  |---|---:|---:|---:|
+  | 128 / 128, 1 | 274 ms | 124.5 ms | 7.9 |
+  | 128 / 128, 32 | 7.98 s | 165.5 ms | 141.1 |
+  | 1,024 / 256, 32 | 24.7 s | 166.0 ms | 122.3 |
+
+  - Smokes PASS, burst 16/16 identical to solo, near-limit 159,680-token prompt in 120.8 s.
+  - Served batch-invariance (`tools/vllm_served_invariance.py`): PASS.
+- p300x2-long (1 x 344,064), healthy after 226 s: 128 / 128 TTFT 245 ms, TPOT 49.9 ms (20.1 tok/s). Smokes PASS,
+  near-limit 344,000-token prompt in 310.8 s.
+- p300x2-1m: the TTI release benchmark rows above (128 / 128 TTFT 251 ms, TPOT 71.5 ms), plus the warm verify's
+  1,040,000-token prompt in 2,291 s.
+- Note: multi-user TPOT on p300x2 (178 ms at 16 users) is slower than the stage-10 sweep (about 110-114 ms before
+  the S >= 2 DSA-bucket removal in 344195b5ef5, plus the batch-invariance fixes); the card states the measured value.
+- The card's Performance, First-start and Accuracy sections are updated from these numbers (hunk
+  `artifacts/s11/hunks/tt-model-card-perf.diff`, lead commits).
 
 ## Pending (to be filled)
 - Loop diagnostic result and classification.
