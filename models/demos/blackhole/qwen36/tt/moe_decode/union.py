@@ -22,7 +22,8 @@ import torch
 import ttnn
 
 from .experts import (
-    KERNEL_DIR, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout, gu_ring, place_along_rows,
+    KERNEL_DIR, ROUTERS, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout, gu_ring,
+    logits_row_bytes, place_along_rows,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -77,52 +78,139 @@ class RowsBuffers:
 
 
 class RouteRows:
-    """(logits [M, E + 32], table) -> table, one core per row (NCRISC and BRISC each take half the logits)."""
+    """(logits [M, E + 32] BF16 (softmax) / [M, E] FP32 (sigb), table) -> table, one core per row (NCRISC and BRISC
+    each take half the logits)."""
 
-    def __init__(self, mesh_device, num_experts, k, rows):
+    def __init__(self, mesh_device, num_experts, k, rows, router="softmax"):
+        assert router in ROUTERS, router
+        self.router = router
         self.E, self.k, self.rows = num_experts, k, rows
         gx = mesh_device.compute_with_storage_grid_size().x
         self.assign = [ttnn.CoreCoord(r % gx, r // gx) for r in range(rows)]
         self.cores = _range_set(self.assign)
 
-    def __call__(self, logits, table):
+    def __call__(self, logits, table, bias=None):
+        """bias: the sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
+        assert (bias is not None) == (self.router == "sigb")
         cb_scr, cb_part, cb_lg = 0, 1, 2
-        lg_bytes = 64 * (self.E // TILE + 1)
+        lg_bytes = logits_row_bytes(self.E, self.router)
         cbs = [
             _cb(self.cores, cb_scr, ttnn.uint16, lg_bytes + 64, 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
         ]
         rd_rt, wr_rt = ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
+        bias_arg = [] if bias is None else [bias.buffer_address()]
         for r, c in enumerate(self.assign):
-            rd_rt[c.x][c.y] = [logits.buffer_address(), table.buffer_address(), r]
-            wr_rt[c.x][c.y] = [logits.buffer_address(), r]
+            rd_rt[c.x][c.y] = [logits.buffer_address(), table.buffer_address(), r] + bias_arg
+            wr_rt[c.x][c.y] = [logits.buffer_address(), r] + bias_arg
         lg_ct = ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct + ttnn.TensorAccessorArgs(table).get_compile_time_args()
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
+        defines = [("ROUTER_SIGB", "1")] if self.router == "sigb" else []
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"), core_ranges=self.cores,
                 compile_time_args=rd_ct, runtime_args=rd_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0), defines=defines,
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"), core_ranges=self.cores,
                 compile_time_args=wr_ct, runtime_args=wr_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1),
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1), defines=defines,
             ),
         ]
-        ttnn.generic_op([logits, table], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        io = [logits, table] + ([bias] if bias is not None else [])
+        ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return table
+
+
+class RouteScores(RouteRows):
+    """Router tail for a port's own expert paths (GLM-4.5-Air: the sigb router feeding its sparse-matmul decode):
+    (logits [1, 1, M, E] (sigb: FP32 TILE), bias) -> (scores [1, 1, M, k] BF16 TILE, ids [1, 1, M, k] UINT16 TILE),
+    one core per row (route_rows_* kernels with ROUTE_TILES). The outputs are persistent per M (zero padding, L1;
+    build every width before trace capture): the caller must not deallocate them."""
+
+    def __init__(self, mesh_device, num_experts, k, router="sigb"):
+        super().__init__(mesh_device, num_experts, k, 32, router=router)
+        self.mesh_device = mesh_device
+        self._out = {}
+
+    def outputs(self, rows):
+        if rows not in self._out:
+            multi = getattr(self.mesh_device, "get_num_devices", lambda: 1)() > 1
+            kw = dict(layout=ttnn.TILE_LAYOUT, device=self.mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG)
+            if multi:
+                kw["mesh_mapper"] = ttnn.ReplicateTensorToMesh(self.mesh_device)
+            scores = ttnn.from_torch(torch.zeros(1, 1, rows, self.k), dtype=ttnn.bfloat16, **kw)
+            ids = ttnn.from_torch(torch.zeros(1, 1, rows, self.k, dtype=torch.int32), dtype=ttnn.uint16, **kw)
+            self._out[rows] = (scores, ids)
+        return self._out[rows]
+
+    def __call__(self, logits, rows, bias=None):
+        assert (bias is not None) == (self.router == "sigb")
+        scores, ids = self.outputs(rows)
+        cb_scr, cb_part, cb_lg = 0, 1, 2
+        lg_bytes = logits_row_bytes(self.E, self.router)
+        cores = _range_set(self.assign[:rows])
+        cbs = [
+            _cb(cores, cb_scr, ttnn.uint16, lg_bytes + 128, 1),
+            _cb(cores, cb_part, ttnn.uint32, 8 * self.k, 1),
+            _cb(cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
+        ]
+        rd_rt, wr_rt = ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
+        bias_arg = [] if bias is None else [bias.buffer_address()]
+        for r, c in enumerate(self.assign[:rows]):
+            rd_rt[c.x][c.y] = [logits.buffer_address(), ids.buffer_address(), r] + bias_arg + [scores.buffer_address()]
+            wr_rt[c.x][c.y] = [logits.buffer_address(), r] + bias_arg
+        lg_ct = ttnn.TensorAccessorArgs(logits).get_compile_time_args()
+        rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct
+        rd_ct += ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(scores).get_compile_time_args()
+        wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
+        dm = ttnn.DataMovementConfigDescriptor
+        defines = [("ROUTE_TILES", "1")] + ([("ROUTER_SIGB", "1")] if self.router == "sigb" else [])
+        kernels = [
+            ttnn.KernelDescriptor(
+                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"), core_ranges=cores,
+                compile_time_args=rd_ct, runtime_args=rd_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0), defines=defines,
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"), core_ranges=cores,
+                compile_time_args=wr_ct, runtime_args=wr_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1), defines=defines,
+            ),
+        ]
+        io = [logits, ids, scores] + ([bias] if bias is not None else [])
+        ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        return scores, ids
+
+
+def selection_bias_q23(bias):
+    """GLM-4.5-Air e_score_correction_bias [E] -> the sigb kernels' Q23 int32 (mean-centred in float64: selection is
+    invariant to a constant shift, and the bias sits near 16-20 with a ~0.02-0.05 spread)."""
+    b = bias.reshape(-1).to(torch.float64)
+    return torch.round((b - b.mean()) * (1 << 23)).to(torch.int32)
+
+
+def upload_selection_bias(mesh_device, bias):
+    """The Q23 bias as one DRAM page ([1, 1, 1, E] INT32 row-major: page 0 in bank 0, where the kernels read it)."""
+    multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
+    return ttnn.from_torch(
+        selection_bias_q23(bias).reshape(1, 1, 1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+        device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        **({"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}),
+    )
 
 
 class ExpertGateUpRows:
     """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column group (experts.gu_layout);
     union slot s goes to core s % readers."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5):
-        """readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5,
+                 shared=True):
+        """shared False: routed experts only (no union slot 0). readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
         SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
         their reads collapse (8 rows, 4-chip shapes: 51 us median at 4 per pair, 89 at 22, 217 max at 8)."""
         self.banks = len(bank_workers(mesh_device))
@@ -131,6 +219,7 @@ class ExpertGateUpRows:
         self.pairs = self.n_tiles // 2
         self.m, self.nb, self.ngroups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
+        self.shared = shared
         self.trows, self.groups = tile_rows(rows), row_groups(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         if readers is None:
@@ -166,9 +255,10 @@ class ExpertGateUpRows:
         ]
         rd_rt, wr_rt = {}, {}
         for c, j, r in self.assign:
+            s0 = r if self.shared else r + 1  # first union slot (no shared expert: slot 0 is never streamed)
             rd_rt[(c.x, c.y)] = [table.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(),
-                                 identity.buffer_address(), j, r, (j + r) & 0x3]
-            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, r]
+                                 identity.buffer_address(), j, s0, (j + r) & 0x3]
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0]
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
@@ -187,7 +277,10 @@ class ExpertDownRows:
     """(act, table, down, shared_down, out) -> out. readers: cores per DRAM bank; chunk: union slots per weight
     block (the cb holds two)."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, chunk=8):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, chunk=8,
+                 shared=True):
+        """shared False: routed experts only (shared_down is not read)."""
+        self.shared = shared
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.m = hidden // TILE // self.banks
@@ -230,6 +323,8 @@ class ExpertDownRows:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
+        if not self.shared:
+            defines.append(("NO_SHARED", "1"))
         kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         return ttnn.generic_op([down, shared_down, act, table, out], program)

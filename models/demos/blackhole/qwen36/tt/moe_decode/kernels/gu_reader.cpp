@@ -16,7 +16,10 @@
 //    kt * m tiles per bank, read in page_bytes packets, transaction-id pipelined (num_buffers - 2 blocks in flight
 //    ahead of compute).
 //
-// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot...]
+// ROUTER_SIGB (GLM-4.5-Air): FP32 logits [32, E], sigmoid + selection-bias top-k, normalized weights, shared weight 1
+// (router_topk.hpp); the bias (Q23 int32 [E], one DRAM page in bank 0) follows the slot list in the runtime args.
+//
+// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot..., (ROUTER_SIGB) bias_addr]
 
 #include <stdint.h>
 
@@ -55,16 +58,23 @@ void kernel_main() {
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
-    constexpr uint32_t lg_tiles = num_experts / 32 + 1;
+    constexpr uint32_t lg_tiles = moe_topk::lg_tiles(num_experts);
 
-    // ---- logits row ----
+    // ---- logits row (+ the selection bias) ----
     cb_reserve_back(cb_scr, 1);
     const uint32_t lg = get_write_ptr(cb_scr);
-    const auto s_lg = TensorAccessor(logits_args, logits_addr, 2048);
+    const auto s_lg = TensorAccessor(logits_args, logits_addr, moe_topk::LG_PAGE);
     for (uint32_t t = 0; t < lg_tiles; ++t) {
-        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * 64, 32);
-        noc_async_read(s_lg.get_noc_addr(t, 512), lg + t * 64 + 32, 32);
+        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * moe_topk::LG_TILE_L1, moe_topk::LG_HALF);
+        noc_async_read(
+            s_lg.get_noc_addr(t, moe_topk::LG_FACE1), lg + t * moe_topk::LG_TILE_L1 + moe_topk::LG_HALF, moe_topk::LG_HALF);
     }
+    const int32_t* bias = nullptr;
+#ifdef ROUTER_SIGB
+    const uint32_t bias_l1 = lg + lg_tiles * moe_topk::LG_TILE_L1;
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(6 + num_slots)), bias_l1, 4 * num_experts);
+    bias = reinterpret_cast<const int32_t*>(bias_l1);
+#endif
     noc_async_read_barrier();
     invalidate_l1_cache();
 
@@ -118,22 +128,21 @@ void kernel_main() {
     {
         DeviceZoneScopedN("tail");
     // ---- router tail: top-k of [0, E / 2) here, of [E / 2, E) on the writer, merged ----
-    const uint32_t* words = reinterpret_cast<const uint32_t*>(lg);
-    moe_topk::select_range<topk>(words, 0, num_experts / 4, keys, ids);
+    moe_topk::route_select<topk>(lg, bias, 0, num_experts / 2, keys, ids);
     cb_wait_front(cb_part, 1);
     invalidate_l1_cache();
     const uint32_t* part = reinterpret_cast<const uint32_t*>(get_read_ptr(cb_part));
     moe_topk::merge<topk>(keys, ids, part, part + topk);
     cb_pop_front(cb_part, 1);
     uint16_t w[topk];
-    moe_topk::softmax_selected<topk>(words, ids, w);
+    const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
     cb_reserve_back(cb_route, 1);
     volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_write_ptr(cb_route));
     for (uint32_t j = 0; j < topk; ++j) {
         route[j] = static_cast<uint16_t>(ids[j]);
         route[16 + 1 + j] = w[j];
     }
-    route[16] = moe_topk::sigmoid_bf16(reinterpret_cast<const uint16_t*>(lg)[num_experts]);
+    route[16] = w_shared;
     cb_push_back(cb_route, 1);
     }
 

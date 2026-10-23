@@ -180,6 +180,144 @@ inline void topk_softmax(const uint32_t* words, uint32_t* ids, uint16_t* weights
     topk_select<topk, n>(words, ids);
     softmax_selected<topk>(words, ids, weights);
 }
+// ---- GLM-4.5-Air router (ROUTER_SIGB): s = sigmoid(logit) (FP32 logits), selection key s + b (b: the per-layer
+// e_score_correction_bias, mean-centred, Q23 int32 from the host), weights s_j / sum s (norm_topk_prob; scaling 1.0),
+// ungated shared expert (weight 1). Fixed point: s in Q23 (exp(-|x|) by exp2_parts, 1 / (1 + e) by Newton in Q30).
+
+// FP32 bits -> Q24 (|x| clamped near 2^7, where the sigmoid is saturated to far below Q23).
+inline int32_t f32_to_q24(uint32_t b) {
+    const int32_t e = (b >> 23) & 0xFF;
+    if (e == 0) {
+        return 0;
+    }
+    const int32_t m = (b & 0x7FFFFF) | 0x800000;  // value = m * 2^(e - 150); in Q24: m * 2^(e - 126)
+    const int32_t shift = e - 126;
+    const int32_t v = shift >= 0 ? (m << (shift > 6 ? 6 : shift)) : (shift < -31 ? 0 : (m >> -shift));
+    return (b & 0x80000000u) ? -v : v;
+}
+
+// sigmoid of an FP32 logit in Q23 (~1e-7): e = exp(-|x|) = 2^n 2^f (f in [0, 1): Taylor degree 8 in Q30), then
+// 1 / (1 + e) by Newton.
+inline uint32_t sigmoid_q23(uint32_t b) {
+    const int32_t v = f32_to_q24(b);
+    const int64_t t = -((static_cast<int64_t>(v < 0 ? -v : v) * 1549082005ll) >> 30);  // -|x| log2(e), Q24
+    const int32_t n = static_cast<int32_t>(t >> 24);                                     // floor, <= 0
+    const uint64_t f = static_cast<uint64_t>(t & 0xFFFFFF) << 6;                         // [0, 1), Q30
+    uint64_t p = 1419ull;
+    p = 16377ull + ((p * f) >> 30);
+    p = 165394ull + ((p * f) >> 30);
+    p = 1431680ull + ((p * f) >> 30);
+    p = 10327387ull + ((p * f) >> 30);
+    p = 59597083ull + ((p * f) >> 30);
+    p = 257941248ull + ((p * f) >> 30);
+    p = 744261118ull + ((p * f) >> 30);
+    p = 1073741824ull + ((p * f) >> 30);                     // 2^f, Q30, [2^30, 2^31)
+    const uint64_t e30 = n < -31 ? 0 : p >> (-n);        // exp(-|x|), Q30, <= 2^30
+    const uint64_t h = ((1ull << 30) + e30) >> 1;        // (1 + e) / 2 in Q30, [2^29, 2^30]
+    // 1 / h by Newton from x0 = 48/17 - 32/17 h (valid on [0.5, 1]; Q30): three steps to ~2^-28
+    uint64_t x = 3031741621ull - ((2021161081ull * h) >> 30);
+    for (int i = 0; i < 3; ++i) {
+        const uint64_t hx = (h * x) >> 30;
+        x = (x * ((2ull << 30) - hx)) >> 30;
+    }
+    uint32_t r = static_cast<uint32_t>(x >> 1);  // 1 / (1 + e), Q30
+    if (r > (1u << 30)) {
+        r = 1u << 30;
+    }
+    return (v >= 0 ? r : (1u << 30) - r) >> 7;
+}
+
+// Top-k (sorted descending, ties to the lower id) of the selection keys s + b of experts [i0, i1): f32 = the FP32
+// logits row (expert i at f32[i]), bias = Q23 int32 per expert. keys_out: order keys (s + b + 2^28 > 0).
+template <uint32_t topk>
+inline void select_range_sigb(
+    const uint32_t* f32, const int32_t* bias, uint32_t i0, uint32_t i1, uint32_t* keys_out, uint32_t* ids_out) {
+    uint32_t keys[topk], ids[topk];
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys[j] = 0;
+        ids[j] = 0;
+    }
+#pragma GCC unroll 1
+    for (uint32_t i = i0; i < i1; ++i) {
+        const uint32_t key = static_cast<uint32_t>(static_cast<int32_t>(sigmoid_q23(f32[i])) + bias[i] + (1 << 28));
+        if (key > keys[topk - 1]) {
+            keys[topk - 1] = key;
+            ids[topk - 1] = i;
+#pragma GCC unroll 16
+            for (uint32_t j = topk - 1; j > 0; --j) {
+                if (keys[j] > keys[j - 1]) {
+                    const uint32_t tk = keys[j], ti = ids[j];
+                    keys[j] = keys[j - 1];
+                    ids[j] = ids[j - 1];
+                    keys[j - 1] = tk;
+                    ids[j - 1] = ti;
+                }
+            }
+        }
+    }
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys_out[j] = keys[j];
+        ids_out[j] = ids[j];
+    }
+}
+
+// weights_j = s_j / sum s (BF16 bits) of the selected experts.
+template <uint32_t topk>
+inline void sigmoid_weights(const uint32_t* f32, const uint32_t* ids, uint16_t* weights) {
+    uint64_t s[topk];
+    uint64_t sum = 0;
+    for (uint32_t j = 0; j < topk; ++j) {
+        s[j] = sigmoid_q23(f32[ids[j]]);
+        sum += s[j];
+    }
+    if (sum == 0) {
+        sum = 1;
+    }
+    const uint64_t inv = (1ull << 59) / sum;  // Q(59 - 23) = Q36 of 1 / sum
+    for (uint32_t j = 0; j < topk; ++j) {
+        weights[j] = fixed_to_bf16((s[j] * inv) >> 32, 27);  // Q23 x Q36 >> 32 = Q27
+    }
+}
+
+// The logits row as the routing kernels read it: one row of each [32, 32] TILE page, faces 0 and 1 back to back.
+#ifdef ROUTER_SIGB
+constexpr uint32_t LG_PAGE = 4096;   // FP32 tile
+constexpr uint32_t LG_HALF = 64;     // 16 FP32 values of a face row
+constexpr uint32_t LG_FACE1 = 1024;  // face 1 offset
+inline uint32_t lg_row_off(uint32_t r) { return (r / 16) * 2048 + (r % 16) * 64; }
+constexpr uint32_t lg_tiles(uint32_t e) { return e / 32; }  // no shared-gate column
+#else
+constexpr uint32_t LG_PAGE = 2048;
+constexpr uint32_t LG_HALF = 32;
+constexpr uint32_t LG_FACE1 = 512;
+inline uint32_t lg_row_off(uint32_t r) { return (r / 16) * 1024 + (r % 16) * 32; }
+constexpr uint32_t lg_tiles(uint32_t e) { return e / 32 + 1; }  // + the shared-gate logit's tile
+#endif
+constexpr uint32_t LG_TILE_L1 = 2 * LG_HALF;  // bytes per tile of the gathered row
+
+// Router of one row: experts [e0, e1) of the gathered row `lg` (bias: Q23 per expert, ROUTER_SIGB only).
+template <uint32_t topk>
+inline void route_select(uint32_t lg, const int32_t* bias, uint32_t e0, uint32_t e1, uint32_t* keys, uint32_t* ids) {
+#ifdef ROUTER_SIGB
+    select_range_sigb<topk>(reinterpret_cast<const uint32_t*>(lg), bias, e0, e1, keys, ids);
+#else
+    select_range<topk>(reinterpret_cast<const uint32_t*>(lg), e0 / 2, e1 / 2, keys, ids);
+#endif
+}
+// Routing weights of the selected (BF16 bits) and the shared-expert weight.
+template <uint32_t topk, uint32_t num_experts>
+inline uint16_t route_weights(uint32_t lg, const uint32_t* ids, uint16_t* w) {
+#ifdef ROUTER_SIGB
+    sigmoid_weights<topk>(reinterpret_cast<const uint32_t*>(lg), ids, w);
+    return 0x3F80;  // ungated shared expert
+#else
+    softmax_selected<topk>(reinterpret_cast<const uint32_t*>(lg), ids, w);
+    return sigmoid_bf16(reinterpret_cast<const uint16_t*>(lg)[num_experts]);
+#endif
+}
+
 // Union of the routed experts of M route records (route table rows: k ids at [0, k), BF16 shared weight at 16,
 // routed weights at [17, 17 + k)): uni[0 .. U) ascending; returns U (union slot 0 is the shared expert, slot 1 + i
 // union expert i).

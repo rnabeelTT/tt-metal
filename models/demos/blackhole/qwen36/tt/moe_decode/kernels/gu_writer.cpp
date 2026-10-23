@@ -13,7 +13,8 @@
 // 4. Writes each 1x32 output tile (w_s * silu(gate) * up of slot s and column pair p, columns 32 p .. 32 p + 31; the
 //    group's pairs as gu_layout.hpp) to row s of the [k + 1, I] BF16 row-major activation buffer.
 //
-// runtime args: [x_addr, act_addr, route_addr, logits_addr, group q, route_owner, num_slots, slot...]
+// runtime args: [x_addr, act_addr, route_addr, logits_addr, group q, route_owner, num_slots, slot...,
+//                (ROUTER_SIGB) bias_addr, (MOE_FUSED) the down cores]
 
 #include <stdint.h>
 
@@ -51,20 +52,30 @@ void kernel_main() {
     constexpr auto lg_args = TensorAccessorArgs<route_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t tiny_bytes = 64;
-    constexpr uint32_t lg_tiles = num_experts / 32;
+    constexpr uint32_t lg_tiles = num_experts / 32;  // the experts' logits (not the shared-gate column)
 
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
     const auto s_act = TensorAccessor(act_args, act_addr, act_row_bytes);
     const auto s_route = TensorAccessor(route_args, route_addr, 64);
-    const auto s_lg = TensorAccessor(lg_args, logits_addr, 2048);
+    const auto s_lg = TensorAccessor(lg_args, logits_addr, moe_topk::LG_PAGE);
 
     // logits [E / 2, E) (they gate the expert stream)
     cb_reserve_back(cb_lg, 1);
     const uint32_t lg = get_write_ptr(cb_lg);
     for (uint32_t t = lg_tiles / 2; t < lg_tiles; ++t) {
-        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * 64, 32);
-        noc_async_read(s_lg.get_noc_addr(t, 512), lg + t * 64 + 32, 32);
+        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * moe_topk::LG_TILE_L1, moe_topk::LG_HALF);
+        noc_async_read(
+            s_lg.get_noc_addr(t, moe_topk::LG_FACE1), lg + t * moe_topk::LG_TILE_L1 + moe_topk::LG_HALF, moe_topk::LG_HALF);
     }
+    const int32_t* bias = nullptr;
+#ifdef ROUTER_SIGB
+    constexpr uint32_t extra = 1;  // the bias address after the slot list
+    const uint32_t bias_l1 = lg + lg_tiles * moe_topk::LG_TILE_L1;
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(7 + num_slots)), bias_l1, 4 * num_experts);
+    bias = reinterpret_cast<const int32_t*>(bias_l1);
+#else
+    constexpr uint32_t extra = 0;
+#endif
     noc_async_read_barrier();
     invalidate_l1_cache();
 
@@ -72,8 +83,7 @@ void kernel_main() {
         DeviceZoneScopedN("tail");
         cb_reserve_back(cb_part, 1);
         uint32_t* part = reinterpret_cast<uint32_t*>(get_write_ptr(cb_part));
-        moe_topk::select_range<topk>(
-            reinterpret_cast<const uint32_t*>(lg), num_experts / 4, num_experts / 2, part, part + topk);
+        moe_topk::route_select<topk>(lg, bias, num_experts / 2, num_experts, part, part + topk);
         cb_push_back(cb_part, 1);
     }
 
@@ -114,7 +124,7 @@ void kernel_main() {
 #ifdef MOE_FUSED
     // the one-program MoE: tell every down core this core's activations are written
     // (runtime args after the slot list: num_down, then (x, y) NOC coordinates per down core)
-    const uint32_t a0 = 7 + num_slots;
+    const uint32_t a0 = 7 + num_slots + extra;
     const uint32_t num_down = get_arg_val<uint32_t>(a0);
     const uint32_t sem = get_semaphore(MOE_SEM);
     for (uint32_t d = 0; d < num_down; ++d) {

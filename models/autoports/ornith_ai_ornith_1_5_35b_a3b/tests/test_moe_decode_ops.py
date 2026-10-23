@@ -267,6 +267,41 @@ def time_experts(
               f"gate|up {t_gu:5.1f} us, down {t_dn:5.1f} us, both {t_both:5.1f} us, one program {t_one:5.1f} us")
 
 
+def check_route_sigb(dev, rows, E=128, k=8, trials=3):
+    """GLM-4.5-Air router (RouteScores, sigb): ids / weights vs torch fp64 (s = sigmoid(logit), top-k of s + centred
+    bias, s / sum s). An id mismatch is allowed only where the torch keys tie within 2e-5 (the fixed-point sigmoid)."""
+    from models.demos.blackhole.qwen36.tt.moe_decode.union import RouteScores, selection_bias_q23, upload_selection_bias
+
+    op = RouteScores(dev, E, k, router="sigb")
+    worst_w, near = 0.0, 0
+    for t in range(trials):
+        torch.manual_seed(100 + t)
+        bias = 19.7 + 0.02 * torch.randn(E)
+        lg = torch.zeros(1, 1, 32, E)
+        lg[0, 0, :rows] = 2.5 * torch.randn(rows, E)
+        lgt = ttnn.from_torch(lg, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=ttnn.L1_MEMORY_CONFIG)
+        bt = upload_selection_bias(dev, bias)
+        scores, ids = op(lgt, rows, bias=bt)
+        got_ids = ttnn.to_torch(ids).reshape(rows, k).long()
+        got_w = ttnn.to_torch(scores).reshape(rows, k).float()
+        bq = selection_bias_q23(bias).double() / (1 << 23)
+        for r in range(rows):
+            s = torch.sigmoid(lg[0, 0, r].double())
+            key = s + bq
+            order = torch.argsort(key, descending=True, stable=True)
+            ref_ids = order[:k]
+            if not torch.equal(got_ids[r], ref_ids):
+                gap = (key[order[k - 1]] - key[order[k]]).abs().item()
+                assert set(got_ids[r].tolist()) == set(ref_ids.tolist()) or gap < 2e-5, (r, got_ids[r].tolist(), ref_ids.tolist(), gap)
+                near += 1
+            ref_w = s[got_ids[r]] / s[got_ids[r]].sum()
+            worst_w = max(worst_w, (got_w[r].double() - ref_w).abs().max().item())
+        ttnn.deallocate(lgt)
+        ttnn.deallocate(bt)
+    print(f"route sigb rows {rows}: ids exact ({near} near-tie / order differences), worst weight abs err {worst_w:.2e}")
+    assert worst_w < 8e-3, worst_w  # BF16 output (8 significant bits)
+
+
 def main():
     what = sys.argv[1:] or ["topk", "experts"]
     dev = ttnn.open_device(device_id=0, trace_region_size=32 << 20)
@@ -304,6 +339,9 @@ def main():
         if "cn" in what:  # Qwen3-Coder-Next shapes: 512 experts, top-10, 256 expert columns per device (TP2)
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
                 check_rows(dev, m, I=256, E=512, k=10, trials=1)
+        if "sigb" in what:  # GLM-4.5-Air router (sigmoid + selection bias) for its own expert paths
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,32").split(",")]:
+                check_route_sigb(dev, m)
         if "mcols" in what:  # m = 3 / 4 / 6 up|gate columns per bank (I = 128 m): GLM-4.5-Air TP4 (padded), one die
             # (Ornith p150), Qwen3-Coder-30B (expert-parallel); bfp4 experts as those profiles store them
             for mc in [int(v) for v in os.environ.get("MCOLS", "4,3,6").split(",")]:

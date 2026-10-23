@@ -6,6 +6,8 @@
 // union expert i, see router_topk.hpp route_union): per slot and K row one read of `cols` tiles, slots stacked along
 // K in chunks of `chunk` slots (one cb_w push per chunk; the compute accumulates across chunks).
 //
+// NO_SHARED: routed experts only (union slots 1 .. U).
+//
 // runtime args: [w_addr, ws_addr, table_addr, bank, c0, vc]
 
 #include <stdint.h>
@@ -46,7 +48,12 @@ void kernel_main() {
     invalidate_l1_cache();
     uint16_t uni[rows * topk];
     const uint32_t U = moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni);
-    const uint32_t slots = U + 1;
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
+    const uint32_t slots = U + 1 - S0;
 
     const uint64_t routed_noc = get_noc_addr_from_bank_id<true>(bank, w_addr);
     const uint64_t shared_noc = get_noc_addr_from_bank_id<true>(bank, ws_addr);
@@ -65,7 +72,8 @@ void kernel_main() {
             l1 -= cb_end - cb_base;
         }
         noc_async_read_set_trid(trid);
-        for (uint32_t s = s0; s < s0 + cs; ++s) {
+        for (uint32_t i = s0; i < s0 + cs; ++i) {
+            const uint32_t s = S0 + i;  // union slot
             const uint64_t bank_noc = s == 0 ? shared_noc : routed_noc;
             const uint32_t e = s == 0 ? 0 : uni[s - 1];
             noc_async_read_one_packet_set_state<true>(bank_noc, row_bytes, vc);

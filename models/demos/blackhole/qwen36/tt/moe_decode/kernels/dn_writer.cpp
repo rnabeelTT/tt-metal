@@ -12,6 +12,8 @@
 // reader (cb_part), then wait until every gate|up core has written its activations (program semaphore MOE_SEM counts
 // MOE_NOTIFIERS increments) before reading them.
 //
+// NO_SHARED: routed experts only (activation rows 1 .. k; num_slots = k).
+//
 // runtime args: [act_addr, out_addr, bank, c0(, logits_addr)]
 
 #include <stdint.h>
@@ -39,6 +41,11 @@ void kernel_main() {
     constexpr auto act_args = TensorAccessorArgs<9>();
     constexpr auto out_args = TensorAccessorArgs<act_args.next_compile_time_args_offset()>();
 
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
     constexpr uint32_t kin = num_slots * act_row_bytes / 64;
 
     const auto s_act = TensorAccessor(act_args, act_addr, act_row_bytes);
@@ -68,7 +75,7 @@ void kernel_main() {
     cb_reserve_back(cb_in0, kin);
     const uint32_t in0 = get_write_ptr(cb_in0);
     for (uint32_t s = 0; s < num_slots; ++s) {
-        noc_async_read(s_act.get_noc_addr(s), in0 + s * act_row_bytes, act_row_bytes);
+        noc_async_read(s_act.get_noc_addr(S0 + s), in0 + s * act_row_bytes, act_row_bytes);
     }
     noc_async_read_barrier();
     cb_push_back(cb_in0, kin);

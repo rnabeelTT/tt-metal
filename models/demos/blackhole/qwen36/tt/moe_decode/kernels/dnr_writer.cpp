@@ -11,6 +11,8 @@
 // 3. Writes each [trows, 32] output tile (group g, column n = bank + banks * (c0 + c)) into rows g * trows .. of tile
 //    n of the [32, H] BF16 TILE output (row r at byte (r / 16) * 1024 + (r % 16) * 32; + 512 for face 1).
 //
+// NO_SHARED: routed experts only (union slots 1 .. U).
+//
 // runtime args: [act_addr, out_addr, table_addr, bank, c0]
 
 #include <stdint.h>
@@ -58,7 +60,12 @@ void kernel_main() {
     noc_async_read_barrier();
     invalidate_l1_cache();
     uint16_t uni[rows * topk];
-    const uint32_t slots = 1 + moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni);
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
+    const uint32_t slots = 1 - S0 + moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni);
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, slots);
@@ -71,7 +78,7 @@ void kernel_main() {
             for (uint32_t s = s0; s < s0 + cs; ++s) {
                 for (uint32_t k = 0; k < kt; ++k) {
                     noc_async_read(
-                        s_act.get_noc_addr((s * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);
+                        s_act.get_noc_addr(((S0 + s) * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);
                 }
             }
         }

@@ -65,6 +65,17 @@ def gu_ring(kt, m, nb, tile_bytes, want, even=False):
     return n
 
 
+ROUTERS = ("softmax", "sigb")  # Qwen3.5-MoE softmax top-k + gated shared expert; GLM-4.5-Air sigmoid + selection bias
+
+
+def logits_row_bytes(num_experts, router):
+    """L1 bytes of one gathered router-logits row (kernels/router_topk.hpp): BF16 with the shared-gate column (softmax),
+    FP32 without it (sigb), + the sigb selection bias (Q23 int32 per expert)."""
+    if router == "sigb":
+        return 128 * (num_experts // TILE) + 4 * num_experts
+    return 64 * (num_experts // TILE + 1)
+
+
 def bank_workers(mesh_device):
     return list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))
 
@@ -233,7 +244,11 @@ class ExpertGateUp:
     around the group's first bank reader; the routed slots go round-robin over them and core 0 also takes the shared
     expert (slot 0), which it streams while the router tail (top-k + softmax) runs."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=4, buffers=5, used=None):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=4, buffers=5, used=None,
+                 router="softmax", shared=True):
+        """shared False: routed experts only (no slot 0; the port adds its shared expert itself)."""
+        assert router in ROUTERS, router
+        self.router, self.shared = router, shared
         self.mesh_device = mesh_device
         self.banks = len(bank_workers(mesh_device))
         self.kt = hidden // TILE
@@ -243,7 +258,7 @@ class ExpertGateUp:
         assert num_experts % 64 == 0 and k <= 15, (num_experts, k)
         self.E, self.k, self.inter = num_experts, k, inter
         self.readers = min(readers, k)
-        self.slots = [([0] if r == 0 else []) + list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
+        self.slots = [([0] if r == 0 and shared else []) + list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers)  # bank blocks in the cb_w ring (buffers - 2 read ahead)
@@ -256,26 +271,29 @@ class ExpertGateUp:
         self.assign = [(c, q, r) for q in range(self.groups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None):
-        """(kernels, cbs). notify = (semaphore id, [(NOC x, y)] of the down cores) for the one-program MoE."""
+    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None):
+        """(kernels, cbs). notify = (semaphore id, [(NOC x, y)] of the down cores) for the one-program MoE. bias: the
+        sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
+        assert (bias is not None) == (self.router == "sigb") and (notify is None or self.router == "softmax")
         cb_x, cb_w, cb_route, cb_scr, cb_part, cb_lg, cb_act = 0, 1, 2, 3, 4, 5, 16
-        lg_tiles = self.E // TILE + 1
+        lg_bytes = logits_row_bytes(self.E, self.router)
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, 64, self.kt, tiny=True),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * self.m),
             _cb(self.cores, cb_route, ttnn.uint16, 128, 1),
-            _cb(self.cores, cb_scr, ttnn.bfloat16, 64 * lg_tiles, 1),
+            _cb(self.cores, cb_scr, ttnn.bfloat16, lg_bytes, 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
-            _cb(self.cores, cb_lg, ttnn.bfloat16, 64 * lg_tiles, 1),
+            _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * len(self.group_pairs[0]), tiny=True),
         ]
         tail = [] if notify is None else [len(notify[1])] + [v for xy in notify[1] for v in xy]
+        bias_arg = [] if bias is None else [bias.buffer_address()]
         rd_rt, wr_rt, cp_rt = {}, {}, {}
         for i, (c, j, r) in enumerate(self.assign):
             sl = self.slots[r]
             vc = (j + r) & 0x3
-            rd_rt[(c.x, c.y)] = [logits.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(), j, vc, len(sl)] + sl
-            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), route.buffer_address(), logits.buffer_address(), j, int(i == 0 and notify is None), len(sl)] + sl + tail
+            rd_rt[(c.x, c.y)] = [logits.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(), j, vc, len(sl)] + sl + bias_arg
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), route.buffer_address(), logits.buffer_address(), j, int(i == 0 and notify is None), len(sl)] + sl + bias_arg + tail
             cp_rt[(c.x, c.y)] = [len(sl)]
         rd_ct = [cb_w, cb_route, cb_scr, self.kt, self.n_tiles, self.E, self.k, cb_part, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, self.buffers] + ttnn.TensorAccessorArgs(logits).get_compile_time_args()
@@ -284,25 +302,32 @@ class ExpertGateUp:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, self.kt, self.m, self.banks]
         defines = [] if notify is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(notify[0]))]
+        if self.router == "sigb":
+            defines.append(("ROUTER_SIGB", "1"))
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs
 
-    def __call__(self, x, logits, up_gate, shared_up_gate, act, route):
-        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route)
+    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None):
+        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([up_gate, shared_up_gate, x, logits, route, act], program)
+        io = [up_gate, shared_up_gate, x, logits, route, act] + ([bias] if bias is not None else [])
+        return ttnn.generic_op(io, program)
 
 
 class ExpertDown:
     """(act, route, down, shared_down, out) -> out. readers: cores per DRAM bank, each with m / readers of the bank's
-    m output columns."""
+    m output columns (None: enough for <= 4 columns per core, the half-sync FP32 DST; at least 2)."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=2, used=None):
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=None, used=None, shared=True):
+        """shared False: routed experts only (shared_down is not read)."""
+        self.shared = shared
         self.mesh_device = mesh_device
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.h_tiles = hidden // TILE
         assert self.h_tiles % self.banks == 0, f"{self.h_tiles} hidden tiles do not split over {self.banks} banks"
         self.m = self.h_tiles // self.banks
+        if readers is None:
+            readers = max(2, -(-self.m // 4))
         assert self.m % readers == 0, f"{self.m} columns per bank do not split over {readers} readers"
         self.cols = self.m // readers
         self.E, self.k, self.inter = num_experts, k, inter
@@ -315,8 +340,9 @@ class ExpertDown:
     def parts(self, act, src, down, shared_down, out, wait=None):
         """(kernels, cbs). src: the route buffer, or (one-program MoE, wait = (semaphore id, notifier count)) the
         router logits, whose top-k these cores take themselves."""
+        assert wait is None or self.shared
         cb_in0, cb_w, cb_scr, cb_part, cb_lg, cb_out = 0, 1, 3, 4, 5, 16
-        slots = self.k + 1
+        slots = self.k + 1 if self.shared else self.k
         kin = slots * self.kt
         lg_bytes = 64 * (self.E // TILE + 1)
         cbs = [
@@ -339,6 +365,8 @@ class ExpertDown:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_in0, cb_w, cb_out, kin, self.cols]
         defines = [] if wait is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(wait[0])), ("MOE_NOTIFIERS", str(wait[1]))]
+        if not self.shared:
+            defines.append(("NO_SHARED", "1"))
         return _kernels(self.cores, "dn", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines), cbs
 
     def __call__(self, act, route, down, shared_down, out):
