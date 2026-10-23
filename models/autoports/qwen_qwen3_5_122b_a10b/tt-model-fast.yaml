@@ -117,14 +117,14 @@ serve_profiles:
     env: {QWEN35_BATCHED_PREFILL: "1"}
   - name: p300x2-longctx
     description: >
-      Long prompts mixed with short ones: chunked prefill ON (2048-token scheduler chunks, prefill steps shared between
+      Long prompts mixed with short ones: chunked prefill ON (4096-token scheduler chunks, so one image (up to 4096 tokens) fits a chunk; prefill steps shared between
       prompts so a short prompt no longer waits for a 100K one to finish) with MTP off (the plugin cannot chunk a
       multi-token-per-step model). Single-user decode about 30 tok/s instead of 50; running users still pause during
       prefill steps (the plugin never mixes prefill and decode in one step).
     hardware: p300x2
     mesh_device: P300x2
     env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
   - name: p300x2-text
     description: >
       Text only, largest KV pool: the vision tower is not loaded (28472 KV blocks of 64 tokens instead of 22725, i.e.
@@ -149,7 +149,7 @@ serve_profiles:
     hardware: p150x4
     mesh_device: P150x4
     env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
   - name: p150x4-text
     description: Four p150 boards, text only with the largest KV pool (no vision tower); see p300x2-text.
     hardware: p150x4
@@ -190,7 +190,7 @@ card:
       instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
       of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
     - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
-      ones: prefill runs in 2048-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
+      ones: prefill runs in 4096-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
       upload. Speculative decoding is off in this profile (about 30 tok/s for a lone user), and running users still pause
       while prefill chunks run.
     - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled
