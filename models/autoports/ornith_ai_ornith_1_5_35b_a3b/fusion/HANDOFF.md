@@ -337,6 +337,29 @@ Real-text single-user comparison (`tools/realtext.py`: 12 chat prompts x 384 tok
 On real text MTP still pays (+11 % over MTP off), so the new bundle keeps the published default (MTP on). Plan step 7
 (MTP verify on the fused kernels) is the lever on top: the pass / commit still run the unfused GDN rows path.
 
+### Release: raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast (user's go-ahead, 2026-10-22)
+
+`tt-model-fast.yaml` = the v2 manifest + `QWEN35_MOE_FUSED_DECODE=1`, `QWEN35_DECODE_REPLICATED=1`, the plugin build
+the v2 image shipped (`~/vllm-tt-plugin-pub`: upstream cacf1e7 + the v2 box's local platform.py / model_runner.py
+changes, recovered from the image), every v2 profile. Image built from `ornith_fusion` 034604dac
+(`tt-model/ornith-1.5-35b-a3b-blackhole-fast:1e153d8053d6`, staged in `build/`).
+
+- One die (p150 / p100) keeps the v2 MoE: 4 up|gate columns per bank (and 7 banks on p100) are outside the fused
+  kernels; `fused.supported()` now checks it (the p150 profile crashed at the kernels' assertion before). p150 with
+  the new code: greedy at 8 concurrent identical to the published build, 32-user TPOT 119.8 vs 119.2 ms.
+- Evals, p300, MTP on, thinking off, the step-0 settings (`tools/eval.sh`): GPQA-D (40) 0.85 (published 0.775),
+  IFEval prompt-strict (100) 0.77 / loose 0.82 (0.76), LiveCodeBench v6 (50) 0.40 (0.36).
+- Card: `tools/card_bench.sh` serves each bundle exactly as shipped (`tt-model serve <bundle> --profile P`) and runs the
+  published card's rows + the real-text row; `tools/card_tables.py` renders published -> new tables.
+
+### Port: Qwen3-Coder-Next (branch coder_next_fusion, worktree ~/tt-metal-codernext)
+
+Its `moe.py` was identical to Ornith's published one; the four Ornith diffs (moe / model / model_config /
+multichip_decoder) applied cleanly. Layer PCC (real weights, 2 chips) found a shared bug: the multi-row union mask
+(`router_topk.hpp route_union`) was 256 bits, so Coder-Next's experts 256..511 fell out of the union (attention b32
+per-user min 0.99197 vs 0.99957 unfused). Fixed on coder_next_fusion (512-bit mask): 0.99959; merge into
+ornith_fusion after the Ornith release (it cannot change Ornith's 256-expert results).
+
 ## Plan (in order; each step ends with a measurement)
 
 1. **MoE quick wins.** (DONE: fused top-k + 1D router, MoE 177 -> 137 us, TPOT 19.20 -> 17.90 ms; the gate|up / shared

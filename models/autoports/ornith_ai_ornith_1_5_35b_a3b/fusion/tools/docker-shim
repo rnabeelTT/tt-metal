@@ -1,4 +1,7 @@
 #!/bin/bash
-# Run docker under the docker group (sessions started before `usermod -aG docker` lack it).
+# Run docker under the docker group (sessions started before `usermod -aG docker` lack it). The arguments travel
+# NUL-separated through a temp file: `sg -c` runs /bin/sh, which cannot parse bash's $'..' quoting of multi-line args.
 if id -nG | grep -qw docker; then exec /usr/bin/docker "$@"; fi
-exec sg docker -c "$(printf '%q ' /usr/bin/docker "$@")"
+f=$(mktemp)
+printf '%s\0' "$@" > "$f"
+exec sg docker -c "bash -c 'mapfile -d \"\" -t a < $f; rm -f $f; exec /usr/bin/docker \"\${a[@]}\"'"
