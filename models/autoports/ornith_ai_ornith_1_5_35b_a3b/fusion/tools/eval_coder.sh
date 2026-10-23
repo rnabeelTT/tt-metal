@@ -1,7 +1,7 @@
 #!/bin/bash
 # eval_coder.sh <label> [tasks...]: the Qwen3-Coder-Next card's eval set through the served chat API (port PORT, default
 # 20000): humaneval_chat (lm_tasks/; humaneval_instruct's gen_prefix is not continued by the chat API, it scores 0),
-# mbpp_instruct, gsm8k_cot_llama, ifeval at temperature 0, 8 in flight, full sets unless LIMIT is set.
+# mbpp_instruct (+ rescore_mbpp.py), gsm8k_cot_llama, ifeval at temperature 0, 8 in flight, full sets unless LIMIT is set.
 # Run on both bundles with the same settings (the card's exact task variants were not recorded).
 set -e
 L=$1; shift
@@ -20,4 +20,7 @@ for T in "${TASKS[@]}"; do
     --tasks $T --include_path $TD/lm_tasks ${LIMIT:+--limit $LIMIT} --apply_chat_template --seed 42 --confirm_run_unsafe_code \
     --gen_kwargs "do_sample=False,temperature=0,max_gen_toks=2048" \
     --output_path $OUT/$T --log_samples 2>&1 | tail -12
+  if [ $T = mbpp_instruct ]; then  # its extractor scores chat answers 0 (rescore_mbpp.py)
+    .venv/bin/python $TD/rescore_mbpp.py $(ls -t $OUT/$T/*/samples_mbpp_instruct_*.jsonl | head -1) 2>&1 | tail -1
+  fi
 done
