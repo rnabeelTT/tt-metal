@@ -321,12 +321,16 @@ inline uint16_t route_weights(uint32_t lg, const uint32_t* ids, uint16_t* w) {
 // ---- Expert parallelism (EP_EXPERTS = experts per die; Qwen3-Coder-30B): each die holds the whole experts
 // [off, off + EP_EXPERTS) and keeps its window of the global top-k. off comes from a per-device tensor (one DRAM page in
 // bank 0, the same address on every die), so the programs' runtime args stay identical across the mesh.
+// DRAM -> L1 reads keep the source's 64-byte alignment: small tables land at the next 64-byte boundary of their
+// scratch (callers leave 64 bytes of slack).
+constexpr uint32_t align64(uint32_t a) { return (a + 63) & ~63u; }
 #ifdef KERNEL_BUILD
-inline uint32_t read_ep_offset(uint32_t addr, uint32_t l1_64) {
-    noc_async_read(get_noc_addr_from_bank_id<true>(0, addr), l1_64, 64);
+inline uint32_t read_ep_offset(uint32_t addr, uint32_t l1_128) {
+    const uint32_t dst = align64(l1_128);
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, addr), dst, 64);
     noc_async_read_barrier();
     invalidate_l1_cache();
-    return *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1_64);
+    return *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(dst);
 }
 #endif
 // ids / w (top-k order) -> this die's window, compacted in place as local ids; returns the count

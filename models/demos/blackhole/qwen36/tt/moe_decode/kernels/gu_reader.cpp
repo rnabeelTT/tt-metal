@@ -75,7 +75,7 @@ void kernel_main() {
     }
     const int32_t* bias = nullptr;
 #ifdef ROUTER_SIGB
-    const uint32_t bias_l1 = lg + lg_tiles * moe_topk::LG_TILE_L1;
+    const uint32_t bias_l1 = moe_topk::align64(lg + lg_tiles * moe_topk::LG_TILE_L1);
     noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(6 + num_slots)), bias_l1, 4 * num_experts);
     bias = reinterpret_cast<const int32_t*>(bias_l1);
 #endif
@@ -83,7 +83,7 @@ void kernel_main() {
     invalidate_l1_cache();
 #ifdef EP_EXPERTS
 #ifdef ROUTER_SIGB
-    constexpr uint32_t a_ep = 7, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1 + 4 * num_experts;
+    constexpr uint32_t a_ep = 7, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1 + 4 * num_experts + 64;
 #else
     constexpr uint32_t a_ep = 6, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1;
 #endif

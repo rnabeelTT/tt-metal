@@ -247,10 +247,10 @@ class ExpertGateUpRows:
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 64, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),  # + the EP offset (64-byte aligned)
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * 2 * g, tiny=True, rows=self.trows),  # two slots' weight tiles
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 64, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
         ]
@@ -316,8 +316,8 @@ class ExpertDownRows:
         cbs = [
             _cb(self.cores, cb_in0, ttnn.bfloat16, tb, 2 * self.groups * self.chunk * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 64, 1),
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 64, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.groups * self.cols, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}

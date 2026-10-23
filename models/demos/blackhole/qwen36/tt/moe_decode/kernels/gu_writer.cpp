@@ -73,7 +73,7 @@ void kernel_main() {
     const int32_t* bias = nullptr;
 #ifdef ROUTER_SIGB
     constexpr uint32_t extra = 1;  // the bias address after the slot list
-    const uint32_t bias_l1 = lg + lg_tiles * moe_topk::LG_TILE_L1;
+    const uint32_t bias_l1 = moe_topk::align64(lg + lg_tiles * moe_topk::LG_TILE_L1);
     noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(7 + num_slots)), bias_l1, 4 * num_experts);
     bias = reinterpret_cast<const int32_t*>(bias_l1);
 #else

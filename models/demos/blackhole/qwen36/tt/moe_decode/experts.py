@@ -88,7 +88,7 @@ def logits_row_bytes(num_experts, router):
     """L1 bytes of one gathered router-logits row (kernels/router_topk.hpp): BF16 with the shared-gate column (softmax),
     FP32 without it (sigb), + the sigb selection bias (Q23 int32 per expert)."""
     if router == "sigb":
-        return 128 * (num_experts // TILE) + 4 * num_experts
+        return 128 * (num_experts // TILE) + 4 * num_experts + 64  # + 64: the bias lands 64-byte aligned
     return 64 * (num_experts // TILE + 1)
 
 
@@ -301,7 +301,7 @@ class ExpertGateUp:
             _cb(self.cores, cb_x, ttnn.bfloat16, 64, self.kt, tiny=True),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * self.m),
             _cb(self.cores, cb_route, ttnn.uint16, 128, 1),
-            _cb(self.cores, cb_scr, ttnn.bfloat16, lg_bytes + (64 if self.ep_experts else 0), 1),
+            _cb(self.cores, cb_scr, ttnn.bfloat16, lg_bytes + (128 if self.ep_experts else 0), 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * len(self.group_pairs[0]), tiny=True),
