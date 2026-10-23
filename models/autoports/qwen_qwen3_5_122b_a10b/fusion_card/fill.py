@@ -2,7 +2,7 @@
 the scorecard subsets (runs/q122ev_{new,pub}/evals), the real-text median of the p300x2 card run and the single-user
 decode speed of the p300x2-longctx run (MTP off).
 
-    python fill.py && python assemble.py p300x2
+    python fill.py && python assemble.py p300x2 longctx
 """
 
 import glob
