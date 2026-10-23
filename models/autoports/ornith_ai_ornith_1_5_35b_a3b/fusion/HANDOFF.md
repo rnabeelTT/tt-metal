@@ -400,6 +400,12 @@ humaneval_instruct / mbpp_instruct score 0 through the chat API (gen_prefix), gs
 id `gsm8k`; `lm_tasks/gsm8k_cot_llama_hf`). Card runs: `runs/cn_card_chain.sh` (p300x2 + p300, both bundles, greedy
 compare), then `runs/cn_gsm8k.sh` (GSM8K on both, p300x2). Then: `fusion_card/performance_head.md`, assemble, publish.
 
+Card runs (as shipped, 2026-10-23): p300x2 real text 42.8 -> 69.8 tok/s, 1 user 23.35 -> 14.28 ms at 128 in and
+25.98 -> 16.87 ms at 130816 in, 32 users 111.23 -> 54.80 ms (288 -> 584 tok/s total), 1024/256 32 users 127.66 ->
+71.20 ms; p300 real text 39.4 -> 58.2, 1 user 25.36 -> 17.16 ms, 32 users 134.43 -> 67.80 ms; TTFT unchanged on both.
+HumanEval (humaneval_chat) 0.939 -> 0.945, MBPP 0.826 -> 0.820, GSM8K strict 0.955 (fused; published run pending).
+Greedy text differs from the published build's (rounded weights), coherent on both meshes (p300 = bfp4 experts).
+
 ### Port: Qwen3.5-122B-A10B (branch q122_fusion, worktree ~/tt-metal-q122)
 
 - Latest published = raahemnabeel/qwen3-5-122b-a10b, built from tt-metal 8fec52c4cb (origin/qwen3_5_122b_a10b_mtp_fix;
@@ -413,6 +419,44 @@ compare), then `runs/cn_gsm8k.sh` (GSM8K on both, p300x2). Then: `fusion_card/pe
 - `~/ornith-fusion/runs/q122_chain.sh`: Ornith Hub smoke test, then 122B op test, PCC fused vs unfused, served new vs
   published (greedy, garble, rows, real text). Manifest draft `qwen_qwen3_5_122b_a10b/tt-model-fast.yaml`
   -> raahemnabeel/qwen3-5-122b-a10b-blackhole-fast.
+
+### Kernel generalization for the remaining ports (2026-10-23)
+
+- **Any m up|gate columns per bank** (`moe_decode/experts.py gu_layout`, `kernels/gu_layout.hpp`): m even = one
+  [kt, m] bank block per slot holding m / 2 complete pairs; m odd = banks q and q + 4 together (the old m = 1 path).
+  DST = m (even) / 2 m (odd) tiles (+1 at multi-row widths), full-sync above 4; ring sized by `RING_BYTES`. m = 1 / 2
+  keep the same reads, DST tiles and ring sizes. Unblocks one die (Ornith p150, m = 4), Coder-30B (EP, m = 6), GLM TP4
+  (m = 3 only with I padded 352 -> 384). DST indices must be compile-time (`static_for`): runtime ones crashed the SFPI
+  compiler (internal compiler error in gimple-rvtt-synth, m = 2 rows). Op test mode `mcols` (queued).
+- **ExpertDown readers default** = enough for <= 4 output columns per core: the 122B (hidden 3072, 12 columns per bank)
+  ran 6 per core in a 4-tile half-sync FP32 DST with the old default of 2 (fixed on q122_fusion too, 1af7c3de943).
+- **sigb router** (GLM-4.5-Air: sigmoid + selection bias, normalized; `ROUTER_SIGB` in the routing kernels): FP32
+  logits, sigmoid in Q23 (Q24 input, 2^f by Taylor-8 in Q30, Newton reciprocal), bias as Q23 int32 (one DRAM page per
+  layer). Host-checked: sigmoid 1.3e-7 abs vs double; top-k equal to the fp64 reference on 2000 random trials outside
+  2e-5 near-ties; weights 4.9e-4 (BF16). `RouteScores` writes [M, k] score / id tiles for a port's own expert paths.
+- **shared=False** (routed experts only; `NO_SHARED` in the down kernels, slot lists from 1): Coder-30B has no shared
+  expert; GLM's is bfp8 while its routed gate|up is bfp4 (one CB format per op).
+
+### Port: GLM-4.5-Air (branch glm_fusion, worktree ~/tt-metal-glm; base = the published commit 13ab966ee923)
+
+- 13ab966 changed shared code (tp_common out_dtype, attention/tp.py) that ornith_fusion does not have, so the branch
+  is the published commit + the moe_decode package + the fusion tools, not a branch off ornith_fusion.
+- Published card (p300x2): 1 user 20.5 ms (MTP), 32 users 106.8 ms (9.4 tok/s/u, 218 total); "decode is op-overhead
+  bound" (31.4 ms token-out for every expert dtype in its sweep).
+- Step G1 (implemented, queued `runs/glm_chain.sh`): `QWEN35_ROUTER_FUSED_SIGB=1` replaces the 12-op router chain of
+  every decode step (<= 32 rows) with one RouteScores op; experts / shared expert unchanged; no layout or prefill change.
+- Step G2 (open): fused experts. Its I = 1408 gives 352 columns per die at TP4 (2.75 per bank): the in-place reads
+  need padding to 384 (+9 % expert work in prefill and ~1.5 GiB per die of KV pool: a TTFT regression the user ruled
+  out) or a split-K design (each bank's cores reduce partial sums across banks). Shared expert stays a ttnn matmul
+  (bfp8 vs bfp4 routed).
+
+### Port: Qwen3-Coder-30B-A3B (published bf7b56f0324f, models/demos/blackhole/qwen3_coder_30b_a3b)
+
+Expert-parallel (32 whole experts per die at TP4, 64 at TP2, bfp4), no shared expert, softmax top-8 of 128; decode
+< 4 rows: sparse_matmul over the local slots, >= 4 rows: sorted. Card: 1 user 20.2 ms, 32 users 37.2 ms (585 total):
+the multi-user path is already strong, single user is the gap. Fused path needs: m = 6 (done), shared=False (done), a
+global top-k with per-die expert windows (device-varying offset from a per-device tensor; runtime args are identical
+on every device), variable local slot counts in the down op.
 
 ## Plan (in order; each step ends with a measurement)
 
