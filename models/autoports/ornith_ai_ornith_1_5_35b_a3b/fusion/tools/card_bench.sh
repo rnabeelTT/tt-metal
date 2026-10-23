@@ -2,7 +2,7 @@
 # card_bench.sh <label> <bundle> <profile> [rows...]: the model card's measurement for one bundle + profile, served
 # exactly as shipped (`tt-model serve <bundle> --profile <profile> --detach`, port 20000): the published card's rows
 # (batch-1 latency ladder, 128/128 and 1024/256 concurrency ladders; random-token prompts, ignore_eos), then the
-# real-text single-user row (realtext.py). Results in runs/<label>/. One server at a time on an otherwise idle box.
+# real-text single-user row (realtext.py); GREEDY=1 first runs greedy.py; EVALS="<tasks>" runs eval_coder.sh last. Results in runs/<label>/. One server at a time on an otherwise idle box.
 set -u
 L=$1; B=$2; P=$3; shift 3
 T=$(cd "$(dirname "$0")" && pwd)
@@ -17,6 +17,7 @@ until curl -sf localhost:20000/v1/models >/dev/null; do
   sleep 10
 done
 echo "$L: $C up after $(( $(date +%s) - t0 )) s"
+[ "${GREEDY:-0}" = 1 ] && URL=http://localhost:20000 RUNS=$RUNS python3 "$T/greedy.py" run $L > /dev/null 2>&1 && echo "$L: greedy done"
 ROWS=("$@")
 if [ ${#ROWS[@]} -eq 0 ]; then
   ROWS=(128:128:1:4 1024:256:1:4 4096:256:1:4 16384:256:1:2 32768:256:1:2 65536:256:1:2 130816:256:1:2
@@ -25,4 +26,5 @@ if [ ${#ROWS[@]} -eq 0 ]; then
 fi
 RUNS=$RUNS "$T/bench.sh" $C $L "${ROWS[@]}" 2>&1 | grep -E "==|TTFT|TPOT"
 URL=http://localhost:20000 python3 "$T/realtext.py" 384 | tee $RUNS/$L/realtext.txt
+[ -n "${EVALS:-}" ] && PORT=20000 RUNS=$RUNS "$T/eval_coder.sh" $L $EVALS 2>&1 | grep -E "^==|\|.*(pass|exact_match|strict|loose)"
 docker rm -f $C > /dev/null
