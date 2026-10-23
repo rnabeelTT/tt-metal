@@ -885,6 +885,8 @@ class GlmDSA(LightweightModule):
                 ttnn.ROW_MAJOR_LAYOUT,
             ),
             "active": (active.float().reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
+            # (1 - active) * 65535: the MoE inactive-row expert sentinel term (tt/model.py _install_inactive_skip)
+            "inactive_sent": ((~active).float().mul(65535.0).reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
             "reset": ((j == 0).float().reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),
             "ape_sel": (self.ape[j].reshape(1, 1, S, self.ID), ttnn.float32, ttnn.TILE_LAYOUT),
             "pos": (pos.reshape(1, 1, S, 1), ttnn.float32, ttnn.TILE_LAYOUT),

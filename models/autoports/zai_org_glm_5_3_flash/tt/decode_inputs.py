@@ -134,6 +134,10 @@ class DeviceDecodeInputs:
         pool_pos = ttnn.where(act, pool, -1.0, memory_config=DRAM)
         self._into(pool_pos, "pool_pos", ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, shape=(1, 1, 1, S))
         self._into(act, "active", ttnn.float32, ttnn.TILE_LAYOUT)
+        if "inactive_sent" in self.dsa_bufs:  # once per step instead of once per MoE layer (stage 12)
+            sent = ttnn.multiply(ttnn.rsub(act, 1.0, memory_config=DRAM), 65535.0, memory_config=DRAM)
+            self._into(sent, "inactive_sent", ttnn.float32, ttnn.TILE_LAYOUT)
+            ttnn.deallocate(sent)
         reset = ttnn.eq(j, 0.0, memory_config=DRAM)
         self._into(reset, "reset", ttnn.float32, ttnn.TILE_LAYOUT)
         ape = None

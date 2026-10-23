@@ -71,8 +71,7 @@ class MCOpts:
     dsa_pack: bool = False  # DSA decode: q_a | kv_a and indexer wk | gate | weights packed, DRAM-sharded matmuls
     router_ds: bool = False  # MoE decode router matmul on a DRAM-sharded (zero-padded 192 -> 256) weight
     mix_nc: bool = False  # mHC mix partial sums with fast_reduce_nc instead of ttnn.sum (transpose + reduce)
-    # decode all-gathers write into preallocated (per call site) output buffers. Off: passes on the fixed code but not
-    # adopted (ttnn skips the all-gather start barrier with persistent outputs; see MeshCCL)
+    # decode all-gathers write into preallocated output buffers, one per (call site, layer parity); see MeshCCL
     ag_persistent: bool = False
     # ds_shared: the DRAM-sharded packed DSA / router weights also serve the prefill rows (2D program config) and the
     # separate interleaved weights are freed at build: no second weight copy (decided at construction)
@@ -206,10 +205,12 @@ DEFAULT_MC = MCOpts(
     # stage-5 review #3 (records/sparse_ab.jsonl, dense_ab.jsonl: bit-identical at 1 slot, positions 128 / 3000 / 130,000)
     dsa_q_mm_ib=64,
     mix_chunks_decode=16,
-    # off. Rejected on 2026-10-17 (45-layer teacher forcing 14 / 32 / 90, 8-slot runs not repeating): that was the
-    # logits-pad lifetime bug (fixed in 46b2a5a601d). On the fixed code it passes (stage-7 review #2: TF identical on
-    # 3 references, reduced 8-slot runs repeat, -0.44 ms per token, +0.55 MiB per die) but is not adopted: see MeshCCL.
-    ag_persistent=False,
+    # stage 12: ON with per-layer-parity (ping-pong) buffers (MeshCCL). Full model, 16 slots, 243,712 (with the
+    # once-per-step MoE sentinel): bit-identical to the shipped path on 29 logit rows (1 and 16 active), token-out
+    # 75.0 -> 74.6 ms at 1 active, 177.8 -> 176.8 ms at 16, trace region -2.6 MiB (artifacts/s12/ab1). History: the
+    # 2026-10-17 rejection was the logits-pad lifetime bug (46b2a5a601d); stage 7 kept it off for the start-barrier
+    # race of one buffer per site shared by all 45 layers, which the parity buffers remove.
+    ag_persistent=True,
     moe_grouped_in0=8,
     kda_out="1d:c16:ib4",
     dsa_o="1d:c16:ib4",
@@ -498,8 +499,8 @@ class MeshCCL:
     def __init__(self, mesh, tt_ccl, mc: MCOpts):
         self.mesh, self.tt_ccl, self.mc = mesh, tt_ccl, mc
         self._topo = {}
-        # ag_persistent output buffers, one per (call site, shape, dtype), shared by every layer on this TT_CCL.
-        # OFF in DEFAULT_MC. History: the 2026-10-17 stacked failures (reduced 0 / 3 / 4 8-slot runs not repeating,
+        # ag_persistent output buffers, one per (call site, shape, dtype, layer parity), shared by the layers of one
+        # parity on this TT_CCL. ON in DEFAULT_MC since stage 12 (parity buffers). History: the 2026-10-17 stacked failures (reduced 0 / 3 / 4 8-slot runs not repeating,
         # 45-layer teacher forcing 14 / 32 / 90) were the logits-pad lifetime bug, not this option; on the fixed code it
         # passes (stage-7 review #2, b3270061cca: TF identical on 3 references, 8-slot runs repeat, -0.44 ms per token,
         # +71,680 B per bank). Not adopted: with a persistent output ttnn skips the all-gather's start barrier
@@ -509,6 +510,10 @@ class MeshCCL:
         # race. Per-layer-parity ping-pong buffers were not tried. Any CCL / buffer option must pass the stacked
         # repeatability probe (README "Stacked gate").
         self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
+        # layer parity of the owning decoder: layers L and L+1 use different buffers, so a buffer read at layer L is
+        # next written at layer L+2, and every die issues the layer-(L+1) collectives (after its layer-L reads, in
+        # program order) before any die can produce its layer-(L+2) input (stage 12 ping-pong; set by MultichipDecoder)
+        self.parity = 0
 
     def topology(self):
         t = self.mc.topology
@@ -545,7 +550,7 @@ class MeshCCL:
         if decode and self.mc.ag_persistent and site is not None and x.dtype == dtype:
             shape = list(x.shape)
             shape[dim] *= tuple(self.mesh.shape)[1]
-            key = (site, tuple(shape), dtype)
+            key = (site, tuple(shape), dtype, self.parity)
             buf = self._bufs.get(key)
             if buf is None:
                 # DRAM, allocated on device (no host transfer inside a pass): persistent L1 buffers sit at the top of
@@ -1380,6 +1385,7 @@ class MultichipDecoder(OptimizedDecoder):
         dec.mc = MCOpts.from_env(mc or DEFAULT_MC)
         dec.ccl = MeshCCL(mesh_device, tt_ccl, dec.mc) if tp > 1 else None
         if dec.ccl is not None:
+            dec.ccl.parity = layer_idx % 2
             dec.ccl.topology()  # resolve "auto" now (its probe tensor is a host write: never inside a trace capture)
         if dec.attn_kind == "dsa":
             dec.attn.__class__ = MultichipDSA

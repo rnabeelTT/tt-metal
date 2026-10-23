@@ -36,6 +36,9 @@ from .weight_cache import cached, weight_cache_from_env
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 HC = 4
+# GLM53_SENT_ONCE=1 (stage 12): the inactive-row MoE sentinel term (1 - active) * 65535 is computed once per decode
+# step (DeviceDecodeInputs.refresh) instead of once per MoE layer (2 ops x 42 layers; exact either way)
+SENT_ONCE = os.environ.get("GLM53_SENT_ONCE", "1") == "1"
 
 # Stage-7 terminal path (GLM53_HEAD, comma list; "legacy" = the stage-6 head):
 #   norm_sharded  decode final RMSNorm width-sharded on 32 cores (the interleaved norm runs one tile of rows on 1 core)
@@ -303,9 +306,16 @@ class Glm53Model:
                     idf = ttnn.to_layout(idf, ttnn.TILE_LAYOUT)
                 # ids * act + (1 - act) * 65535: one term is zero, both exact in fp32 (ids < 192)
                 keep = ttnn.multiply(idf, act, memory_config=DRAM)
-                sent = ttnn.multiply(ttnn.rsub(act, 1.0), 65535.0, memory_config=DRAM)
-                ids2 = ttnn.typecast(ttnn.add(keep, sent, memory_config=DRAM), ttnn.uint32)
-                for t in (keep, sent) + ((idf,) if idf is not ids else ()):
+                pre = self.inputs.dsa_bufs.get("inactive_sent") if SENT_ONCE else None
+                if pre is not None:  # (1 - act) * 65535 computed once per step by DeviceDecodeInputs.refresh
+                    summed = ttnn.add(keep, pre, memory_config=DRAM)
+                    owned = (keep, summed)
+                else:
+                    sent = ttnn.multiply(ttnn.rsub(act, 1.0), 65535.0, memory_config=DRAM)
+                    summed = ttnn.add(keep, sent, memory_config=DRAM)
+                    owned = (keep, sent, summed)
+                ids2 = ttnn.typecast(summed, ttnn.uint32)
+                for t in owned + ((idf,) if idf is not ids else ()):
                     ttnn.deallocate(t)
                 out = _orig(x4, scores, ids2, T)
                 ttnn.deallocate(ids2)
