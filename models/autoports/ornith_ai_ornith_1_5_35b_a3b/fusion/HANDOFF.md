@@ -381,6 +381,25 @@ Package: `qwen_qwen3_coder_next/tt-model-fast.yaml` -> raahemnabeel/qwen3-coder-
 worktree (submodules initialised with `--reference` to the main checkout). Its p300 profile runs bfp4 experts at TP2
 (2 columns per bank): supported, but only the bfp8 TP2 shapes were op-tested; check p300 greedy / PCC before the card.
 
+Milestone (2026-10-23, p300x2, published image + the worktree's models/ mounted; `runs/cn_new` vs `runs/cn_pub`, no MTP):
+
+| row | published | fused | |
+| --- | --- | --- | --- |
+| 128/128, 1 user | 23.36 ms (42.8 tok/s) | 14.30 ms (69.9 tok/s) | -39 % |
+| 2048/128, 1 user | 23.44 ms | 14.42 ms (69.3 tok/s) | -38 % |
+| 8 users | 47.43 ms (21.1 tok/s/u, 169 agg) | 23.08 ms (43.3 tok/s/u, 347 agg) | -51 % |
+| 16 users | 72.05 ms (13.9 tok/s/u, 222 agg) | 30.49 ms (32.8 tok/s/u, 525 agg) | -58 % |
+| 32 users | 111.58 ms (9.0 tok/s/u, 287 agg) | 55.09 ms (18.2 tok/s/u, 581 agg) | -51 % |
+| 1024/256, 32 users | 128.54 ms | 71.57 ms | -44 % |
+| real text, 1 user (12 x 384) | 42.8 tok/s | 69.8 tok/s | +63 % |
+
+(agg = users / TPOT, decode only.) Evals through the chat API, temperature 0, full sets (`tools/eval_coder.sh`):
+IFEval prompt-strict 0.782 vs published 0.799 (+-0.018), loose 0.826 vs 0.841; MBPP (rescored, `rescore_mbpp.py`)
+0.820 vs 0.826 (500); HumanEval (`humaneval_chat`) published 0.939, fused in the card run. The stock tasks broke:
+humaneval_instruct / mbpp_instruct score 0 through the chat API (gen_prefix), gsm8k_cot_llama no longer loads (dataset
+id `gsm8k`; `lm_tasks/gsm8k_cot_llama_hf`). Card runs: `runs/cn_card_chain.sh` (p300x2 + p300, both bundles, greedy
+compare), then `runs/cn_gsm8k.sh` (GSM8K on both, p300x2). Then: `fusion_card/performance_head.md`, assemble, publish.
+
 ### Port: Qwen3.5-122B-A10B (branch q122_fusion, worktree ~/tt-metal-q122)
 
 - Latest published = raahemnabeel/qwen3-5-122b-a10b, built from tt-metal 8fec52c4cb (origin/qwen3_5_122b_a10b_mtp_fix;
