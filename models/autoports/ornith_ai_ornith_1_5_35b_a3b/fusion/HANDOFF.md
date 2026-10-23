@@ -423,6 +423,10 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
 - `~/ornith-fusion/runs/q122_chain.sh`: Ornith Hub smoke test, then 122B op test, PCC fused vs unfused, served new vs
   published (greedy, garble, rows, real text). Manifest draft `qwen_qwen3_5_122b_a10b/tt-model-fast.yaml`
   -> raahemnabeel/qwen3-5-122b-a10b-blackhole-fast.
+- 2026-10-23: op test `q122` passed (single row out PCC 0.99998, rows 1..32 worst row >= 0.99996, ids exact) after the
+  ExpertDown readers fix. Layer PCC vs HF (real weights, 4 dies, shipped policy), fused / unfused: GDN decode 0.99965 /
+  0.99967, attention decode 0.99471 / 0.99477, B=32 per-user min GDN 0.99719 / 0.99717, attention 0.99532 / 0.99548;
+  prefill identical. Served runs next (`runs/q122/`, `runs/q122_new`, `runs/q122_pub`).
 
 ### Shared box (2026-10-23)
 
