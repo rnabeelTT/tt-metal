@@ -24,7 +24,7 @@ if [ ${#ROWS[@]} -eq 0 ]; then
         128:128:2:8 128:128:4:16 128:128:8:32 128:128:16:64 128:128:32:128
         1024:256:2:8 1024:256:4:16 1024:256:8:32 1024:256:16:64 1024:256:32:128)
 fi
-RUNS=$RUNS "$T/bench.sh" $C $L "${ROWS[@]}" 2>&1 | grep -E "==|TTFT|TPOT"
+RUNS=$RUNS "$T/bench.sh" $C $L "${ROWS[@]}" 2>&1 | grep -E "==|TTFT|TPOT|ROW FAILED"
 URL=http://localhost:20000 python3 "$T/realtext.py" 384 | tee $RUNS/$L/realtext.txt
 [ -n "${EVALS:-}" ] && PORT=20000 RUNS=$RUNS "$T/eval_coder.sh" $L $EVALS 2>&1 | grep -E "^==|\|.*(pass|exact_match|strict|loose)|chat extractor"
 docker rm -f $C > /dev/null
