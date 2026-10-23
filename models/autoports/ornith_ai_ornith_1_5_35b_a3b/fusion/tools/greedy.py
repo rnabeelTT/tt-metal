@@ -40,7 +40,9 @@ def ask(p):
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=1800) as r:
-        return json.load(r)["choices"][0]["message"]["content"]
+        msg = json.load(r)["choices"][0]["message"]
+        # thinking-on bundles: 256 tokens can all be reasoning (content None); compare that text instead
+        return msg.get("content") or msg.get("reasoning") or msg.get("reasoning_content")
 
 
 def run(label):
