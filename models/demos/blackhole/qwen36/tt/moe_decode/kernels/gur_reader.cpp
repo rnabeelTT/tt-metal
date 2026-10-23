@@ -11,7 +11,9 @@
 //    expert ([kt, m] each: bank q, or banks q and q + banks / 2 when m is odd; gu_layout.hpp), in place from the
 //    interleaved ttnn tensor (see gu_reader.cpp), transaction-id pipelined.
 //
-// runtime args: [table_addr, w_addr, ws_addr, id_addr, group q, slot0, vc]
+// EP_EXPERTS: only this die's window of the union (local ids).
+//
+// runtime args: [table_addr, w_addr, ws_addr, id_addr, group q, slot0, vc, (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
 
@@ -68,7 +70,13 @@ void kernel_main() {
     cb_push_back(cb_id, 2);
     invalidate_l1_cache();
     uint16_t uni[rows * topk];
+#ifdef EP_EXPERTS
+    const uint32_t U = moe_topk::window_union(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni),
+        moe_topk::read_ep_offset(get_arg_val<uint32_t>(7), scr + 64 * rows), EP_EXPERTS);
+#else
     const uint32_t U = moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni);
+#endif
 
     constexpr uint32_t extra_in_flight = num_buffers - 2;
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);

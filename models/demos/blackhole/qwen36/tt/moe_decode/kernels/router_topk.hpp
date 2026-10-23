@@ -318,6 +318,42 @@ inline uint16_t route_weights(uint32_t lg, const uint32_t* ids, uint16_t* w) {
 #endif
 }
 
+// ---- Expert parallelism (EP_EXPERTS = experts per die; Qwen3-Coder-30B): each die holds the whole experts
+// [off, off + EP_EXPERTS) and keeps its window of the global top-k. off comes from a per-device tensor (one DRAM page in
+// bank 0, the same address on every die), so the programs' runtime args stay identical across the mesh.
+#ifdef KERNEL_BUILD
+inline uint32_t read_ep_offset(uint32_t addr, uint32_t l1_64) {
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, addr), l1_64, 64);
+    noc_async_read_barrier();
+    invalidate_l1_cache();
+    return *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1_64);
+}
+#endif
+// ids / w (top-k order) -> this die's window, compacted in place as local ids; returns the count
+template <uint32_t topk>
+inline uint32_t local_window(uint32_t* ids, uint16_t* w, uint32_t off, uint32_t n_local) {
+    uint32_t n = 0;
+    for (uint32_t j = 0; j < topk; ++j) {
+        if (ids[j] - off < n_local) {  // unsigned: ids below the window wrap past it
+            ids[n] = ids[j] - off;
+            w[n] = w[j];
+            ++n;
+        }
+    }
+    return n;
+}
+// a route_union result (ascending global ids) -> the window's experts as local ids (ascending); returns the count
+inline uint32_t window_union(uint16_t* uni, uint32_t u, uint32_t off, uint32_t n_local) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < u; ++i) {
+        const uint32_t e = uni[i];
+        if (e - off < n_local) {
+            uni[n++] = static_cast<uint16_t>(e - off);
+        }
+    }
+    return n;
+}
+
 // Union of the routed experts of M route records (route table rows: k ids at [0, k), BF16 shared weight at 16,
 // routed weights at [17, 17 + k)): uni[0 .. U) ascending; returns U (union slot 0 is the shared expert, slot 1 + i
 // union expert i).

@@ -13,6 +13,9 @@
 // 4. Writes each 1x32 output tile (w_s * silu(gate) * up of slot s and column pair p, columns 32 p .. 32 p + 31; the
 //    group's pairs as gu_layout.hpp) to row s of the [k + 1, I] BF16 row-major activation buffer.
 //
+// EP_EXPERTS: only the slot positions up to the route record's count (route[15], this die's window) are live; their
+// count goes to the compute threads first.
+//
 // runtime args: [x_addr, act_addr, route_addr, logits_addr, group q, route_owner, num_slots, slot...,
 //                (ROUTER_SIGB) bias_addr, (MOE_FUSED) the down cores]
 
@@ -100,7 +103,20 @@ void kernel_main() {
     cb_wait_front(cb_route, 1);
     const uint32_t route_l1 = get_read_ptr(cb_route);
     volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(route_l1);
-    for (uint32_t i = 0; i < num_slots; ++i) {
+#ifdef EP_EXPERTS
+    // this die's window: positions beyond route[15] hold no expert (positions ascend per core); the compute takes the
+    // count through the mailboxes
+    uint32_t mine = 0;
+    while (mine < num_slots && get_arg_val<uint32_t>(7 + mine) <= route[15]) {
+        ++mine;
+    }
+    ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, mine);
+    ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, mine);
+    ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, mine);
+#else
+    const uint32_t mine = num_slots;
+#endif
+    for (uint32_t i = 0; i < mine; ++i) {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
         ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, static_cast<uint32_t>(route[16 + s]) << 16);
     }
@@ -108,7 +124,7 @@ void kernel_main() {
         noc_async_write(route_l1, s_route.get_noc_addr(0), 64);
     }
 
-    for (uint32_t i = 0; i < num_slots; ++i) {
+    for (uint32_t i = 0; i < mine; ++i) {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
         cb_wait_front(cb_act, np);
         for (uint32_t p = 0; p < np; ++p) {

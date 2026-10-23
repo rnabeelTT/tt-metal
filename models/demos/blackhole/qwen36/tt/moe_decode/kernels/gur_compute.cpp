@@ -101,7 +101,11 @@ void kernel_main() {
             silu_tile_init();
             gu_layout::static_for<np>([&](auto p) {
                 constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+#ifdef GATE_FIRST
+                silu_rows(u);  // [gate | up] packing: the first-half column is the gate
+#else
                 silu_rows(gu_layout::gate_dst<m, banks>(u));
+#endif
             });
             mul_binary_tile_init();
             gu_layout::static_for<np>([&](auto p) {

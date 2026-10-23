@@ -22,8 +22,8 @@ import torch
 import ttnn
 
 from .experts import (
-    KERNEL_DIR, RING_BYTES, ROUTERS, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout,
-    gu_ring, logits_row_bytes, place_along_rows,
+    KERNEL_DIR, RING_BYTES, ROUTERS, TILE, TILE_BYTES, _cb, _ep_defines, _kernels, _page_bytes, _range_set, bank_workers,
+    gu_layout, gu_ring, logits_row_bytes, place_along_rows,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -209,8 +209,8 @@ class ExpertGateUpRows:
     union slot s goes to core s % readers."""
 
     def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5,
-                 shared=True):
-        """shared False: routed experts only (no union slot 0). readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
+                 shared=True, ep_experts=None, gate_first=False):
+        """shared False: routed experts only (no union slot 0). ep_experts / gate_first: as ExpertGateUp. readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
         SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
         their reads collapse (8 rows, 4-chip shapes: 51 us median at 4 per pair, 89 at 22, 217 max at 8)."""
         self.banks = len(bank_workers(mesh_device))
@@ -219,7 +219,8 @@ class ExpertGateUpRows:
         self.pairs = self.n_tiles // 2
         self.m, self.nb, self.ngroups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
-        self.shared = shared
+        assert not ep_experts or not shared
+        self.shared, self.ep_experts, self.gate_first = shared, ep_experts, gate_first
         self.trows, self.groups = tile_rows(rows), row_groups(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         if readers is None:
@@ -236,7 +237,7 @@ class ExpertGateUpRows:
         self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def __call__(self, x, table, identity, up_gate, shared_up_gate, act):
+    def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None):
         cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
         tb = 64 * self.trows
         g = self.groups
@@ -246,19 +247,21 @@ class ExpertGateUpRows:
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 64, 1),
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * 2 * g, tiny=True, rows=self.trows),  # two slots' weight tiles
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 64, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
         ]
+        assert (ep_offset is not None) == bool(self.ep_experts)
+        ep_arg = [ep_offset.buffer_address()] if ep_offset is not None else []
         rd_rt, wr_rt = {}, {}
         for c, j, r in self.assign:
             s0 = r if self.shared else r + 1  # first union slot (no shared expert: slot 0 is never streamed)
             rd_rt[(c.x, c.y)] = [table.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(),
-                                 identity.buffer_address(), j, s0, (j + r) & 0x3]
-            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0]
+                                 identity.buffer_address(), j, s0, (j + r) & 0x3] + ep_arg
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0] + ep_arg
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
@@ -267,10 +270,11 @@ class ExpertGateUpRows:
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
-        defines = [("ROWS", str(self.trows))]
+        defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
         kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([up_gate, shared_up_gate, identity, x, table, act], program)
+        io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
+        return ttnn.generic_op(io, program)
 
 
 class ExpertDownRows:
@@ -278,9 +282,10 @@ class ExpertDownRows:
     block (the cb holds two)."""
 
     def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, chunk=8,
-                 shared=True):
-        """shared False: routed experts only (shared_down is not read)."""
-        self.shared = shared
+                 shared=True, ep_experts=None):
+        """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
+        assert not ep_experts or not shared
+        self.shared, self.ep_experts = shared, ep_experts
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.m = hidden // TILE // self.banks
@@ -303,21 +308,23 @@ class ExpertDownRows:
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def __call__(self, act, table, down, shared_down, out):
+    def __call__(self, act, table, down, shared_down, out, ep_offset=None):
+        assert (ep_offset is not None) == bool(self.ep_experts)
+        ep_arg = [ep_offset.buffer_address()] if ep_offset is not None else []
         cb_in0, cb_w, cb_scr, cb_tab, cb_out = 0, 1, 3, 5, 16
         tb = 64 * self.trows
         cbs = [
             _cb(self.cores, cb_in0, ttnn.bfloat16, tb, 2 * self.groups * self.chunk * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 64, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 64, 1),
             _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.groups * self.cols, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}
         for c, b, r in self.assign:
             c0 = r * self.cols
-            rd_rt[(c.x, c.y)] = [down.buffer_address(), shared_down.buffer_address(), table.buffer_address(), b, c0, (b + r) & 0x3]
-            wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0]
+            rd_rt[(c.x, c.y)] = [down.buffer_address(), shared_down.buffer_address(), table.buffer_address(), b, c0, (b + r) & 0x3] + ep_arg
+            wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0] + ep_arg
         rd_ct = [cb_w, cb_scr, self.kt, self.m, self.cols, self.k, self.tile_bytes, self.rows, self.chunk]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args()
         wr_ct = [cb_in0, cb_out, cb_tab, self.kt, self.cols, self.banks, self.k, self.rows, self.trows, self.groups, self.chunk, ACT_PAGE]
@@ -327,6 +334,8 @@ class ExpertDownRows:
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
+        defines += _ep_defines(self.ep_experts)
         kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([down, shared_down, act, table, out], program)
+        io = [down, shared_down, act, table, out] + ([ep_offset] if ep_offset is not None else [])
+        return ttnn.generic_op(io, program)

@@ -35,6 +35,12 @@ void kernel_main() {
     UNPACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     MATH(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+#ifdef EP_EXPERTS
+    if (slots == 0) {  // none of the union on this die: the writer writes zero rows
+        custom_mm_block_uninit<dense_packing>();
+        return;
+    }
+#endif
 
     tile_regs_acquire();
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
