@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "noc_state.hpp"
 #include "router_topk.hpp"
 
 void kernel_main() {
@@ -84,4 +85,5 @@ void kernel_main() {
     }
     noc_async_read_barrier_with_trid(trid == 1 ? 2 : 1);
     cb_push_back(cb_w, prev_tiles);
+    restore_read_cmd_buf();
 }

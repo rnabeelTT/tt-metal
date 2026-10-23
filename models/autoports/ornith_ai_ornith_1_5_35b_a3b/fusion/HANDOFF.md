@@ -268,8 +268,48 @@ a per-expert row gather (custom_mm with the routed rows only) is the next MoE le
 allocated per step (a persistent 32-row buffer, 2.7 MB per device on 2 chips, made the model's other programs' circular
 buffers clash with L1 buffers at boot).
 
-Next: step 3 (boundary) for all widths;
-the 8-row core-time levers above; then step 3 (boundary) for all widths.
+### Step 3: replicated-residual decode boundary (`QWEN35_DECODE_REPLICATED=1`)
+
+`models/demos/blackhole/qwen36/tt/decode_boundary.py`: on TP meshes the decode residual stays replicated on every device
+(16-core width-sharded L1); the GDN / attention mixers and the MoE return per-device partial sums and each boundary is
+`residual + all_reduce_async(partial)` (BFP8 in, one persistent scratch + global semaphore per site) followed by the local
+sharded RMSNorm. Model entry gathers the embedding rows once, the final norm runs locally. The layer dispatches on the
+input width, so the MTP head / verify paths (fractured rows) keep the reduce-scatter contract. The per-layer harness
+gathers in / partitions out (`segments.py` reports those ops apart).
+
+- Layer PCC (real weights, 2 chips) unchanged: decode GDN 0.99998 / attention 0.99993, b32 per-user min 0.99997 / 0.99994.
+- 2-chip per-layer, device 0, b1 (`segments.py`): boundary 88.8 -> 51.6 us; GDN layer 416.0 -> 373.2, attention
+  323.4 -> 279.4 us; b16 GDN 1110 -> 1079 us. Device 1's fused MoE is 60-66 us vs device 0's 48-52 (the all-reduce
+  absorbs the skew): a per-device imbalance worth ~12 us per layer.
+- Served p300 (chips 2,3, MTP off, 128/128), TPOT ms / tok/s/u / total tok/s:
+
+| Users | Reference (published) | Milestone 2 | Step 3 |
+|---|---|---|---|
+| 1 | 21.64 / 46.2 / 44.4 | 16.47 / 60.7 / 57.5 | 15.06 / 66.4 / 61.0 |
+| 8 | 47.45 / 21.1 / 141.3 | 28.91 / 34.6 / 210.9 | 27.93 / 35.8 / 214.6 |
+| 16 | 75.02 / 13.3 / 174.0 | 40.23 / 24.9 / 278.3 | 38.99 / 25.6 / 284.4 |
+| 32 | 84.86 / 11.8 / 273.8 | 59.69 / 16.8 / 344.0 | 59.28 / 16.9 / 343.6 |
+
+- Quality: garble gate 7.41 (milestone 2: 8.05, reference 10.71; flagged words all real); greedy coherent.
+
+### TTFT (user requirement: no prefill regression)
+
+1-user TTFT, p300, median ms (chips 2,3 vs the reference on 0,1; the two servers' benches run one after the other: run
+side by side they share the host CPU and the reference read TPOT 24.98 instead of 21.64):
+
+| Input | Reference | Fused MoE + step 3 | Fused MoE (no step 3) | Fused MoE off |
+|---|---|---|---|---|
+| 128 | 132.7 | 137.7 | 137.8 | 132.5 |
+| 2048 | 417.0 | 430.6 | 429.9 | 418.8 |
+| 8192 | 1602 | 1659 | 1663 | - |
+
+The ~3% comes with `QWEN35_MOE_FUSED_DECODE=1` (step 3 adds nothing), not from the 5-bit weight rounding (136.4 / 428.4
+without it), not from decode heating the chips (same gap with 2-token outputs), and not per layer (2048-token GDN layer
+10465 vs 10518 us). Reproduced outside vLLM with `tools/prefill_time.py` (full model, traced buckets): 2048 tokens 428.5
+-> 443.9 ms, 8192 1611 -> 1652 ms; with `QWEN35_MOE_FUSED_ROWS_MAX=1` (no multi-row op sets) 8192 is back to 1614 ms.
+
+Next: find and remove the prefill cost of the multi-row op sets; MTP with step 3 (the published bundle runs MTP for
+one live request); package as a new repo; the 8-row core-time levers above.
 
 ## Plan (in order; each step ends with a measurement)
 

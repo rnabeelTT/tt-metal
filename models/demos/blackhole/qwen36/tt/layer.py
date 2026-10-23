@@ -211,7 +211,9 @@ class Qwen36DecoderLayer:
         valid_len=None,
         gdn_collect=False,
     ):
-        if mode == "decode" and self._decode_replicated:
+        # the replicated residual is full width; a fractured [.., dim / tp] input (the MTP head / verify paths) keeps the
+        # reduce-scatter contract
+        if mode == "decode" and self._decode_replicated and int(x.shape[-1]) == self.args.dim:
             return self._forward_decode_replicated(x, cos, sin, position_tensor, page_table)
         _norm_mode = Mode.PREFILL if mode == "prefill" else Mode.DECODE
         if self.num_devices > 1:

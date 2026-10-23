@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "noc_state.hpp"
 #include "router_topk.hpp"
 
 void kernel_main() {
@@ -113,4 +114,5 @@ void kernel_main() {
         cb_push_back(cb_w, blk_tiles);
         trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
     }
+    restore_read_cmd_buf();
 }

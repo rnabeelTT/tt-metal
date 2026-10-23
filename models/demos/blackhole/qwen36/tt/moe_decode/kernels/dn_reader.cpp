@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "noc_state.hpp"
 #ifdef MOE_FUSED
 #include "router_topk.hpp"
 #endif
@@ -94,4 +95,5 @@ void kernel_main() {
     }
     noc_async_read_barrier_with_trid(1);
     cb_push_back(cb_w, num_slots * slot_tiles);
+    restore_read_cmd_buf();
 }
