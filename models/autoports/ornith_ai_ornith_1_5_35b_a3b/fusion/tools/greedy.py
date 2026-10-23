@@ -28,7 +28,7 @@ PROMPTS = [
 
 def ask(p):
     body = {
-        "model": "ornith-ai/Ornith-1.5-35B-A3B",
+        "model": os.environ.get("MODEL_ID", "ornith-ai/Ornith-1.5-35B-A3B"),
         "messages": [{"role": "user", "content": p}],
         "max_tokens": 256,
         "temperature": 0,

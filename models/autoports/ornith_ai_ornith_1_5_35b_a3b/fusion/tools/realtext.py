@@ -26,7 +26,7 @@ URL = os.environ.get("URL", "http://localhost:20000")
 
 def run(prompt, max_tokens):
     body = {
-        "model": "ornith-ai/Ornith-1.5-35B-A3B",
+        "model": os.environ.get("MODEL_ID", "ornith-ai/Ornith-1.5-35B-A3B"),
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0,
