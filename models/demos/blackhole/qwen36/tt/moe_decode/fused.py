@@ -37,9 +37,12 @@ def round_sig(t: torch.Tensor, bits: int = WEIGHT_SIG_BITS) -> torch.Tensor:
 
 
 def supported(num_experts, hidden, inter_local, dtype, banks=8):
+    """The gate|up kernels read 1 or 2 up|gate columns per bank and expert: TP4 / TP2 at Ornith 35B and 122B, Coder-Next;
+    one die (4 columns per bank) and 7-bank parts keep the unfused path."""
     return (
         dtype in (ttnn.bfloat8_b, ttnn.bfloat4_b)
         and (2 * inter_local // TILE) % banks == 0
+        and (2 * inter_local // TILE) // banks in (1, 2)
         and (hidden // TILE) % banks == 0
         and num_experts % TILE == 0
     )

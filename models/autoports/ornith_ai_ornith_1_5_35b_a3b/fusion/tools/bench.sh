@@ -3,6 +3,7 @@
 # concurrency ladder). Runs `vllm bench serve` inside the serving container (random-token prompts of exactly the input
 # length, ignore_eos, one warm-up per row), copies the JSON results to runs/<label>/.
 set -e
+MODEL_ID=${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B}
 C=$1; L=$2; shift 2
 OUT=${RUNS:-$HOME/ornith-fusion/runs}/$L
 mkdir -p $OUT
@@ -15,8 +16,8 @@ for r in "${ROWS[@]}"; do
   IFS=: read ISL OSL U N <<< "$r"
   F=bench_${ISL}_${OSL}_u${U}.json
   echo "== $L isl=$ISL osl=$OSL users=$U N=$N $(date +%T)"
-  docker exec $C vllm bench serve --backend openai --base-url http://localhost:20000 --endpoint /v1/completions \
-    --model ornith-ai/Ornith-1.5-35B-A3B --tokenizer /hf/hub/models--ornith-ai--Ornith-1.5-35B-A3B/snapshots/10fbf86fed7ecee4a061f8b499a618f46001cac1 \
+  docker exec --env HF_HUB_OFFLINE=1 $C vllm bench serve --backend openai --base-url http://localhost:20000 --endpoint /v1/completions \
+    --model $MODEL_ID --tokenizer $MODEL_ID \
     --dataset-name random --random-input-len $ISL --random-output-len $OSL --random-range-ratio 0 \
     --num-prompts $N --max-concurrency $U --ignore-eos --num-warmups 1 --seed 42 \
     --percentile-metrics ttft,tpot,itl,e2el --save-result --result-dir /tmp/bench --result-filename $F 2>&1 \

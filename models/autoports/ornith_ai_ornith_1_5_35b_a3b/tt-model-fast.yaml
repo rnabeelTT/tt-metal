@@ -101,14 +101,14 @@ serve_profiles:
     mesh_device: P150x2
     env: {TT_VISIBLE_DEVICES: "0,1"}
   - name: p150
-    description: One p150 (1 die), 32 sequences, bfp4 routed experts (bfp8 does not fit one die), text only, no fabric.
+    description: "One p150 (1 die), 32 sequences, bfp4 routed experts (bfp8 does not fit one die), text only, no fabric. One die holds 4 up|gate columns per DRAM bank and expert, which the fused MoE kernels do not read yet: this profile keeps the v2 MoE (with the fused router top-k)."
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
     env: {QWEN35_VISION: "0"}   # one die keeps its DRAM for the KV pool
     args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
-    description: "One p100 (1 die, 7 DRAM banks): the p150 profile unchanged - 32 sequences, bfp4 routed experts, text only, no fabric. The fused MoE needs the expert columns to split evenly over the DRAM banks, so 7 banks keep the v2 MoE path."
+    description: "One p100 (1 die, 7 DRAM banks): the p150 profile unchanged - 32 sequences, bfp4 routed experts, text only, no fabric. Like p150 it keeps the v2 MoE (7 DRAM banks, 4 columns per bank)."
     hardware: p100
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
