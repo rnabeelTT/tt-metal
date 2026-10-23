@@ -496,6 +496,18 @@ weighting / sum.
   path); `tt-model-fast.yaml` -> raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast. Op test mode `ep`; `runs/c30_chain.sh`
   (op tests, decode vs HF fused off / on, package, card rows both bundles).
 
+### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
+
+Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
+(default) = MTP only while ONE request is live, plain batched decode otherwise; `=0` = MTP over every live slot
+(traced multi-user step, slots x (k + 1) <= 32, so max-num-seqs <= 32 / (k + 1)); measured slower than plain decode at
+2-4 users before the fusion, which made multi-row verify passes much cheaper. Sweep (`runs/mtp_sweep.sh`, p300x2,
+the shipped fast builds): MTP off; adaptive k = 1..4 (real text 1 user, 128/128, acceptance); MTP-all k = 1 / 2 / 3
+(16 / 10 / 8 slots) at 2 / 4 / 8 (/ 16) concurrent real-text streams vs plain fused decode at the same concurrency
+(`realtext.py CONC=U`). Queue: `ornith_mtp.sh`, `q122_mtp.sh` (GLM after its build is chosen). Decision rule: per
+batch size the setting with the highest aggregate real-text tok/s, provided per-user tok/s does not drop; if MTP-all
+wins up to N users, the serving change is an adaptive threshold (MTP while <= N requests live) instead of one.
+
 ### Run queue (2026-10-23)
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B chain, in order: q122_card_chain (package + card rows + scorecard

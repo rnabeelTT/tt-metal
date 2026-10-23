@@ -4,7 +4,7 @@
 # ~/.cache/huggingface and thinking off by default (the scorecard's eval setting).
 # PORT (default 20000) / DEVS (TT_VISIBLE_DEVICES, default 0,1 for p300): two p300 servers side by side on the two chip
 # pairs, e.g. the published reference on 0,1 :20000 and a development build on DEVS=2,3 PORT=20001.
-# MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
+# MAXSEQS overrides --max-num-seqs (32). MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
 # MODEL_ID (default Ornith) picks the serving recipe (Qwen/Qwen3-Coder-Next, Qwen/Qwen3.5-122B-A10B,
 # zai-org/GLM-4.5-Air too); CACHE_NAME the host cache dir.
 set -e
@@ -44,6 +44,6 @@ docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --
   --volume $CACHE/tensors:/tensor-cache --env TT_CACHE_PATH=/tensor-cache \
   $MNT --publish ${PORT:-20000}:20000 --env ARCH_NAME=blackhole --env HF_MODEL=$MODEL_ID --env MESH_DEVICE=$MESH \
   --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_TRACE_REGION_MIB=768 $VIS --env VLLM_ENGINE_READY_TIMEOUT_S=3600 $MENV \
-  "$@" $IMAGE vllm serve $MODEL_ID --max-model-len ${MAXLEN:-262144} --max-num-seqs 32 --block-size 64 \
+  "$@" $IMAGE vllm serve $MODEL_ID --max-model-len ${MAXLEN:-262144} --max-num-seqs ${MAXSEQS:-32} --block-size 64 \
   --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", \"trace_region_size\": 805306368, \"l1_small_size\": 24576, \"fabric_config\": \"$FAB\"}}" \
   "${MARGS[@]}" --port 20000
