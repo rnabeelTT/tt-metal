@@ -240,7 +240,13 @@ class Qwen35MoE:
             MOE_FUSED_DECODE
             and _gu_tile0 is None
             and self.prec.routed_gate_up == self.prec.routed_down
-            and moe_fused.supported(self.num_experts, self.hidden, self.inter_local, self.prec.routed_gate_up)
+            and moe_fused.supported(
+                self.num_experts,
+                self.hidden,
+                self.inter_local,
+                self.prec.routed_gate_up,
+                banks=len(moe_fused.bank_workers(mesh_device)),  # p100: 7 banks
+            )
         )
         rnd = moe_fused.round_sig if self._fused_ok else (lambda t: t)
         sfx = moe_fused.CACHE_SUFFIX if self._fused_ok else ""

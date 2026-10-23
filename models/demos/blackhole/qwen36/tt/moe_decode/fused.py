@@ -21,7 +21,7 @@ import torch
 
 import ttnn
 
-from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers
+from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers
 from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)

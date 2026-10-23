@@ -308,8 +308,34 @@ without it), not from decode heating the chips (same gap with 2-token outputs), 
 10465 vs 10518 us). Reproduced outside vLLM with `tools/prefill_time.py` (full model, traced buckets): 2048 tokens 428.5
 -> 443.9 ms, 8192 1611 -> 1652 ms; with `QWEN35_MOE_FUSED_ROWS_MAX=1` (no multi-row op sets) 8192 is back to 1614 ms.
 
-Next: find and remove the prefill cost of the multi-row op sets; MTP with step 3 (the published bundle runs MTP for
-one live request); package as a new repo; the 8-row core-time levers above.
+Cause and fix: the fused readers (`gu`, `gur`, `dn`, `dnr`) set a static VC (`(bank + reader) & 3`) and transaction ids
+on the read command buffer (`noc_async_read_one_packet_set_state<true>`, `noc_async_read_set_trid`). The firmware
+re-runs `noc_init` (static VC 1, packet tag 0) only when a kernel's NoC mode differs from the previous kernel's
+(`brisc.cc`), so the state outlived the kernel and every later kernel's reads on those cores ran on that VC. More cores
+touched, more slowdown: the 16 / 32-row down op on 32 cores cost ~3 %, a 64-core variant 6.6 %. Bisect: not the weight
+rounding, not decode heating, not DRAM placement (3 / 17 MB padding: no change), not the L1 activation buffer (DRAM
+activations: same), not building the op sets (built but unused: fine), only running them. Now every reader restores
+the command buffer before it exits (`kernels/noc_state.hpp`). Full-model prefill, p300, fused on vs off: 2048 tokens
+429.1 vs 429.6 ms, 4096 817.0 vs 817.8, 8192 1609.7 vs 1611 (was 1652). Any kernel that uses the stateful NoC read API
+with a custom VC or a transaction id needs the same restore (the gpt-oss fused ops on main, which these readers
+follow, are worth checking for it; they are not in this tree).
+
+### MTP (the published bundle's default: k = 3 drafts while one request is live)
+
+Served p300, 128/128 random-token prompts, 1 user: new build MTP on 19.39 ms (MTP off 15.06 ms); the published build
+MTP on 26.30 ms in this run (18.58 in the step-0 baseline with N = 4: random-token acceptance varies widely with the
+prompt set). The MTP pass / commit / draft still run the unfused GDN prefill-form rows path; only the pass's MoE uses
+the fused rows ops (4 rows), and the plain decode step the MTP replaces is now much cheaper, so speculation buys less.
+Real-text single-user comparison (`tools/realtext.py`: 12 chat prompts x 384 tokens, temperature 0, p300):
+
+| Build | decode tok/s | ms / token |
+|---|---|---|
+| published, MTP on (its default) | 51.1 | 19.56 |
+| new (fused MoE + step 3), MTP on | 73.4 (+44 %) | 13.62 |
+| new, MTP off | 66.2 (+30 %) | 15.10 |
+
+On real text MTP still pays (+11 % over MTP off), so the new bundle keeps the published default (MTP on). Plan step 7
+(MTP verify on the fused kernels) is the lever on top: the pass / commit still run the unfused GDN rows path.
 
 ## Plan (in order; each step ends with a measurement)
 
