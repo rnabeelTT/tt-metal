@@ -116,7 +116,7 @@ class CheckpointReader:
     # ------------------------------------------------------------------------------------------------- name helpers
     def _expert_name(self, layer: int, expert: int, suffix: str) -> str:
         e = expert
-        if self.mask is not None and layer != MTP_LAYER:
+        if self.mask is not None and layer in self.mask:  # dense layers and the MTP layer have no mask row
             e = self.mask[layer][expert]
         return LAYER_PREFIX.format(layer) + f"mlp.experts.{e}.{suffix}"
 
