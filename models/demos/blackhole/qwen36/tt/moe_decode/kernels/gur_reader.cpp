@@ -7,16 +7,16 @@
 // 1. Reads the M route records (route table, RouteRows) and builds the union of the routed experts (ascending; union
 //    slot 0 = the shared expert, slot 1 + i = union expert i).
 // 2. Reads the identity tile twice into cb_id (the compute loads the per-row weight tiles into DST through it).
-// 3. Streams, for each union slot s = slot0, slot0 + step, ... this core owns, up column j and gate column
-//    j + N / 2 of the slot's expert, in place from the interleaved ttnn tensor (see gu_reader.cpp), one cb_w block of
-//    kt tiles per column (m == 1) or one [kt, 2] block per slot (m == 2, both columns in one bank),
-//    transaction-id pipelined.
+// 3. Streams, for each union slot s = slot0, slot0 + step, ... this core owns, its group's bank blocks of the slot's
+//    expert ([kt, m] each: bank q, or banks q and q + banks / 2 when m is odd; gu_layout.hpp), in place from the
+//    interleaved ttnn tensor (see gu_reader.cpp), transaction-id pipelined.
 //
-// runtime args: [table_addr, w_addr, ws_addr, id_addr, pair j, slot0, vc]
+// runtime args: [table_addr, w_addr, ws_addr, id_addr, group q, slot0, vc]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "gu_layout.hpp"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
 
@@ -45,8 +45,8 @@ void kernel_main() {
     constexpr auto id_args = TensorAccessorArgs<table_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t m = n_tiles / banks;
-    static_assert(m == 1 || m == 2, "up|gate column pairs: in two banks (m = 1) or one bank (m = 2)");
-    constexpr uint32_t blk_tiles = kt * m;  // a column (m == 1) or the pair's [kt, 2] run in one bank (m == 2)
+    constexpr uint32_t nb = gu_layout::blocks<m>();
+    constexpr uint32_t blk_tiles = kt * m;  // one bank's [kt, m] run
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
@@ -82,10 +82,9 @@ void kernel_main() {
     for (uint32_t s = slot0; s < U + 1; s += step) {
         const uint32_t base = s == 0 ? ws_addr : w_addr;
         const uint32_t e = s == 0 ? 0 : uni[s - 1];
-        for (uint32_t h = 0; h < 3 - m; ++h) {
-            const uint32_t n = pair + h * (n_tiles / 2);
-            uint32_t src = (e * kt * m + n / banks) * tile_bytes;
-            const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(n % banks, base);
+        for (uint32_t h = 0; h < nb; ++h) {
+            uint32_t src = e * blk_tiles * tile_bytes;
+            const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(pair + h * (banks / 2), base);
             noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
             noc_async_read_set_trid(trid);
             for (uint32_t p = 0; p < pages_per_col; ++p) {

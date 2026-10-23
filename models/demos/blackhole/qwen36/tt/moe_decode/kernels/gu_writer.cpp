@@ -10,16 +10,17 @@
 // 3. Waits for the reader's route record (cb_route: k ids, then the k + 1 slot weights) and hands this core's slot
 //    weights to the compute MATH thread through the TRISC mailbox (FP32 bits). The route-owner core also writes the
 //    record to the route buffer the down op reads ([ids | weights] UINT16 row-major, 64 bytes).
-// 4. Writes each 1x32 output tile (w_s * silu(gate) * up of slot s, columns 32 j .. 32 j + 31) to row s of the
-//    [k + 1, I] BF16 row-major activation buffer.
+// 4. Writes each 1x32 output tile (w_s * silu(gate) * up of slot s and column pair p, columns 32 p .. 32 p + 31; the
+//    group's pairs as gu_layout.hpp) to row s of the [k + 1, I] BF16 row-major activation buffer.
 //
-// runtime args: [x_addr, act_addr, route_addr, logits_addr, pair j, route_owner, num_slots, slot...]
+// runtime args: [x_addr, act_addr, route_addr, logits_addr, group q, route_owner, num_slots, slot...]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 #include "ckernel.h"
 #include "ckernel_defs.h"
+#include "gu_layout.hpp"
 #include "router_topk.hpp"
 #include "tools/profiler/kernel_profiler.hpp"
 
@@ -41,7 +42,10 @@ void kernel_main() {
     constexpr uint32_t act_row_bytes = get_compile_time_arg_val(6);
     constexpr uint32_t cb_part = get_compile_time_arg_val(7);
     constexpr uint32_t cb_lg = get_compile_time_arg_val(8);
-    constexpr auto x_args = TensorAccessorArgs<9>();
+    constexpr uint32_t m = get_compile_time_arg_val(9);  // up|gate columns per bank and expert
+    constexpr uint32_t banks = get_compile_time_arg_val(10);
+    constexpr uint32_t np = gu_layout::pairs<m>();
+    constexpr auto x_args = TensorAccessorArgs<11>();
     constexpr auto act_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto route_args = TensorAccessorArgs<act_args.next_compile_time_args_offset()>();
     constexpr auto lg_args = TensorAccessorArgs<route_args.next_compile_time_args_offset()>();
@@ -94,13 +98,17 @@ void kernel_main() {
         noc_async_write(route_l1, s_route.get_noc_addr(0), 64);
     }
 
-    const uint32_t col_off = pair * tiny_bytes;
     for (uint32_t i = 0; i < num_slots; ++i) {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
-        cb_wait_front(cb_act, 1);
-        noc_async_write(get_read_ptr(cb_act), s_act.get_noc_addr(s, col_off), tiny_bytes);
+        cb_wait_front(cb_act, np);
+        for (uint32_t p = 0; p < np; ++p) {
+            noc_async_write(
+                get_read_ptr(cb_act) + p * tiny_bytes,
+                s_act.get_noc_addr(s, gu_layout::pair_index<m, banks>(pair, p) * tiny_bytes),
+                tiny_bytes);
+        }
         noc_async_writes_flushed();
-        cb_pop_front(cb_act, 1);
+        cb_pop_front(cb_act, np);
     }
     noc_async_write_barrier();
 #ifdef MOE_FUSED

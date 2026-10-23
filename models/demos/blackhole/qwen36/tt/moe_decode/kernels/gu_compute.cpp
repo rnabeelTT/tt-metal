@@ -3,10 +3,12 @@
 
 // Expert gate|up matmul + SwiGLU (TRISC) of the fused MoE decode (moe_decode/experts.py ExpertGateUp).
 //
-// Per slot this core owns (shared expert or a routed expert) and its column pair j:
-//   u = x . W[:, up col j],  g = x . W[:, gate col j]   (custom_mm, 1x32 activation tiles, LoFi, FP32 accumulation)
-//   act = w_s * silu(g) * u                               (SFPU on the result rows; w_s from BRISC via the mailbox)
-// rounded to the 7 significant bits the down projection's LoFi custom_mm reads exactly, packed as one 1x32 tile.
+// Per slot this core owns (shared expert or a routed expert) and each column pair i of its group (gu_layout.hpp):
+//   u = x . W[:, up col],  g = x . W[:, gate col]   (custom_mm over the group's [kt, m] bank blocks, ct = m; 1x32
+//                                                    activation tiles, LoFi, FP32 accumulation)
+//   act = w_s * silu(g) * u                         (SFPU on the result rows; w_s from BRISC via the mailbox)
+// rounded to the 7 significant bits the down projection's LoFi custom_mm reads exactly, packed as one 1x32 tile per
+// pair (pair order).
 
 #include <cstdint>
 
@@ -17,6 +19,7 @@
 #include "api/compute/eltwise_unary/eltwise_unary.h"
 #include "api/compute/experimental/custom_mm.h"
 #include "api/compute/pack.h"
+#include "gu_layout.hpp"
 
 // SFPU ops over the result rows only: a 1x32 matmul result occupies the first rows of DST faces 0 and 1
 // (VectorMode::R, 2 iterations), as in the gpt-oss fused decode (models/demos/gpt_oss/tt/fused_decode/kernels).
@@ -74,15 +77,15 @@ void kernel_main() {
     constexpr uint32_t cb_w = get_compile_time_arg_val(1);
     constexpr uint32_t cb_act = get_compile_time_arg_val(2);
     constexpr uint32_t kt = get_compile_time_arg_val(3);
+    constexpr uint32_t m = get_compile_time_arg_val(4);      // up|gate columns per bank and expert
+    constexpr uint32_t banks = get_compile_time_arg_val(5);
+    constexpr uint32_t nb = gu_layout::blocks<m>();
+    constexpr uint32_t np = gu_layout::pairs<m>();
 
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-#ifdef PAIR_JOINT
-    constexpr uint32_t ct = 2;  // up and gate columns of one [kt, 2] block (both in one bank)
-#else
-    constexpr uint32_t ct = 1;
-#endif
+    constexpr uint32_t ct = m;  // one bank block's columns
     custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
 
     const uint32_t num_slots = get_arg_val<uint32_t>(0);  // this core's slot count
@@ -90,36 +93,40 @@ void kernel_main() {
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
         tile_regs_acquire();
-#ifdef PAIR_JOINT
-        cb_wait_front(cb_w, 2 * kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
-        cb_pop_front(cb_w, 2 * kt);
-#else
-        cb_wait_front(cb_w, kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 0, kt);  // up
-        cb_pop_front(cb_w, kt);
-        cb_wait_front(cb_w, kt);
-        custom_mm_block<true>(cb_x, cb_w, 0, 0, 1, kt);  // gate
-        cb_pop_front(cb_w, kt);
-#endif
+        for (uint32_t h = 0; h < nb; ++h) {
+            cb_wait_front(cb_w, kt * m);
+            custom_mm_block<true>(cb_x, cb_w, 0, 0, h * m, kt, m);
+            cb_pop_front(cb_w, kt * m);
+        }
 
         silu_tile_init();
-        silu_rows(1);
+        for (uint32_t p = 0; p < np; ++p) {
+            silu_rows(gu_layout::gate_dst<m, banks>(gu_layout::up_dst<m, banks>(p)));
+        }
         mul_binary_tile_init();
-        mul_rows(0, 1, 0);
+        for (uint32_t p = 0; p < np; ++p) {
+            const uint32_t u = gu_layout::up_dst<m, banks>(p);
+            mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
+        }
         binop_with_scalar_tile_init();
         // the slot weight arrives once the router tail is done; the shared expert's matmuls run before that
         uint32_t score = 0;
         MATH(score = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
-        scalar_rows<MUL_UNARY>(0, score);
-        round_rows(0);
+        for (uint32_t p = 0; p < np; ++p) {
+            scalar_rows<MUL_UNARY>(gu_layout::up_dst<m, banks>(p), score);
+        }
+        for (uint32_t p = 0; p < np; ++p) {
+            round_rows(gu_layout::up_dst<m, banks>(p));
+        }
         tile_regs_commit();
 
-        cb_reserve_back(cb_act, 1);
+        cb_reserve_back(cb_act, np);
         tile_regs_wait();
-        pack_tile(0, cb_act);
+        for (uint32_t p = 0; p < np; ++p) {
+            pack_tile(gu_layout::up_dst<m, banks>(p), cb_act);
+        }
         tile_regs_release();
-        cb_push_back(cb_act, 1);
+        cb_push_back(cb_act, np);
 
         custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
     }

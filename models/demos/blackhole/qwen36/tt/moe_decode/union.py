@@ -21,7 +21,9 @@ import torch
 
 import ttnn
 
-from .experts import KERNEL_DIR, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, place_along_rows
+from .experts import (
+    KERNEL_DIR, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout, gu_ring, place_along_rows,
+)
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
 
@@ -116,8 +118,8 @@ class RouteRows:
 
 
 class ExpertGateUpRows:
-    """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column pair; union slot s goes
-    to core s % readers."""
+    """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column group (experts.gu_layout);
+    union slot s goes to core s % readers."""
 
     def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5):
         """readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
@@ -127,40 +129,40 @@ class ExpertGateUpRows:
         self.kt = hidden // TILE
         self.n_tiles = 2 * inter // TILE
         self.pairs = self.n_tiles // 2
-        assert self.n_tiles % self.banks == 0
+        self.m, self.nb, self.ngroups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
         self.trows, self.groups = tile_rows(rows), row_groups(rows)
         self.max_slots = min(num_experts, rows * k) + 1
         if readers is None:
             readers = 4
-        self.readers, self.buffers = readers, buffers
+        self.readers = readers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
-        m = self.n_tiles // self.banks
-        assert m in (1, 2), f"{m} up|gate columns per bank and expert: the kernels read 1 (two banks) or 2 (one bank)"
-        self.joint = m == 2  # up and gate column of a pair in one bank: one contiguous [kt, 2] block per slot
-        self.page_bytes = _page_bytes(self.kt * m, self.tile_bytes)
-        placed = place_along_rows(mesh_device, {j % self.banks: readers for j in range(self.pairs)})
-        self.assign = [(c, j, r) for j in range(self.pairs) for r, c in enumerate(placed[j % self.banks])]
+        # nb = 2 (odd m: a slot is two consecutive ring blocks the compute indexes together): an even ring
+        self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers, even=True)
+        self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
+        self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
+        assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
+        placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
+        self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act):
         cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
         tb = 64 * self.trows
         g = self.groups
-        # split mode (up / gate columns in two banks): a slot is two consecutive ring blocks the compute indexes
-        # together, so the ring holds an even number of blocks (custom_mm's tile index does not wrap)
-        buffers = self.buffers if self.joint else self.buffers + (self.buffers % 2)
+        buffers = self.buffers
+        np_ = len(self.group_pairs[0])
         per_core = -(-self.max_slots // self.readers)
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
-            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * (2 if self.joint else 1)),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows, 1),
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * 2 * g, tiny=True, rows=self.trows),  # two slots' weight tiles
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
-            _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g, tiny=True, rows=self.trows),
+            _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}
         for c, j, r in self.assign:
@@ -171,11 +173,12 @@ class ExpertGateUpRows:
         rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
         wr_ct = [cb_x, cb_act, cb_sc, cb_tab, self.kt, self.k, self.rows, self.readers, self.pairs, self.trows, g, cb_wt, ACT_PAGE]
+        wr_ct += [self.m, self.banks]
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g]
-        defines = [("ROWS", str(self.trows))] + ([("PAIR_JOINT", "1")] if self.joint else [])
-        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines)
+        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
+        defines = [("ROWS", str(self.trows))]
+        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         return ttnn.generic_op([up_gate, shared_up_gate, identity, x, table, act], program)
 

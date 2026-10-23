@@ -304,6 +304,14 @@ def main():
         if "cn" in what:  # Qwen3-Coder-Next shapes: 512 experts, top-10, 256 expert columns per device (TP2)
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
                 check_rows(dev, m, I=256, E=512, k=10, trials=1)
+        if "mcols" in what:  # m = 3 / 4 / 6 up|gate columns per bank (I = 128 m): GLM-4.5-Air TP4 (padded), one die
+            # (Ornith p150), Qwen3-Coder-30B (expert-parallel); bfp4 experts as those profiles store them
+            for mc in [int(v) for v in os.environ.get("MCOLS", "4,3,6").split(",")]:
+                print(f"== m = {mc} (I = {128 * mc})")
+                check_experts(dev, I=128 * mc, dtype=ttnn.bfloat4_b, trials=1)
+                check_experts(dev, I=128 * mc, dtype=ttnn.bfloat4_b, trials=1, one_program=True)
+                for m in [int(v) for v in os.environ.get("ROWS_LIST", "2,8,32").split(",")]:
+                    check_rows(dev, m, I=128 * mc, dtype=ttnn.bfloat4_b, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:

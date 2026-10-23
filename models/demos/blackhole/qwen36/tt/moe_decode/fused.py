@@ -37,12 +37,14 @@ def round_sig(t: torch.Tensor, bits: int = WEIGHT_SIG_BITS) -> torch.Tensor:
 
 
 def supported(num_experts, hidden, inter_local, dtype, banks=8):
-    """The gate|up kernels read 1 or 2 up|gate columns per bank and expert: TP4 / TP2 at Ornith 35B and 122B, Coder-Next;
-    one die (4 columns per bank) and 7-bank parts keep the unfused path."""
+    """The gate|up kernels read m = 2 I / 32 / banks up|gate columns per bank and expert, with the matmul result in DST
+    (m even: m tiles; m odd: 2 m; + 1 at multi-row widths; <= 8 FP32 tiles): m in 1, 2, 3, 4, 6 (Ornith 35B TP4 / TP2 /
+    one die = 1 / 2 / 4, 122B TP4 = 2). 7-bank parts (p100) keep the unfused path."""
+    m = (2 * inter_local // TILE) // banks
     return (
         dtype in (ttnn.bfloat8_b, ttnn.bfloat4_b)
         and (2 * inter_local // TILE) % banks == 0
-        and (2 * inter_local // TILE) // banks in (1, 2)
+        and m * (2 if m % 2 else 1) + 1 <= 8
         and (hidden // TILE) % banks == 0
         and num_experts % TILE == 0
         and num_experts <= 512  # router_topk.hpp route_union's expert mask

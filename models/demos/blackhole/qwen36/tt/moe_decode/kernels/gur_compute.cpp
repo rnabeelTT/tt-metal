@@ -4,9 +4,10 @@
 // Multi-row expert gate|up matmul + SwiGLU (TRISC) of the fused MoE decode (moe_decode/union.py ExpertGateUpRows),
 // row groups of ROWS rows ([ROWS, 32] activation tiles). Per union slot this core owns (count from BRISC through the
 // mailboxes) and row group:
-//   u = x . W[:, up col j], g = x . W[:, gate col j]          (custom_mm, LoFi, FP32 accumulation)
+//   u = x . W[:, up col], g = x . W[:, gate col]              (custom_mm over the group's bank blocks, ct = m; LoFi,
+//                                                              FP32 accumulation; column pairs as gu_layout.hpp)
 //   w = the slot's [M, 32] weight tile . I                   (custom_mm with the identity tile: loads it into DST)
-//   act = w * silu(g) * u, rounded to 7 significant bits (the down projection's srcB width), one [M, 32] tile.
+//   act = w * silu(g) * u, rounded to 7 significant bits (the down projection's srcB width), one [M, 32] tile per pair.
 // The per-row weight load through an identity matmul follows the gpt-oss union kernels
 // (models/demos/gpt_oss/tt/fused_decode/kernels/stream_gate_up_union_compute.cpp).
 
@@ -18,6 +19,7 @@
 #include "api/compute/eltwise_unary/eltwise_unary.h"
 #include "api/compute/experimental/custom_mm.h"
 #include "api/compute/pack.h"
+#include "gu_layout.hpp"
 
 // SFPU over the result rows only: M rows of DST faces 0 and 1 (VectorMode::R).
 constexpr uint32_t kRowIters = ROWS <= 4 ? 2 : ROWS / 2;
@@ -65,15 +67,16 @@ void kernel_main() {
     constexpr uint32_t cb_id = get_compile_time_arg_val(4);
     constexpr uint32_t kt = get_compile_time_arg_val(5);
     constexpr uint32_t groups = get_compile_time_arg_val(6);  // row groups of ROWS rows
+    constexpr uint32_t m = get_compile_time_arg_val(7);       // up|gate columns per bank and expert
+    constexpr uint32_t banks = get_compile_time_arg_val(8);
+    constexpr uint32_t nb = gu_layout::blocks<m>();
+    constexpr uint32_t np = gu_layout::pairs<m>();
+    constexpr uint32_t wdst = gu_layout::tiles<m>();  // the per-row weight tile, after the matmul results
 
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-#ifdef PAIR_JOINT
-    constexpr uint32_t ct = 2;  // up and gate columns of one [kt, 2] block (both in one bank)
-#else
-    constexpr uint32_t ct = 1;
-#endif
+    constexpr uint32_t ct = m;  // one bank block's columns
     custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
 
     uint32_t n = 0;
@@ -84,37 +87,43 @@ void kernel_main() {
     cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
     for (uint32_t i = 0; i < n; ++i) {
-        cb_wait_front(cb_w, 2 * kt);  // the slot's up and gate columns (one [kt, 2] block or two columns)
+        cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
         cb_wait_front(cb_sc, 2 * groups);
         for (uint32_t g = 0; g < groups; ++g) {
             tile_regs_acquire();
-#ifdef PAIR_JOINT
-            custom_mm_block<true>(cb_x, cb_w, g * kt, 0, 0, kt, 2);  // up -> DST 0, gate -> DST 1
-#else
-            custom_mm_block<true>(cb_x, cb_w, g * kt, 0, 0, kt);   // up
-            custom_mm_block<true>(cb_x, cb_w, g * kt, kt, 1, kt);  // gate
-#endif
+            for (uint32_t h = 0; h < nb; ++h) {
+                custom_mm_block<true>(cb_x, cb_w, g * kt, h * kt * m, h * m, kt, m);
+            }
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
-            custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, 2, 2);  // the group's per-row weights
+            custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
             silu_tile_init();
-            silu_rows(1);
+            for (uint32_t p = 0; p < np; ++p) {
+                silu_rows(gu_layout::gate_dst<m, banks>(gu_layout::up_dst<m, banks>(p)));
+            }
             mul_binary_tile_init();
-            mul_rows(0, 1, 0);
-            mul_rows(0, 2, 0);
-            round_rows(0);
+            for (uint32_t p = 0; p < np; ++p) {
+                const uint32_t u = gu_layout::up_dst<m, banks>(p);
+                mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
+                mul_rows(u, wdst, u);
+            }
+            for (uint32_t p = 0; p < np; ++p) {
+                round_rows(gu_layout::up_dst<m, banks>(p));
+            }
             tile_regs_commit();
 
-            cb_reserve_back(cb_act, 1);
+            cb_reserve_back(cb_act, np);
             tile_regs_wait();
-            pack_tile(0, cb_act);
+            for (uint32_t p = 0; p < np; ++p) {
+                pack_tile(gu_layout::up_dst<m, banks>(p), cb_act);
+            }
             tile_regs_release();
-            cb_push_back(cb_act, 1);
+            cb_push_back(cb_act, np);
 
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
         }
         cb_pop_front(cb_sc, 2 * groups);
-        cb_pop_front(cb_w, 2 * kt);
+        cb_pop_front(cb_w, nb * kt * m);
     }
     cb_pop_front(cb_id, 2);
     cb_pop_front(cb_x, groups * kt);

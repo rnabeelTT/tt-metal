@@ -11,16 +11,17 @@
 //    to the writer through cb_route (slot 0 = the shared expert, slots 1..k = the routed experts in top-k order).
 // 4. Streams this core's remaining columns straight from the ttnn expert tensors (no decode copy): a [1, E, K, N]
 //    TILE tensor interleaved over the DRAM banks keeps page p in bank p % banks, so when N tiles is a multiple of the
-//    bank count, output column n of expert e is a run of K tiles in bank n % banks (K * N / banks tiles per expert and
-//    bank, row-major over (k, local column)). This core owns column pair j: up column j and gate column j + N / 2 of
-//    each of its slots (runtime list). Each column is one cb_w block of kt tiles, read in page_bytes packets,
-//    transaction-id pipelined (num_buffers - 2 columns in flight ahead of compute).
+//    bank count, each expert's columns in bank b are one [kt, m] run (gu_layout.hpp). This core's group q owns the
+//    column pairs in bank q (m even) or banks q and q + banks / 2 (m odd): per slot (runtime list) one cb_w block of
+//    kt * m tiles per bank, read in page_bytes packets, transaction-id pipelined (num_buffers - 2 blocks in flight
+//    ahead of compute).
 //
-// runtime args: [logits_addr, w_addr, ws_addr, pair j, vc, num_slots, slot...]
+// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot...]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "gu_layout.hpp"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
 #include "tools/profiler/kernel_profiler.hpp"
@@ -49,10 +50,8 @@ void kernel_main() {
 
     static_assert(n_tiles % banks == 0, "the column-in-one-bank layout needs N tiles to be a multiple of the banks");
     constexpr uint32_t m = n_tiles / banks;  // local columns per bank and expert
-    static_assert(m == 1 || m == 2, "up|gate column pairs: in two banks (m = 1) or one bank (m = 2)");
-    // a block: m == 1: one column (kt tiles; up and gate in banks j and j + banks / 2); m == 2: the pair's [kt, 2]
-    // run in bank j (up = local column 0, gate = local column 1, row-major), read whole
-    constexpr uint32_t blk_tiles = kt * m;
+    constexpr uint32_t nb = gu_layout::blocks<m>();  // bank blocks per slot
+    constexpr uint32_t blk_tiles = kt * m;            // one bank's [kt, m] run, read whole
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
@@ -79,10 +78,10 @@ void kernel_main() {
     uint32_t free_blocks = num_buffers;
     uint32_t trid = 1;
     uint32_t trid_to_wait = 1;
-    auto stream_block = [&](uint32_t base, uint32_t e, uint32_t n) {
+    auto stream_block = [&](uint32_t base, uint32_t e, uint32_t bank) {
         // page (e, k, n) = (e * kt + k) * n_tiles + n -> bank n % banks, bank-local page (e * kt + k) * m + n / banks
-        uint32_t src = (e * kt * m + n / banks) * tile_bytes;
-        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(n % banks, base);
+        uint32_t src = e * blk_tiles * tile_bytes;
+        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(bank, base);
         noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
         noc_async_read_set_trid(trid);
         for (uint32_t p = 0; p < pages_per_col; ++p) {
@@ -104,9 +103,8 @@ void kernel_main() {
         }
     };
     auto stream_slot = [&](uint32_t base, uint32_t e) {
-        stream_block(base, e, pair);
-        if constexpr (m == 1) {
-            stream_block(base, e, pair + n_tiles / 2);
+        for (uint32_t h = 0; h < nb; ++h) {
+            stream_block(base, e, pair + h * (banks / 2));
         }
     };
 

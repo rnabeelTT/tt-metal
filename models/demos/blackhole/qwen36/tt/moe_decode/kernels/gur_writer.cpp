@@ -14,15 +14,17 @@
 //    shared-gate sigmoid), rounded to the 7 significant bits custom_mm reads.
 // 3. Per slot: the groups' [trows, 32] weight tiles (each followed by a zero tile: custom_mm takes an even K; zeroed by
 //    NOC reads of the L1 zero region), then the previous slot's output tiles to the activation buffer (page
-//    (s * pairs + j) * groups + g): interleaved so neither cb fills up.
+//    (s * pairs + p) * groups + g for each column pair p of the core's group, gu_layout.hpp): interleaved so neither
+//    cb fills up.
 //
-// runtime args: [x_addr, act_addr, table_addr, pair j, slot0]
+// runtime args: [x_addr, act_addr, table_addr, group q, slot0]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 #include "ckernel.h"
 #include "ckernel_defs.h"
+#include "gu_layout.hpp"
 #include "router_topk.hpp"
 
 void kernel_main() {
@@ -45,7 +47,10 @@ void kernel_main() {
     constexpr uint32_t groups = get_compile_time_arg_val(10);
     constexpr uint32_t cb_wt = get_compile_time_arg_val(11);
     constexpr uint32_t act_page = get_compile_time_arg_val(12);  // activation buffer page (>= one tile: shared by all widths)
-    constexpr auto x_args = TensorAccessorArgs<13>();
+    constexpr uint32_t m = get_compile_time_arg_val(13);  // up|gate columns per bank and expert
+    constexpr uint32_t banks = get_compile_time_arg_val(14);
+    constexpr uint32_t np = gu_layout::pairs<m>();
+    constexpr auto x_args = TensorAccessorArgs<15>();
     constexpr auto act_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto table_args = TensorAccessorArgs<act_args.next_compile_time_args_offset()>();
 
@@ -136,10 +141,13 @@ void kernel_main() {
 
     auto drain = [&](uint32_t s) {
         for (uint32_t g = 0; g < groups; ++g) {
-            cb_wait_front(cb_act, 1);
-            noc_async_write(get_read_ptr(cb_act), s_act.get_noc_addr((s * pairs + pair) * groups + g), tb);
+            cb_wait_front(cb_act, np);
+            for (uint32_t p = 0; p < np; ++p) {
+                const uint32_t pj = gu_layout::pair_index<m, banks>(pair, p);
+                noc_async_write(get_read_ptr(cb_act) + p * tb, s_act.get_noc_addr((s * pairs + pj) * groups + g), tb);
+            }
             noc_async_writes_flushed();
-            cb_pop_front(cb_act, 1);
+            cb_pop_front(cb_act, np);
         }
     };
     uint32_t i = 0;
