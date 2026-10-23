@@ -304,6 +304,10 @@ def main():
         if "cn" in what:  # Qwen3-Coder-Next shapes: 512 experts, top-10, 256 expert columns per device (TP2)
             for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
                 check_rows(dev, m, I=256, E=512, k=10, trials=1)
+        if "q122" in what:  # Qwen3.5-122B-A10B on 4 dies: hidden 3072 (12 tiles per bank), 256 expert columns, bfp4 experts
+            check_experts(dev, H=3072, I=256, dtype=ttnn.bfloat4_b, trials=1)
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
+                check_rows(dev, m, H=3072, I=256, dtype=ttnn.bfloat4_b, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:
