@@ -289,6 +289,12 @@ class Qwen35MoeModel(Qwen36Model):
         x = self.embd(token_ids_buf)
         if self.num_devices > 1:
             x = ttnn.reshape(x, (1, 1, x.shape[0] * x.shape[1], x.shape[-1]))
+        replicated = bool(getattr(self.args, "decode_replicated", False))
+        if replicated:  # the replicated decode residual (decode_boundary.py): one gather of the embedding rows
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            bnd = decode_boundary(self.args, self.mesh_device)
+            x = bnd.gather(x, self.tt_ccl)
         if hook is not None:
             hook("pre", token_ids_buf, cur_pos_tensor, page_table, cos, sin)
         for layer in self.layers:
@@ -296,7 +302,7 @@ class Qwen35MoeModel(Qwen36Model):
                 x = layer.forward(x, cos, sin, position_tensor=cur_pos_tensor, page_table=page_table, mode="decode")
             else:
                 x = layer.forward(x, mode="decode")
-        x = self._final_norm_decode(x)
+        x = self._final_norm_decode_replicated(x) if replicated else self._final_norm_decode(x)
         if hook is not None:
             hook("post", x)
         if sharded_lm_head or self._ondev_argmax:
@@ -305,6 +311,19 @@ class Qwen35MoeModel(Qwen36Model):
             logits = self._lm_head(x)
         ttnn.deallocate(x)
         return logits
+
+    def _final_norm_decode_replicated(self, x):
+        """The final RMSNorm on the replicated decode residual: the same sharded norm program and output layout as the
+        TP path (lm_head norm config), without its all-gather."""
+        from models.tt_transformers.tt.common import Mode
+
+        nc = dict(self.args.get_norm_config("lm_head", Mode.DECODE))
+        nc["output_mem_config"] = ttnn.DRAM_MEMORY_CONFIG
+        x_in = ttnn.to_memory_config(x, nc["sharded_output_config"])
+        ttnn.deallocate(x)
+        out = self.norm.norm(x_in, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        ttnn.deallocate(x_in)
+        return out
 
     # ---- adaptive MTP: a second persistent B=1 GDN state set (the live request's state during an MTP phase) --------
     def _ensure_gdn_mtp_scratch(self):
@@ -793,6 +812,9 @@ def create_model(
     # datatype-sweep precision policy (stage 8): the shipped doc/datatype_sweep/selected_precision_config.json, or the file
     # named by QWEN35_PRECISION_CONFIG (``none`` = code defaults), mapped onto the MultichipConfig knobs the runtime reads.
     policy, policy_path = precision.load_policy()
+    if os.environ.get("QWEN35_GDN_FUSED_DECODE", "0") == "1":
+        # the fused GDN decode steps the recurrent state in place in fp32 (kda.recurrent_decode)
+        policy = {**policy, "linear_state_dtype": "fp32"}
     mc = precision.apply_policy(mc, policy)
     logger.info(
         f"precision policy {policy.get('config_id')} ({policy_path or 'code defaults'}): "

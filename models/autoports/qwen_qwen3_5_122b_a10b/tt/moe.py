@@ -42,6 +42,20 @@ ROUTER_TOPK_PAD = int(os.environ.get("QWEN35_ROUTER_TOPK_PAD", "0") or 0)  # pro
 ROUTER_L1 = (
     os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
 )  # L1-resident router intermediates for decode rows (experiment)
+# One-token decode: top-k + softmax as one generic_op (models/demos/blackhole/qwen36/tt/moe_decode/topk.py) instead of
+# the 7-op topk route -> slice -> softmax -> untilize chain (~25 us per layer on 4 chips, fusion step 1)
+ROUTER_TOPK_FUSED = os.environ.get("QWEN35_ROUTER_TOPK_FUSED", "1") == "1"
+# Decode router matmul (<= 32 rows): 1D mcast on 8 cores over the interleaved weight, in0_block_w 16, same HiFi4 / fp32
+# accumulation (op microbenchmark fusion/tools/mbench_moe.py: 8.3 us vs 36.6 us for the DRAM-sharded path with its
+# reshards). The DRAM-sharded copy stays for prefill rows. 0 = the DRAM-sharded decode path.
+ROUTER_DECODE_1D = os.environ.get("QWEN35_ROUTER_DECODE_1D", "1") == "1"
+# One-token decode MoE as 3 ops (router matmul, streamed gate|up + SwiGLU, streamed down + expert sum) reading the
+# routed experts in place (models/demos/blackhole/qwen36/tt/moe_decode, fusion step 2). Rounds the stored routed
+# weights to the LoFi operand width (moe_decode.fused.WEIGHT_SIG_BITS), so prefill reads the same rounded weights.
+MOE_FUSED_DECODE = os.environ.get("QWEN35_MOE_FUSED_DECODE", "0") == "1"
+# decode widths 2..N take the multi-row fused MoE (expert union, moe_decode/union.py; > 8 rows in groups of 8);
+# 0 = one-token only
+MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "32") or 0)
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -178,10 +192,27 @@ class Qwen35MoE:
         self._router_sharded = (
             self.num_devices > 1 and os.environ.get("QWEN35_ROUTER_DRAM_SHARDED", "1") == "1"
         ) and getattr(args, "act_shard_hidden", None) is not None
+        self._router_1d = None
+        if self._router_sharded and ROUTER_DECODE_1D:
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            self._router_1d = (
+                self.router_w,  # interleaved
+                tpc.create_matmul_1d_decode_progcfg(
+                    TILE,
+                    self.hidden,
+                    self.num_experts,
+                    8,
+                    fp32_acc=True,
+                    grid_w=mesh_device.compute_with_storage_grid_size().x,
+                    in0_block_w=16 if (self.hidden // TILE) % 16 == 0 else None,
+                ),
+            )
         if self._router_sharded:
             from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
-            ttnn.deallocate(self.router_w)
+            if self._router_1d is None:
+                ttnn.deallocate(self.router_w)
             self.router_w = ttnn.as_tensor(
                 state_dict["gate.weight"].T.contiguous(),
                 dtype=self.prec.router,
@@ -194,6 +225,24 @@ class Qwen35MoE:
             self.router_decode_progcfg = tpc.create_dram_sharded_matmul_program_config(
                 TILE, self.hidden, self.num_experts
             )
+
+        from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
+
+        _gu_tile0 = getattr(args, "gather_gate_up_output_tile", None)
+        self._fused_ok = (
+            MOE_FUSED_DECODE
+            and _gu_tile0 is None
+            and self.prec.routed_gate_up == self.prec.routed_down
+            and moe_fused.supported(
+                self.num_experts,
+                self.hidden,
+                self.inter_local,
+                self.prec.routed_gate_up,
+                banks=len(moe_fused.bank_workers(mesh_device)),  # p100: 7 banks
+            )
+        )
+        rnd = moe_fused.round_sig if self._fused_ok else (lambda t: t)
+        sfx = moe_fused.CACHE_SUFFIX if self._fused_ok else ""
 
         # ---- routed experts (HF fused: gate_up [E, 2N, H] = [gate; up] rows, down [E, H, N]) -------
         gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
@@ -215,18 +264,18 @@ class Qwen35MoE:
         # (matmul: out_tile_shape[1] % in1_tile_w == 0).
         _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
         self.up_gate = upload(
-            packed.unsqueeze(0).contiguous(),
+            rnd(packed.unsqueeze(0).contiguous()),
             self.prec.routed_gate_up,
-            "experts.up_gate",
+            "experts.up_gate" + sfx,
             dim=-1,
             tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
         )
         down_t = down.transpose(1, 2).unsqueeze(0).contiguous()  # [1, E, N, H]
         # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
         self.down = upload(
-            down_t,
+            rnd(down_t),
             self.prec.routed_down,
-            "experts.down",
+            "experts.down" + sfx,
             dim=-2,
             tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
         )
@@ -251,6 +300,26 @@ class Qwen35MoE:
         self.shared_gate_w = upload(
             state_dict["shared_expert_gate.weight"].T.contiguous(), ttnn.bfloat16, "shared_expert_gate"
         )  # [H, 1]
+
+        self._fused = None
+        if self._fused_ok:
+            self._fused = moe_fused.FusedMoEDecode(
+                mesh_device,
+                args,
+                hidden=self.hidden,
+                inter_local=self.inter_local,
+                num_experts=self.num_experts,
+                k=self.top_k,
+                tp=tp,
+                dtype=self.prec.routed_gate_up,
+                router_weight=state_dict["gate.weight"],
+                shared_gate_weight=state_dict["shared_expert_gate.weight"],
+                shared_gate_proj=state_dict["shared_expert.gate_proj.weight"],
+                shared_up_proj=state_dict["shared_expert.up_proj.weight"],
+                shared_down_proj=state_dict["shared_expert.down_proj.weight"],
+                cache_name=cache_name,
+                router_ckc=None,  # set below with the block's router compute config
+            )
 
         # ---- constants ----------------------------------------------------------------------------------
         self.ones_mask = ttnn.from_torch(
@@ -293,11 +362,19 @@ class Qwen35MoE:
         self.cfg_down_masked = sparse_matmul_program_config(
             self.PREFILL_CHUNK, H, Nl, target_cores=max(8, min(32, union // 4)), in0_block_w_cap=32
         )
+        if self._fused is not None:
+            self._fused.router_ckc = self.router_ckc
+            for m in range(2, min(MOE_FUSED_ROWS_MAX, 32) + 1):
+                self._fused.rows_ops(m)  # buffers uploaded before any trace capture
+        if ROUTER_TOPK_FUSED:
+            self._fused_topk()  # build the shared outputs now: no host upload once decode traces are captured
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
 
     # ------------------------------------------------------------------------------------------------
-    def forward(self, x, mode=None):
-        """x: [B, T, H] (single device prefill/decode) or [1, 1, T, H]. Returns the same shape."""
+    def forward(self, x, mode=None, partial=False):
+        """x: [B, T, H] (single device prefill/decode) or [1, 1, T, H]. Returns the same shape. partial (TP decode):
+        return this device's [1, 1, T, H] partial sum instead of the reduce-scattered output (the replicated-residual
+        decode boundary all-reduces it, models/demos/blackhole/qwen36/tt/decode_boundary.py)."""
         orig = list(x.shape)
         H = orig[-1]
         T = math.prod(orig[:-1])
@@ -306,6 +383,9 @@ class Qwen35MoE:
             # interleaved inputs. One conversion at the block entry.
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
+        if self._fused is not None and list(x4.padded_shape)[-2] == TILE and mode != "prefill":
+            if T == 1 or 2 <= T <= min(MOE_FUSED_ROWS_MAX, 32):
+                return self._forward_fused_decode(x4, orig, partial)
         scores, ids = self._route(x4)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
             if T <= self.GATHER_MAX_TOKENS:
@@ -314,12 +394,15 @@ class Qwen35MoE:
                 routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
         else:
             routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
-        ttnn.deallocate(scores)
-        ttnn.deallocate(ids)
+        if not getattr(self, "_route_persistent", False):
+            ttnn.deallocate(scores)
+            ttnn.deallocate(ids)
         shared = self._shared(x4)
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
         ttnn.deallocate(shared)
+        if self.num_devices > 1 and partial:
+            return ttnn.reshape(out, orig) if list(out.shape) != orig else out
         if self.num_devices > 1:
             # TP on the expert intermediate dim: every device holds a partial [.., H] sum (routed + shared); the layer
             # contract wants the FRACTURED residual [.., H / tp], so reduce-scatter along the hidden dim (the same
@@ -341,12 +424,58 @@ class Qwen35MoE:
             out = ttnn.reshape(out, orig)
         return out
 
+    def _forward_fused_decode(self, x4, orig, partial=False):
+        """One decode token through moe_decode.FusedMoEDecode: the partial sum lands in a model-wide buffer that the
+        reduce-scatter reads directly (tt_all_reduce would deallocate it)."""
+        rows = int(x4.shape[-2])
+        part = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
+        if partial:  # a copy (the fused ops' output buffer is model-wide), already in the boundary's all-reduce input layout
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            out = decode_boundary(self.args, self.device).to_partial(part)
+            return ttnn.reshape(out, orig) if list(out.shape) != orig else out
+        if self.num_devices > 1:
+            out = ttnn.experimental.reduce_scatter_minimal_async(
+                part,
+                persistent_output_buffers=None,
+                dim=3,
+                multi_device_global_semaphore=self.tt_ccl.get_and_cycle_rs_semaphore_handles(),
+                barrier_semaphore=self.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
+                num_links=self.tt_ccl.get_num_links(0),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                intermediate_memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                topology=self.args.ccl_topology(),
+                chunks_per_sync=10,
+                num_workers_per_link=2,
+                num_buffers_per_channel=2,
+            )
+            orig = orig[:-1] + [out.shape[-1]]
+        else:
+            out = ttnn.clone(part, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if list(out.shape) != orig:
+            out = ttnn.reshape(out, orig)
+        return out
+
     # ------------------------------------------------------------------------------------------------
     def _route(self, x4):
         """Router: returns renormalized top-k scores [1,1,T,k] (bf16) and expert ids [1,1,T,k] (uint16)."""
+        self._route_persistent = False
+        fused_topk = ROUTER_TOPK_FUSED and x4.shape[-2] == 1 and list(x4.padded_shape)[-2] == TILE
         # decode rows (<= 32 tokens): keep the router chain L1-resident (perf pass, QWEN35_ROUTER_L1); prefill rows in DRAM
-        r_mc = ttnn.L1_MEMORY_CONFIG if (ROUTER_L1 and x4.shape[-2] <= TILE) else ttnn.DRAM_MEMORY_CONFIG
-        if getattr(self, "_router_sharded", False):
+        r_mc = (
+            ttnn.L1_MEMORY_CONFIG
+            if ((ROUTER_L1 or fused_topk) and x4.shape[-2] <= TILE)
+            else ttnn.DRAM_MEMORY_CONFIG
+        )
+        if getattr(self, "_router_1d", None) is not None and x4.shape[-2] <= TILE:
+            w_il, pc = self._router_1d
+            x_in = ttnn.to_memory_config(x4, ttnn.L1_MEMORY_CONFIG) if x4.is_sharded() else x4
+            logits = ttnn.linear(
+                x_in, w_il, compute_kernel_config=self.router_ckc, program_config=pc, memory_config=r_mc
+            )
+            if x_in is not x4:
+                ttnn.deallocate(x_in)
+        elif getattr(self, "_router_sharded", False):
             from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
             logits = tpc.sharded_decode_matmul(
@@ -367,6 +496,14 @@ class Qwen35MoE:
                 compute_kernel_config=self.router_ckc,
                 memory_config=r_mc,
             )
+        if fused_topk:
+            # one token: top-k + softmax in one op, into model-wide persistent outputs (ids UINT16 row-major, the gather
+            # path's `indices` layout; weights BF16 TILE)
+            topk, ids, scores = self._fused_topk()
+            topk(logits, ids, scores)
+            ttnn.deallocate(logits)
+            self._route_persistent = True
+            return scores, ids
         if ROUTER_TOPK_FIRST:
             # softmax over all experts -> top-k -> renormalize == top-k of the logits -> softmax over the k selected
             # (the global partition function cancels in the renormalization): 2 ops instead of 4 (perf pass turn 1).
@@ -398,6 +535,18 @@ class Qwen35MoE:
         if ids.dtype != ttnn.uint16:
             ids = ttnn.typecast(ids, ttnn.uint16)
         return scores, ids
+
+    def _fused_topk(self):
+        """(RouterTopK, ids, scores): one op and one pair of output buffers per model build (args), shared by the layers
+        (each layer consumes them before the next layer's router writes them)."""
+        cache = self.args.__dict__.setdefault("_qwen35_fused_topk", {})
+        key = (self.num_experts, self.top_k)
+        if key not in cache:
+            from models.demos.blackhole.qwen36.tt.moe_decode.topk import RouterTopK
+
+            op = RouterTopK(self.device, self.num_experts, self.top_k)
+            cache[key] = (op, *op.alloc_outputs())
+        return cache[key]
 
     def _alloc_dev(self, shape, dtype, zero=False, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG):
         """Device-side buffer allocation (no host write, trace-safe, nothing cached): ``ttnn.empty`` and, when the

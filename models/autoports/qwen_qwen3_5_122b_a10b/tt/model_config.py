@@ -27,6 +27,12 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
     def __init__(self, mesh_device=None, max_batch_size=1, max_seq_len=2048, **kwargs):
         os.environ.setdefault("HF_MODEL", HF_MODEL_ID)
         super().__init__(mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len, **kwargs)
+        # QWEN35_DECODE_REPLICATED=1 (TP meshes): decode keeps the residual replicated, one all-reduce per layer boundary
+        # (models/demos/blackhole/qwen36/tt/decode_boundary.py; fusion step 3): the plain decode steps; the MTP head and
+        # verify passes feed fractured rows and keep the reduce-scatter contract (the layer dispatches on the width).
+        self.decode_replicated = (
+            os.environ.get("QWEN35_DECODE_REPLICATED", "0") == "1" and int(getattr(self, "num_devices", 1)) > 1
+        )
         text_config = self.hf_config.get_text_config()
         self.num_experts = int(text_config.num_experts)
         self.num_experts_per_tok = int(text_config.num_experts_per_tok)
