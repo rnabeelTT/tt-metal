@@ -444,7 +444,11 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
   (rounded weights), coherent. Card chain `runs/q122_card_chain.sh`: p300x2 card rows done for both bundles (pub
   realtext median 45.9). Evals new / pub: GPQA-40 0.65 / 0.775, IFEval strict 0.87 / 0.85 (loose 0.90 / 0.87),
   LCB-50 0.54 / 0.54. GPQA: 3 vs 8 discordant (McNemar p 0.23), same truncation count (18/40 at 4096 tokens) on both;
-  `runs/q122_gpqa.sh` runs all 198 diamond questions on both before publishing.
+  `runs/q122_gpqa.sh` ran all 198: 0.677 / 0.697 (12 vs 16 discordant, McNemar p 0.57, within one stderr +-0.033).
+  longctx rows (p300x2-longctx, MTP off, 1 user): TPOT 31.3 -> 17.6 ms (31.9 -> 56.8 tok/s, +78 %); 16K TTFT 4388 ->
+  4408 ms. **Published 2026-10-23: raahemnabeel/qwen3-5-122b-a10b-blackhole-fast** (q122_fusion 883cc57c369, image
+  302caba622c3; models/ byte-identical to the benchmarked af3d5f52a5eb, only codegen include order + _ttnn.so differ).
+  Hub smoke test queued (`runs/q122_hub_smoke.sh`).
   The shipped `p300x2-longctx` / `p150x4-longctx` profiles do not boot (both bundles): the plugin disables chunked MM
   input and one image item (4096 tokens) exceeds the 2048-token budget. q122_fusion b7e15dd9876 sets the budget to
   4096 (intermediate chunks stay whole 2048-token segments); `runs/q122_longctx.sh` re-packages and reruns the longctx
@@ -527,7 +531,8 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 ### Run queue (2026-10-23)
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
-q122_longctx, q122_gpqa, c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
+q122_longctx, q122_gpqa (done; 122B published), c30_chain (running), glm_chain, ornith_p150_chain, cn_hub_smoke,
+q122_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
 (ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
 multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
 profile picks one; that choice stays).
