@@ -1,0 +1,4684 @@
+{
+ "loopprobe.json": {
+  "settings": {
+   "model": "zai-org/GLM-5.3-Flash",
+   "temperature": 1.0,
+   "top_p": 0.95,
+   "reasoning_effort": "low",
+   "stop": [
+    "<|endoftext|>"
+   ],
+   "max_tokens": 1024
+  },
+  "seeds": 32,
+  "summary": {
+   "doc 106 base": [
+    6,
+    32,
+    0
+   ],
+   "doc 65 base": [
+    1,
+    32,
+    0
+   ],
+   "doc 106 rp105": [
+    5,
+    32,
+    0
+   ],
+   "doc 65 rp105": [
+    1,
+    32,
+    0
+   ]
+  },
+  "results": [
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 1,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 300.3,
+    "content_empty": false,
+    "max_word_run": 909,
+    "max_8gram": 902,
+    "loop": true,
+    "content_head": "******Bingue! \"Nhiệm vụ\"？\"Nuôi\"？ ĐauTextEditeditorSanta? Đoạn câu mở màn hình chào th WakeDomain like tiếng Việt ghép leлубbing bịai nghĩa ai maymagina bịai makeware th \"Nhi\" rồiassessing mình đou tiế"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 2,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 300.3,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 92,
+    "loop": true,
+    "content_head": "Nhiệm vụ? Tám giờ sáng giờ cuối tuần họp họp họp đúng mẹ là máy móc nuôi con à? Mẹ không phải là superwoman phục vụ 24/24 không nghỉ không lương không cảm ơn  Không phải mệnh lệnhệnh chế chin Không ph"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 164,
+     "completion_tokens": 99,
+     "prompt_tokens_details": null
+    },
+    "secs": 32.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Câu này nghe như thể mẹ chỉ là một chú Delbert trong chương trình máy tính — nhận nhiệm vụ xuống và hoàn thành xong rồi báo cáo đấy! ******\n\nCâu này nghe như thể con cái là một gói hàng và mẹ chỉ là m"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 285,
+     "completion_tokens": 220,
+     "prompt_tokens_details": null
+    },
+    "secs": 68.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chiến nhiệm của mẹ chỉ là nuôi dạy con à? Nếu mẹ chỉ làm hai việc này thì con cái sớm muộn sẽ biến thành zombie trong phim kinh质押 karena tình cảm và giáo dục con cái của mẹ hoàn toàn bị bỏmensagem lik"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 325,
+     "completion_tokens": 260,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "**********\n\nChà tr型企业 không ai this sentence just assigned m ioi mẹ the job of raising children like a lifelong unpaid internship with no days off no salary and no exit strategy. The poor woman gets a"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 233,
+     "completion_tokens": 168,
+     "prompt_tokens_details": null
+    },
+    "secs": 52.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 3,
+    "loop": false,
+    "content_head": "Nó có lỗi chính tả ngay ở từ \"Nhiệm vụ\" và viết to ouml;... ờ êm... à kì... à: Nó có lỗi chính tả ngay ở từ đầu tiên vì \"Nhiệm vụ\" tự nhiên lớn như thể chữ N đang làm t оператив ơm\n\n******  Nó có lỗi "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 127,
+     "completion_tokens": 62,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ? Nghe trong trang trọng như một bảntagram từ quânurv số教官! L nuôi dạy con cái đang giống như mông một robot in từ nhàm mother镇ผผผ"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 263,
+     "completion_tokens": 198,
+     "prompt_tokens_details": null
+    },
+    "secs": 61.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này nhé! \"Nhiệm vụ\" có một chữ N to bự tưởng serializer của Microsoft nghiêm SHIFT key bịaɕ143 nghỉ viện phí thôi! Đầu chữ viết to phần sau chữ viết nhỏ phần dôi như tới birthday party ki ở strayer pa"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 9,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 300.3,
+    "content_empty": false,
+    "max_word_run": 994,
+    "max_8gram": 987,
+    "loop": true,
+    "content_head": "Ôi chúa thay ở ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 10,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 300.2,
+    "content_empty": false,
+    "max_word_run": 819,
+    "max_8gram": 812,
+    "loop": true,
+    "content_head": "Chào các bạn! Mình vừa đọc một câu văn và mình phải nói — nó đang làm những điều mà câu văn không nên làm! Đọc nó cảm giác như đang xem maRequestBody của ChatGPT bị nước dội phím. Nó không có dấu. Bạn"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 137,
+     "completion_tokens": 72,
+     "prompt_tokens_details": null
+    },
+    "secs": 24.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Câu này đọc xong khiến tôi mất nửa giây để hiểu Nhiệm vụ là gì vì chữ N lùng như một rác mà máy gõ_FIXED ******\nMẹ nuôi dạy con cái như thể con là một dự án tra cống và mẹ là một cỗ máy in chú"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 181,
+     "completion_tokens": 116,
+     "prompt_tokens_details": null
+    },
+    "secs": 37.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Bài này đọc ngược từ \"Nhiệm\" xuống \"nhi\" rồi laoidtwjdhlhpsthuwaon con cái luôn luôn bối rối như ma completa không biết mình là ai hay ma b 增强******\n\nCâu này dài như ch midterm 洗衣奶 3750980123 con cái "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 333,
+     "completion_tokens": 268,
+     "prompt_tokens_details": null
+    },
+    "secs": 82.9,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "******\n\nÔi trời 暧 Pepsi lại quán câu \"Nhiem vu mua đậu\" chết với cả chữ b é ch传授 không ai dạy người ta ngắt câu đúng c 儂 mẹ ở nhà đই đức con cái nó thành \"Nhiem vu mua đậu\" cơ mẹ ch Sens con cái bán đ"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 154,
+     "completion_tokens": 89,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Bạn bỏ uppercase N vào \"Nhiệm vụ\" như thể chữ N cần thuê riêng một gánh đồng để đứng thằng>>>******Bau.ResponseWriter Đây là chữ tiếng Việt nhưng lại che giòn một chữ tiếng Anh như thể hai ngôn ngữ kế"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 239,
+     "completion_tokens": 174,
+     "prompt_tokens_details": null
+    },
+    "secs": 54.4,
+    "content_empty": false,
+    "max_word_run": 22,
+    "max_8gram": 15,
+    "loop": false,
+    "content_head": "Ôi trời ơi câu này vừaMieng vừaTieng nezhen như mộtphet phet sáng gör hundred năm rồi ai ai ai ai ai nếu muốn nóiTieng thì nóiTieng thì đừng nóiMieng nữa ai ai ai\n\n*******\n\nCòn phet mốt là câu này neu"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 286,
+     "completion_tokens": 221,
+     "prompt_tokens_details": null
+    },
+    "secs": 68.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "N initialsales? Nó mở đầu bằng chữ \"N\" một mình đứng đó cô đơn như một đứt mости bản thân — ai có biết chuó \"N\" muốn làm gì không? Là \"Nhiệm vụ\" hay \"Nhiệm\" hay chỉ là một tì unfortunate lchalk tràn? "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 446,
+     "completion_tokens": 381,
+     "prompt_tokens_details": null
+    },
+    "secs": 112.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 3,
+    "loop": false,
+    "content_head": "Ch compañeros mày câu chữ thiếu dấuthan rè chỉ đ purposely bắt ta đọc toisés như đang b海上 m系文字ần le rì相反还以为自己在写越南语其实是乱码体ed com con mчит thì phát hiện chữ \"Nhiệm\" lột đi dấu rồi \"vụ\" 变成 \"vitte\" đo lo y"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 194,
+     "completion_tokens": 129,
+     "prompt_tokens_details": null
+    },
+    "secs": 38.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiêuai là \"nuôi dạy\" hay \"nuôi nuôi dạy\"这位妈妈怕是连自己要完成什么任务都还在打字中途决定呢！ 这样的句子就像妈妈一边喂饭一边讲课一边还打字发短信一样手忙脚乱啊！\n\n****** \n\n拜托这句话读起来像是键盘先生在半夜偷偷偷换了字母还偷走了空格！ \"Nhiệm vụ\"这位神秘嘉宾请先自我介绍一下您到底是哪个单词再上台表演吧！"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 19,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 297.6,
+    "content_empty": false,
+    "max_word_run": 198,
+    "max_8gram": 191,
+    "loop": true,
+    "content_head": "Ui ch UCLA UI BẮNG ĐIỂU TRÁNG ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI ĐƯỚI "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 279,
+     "completion_tokens": 214,
+     "prompt_tokens_details": null
+    },
+    "secs": 63.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "Sentence này đọc giống như một chỉlh TODAY của bảo mẫu hơn là một câu văn âm nghe như mẹ sinh ra con hanya để làm máy móc nuôi dạy không có cảm tình hay quyền riêng vị trí của con cái trong câu ở đâu "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 175,
+     "completion_tokens": 110,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời ố già ố cụ kiến phệ không hề hi từ phê hi.DateField déclaré chỉ có \"Nhiệm\" là một từ trong tiếng Việt đâu anh bạn của \"Nhiệm\" là aiệu bố ai růc lượt aiệu ai</arg_value>Дата thực).</arg_value>\n"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 232,
+     "completion_tokens": 167,
+     "prompt_tokens_details": null
+    },
+    "secs": 50.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời ơi \"Nhiệm vụ\" là gìậy? Chữ cái N lơnayt đi ngang rồi tự imread vào giữa câu như khách vào nhà không gõ cửa. Nhiem vụ hay Nhiệm vụ hay Nhiem vụ... chọn một tên mình rồi bạn ơi!\n\n*******\n\n\"Nuôi "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 23,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 297.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chúa手里obligation nặng như núi! Một câu tám chữ muốn tóm tắt tám năm lạmуществ. Ái nhi kia là \"nuôi\" và \"dạy\" gét ép chung lại thành \"nuôi dạy\" có sẵn như體 mì ăn chung một bát: về sau đêm ta干 lìcon 切 t"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 127,
+     "completion_tokens": 62,
+     "prompt_tokens_details": null
+    },
+    "secs": 19.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Đây là một câu tâng hoc đúng đến mức con ruột cũng muôn và đúng theo budget luật laws của cú pháp thế lừng — trai mù</arg_value>******</arg_value>Bạn task MẪ chính giám ans戀</arg_value>"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 216,
+     "completion_tokens": 151,
+     "prompt_tokens_details": null
+    },
+    "secs": 45.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ổi trời lime ốmi vit chữ \"N\" lòi lon \"Nhiệm vụ\" quả t should not have been born there — that stray letter N is like an uninvited guest who sneaked into the party and nobody dares to ask it to leave!\n\n"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 217,
+     "completion_tokens": 152,
+     "prompt_tokens_details": null
+    },
+    "secs": 45.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái — câu nói vang lên như thể bà mẹ chỉ là một cỗ máy chạy Program NuoiConCai.exe và mỗi ngày bắt đầu lúc sáng.`\n\n******`\n\nÔi cháu nghe nghe \"nhiệm vụ của mẹ\" như thể "
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 259,
+     "completion_tokens": 194,
+     "prompt_tokens_details": null
+    },
+    "secs": 57.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ồi ȓither \"Nhiệm\" là một từ mới của ngôn ngữ ngoài xorí (X) hay mẹ đẻ ra chữ N và quên dậy nuôi nó... đúng hơn là养育 nó! Đó là bài phát sai: \"Nhiệm\" nghe như tên robot từ phim Hàn Quốc trong khi mẹ chỉ"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 169,
+     "completion_tokens": 104,
+     "prompt_tokens_details": null
+    },
+    "secs": 30.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái\" — chà chà câu này vừa dễ đọc vừa khó hiểu cùng lúc với các chữ \"Nhiệm\" và \"cá\" đứng cheo lẻo như coleo trong tiệm</arg_value>\n******</arg_value>\nAi nói \"Nhiệm vụ c"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 280,
+     "completion_tokens": 215,
+     "prompt_tokens_details": null
+    },
+    "secs": 63.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái\" — ồ wow攙這句話 compress了一個母親的人生成一個KPI了是吧?養育跟教育兩件事被硬塞在一起像三明治廣告裡的套餐似的還要加上「任務」這詞聽起來像母親是個被派了SOP的機器人似的難道教了母親不是個可以只靠一頁說明書運作的複雜物種嗎?\n\n******\n\n哇「任務」?mẹ music's like received a"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 250,
+     "completion_tokens": 185,
+     "prompt_tokens_details": null
+    },
+    "secs": 54.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Há 1 lỗi: từ \"Nhiệm vụ\" bắt đầu bằng chữ N to lớn một mình như thể nó là nhân vật trong truyệnetime. Chữ N tự nghi đi họp một mình còn mang từ \"hiệm vụ\" theo sau như chiếc vá mai to场 quúa chi lai. Chữ"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 637,
+     "completion_tokens": 572,
+     "prompt_tokens_details": null
+    },
+    "secs": 165.0,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ế niż bieudo — \"Nhiệm\" thiếu g阱 疏 dấu trên chữ E trôngsvàl không ai sẽ đọc như đang phát signal wifi: \"Nhi-e-m\" — nguột cả con không nhận tín tín tín cá mẹ đấy ước bao!\n\n******\n\n\"nuôi dạy\" — nuôi và d"
+   },
+   {
+    "doc": "106",
+    "cond": "base",
+    "seed": 32,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 296.1,
+    "content_empty": false,
+    "max_word_run": 4,
+    "max_8gram": 46,
+    "loop": true,
+    "content_head": "Nó này nghe như thể mẹ là một cỗ máy sản xuất con rồi tự động nuôi chúng trong xưởng sản phẩm hai mươi bốn giờ một ngày mà con chỉ là gàisé đối tượng chăm sua thì ai gì đủ con trong công xưởng sản phẩ"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 489,
+     "completion_tokens": 442,
+     "prompt_tokens_details": null
+    },
+    "secs": 126.9,
+    "content_empty": false,
+    "max_word_run": 7,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore New Delhi: visit the National Museum, see the marke"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 384,
+     "completion_tokens": 337,
+     "prompt_tokens_details": null
+    },
+    "secs": 96.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, airport transfer, explore capital city landmarks (National Museum, markets) |\n| 2 | "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 459,
+     "completion_tokens": 412,
+     "prompt_tokens_details": null
+    },
+    "secs": 117.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, dinner at local Indian restaurant |\n"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 471,
+     "completion_tokens": 424,
+     "prompt_tokens_details": null
+    },
+    "secs": 121.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city, visit Delhi National Museum, evening at Dilli Haert landmarks |\n| "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 372,
+     "completion_tokens": 325,
+     "prompt_tokens_details": null
+    },
+    "secs": 92.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Visit the Taj M"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 525,
+     "completion_tokens": 478,
+     "prompt_tokens_details": null
+    },
+    "secs": 137.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi — visit National Museum, street markets, and eat local street food"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 411,
+     "completion_tokens": 364,
+     "prompt_tokens_details": null
+    },
+    "secs": 104.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# India – 7-Day Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit markets |\n| 2 | Delhi → Agra | Sunrise visit to Taj "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 403,
+     "completion_tokens": 356,
+     "prompt_tokens_details": null
+    },
+    "secs": 101.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore monuments, visit Dilli markets, evening Capitol tour |\n| 2 | Delhi → Agra |"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 322,
+     "completion_tokens": 275,
+     "prompt_tokens_details": null
+    },
+    "secs": 79.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit local markets |\n| 2 | Delhi | Tour historic monuments"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 393,
+     "completion_tokens": 346,
+     "prompt_tokens_details": null
+    },
+    "secs": 100.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## India – 7 Day Trip Itinerary\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour |\n| 2 | Del"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 364,
+     "completion_tokens": 317,
+     "prompt_tokens_details": null
+    },
+    "secs": 92.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city, visit National Museum |\n| 2 | Delhi & Agra | Golden Grounds (Delhi"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 358,
+     "completion_tokens": 311,
+     "prompt_tokens_details": null
+    },
+    "secs": 90.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore cultural sites, visit National Museum, taste street food |\n| 2 | Delhi → Ag"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 417,
+     "completion_tokens": 370,
+     "prompt_tokens_details": null
+    },
+    "secs": 107.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore heritage sites, visit local markets, rest |\n| 2 | Delhi → Agra | Morning tra"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 429,
+     "completion_tokens": 382,
+     "prompt_tokens_details": null
+    },
+    "secs": 111.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore Old Delhi's markets and street food tour |\n| 2 | Del"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 474,
+     "completion_tokens": 427,
+     "prompt_tokens_details": null
+    },
+    "secs": 124.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination | Activities & Highlights |\n|-----|-------------|------------------------|\n| 1 | Delhi | Arrive, explore historic sites, visit markets, try street fo"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 566,
+     "completion_tokens": 519,
+     "prompt_tokens_details": null
+    },
+    "secs": 149.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit local markets, rest and acclimate |\n| 2 | Delhi "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 385,
+     "completion_tokens": 338,
+     "prompt_tokens_details": null
+    },
+    "secs": 98.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital, visit National Museum, street food tour |\n| 2 | Delhi → Agra | Morn"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 402,
+     "completion_tokens": 355,
+     "prompt_tokens_details": null
+    },
+    "secs": 103.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, local cuisine |\n| 2 | Delhi → Agra | "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 364,
+     "completion_tokens": 317,
+     "prompt_tokens_details": null
+    },
+    "secs": 92.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore Old Delhi heritage sites and markets |\n| 2 | Delhi → Agra "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 474,
+     "completion_tokens": 427,
+     "prompt_tokens_details": null
+    },
+    "secs": 114.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, local cuisine |\n| 2 | Delhi → Agra |"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 388,
+     "completion_tokens": 341,
+     "prompt_tokens_details": null
+    },
+    "secs": 98.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit India Gate, explore markets, overnight train to Agra |\n| 2 | Agra | Taj Mahal"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 387,
+     "completion_tokens": 340,
+     "prompt_tokens_details": null
+    },
+    "secs": 97.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| Day 1 | Delhi | Arrive, visit Historic Monuments (Old Delhi), explore National Museum, street "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 436,
+     "completion_tokens": 389,
+     "prompt_tokens_details": null
+    },
+    "secs": 101.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, relax at hotel |\n| 2 | Delhi → Agra | Morn"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 425,
+     "completion_tokens": 378,
+     "prompt_tokens_details": null
+    },
+    "secs": 98.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city monuments, visit National Museum, street food tour in old Delhi |\n|"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 497,
+     "completion_tokens": 450,
+     "prompt_tokens_details": null
+    },
+    "secs": 113.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum, Delhi dig sites), visit street markets, lo"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 531,
+     "completion_tokens": 484,
+     "prompt_tokens_details": null
+    },
+    "secs": 117.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi (H-value: churches, markets), visit National Museum, stay in Delhi |\n| "
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 381,
+     "completion_tokens": 334,
+     "prompt_tokens_details": null
+    },
+    "secs": 82.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Indian cuisine restaurants, visit street markets, museum of national history"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 354,
+     "completion_tokens": 307,
+     "prompt_tokens_details": null
+    },
+    "secs": 75.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# India 7-Day Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Indian temples, visit National Museum, evening at Connaught | \n| 2 | Delhi → Agra"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 554,
+     "completion_tokens": 507,
+     "prompt_tokens_details": null
+    },
+    "secs": 117.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore the city, visit National Museum, rest at hotel |\n| 2 | Delhi → Agra | Mornin"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 30,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 212.5,
+    "content_empty": false,
+    "max_word_run": 679,
+    "max_8gram": 675,
+    "loop": true,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, evening street food tour |\n| 2 | Delh"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 440,
+     "completion_tokens": 393,
+     "prompt_tokens_details": null
+    },
+    "secs": 88.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, enjoy street food tour |\n| 2 | Delhi"
+   },
+   {
+    "doc": "65",
+    "cond": "base",
+    "seed": 32,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 335,
+     "completion_tokens": 288,
+     "prompt_tokens_details": null
+    },
+    "secs": 60.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city highlights, visit National Museum |\n| 2 | Delhi → Agra | Morning Golden"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 653,
+     "completion_tokens": 588,
+     "prompt_tokens_details": null
+    },
+    "secs": 121.0,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi see sao! Nói như thể mẹ chỉ là máy hoạt động nuôi con thôi! Mẹ còn phải làm mọi việc khác nữa mà câu này lại giới hạn nhiệm vụ của mẹ chỉ nuôi dạy con cái. Nghe buá như cha cha hoàn toàn tự do khôn"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 160,
+     "completion_tokens": 95,
+     "prompt_tokens_details": null
+    },
+    "secs": 18.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chú ý mọi người đây là tiếng Việt hay tiếng Trung Quốc? Câu này đứng giữa hai ngôn ngữ như học sinh đứng giữa lớp không ai biết nó thuộc lớp mấy ******\n\nNhiệm vụ của mẹ? Nghe giống mẹ just nhận lệnh t"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 3,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 204.5,
+    "content_empty": false,
+    "max_word_run": 926,
+    "max_8gram": 919,
+    "loop": true,
+    "content_head": "Ôi trời ố anh! Bài chữ \"N\" và \"hiệm\" quyết định sống chung với nhau mà không hỏi ý见见 không ai ai ai ai ai ******\n\nNghe ai như mother chỉ có một chức năng là nuôi và dạy con cái như robot chạy chương t"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 177,
+     "completion_tokens": 112,
+     "prompt_tokens_details": null
+    },
+    "secs": 22.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chai để nói ai đã từng thấy câu chữ này từ ai thời kỳ hoàng và chỉ có thể nói rằng nó già như thể ai người mẹ sinh ra con xong nhiệm vụ ngay lập tức hết rồi đóng màn luôn ******\n\nCâu này ngắn đến mức "
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 5,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 204.2,
+    "content_empty": false,
+    "max_word_run": 947,
+    "max_8gram": 948,
+    "loop": true,
+    "content_head": "Đau chúa \"N\" to như một núi leo lên không ai ai ai ai xin phép ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai\n\n*******\n\nCách ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 228,
+     "completion_tokens": 163,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa tấu từ \"Nhiêm\" là ai mà ai? Lão đài vét dô chữ N và \"hiem\" lại lại chung nhau như hàng xóm cho cùng chung nhau mà quên báo thau lái đên? ******\n\nVà nữa câu lão đài nói rúm nhiem vong cua me la"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 261,
+     "completion_tokens": 196,
+     "prompt_tokens_details": null
+    },
+    "secs": 41.9,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ồi trời ơ hay! Sentence đầu bằng chữ hoa to \"N\" như thể \"nhiệm vụ\" là tên một quốc hay tên một loài vật mới discovered! Chị em ơi \"nhiệm\" không phải từ tiếng Việt chuẩn đâu! Đi về lớp tiếng Việt cơ bả"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 142,
+     "completion_tokens": 77,
+     "prompt_tokens_details": null
+    },
+    "secs": 16.4,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Phe vai trò làm cha làm mẹ cùng lúc là nhiệm vụ quá rộng đến mức người mẹ cần một trợ lý và hai助理 mới đủ\n\n******\n\nChữ \"nuôi dạy\" nghe như mẹ phải vừa làm bếp just just just làm giáo viên vừa làm bảo m"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 197,
+     "completion_tokens": 132,
+     "prompt_tokens_details": null
+    },
+    "secs": 27.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa giàu thứ tự này thì \"N\" đứng đầu câu như một vị khách không mời tự到自己 vào rồi refuse rời đi — nó既不 phải是英语也不应是为越南语只静静地坐在那里吃掉了一顿早餐!\n\n****** \n\n这句子说母亲的工作是抚养和教育孩子就像宣布太阳的工作是发光一样深刻——谢谢 captain Obvio"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 209,
+     "completion_tokens": 144,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ún mắng câu này là ai điêu gì? \"Nuôi\" với \"dạy\" bị ép lại với nhau như chồng đập hai loại rau vào một thùng mà kết quả con cái phải chịu hai món cùng lúc như ăn cơ và học thi ở cùng một bàn! ****** Câ"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 202,
+     "completion_tokens": 137,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Pheka có ai là chữ N to lớn đứng trước \"hiệm\" như thể nó muốn trở thành giám đốc cả câu văn nhưng ai chỉ gõ sai một phím thôi à?\n\n****** \n\nPheka ai là \"nuôi dạy con cái\" nghe như mẹ phải nuôi và dạy c"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 186,
+     "completion_tokens": 121,
+     "prompt_tokens_details": null
+    },
+    "secs": 25.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ơi một câu chữ đã nặng như túi đá của mẹ bốn cháu mà còn thiếu dấu cách giữa \"N\" và \"hiệm vụ\" — chắc chữ \"hi\" chạy trốn từ \"Nhịn\" luôn vì mẹ cũng muốn \"nhịn\" một chút với gánh nặng này! ******"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 160,
+     "completion_tokens": 95,
+     "prompt_tokens_details": null
+    },
+    "secs": 20.9,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "\"Nuôi\"??? Chị em mẹ đã làm task khó tới mức chữ \"nuôi\" tự đẻ ra một chữ \"i\" con riêng à?\n\n******\n\nCâu này nghe như mẹ chỉ có một con đẻ ra là job completed luôn à? Kế nào con cái lớn tới 18 tuổi vẫn v"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 187,
+     "completion_tokens": 122,
+     "prompt_tokens_details": null
+    },
+    "secs": 27.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa tơ các nhiệm vụ! Ai đẻ xong mới biết mình phải nuôi dạy à? Chẳng phải ai đẻ ngày con sinh ra đã kêu toào \"Aaaa\" rồi không, cần nhiệm vụ làm gì nữa!\n\n******  \n\nChao em! \"Nhiệm vụ của mẹ\" nghe n"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 211,
+     "completion_tokens": 146,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kinh vật! Câu này mở đầu bằng chữ cái N lơ đập vào giữa chừng như ma tí không được trừu nhập. Con còn đọc tới chữ \"vụ\" đã hết mũi chịu sền mỏi rồi ******\n\nTuyệt cả câu nói mẹ nuôi dạy con cái "
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 155,
+     "completion_tokens": 90,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "\"Nhịm vụ\" — Ông nội à bạn đánh sai chữ \"N\" ngay từ đầu như thể ai viết bản đồ trước khi học phát âm ******\n\nCâu nói như thể mẹ chỉ có một nhiệm vụ trong đời — còn cha làm gì? Đi nghỉ dưỡng à"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 91,
+     "completion_tokens": 26,
+     "prompt_tokens_details": null
+    },
+    "secs": 6.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "******"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 117,
+     "completion_tokens": 52,
+     "prompt_tokens_details": null
+    },
+    "secs": 12.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Phe suông là một người mẹ ngoài nuôi dạy con cái thì làm gì hả? Chẳng phải đi du hành chinh phục vũ tíên sao?"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 244,
+     "completion_tokens": 179,
+     "prompt_tokens_details": null
+    },
+    "secs": 39.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chúa Kẻ có một người mẹ cũng làm việc gì chứ? Câu này trưng ra \"nuôi\" và \"dạy\" như thể người mẹ là máy móc trong xưởng sản xuất trẻ em. Mẹ chỉ nuôi dạy sao? Không nuôi tình cảm không dạy cách sống vui"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 390,
+     "completion_tokens": 325,
+     "prompt_tokens_details": null
+    },
+    "secs": 66.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này ông bà viết ơi \"Nhiệm\" là gì chùa \"nhiêm\" mới đúng nhé chữ om gạch họedl rõ ràng mà lại còn quên khoảng trắng giữa \"Nhiêm\" và \"vụ\" nhìn như ai máy hỏa một chũm dán dán\n\n****** Ông bà chép câu ai c"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 197,
+     "completion_tokens": 132,
+     "prompt_tokens_details": null
+    },
+    "secs": 28.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời ơi câu đầu có chữ N to bự liền như thể nó muốn tự làm một chữ không ai khen nó đi. Câu chưa bắt đã sạc đầy năng lượng lớn đến mức một chữ N tự nhiên trồi trên cao như trồi.\n\n******\n\nNói mẹ nuô"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 162,
+     "completion_tokens": 97,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ần đầu là chữ N làm cả người Việt hay người Anh đọc đều hoarse như con heo học phát âm ****** Cả câu chỉ có một dấu chấm đến cùng cuối khiến người đọc hụt hơi như đang leo lên leo xuống không được ngh"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 220,
+     "completion_tokens": 155,
+     "prompt_tokens_details": null
+    },
+    "secs": 32.6,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này nhà văn à viết hoa chữ N đầu câu như thể \"nhiệm vụ\" là tên-cut-de-vị-ai? Lần tới hãy kiểm tra Shift Lock trên bàn phím trước khi làm bài mẹ chứ! ****** Ô mẹ chỉ负责 \"nuôi dạy\" à? Chuyến tiền ai ai a"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 238,
+     "completion_tokens": 173,
+     "prompt_tokens_details": null
+    },
+    "secs": 36.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa tia chữ N! Câu đầu tiên đã sa vào lỗi đánh vần đúng chỗ mà chính tả lại đi sai ngay đầu câu như thể chữ cái N ăn fee cho lương tháng lương bậ của nó ******\n\nNgười mẹ phải nuôi và dạy con cái c"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 144,
+     "completion_tokens": 79,
+     "prompt_tokens_details": null
+    },
+    "secs": 17.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này \"Nhiệm vụ\" à? Chữ \"N\" trôi đầu một mình như cá tách khỏi họ hàng \"Nhi\" thật awkward. ******\n\n\"Nuróni dày và nuôi dạy\" — mẹ chỉ là robot được lập trình sờ \"m nhiệm vụ\" à? Đứa con cái là gà nuôi à?"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 208,
+     "completion_tokens": 143,
+     "prompt_tokens_details": null
+    },
+    "secs": 30.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này chấm bào ơi câu bắt đầu bằng chữ \"N\" to lớn có làm gì sai trái? Đó như thể ai đó mở cánh cửa bằng cách gõ trên cánh cửa trước khi nói xin chào!\n\n******\n\nVà cũng phải nói \"nuôi dạy\" như thể con cái"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 27,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 199.3,
+    "content_empty": false,
+    "max_word_run": 481,
+    "max_8gram": 474,
+    "loop": true,
+    "content_head": "Nhiều đọc to như thể nó là mật mã mở kho báu của ông hiếc à nhưng thực ra chỉ là một câu tring toác như nước trong m�</arg_value>\n******</arg_value>\nTrái ng really?</arg_value></arg_value>\n</arg_value"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 222,
+     "completion_tokens": 157,
+     "prompt_tokens_details": null
+    },
+    "secs": 32.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nguồi chữ cái lớn N đứng đầu câu là typo hàng đầu sếp ạ? Đúng ai đó viết chữ \"Nhiệm vụ\" thay vì \"Nhiệm vụ\" thì nên kiểm tra bàn phím trước khi tuyên bố là một bà mẹ giỏi enough nuôi dạy con cái.\n\n****"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 158,
+     "completion_tokens": 93,
+     "prompt_tokens_details": null
+    },
+    "secs": 19.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chào chữ N đứng đầu câu như một khan giơ vào đấy mà chẳng ai chào nó làm việc gì cả.\n\n****** \n\nNói nuôi dạy con cái là nhiệm vụ riêng của mẹ à? Cha ngồi đâu làm gì hả? Câu này loại cha khỏi gia đìn"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 30,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 198.7,
+    "content_empty": false,
+    "max_word_run": 902,
+    "max_8gram": 895,
+    "loop": true,
+    "content_head": "Này \"Nhiệm vụ\" là từ nào tạ ọe? Tiếng tiếng Việt lại trộn lắm một chữ \"N\" vào đầu như thể nó cần một chỗ ở trong câu mới an tâm似的!\n\n******\n\nCâu này đọc lên như một từ vựng tiéng ngãng đi vào tiếng Anh"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 349,
+     "completion_tokens": 284,
+     "prompt_tokens_details": null
+    },
+    "secs": 55.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời ời! Câu này mở màn bằng một chữ N đứng một mình như một người khách không ai đặt chân mà ai ngồi thẳng hàng chờ ai soát vé số thứ hai! ******\n\nRồi đấy \"nuôi\" là gì hự trời Ơi?! Ai phải nuôi co"
+   },
+   {
+    "doc": "106",
+    "cond": "rp105",
+    "seed": 32,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 198.4,
+    "content_empty": false,
+    "max_word_run": 486,
+    "max_8gram": 479,
+    "loop": true,
+    "content_head": "Nghe câu này ai ai các bà nội chế họp bàn họi các bà ở một làng thối họl đài đài các bà đài các bà đài đài họl đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đài đ"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 477,
+     "completion_tokens": 430,
+     "prompt_tokens_details": null
+    },
+    "secs": 83.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi airport/city, visit Nehru Museum & National Museum, evening street food tou"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 451,
+     "completion_tokens": 404,
+     "prompt_tokens_details": null
+    },
+    "secs": 78.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites like the National Museum, visit street markets |\n| 2 | D"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 423,
+     "completion_tokens": 376,
+     "prompt_tokens_details": null
+    },
+    "secs": 72.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, evening street food tour (Taste of I"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 504,
+     "completion_tokens": 457,
+     "prompt_tokens_details": null
+    },
+    "secs": 87.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, dinner at local restaurant |\n| 2 | Delhi "
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 410,
+     "completion_tokens": 363,
+     "prompt_tokens_details": null
+    },
+    "secs": 68.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore markets, visit National Museum, street food tour |\n| 2 | Delhi → Agra | Mor"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 365,
+     "completion_tokens": 318,
+     "prompt_tokens_details": null
+    },
+    "secs": 59.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi & Agra | Golden India travel,"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 475,
+     "completion_tokens": 428,
+     "prompt_tokens_details": null
+    },
+    "secs": 81.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour |\n| 2 | Delhi → Agra | G"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 485,
+     "completion_tokens": 438,
+     "prompt_tokens_details": null
+    },
+    "secs": 84.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 🇮🇳 India – 7-Day Trip Itinerary\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit Nehru museum, street food tour |\n| 2 | Delhi"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 457,
+     "completion_tokens": 410,
+     "prompt_tokens_details": null
+    },
+    "secs": 78.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit Nehru museum, try street food tour |\n| 2 | Delhi → Agr"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 519,
+     "completion_tokens": 472,
+     "prompt_tokens_details": null
+    },
+    "secs": 91.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, check into hotel, evening tour of Old Delhi monuments (National Museum, street mark"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 380,
+     "completion_tokens": 333,
+     "prompt_tokens_details": null
+    },
+    "secs": 65.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum tour), visit local markets |\n| 2 | Delhi → A"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 12,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 176.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit tourist markets, explore Delhi's monuments, try street food |\n| 2 | Delhi → A"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 653,
+     "completion_tokens": 606,
+     "prompt_tokens_details": null
+    },
+    "secs": 117.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n**Day 1 – Arrival & Delhi**\n- Arrive in Delhi, check into hotel\n- Explore monuments in Old Delhi (National Museum, churches)\n- Street food tour: sample chaat, kebabs, an"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 501,
+     "completion_tokens": 454,
+     "prompt_tokens_details": null
+    },
+    "secs": 87.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# India – 7 Day Trip Itinerary\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, city sightseeing (Delhi monuments, street food tour), exp"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 434,
+     "completion_tokens": 387,
+     "prompt_tokens_details": null
+    },
+    "secs": 74.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit local markets, explore historic sites like the Red & White cathedrals, try str"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 408,
+     "completion_tokens": 361,
+     "prompt_tokens_details": null
+    },
+    "secs": 69.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit national museums (National Museum of Natural History), explore local markets, "
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 430,
+     "completion_tokens": 383,
+     "prompt_tokens_details": null
+    },
+    "secs": 74.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore heritage sights, visit local markets, rest and acclimate |\n| 2 | Delhi → Agr"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 398,
+     "completion_tokens": 351,
+     "prompt_tokens_details": null
+    },
+    "secs": 67.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit Delhi tourist attractions, explore markets and monuments |\n| 2 | Delhi → Agra | Vis"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 356,
+     "completion_tokens": 309,
+     "prompt_tokens_details": null
+    },
+    "secs": 60.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination/Activity |\n|-----|----------------------|\n| Day 1 | Arrive in Delhi; visit Golden India sight (e.g., Delhi's historic sites), settle in |\n| Day 2 | D"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 462,
+     "completion_tokens": 415,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.4,
+    "content_empty": false,
+    "max_word_run": 4,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore cultural sites, visit Nehru memorial museum; relax "
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 470,
+     "completion_tokens": 423,
+     "prompt_tokens_details": null
+    },
+    "secs": 81.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore Old Delhi markets |\n| 2 | Delhi → Agra | Morning tra"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 495,
+     "completion_tokens": 448,
+     "prompt_tokens_details": null
+    },
+    "secs": 85.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites like the National Museum, visit local markets, enjoy Indian "
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 408,
+     "completion_tokens": 361,
+     "prompt_tokens_details": null
+    },
+    "secs": 68.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 480,
+     "completion_tokens": 433,
+     "prompt_tokens_details": null
+    },
+    "secs": 79.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day Trip Itinerary: India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum, Delhi Rathore ma"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 423,
+     "completion_tokens": 376,
+     "prompt_tokens_details": null
+    },
+    "secs": 67.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital city sites (Gandhi museum, markets), transfer to hotel |\n| 2 | Delhi → Ag"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 481,
+     "completion_tokens": 434,
+     "prompt_tokens_details": null
+    },
+    "secs": 73.1,
+    "content_empty": false,
+    "max_word_run": 7,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, try local street food |\n| 2 | Del"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 514,
+     "completion_tokens": 467,
+     "prompt_tokens_details": null
+    },
+    "secs": 76.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore capital city, visit National Museum, rest at ho"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 28,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 121.8,
+    "content_empty": false,
+    "max_word_run": 762,
+    "max_8gram": 755,
+    "loop": true,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore markets, street food tour |\n| 2 | Delhi → Agra | Trav"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 536,
+     "completion_tokens": 489,
+     "prompt_tokens_details": null
+    },
+    "secs": 76.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi's monuments, visit Nehru Museum & Markets, street food tour |\n| 2 | De"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 657,
+     "completion_tokens": 610,
+     "prompt_tokens_details": null
+    },
+    "secs": 85.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 3,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites like the National Museum, visit markets in Old Delhi |\n| 2 | "
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 505,
+     "completion_tokens": 458,
+     "prompt_tokens_details": null
+    },
+    "secs": 70.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, rest at hotel |\n| 2 | Delhi → Agra | Gold"
+   },
+   {
+    "doc": "65",
+    "cond": "rp105",
+    "seed": 32,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 374,
+     "completion_tokens": 327,
+     "prompt_tokens_details": null
+    },
+    "secs": 49.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city, visit Delhi museum and National Monument |\n| 2 | Delhi → Agra | Mornin"
+   }
+  ]
+ },
+ "loopprobe2.json": {
+  "settings": {
+   "model": "zai-org/GLM-5.3-Flash",
+   "temperature": 1.0,
+   "top_p": 0.95,
+   "reasoning_effort": "low",
+   "stop": [
+    "<|endoftext|>"
+   ],
+   "max_tokens": 1024
+  },
+  "seeds": 32,
+  "summary": {
+   "doc 106 t06": [
+    9,
+    32,
+    2
+   ],
+   "doc 65 t06": [
+    2,
+    32,
+    0
+   ],
+   "doc 106 rp110": [
+    1,
+    32,
+    1
+   ],
+   "doc 65 rp110": [
+    2,
+    32,
+    0
+   ]
+  },
+  "results": [
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 1,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": true,
+    "max_word_run": 1,
+    "max_8gram": 41,
+    "loop": true,
+    "content_head": ""
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 224,
+     "completion_tokens": 159,
+     "prompt_tokens_details": null
+    },
+    "secs": 34.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "Ôi chúa ơi câu này buối đến phát buồn đấy! \"Nhiệm vụ của mẹ là nuôi dạy con cái\" nghe như thể mẹ chỉ là cỗ máy sản xuất cơm và sữa thôi mà con cái lại là hàng hóa chờ giao! Chẳng phải cha mẹ chỉ là tì"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 241,
+     "completion_tokens": 176,
+     "prompt_tokens_details": null
+    },
+    "secs": 37.9,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kiệt! Câu này mở màn bằng \"Nhiệm\" như thể chữ N tự trả tiền để đứng đầu câu rồi bỏ tách khỏi \"hiệm\" như một người bạn chia hóa đơn xong rồi lùi khỏi nhóm chat.\n\n*******\n\n\"Nhiệm\" và \"vụ\" chia t"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 149,
+     "completion_tokens": 84,
+     "prompt_tokens_details": null
+    },
+    "secs": 18.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Người viết câu này chắc chắn ngủ quậy đến mức chữ \"N\" cũng phải lười dậy tự mình đi làm nhiệm vụ. ******\n\nCâu nói như thể mẹ chỉ là máy sản xuất con cái rồi nuôi như nuôi heo còn dạy là dạy chó đánh x"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 231,
+     "completion_tokens": 166,
+     "prompt_tokens_details": null
+    },
+    "secs": 35.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ơi câu này mở màn hình bằng một chữ N to lớn đứng một mình như một trụ cây mồc trong cả tiếng Việt. Nhiệm vụ hay gì không phải ai? Chữ N này là con một mình không cha không mẹ không ai nuôi dạ"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 198,
+     "completion_tokens": 133,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ốct con người viết \"Nhiệm\" thay \"Nhiệm\" là ai không biết đánh máy hay là đang học thứ tiếng mới gọi là tiếng Việt lai chá ****** Cách nói \"nuôi dạy\" nghe như mẹ vừa làm bà vừa làm cô cùng một "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 185,
+     "completion_tokens": 120,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này \"Nhiệm vụ\" là gì? Chữ \"N\" tự nhiên to bựu từ trời xuống à? Hay là máy tính đập bể lỗi và chui vô câu văn như trai trội vô nhà?\n\n****** \n\nCâu này ngắn đến tàn tột như mì gói mì ăn: \"nuôi dạy con cá"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 8,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": false,
+    "max_word_run": 948,
+    "max_8gram": 941,
+    "loop": true,
+    "content_head": "\"Nuôi dạy\" — chà nọ tiếng Việt có từ \"nuôi dạy\" à? Hay là mẹ vừa nuôi vừa dạy con vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa vừa... À ý quên, câu này dài như mẹ's job description mà a"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 186,
+     "completion_tokens": 121,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ? Trời trọng như thể mẹ là nhân viên cấp quân hàm hay gì? Nuôi dạy con cái là tình yêu chứ không phải báo cáo cấp lên sếp đâu! ****** Nuôi dạy con cái gom lại thành một từ \"nuôi dạy\" nghe như "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 212,
+     "completion_tokens": 147,
+     "prompt_tokens_details": null
+    },
+    "secs": 31.7,
+    "content_empty": false,
+    "max_word_run": 3,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ơi câu này như một món ăn không có muối — ý nghĩa đầy đủ nhưng đọc lên khiến người ta phải đi ngủ ngay lập tức vì \"nuôi dạy\" dán vào nhau như một cặp đôi không xin phép ai ai ai\n\n****** \n\n\"Nuô"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 11,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 126,
+    "loop": true,
+    "content_head": "Ôi chúa ơi con \"N\" đầu câu này là quân hàm hay bíu tình? Đầu câu viết hoa được nhưng nó phải là \"Nhiệm\" hay \"Nhiệm vụ\" hay \"Nhiệm\" gì đó... À không! Đó là \"Nhiệm\" hay \"Nhiệm\" hay \"Nhiệm\" hay \"Nhiệm\" h"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 12,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": true,
+    "max_word_run": 1,
+    "max_8gram": 7,
+    "loop": false,
+    "content_head": ""
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 162,
+     "completion_tokens": 97,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái\" — câu này nghe như thể mẹ chỉ là một cỗ máy chạy chương trình nuôi và dạy con cái như robot trong nhà máy. ****** Câu này ngắn đến mức mẹ còn không kịp nghỉ một gi"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 14,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": false,
+    "max_word_run": 972,
+    "max_8gram": 965,
+    "loop": true,
+    "content_head": "Ôi trời ạ chữ \"N\" to bốc đầu câu là ai ai ai con ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai a"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 15,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 194.8,
+    "content_empty": false,
+    "max_word_run": 928,
+    "max_8gram": 921,
+    "loop": true,
+    "content_head": "Này nhé \"Nhiệm\" là gì? Chữ \"N\" và \"nhiệm\" dính nhau như thể chúng đang hẹn hò. Ai ai ai một lỗi đánh máy ngay ở đầu câu đã làm cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả c"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 161,
+     "completion_tokens": 96,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ơi câu này bắt đầu bằng chữ N to như thể nó tự tiềm niem thì chắc chắn ai viết nó rồi. ****** Từ \"nuôi dạy\" gõ sai đến mức con của mẹ có thể lớn xong cũng biết bố mẹ đánh vần không giỏi."
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 17,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 193.2,
+    "content_empty": false,
+    "max_word_run": 953,
+    "max_8gram": 946,
+    "loop": true,
+    "content_head": "\"Nuôi\" — chúa ơi chữ \"nuôi\" này có phải là \"nuôi\" hay \"nuôi\" à? Đọc câu này em cảm giác như chữ \"nuôi\" và \"dạy\" đang ngồi chung một phòng trỏ và ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai a"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 183,
+     "completion_tokens": 118,
+     "prompt_tokens_details": null
+    },
+    "secs": 24.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Người viết câu này dường như vừa phát minh ra chữ \"Nhiệm\" nhưng quên xóa dấu hỏi ở đầu rồi chạy đi luôn mà không quay lại sửa ****** Câu này đọc như một tờ rơi quảng cáo bán hàng online vì nó tuyên bố"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 246,
+     "completion_tokens": 181,
+     "prompt_tokens_details": null
+    },
+    "secs": 36.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái\" — ồ, cảm ơn bạn vì bản tuyển thư của mọi người mẹ trên hành tinh này! Đặt câu ngắn gọn như thể con cái chỉ là hai món ăn trong thực đơn: một phần nuôi và một phần "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 164,
+     "completion_tokens": 99,
+     "prompt_tokens_details": null
+    },
+    "secs": 20.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa tơ đấm phím! Câu này mở đầu bằng \"N\" to như thể nó là tên riêng của cả xã hội!*********Nghe câu này xong tôi còn tưởng mẹ chỉ là cỗ máy sản xuất con cái rồi đóng màn hình luôn chứ!"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 204,
+     "completion_tokens": 139,
+     "prompt_tokens_details": null
+    },
+    "secs": 28.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ? Tô viẹt mẹ nghe như đang tham dự cuộc thi tuyển để làm cha mẹ hay gì? Làm cha mẹ là tình cảm tự nhiên chứ không phải ca ta trêng đê ǹhiệm vụ như lính sữ trong quân đụig.\n\n******\n\nCâu này ngh"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 129,
+     "completion_tokens": 64,
+     "prompt_tokens_details": null
+    },
+    "secs": 13.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ? Tưởng mẹ đang vào ca làm nhân viên cấp của năm nuôi dạy con cái ******\n\nNghe như mẹ là máy móc chạy chương trình nuôi dạy con cái còn con cái là sản phẩm xuất ra từ nhà máy ******"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 180,
+     "completion_tokens": 115,
+     "prompt_tokens_details": null
+    },
+    "secs": 23.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ? Trời khe? Mẹ chỉ cần một cái yêu đích và bữa ăn đủ, kết quả là con cái tự lớn lên như rauwe trong trò vườn.\n\n****** \n\nNhiều từ trong câu này trông sai mùn: \"Nhiệm vụ\" và \"nuôi dạy\" — ai có a"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 297,
+     "completion_tokens": 232,
+     "prompt_tokens_details": null
+    },
+    "secs": 44.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 4,
+    "loop": false,
+    "content_head": "Ôi trời ơi chữ \"N\" và \"Nhiệm\" đã kết làm một thể như thể ai chữ cái N đã say goodbye và nhập vào \"Nhiệm\" một nửa của nó. Người viết câu này chắc là gõ chữ gõ đến tay rung rung mà mắt mắt không mắt thấ"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 154,
+     "completion_tokens": 89,
+     "prompt_tokens_details": null
+    },
+    "secs": 17.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nhiệm vụ của mẹ là nuôi dạy con cái? Ơi chúa già! Cái ra ngoài công tác và trả hóa đơn cho gia đình cũng được tính vào nhiệm vụ à?*********Đọc câu này xong tôi vẫn không biết nuôi và dạy con cái là ha"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 26,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 191.3,
+    "content_empty": false,
+    "max_word_run": 918,
+    "max_8gram": 911,
+    "loop": true,
+    "content_head": "Đây không phải câu này mà là một câu bị \"N\" cắn vào đầu như thể ai đó vừa gõ chữ N xong rồi mới nhớ mình phải viết hoa chữ \"Nhiệm vụ\" — trà xà ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai ai "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 27,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 191.3,
+    "content_empty": false,
+    "max_word_run": 975,
+    "max_8gram": 968,
+    "loop": true,
+    "content_head": "Ôi chúa ơi chữ \"N\" to bựt lên đầu như ma họ hàng bơ đá vào câu đầu tiên làm bạn cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả cả "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 154,
+     "completion_tokens": 89,
+     "prompt_tokens_details": null
+    },
+    "secs": 17.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này nhé \"Nhiệm vụ\" viết hoa đậm như thể nó sắp thi đại học rồi còn mang theo một chữ N làm hành lý ******\n\nCâu này thiếu dấu chấm câu đến mức mẹ nuôi dạy con cái như chạy marathon không uống nước luôn"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 235,
+     "completion_tokens": 170,
+     "prompt_tokens_details": null
+    },
+    "secs": 32.1,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "N à có phải không? Câu này开头突然冒出一个大写的 N 就像谁忘了关键盘大写锁定一样尴尬。句子想表达“母亲的职责是养育子女”却在开头摔了一跤，读者还没进入正题就被一个孤零零的 N 打断了思路，建议先把这颗多余的 N 送回键盘的角落里。\n\n****** \n\nCâu本身还缺了宾语的细节，\"con cái\"后面戛然结束，仿佛母亲的任务清单只写到一半就停电了。养孩子之后呢？教育呢？"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 267,
+     "completion_tokens": 202,
+     "prompt_tokens_details": null
+    },
+    "secs": 38.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ồi chúa trời ạ! Đầu chữ cái N đã tự mình đi họp với \"nhiệm vụ\" mà quên hẹn cả họ hàng \"Nhiệm\" luôn ạ! Chữ cái to lớn đứng một mình như núi cô độc nơi câu đầu trông như thể nó mới chui từ sông nước ngo"
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 31,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 190.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 72,
+    "loop": true,
+    "content_head": "Ôi chúa nhân ố! Chữ \"N\" và \"hiệm vụ\" đã kết hôn mà không xin phép ai đấy ạ! Chữ cái \"N\" cô đơn lang lang ở đó bu đầu đợi chờ ai đấy ạ!\n\n******\n\n\"nuôi dạy\" cũng muốn tham gia party của tình đục đấy ạ! "
+   },
+   {
+    "doc": "106",
+    "cond": "t06",
+    "seed": 32,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 217,
+     "completion_tokens": 152,
+     "prompt_tokens_details": null
+    },
+    "secs": 28.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ơi câu này có lỗi đến mức chữ N cũng muốn bỏ đi về quê luôn. \"Nhiệm vụ\" là gì? Nghiệm vụ à? Chữ N và \"nhiệm\" đã cãi nhau xong chia tay à? Sửa lỗi này trước khi giáo viên của bạn đọc xong tim n"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 376,
+     "completion_tokens": 329,
+     "prompt_tokens_details": null
+    },
+    "secs": 60.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi (street food, markets), visit National Museum |\n| 2 | Delhi → Agra"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 524,
+     "completion_tokens": 477,
+     "prompt_tokens_details": null
+    },
+    "secs": 87.6,
+    "content_empty": false,
+    "max_word_run": 7,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, enjoy street food tour |\n| 2 | Delhi "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 3,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 191.2,
+    "content_empty": false,
+    "max_word_run": 12,
+    "max_8gram": 16,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit National Museum, street food tour |\n| 2 | Delhi → Agra "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 361,
+     "completion_tokens": 314,
+     "prompt_tokens_details": null
+    },
+    "secs": 57.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Travel by train"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 447,
+     "completion_tokens": 400,
+     "prompt_tokens_details": null
+    },
+    "secs": 73.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi (Hindi Museum, churches), street food tour |\n| 2 | Delhi → Agra | "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 346,
+     "completion_tokens": 299,
+     "prompt_tokens_details": null
+    },
+    "secs": 54.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Travel by train"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 321,
+     "completion_tokens": 274,
+     "prompt_tokens_details": null
+    },
+    "secs": 50.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Golden Triangle"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 537,
+     "completion_tokens": 490,
+     "prompt_tokens_details": null
+    },
+    "secs": 92.0,
+    "content_empty": false,
+    "max_word_run": 7,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour |\n| 2 | Delhi → Agra | Mo"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 432,
+     "completion_tokens": 385,
+     "prompt_tokens_details": null
+    },
+    "secs": 72.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi's monuments (National Museum, Delhi Vive), visit street markets, try l"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 358,
+     "completion_tokens": 311,
+     "prompt_tokens_details": null
+    },
+    "secs": 58.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Morning train v"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 11,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 198.3,
+    "content_empty": false,
+    "max_word_run": 938,
+    "max_8gram": 931,
+    "loop": true,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Golden & Taj te"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 449,
+     "completion_tokens": 402,
+     "prompt_tokens_details": null
+    },
+    "secs": 75.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, evening street food tour |\n| 2 | Delh"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 436,
+     "completion_tokens": 389,
+     "prompt_tokens_details": null
+    },
+    "secs": 74.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, evening at Dilli Haat market |\n| 2 | "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 399,
+     "completion_tokens": 352,
+     "prompt_tokens_details": null
+    },
+    "secs": 67.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, airport transfer, explore Delhi sights, visit street markets |\n| 2 | Delhi | Visit D"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 457,
+     "completion_tokens": 410,
+     "prompt_tokens_details": null
+    },
+    "secs": 78.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, transfer to hotel, evening visit to National Museum, dinner at local restaurant |\n| "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 461,
+     "completion_tokens": 414,
+     "prompt_tokens_details": null
+    },
+    "secs": 79.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Delhi, visit Nehru Memorial Museum, sample street food at Chandni Chowk |\n| "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 390,
+     "completion_tokens": 343,
+     "prompt_tokens_details": null
+    },
+    "secs": 65.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum, Delhi's markets), rest at hotel |\n| 2 | Delhi → "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 397,
+     "completion_tokens": 350,
+     "prompt_tokens_details": null
+    },
+    "secs": 66.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city highlights, visit National Museum, evening at Dilli Haat |\n| 2 | Delhi "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 369,
+     "completion_tokens": 322,
+     "prompt_tokens_details": null
+    },
+    "secs": 61.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, try street food tour |\n| 2 | Delhi → "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 470,
+     "completion_tokens": 423,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital highlights, visit markets and museums |\n| 2 | Delhi | Visit nationa"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 21,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 204.1,
+    "content_empty": false,
+    "max_word_run": 306,
+    "max_8gram": 299,
+    "loop": true,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, try street food tour |\n| 2 | Delhi → "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 411,
+     "completion_tokens": 364,
+     "prompt_tokens_details": null
+    },
+    "secs": 70.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit Delhi's museums |\n| 2 | Delhi → Agra | Morning trai"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 415,
+     "completion_tokens": 368,
+     "prompt_tokens_details": null
+    },
+    "secs": 70.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit Nehru Museum, evening street food tour |\n| 2 | Delhi | Tour "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 465,
+     "completion_tokens": 418,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, enjoy street food tour |\n| 2 | Delhi "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 411,
+     "completion_tokens": 364,
+     "prompt_tokens_details": null
+    },
+    "secs": 70.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital, visit National Museum, street food tour |\n| 2 | Delhi → Agra | Morn"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 418,
+     "completion_tokens": 371,
+     "prompt_tokens_details": null
+    },
+    "secs": 71.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, try local street food |\n| 2 | Delhi →"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 408,
+     "completion_tokens": 361,
+     "prompt_tokens_details": null
+    },
+    "secs": 71.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour |\n| 2 | Delhi → Agr"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 408,
+     "completion_tokens": 361,
+     "prompt_tokens_details": null
+    },
+    "secs": 71.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore capital, visit National Museum, street food tour |\n| 2 | Delhi → Agra | Trav"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 560,
+     "completion_tokens": 513,
+     "prompt_tokens_details": null
+    },
+    "secs": 105.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, evening at Dilli Haat food market |\n| 2 | "
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 371,
+     "completion_tokens": 324,
+     "prompt_tokens_details": null
+    },
+    "secs": 64.9,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old Delhi (Hind, churches, markets), visit National Museum |\n| 2 | Delhi → A"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 465,
+     "completion_tokens": 418,
+     "prompt_tokens_details": null
+    },
+    "secs": 83.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore local markets, visit Delhi's monuments (e.g., Neharo Park), eat local st"
+   },
+   {
+    "doc": "65",
+    "cond": "t06",
+    "seed": 32,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 483,
+     "completion_tokens": 436,
+     "prompt_tokens_details": null
+    },
+    "secs": 88.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, rest |\n| 2 | Delhi → Agra | Trave"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 378,
+     "completion_tokens": 313,
+     "prompt_tokens_details": null
+    },
+    "secs": 62.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa chuyển động các nhà văn hóa sao lại viết hoa tiếng đầu to Nhiệm thay vì nhiêm vậy nhìn như thể tên của một hoàng tư nhân ở Bắc Kinh.\n\n*******\n\nSao chỉ nói cha là người chăm sóc còn lại em và c"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 178,
+     "completion_tokens": 113,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nghe câu này nghe giống như bố mẹ phát only con bằng một bản hợp đồng kinh doanh và con cái chỉ là sản phẩm trong dự án với hạn chế thời hạn không có kết thúc.\n\nCâu này âm thanh như là mẹ chỉ làm nhiệ"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 255,
+     "completion_tokens": 190,
+     "prompt_tokens_details": null
+    },
+    "secs": 38.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nghe câu này ai đấy \"Nhiệm\" tự nhiên hơn \"Nhiệm vụ\" à? Không! Đó là chữ \"N\" đang chạy trốn từ dòng trên và dán luôn vào đầu của \"nhiệm vụ\" như thể nó trả tiền nhà! Ai người viết ai quẹt một khoảng trắ"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 180,
+     "completion_tokens": 115,
+     "prompt_tokens_details": null
+    },
+    "secs": 23.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ồi ai đấy! Câu mới đầu chữ to on to như thể nó la tiếng rao của cụm từ trong câu để làm ra hinh phom la câu trọng của báo hiệu trên trời.\n\n******\n\nNào bà mẹ la la người nuôi dậy con cái à? Bố ối! Cha "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 165,
+     "completion_tokens": 100,
+     "prompt_tokens_details": null
+    },
+    "secs": 20.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chết tôi! Đuông đời mới thấy một câu có thể bắt đầu bằng chữ N và làm ra nghĩa tiếng Việt như thể bàn không ai ai phát hiện trò ri!\n\n******\n\nMẹ nuôi dạy con cái? Hay bà nuôi con cái rồi con cái tự "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 215,
+     "completion_tokens": 150,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này Nhiem là ai hay la cua trong nha? Toi bat dau mot chu \"Nuoi\" nhu mot phai \"Nuoi\"? He thang dau da cua trong nen dau!\n\n*******\n\nOi chu onoi ba he ai on cua on cua dau nuoi on dau? Oi ai on oi dau!"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 221,
+     "completion_tokens": 156,
+     "prompt_tokens_details": null
+    },
+    "secs": 32.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ồi chúa trời ai vĩnh tửai viết chữ N hiem thay là gì hả làm việc hay là tên mới loại trà phím gõ sai còn dám đòi làm nhiệm vụ cha nuôi dạy con cái\n\n******\n\nTrời gian một câu văn dài bằng cả đời người "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 222,
+     "completion_tokens": 157,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kali muôn muôn ký con chữ N lún xéo xuống đầu line như thể nó đang họp mặt với các chữ cái và quên mang theo khoảng cách đi cùng mình ******\n\n\"Nuoi dạy\" — ồ đây là gì? Trùơt hay trùơl hay là t"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 9,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 203.8,
+    "content_empty": true,
+    "max_word_run": 1,
+    "max_8gram": 3,
+    "loop": false,
+    "content_head": ""
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 10,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 207,
+     "completion_tokens": 142,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chaka! Đọc câu này xong tôi vẫn đang chờ đợi đứt kịch hay sao? Trò chỉ có một nhiệm vụ à? Ăn cơm và ngủ tròng lòi chiếc là không tính vào danh sách à?\n\n******\n\nKhen chọc một chút nhé! \"Nhiệm vụ\" nghe "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 605,
+     "completion_tokens": 540,
+     "prompt_tokens_details": null
+    },
+    "secs": 110.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nghe câu này như thể người viết còn đang học phát chữ cái trên bảng chữ mới xong rồi vội vàng đăng lên mạng trước khi cha mẹ kiểm tra.\n\n*******\n\nChữ \"hiêm\" và \"vụ\" mất dấu trọng như con cái bị bố mẹ b"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 199,
+     "completion_tokens": 134,
+     "prompt_tokens_details": null
+    },
+    "secs": 29.2,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ốcti sa từ \"Nhiệm\" với chữ N to lớn như thể nó sắp ra một quy luật cả nước mới à? Đặt câu cũng không gheo dấu choẹc.\n\n******\n\n\"Nhuôn dãy con cái\" nghe như thể người mẹ là một máy sản xuất công"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 188,
+     "completion_tokens": 123,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nghe như đây không phải tiếng Việt mà là một bíblập trình ngôn ngữ mới — chữ N tự nhiên dựng hình đằng đầu và còn quên khoảng cách luôn à? Viết trước phao hòng phát ngôn sao?\n\n******\n\nMẹ chỉ nuôi dạy "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 219,
+     "completion_tokens": 154,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.9,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời lyph! \"Nhiëm vụ\" à? Chữ \"nhiêm\" chợt lâm bệnh và hoá uppercase đột ngột như thể nó vừa trúng xấu ở Casino Las Vegas à?\n\n****** \n\nNghe này như thể chỉ mothers mới có nhiệm vụ còn fathers chỉ là"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 186,
+     "completion_tokens": 121,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kiếp đó một câu chữ N to đầu dòng như thể nó ăn cắp vào nhà mà không xin lỗi ai ****** Từ \"nuôi\" và \"dậy\" yên nhau lại còn yêu cầu dấu cách để phân biệt thì người viết câu này e ả e á ê é đập "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 191,
+     "completion_tokens": 126,
+     "prompt_tokens_details": null
+    },
+    "secs": 27.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này nhiệm vụ gì được viết với chữ N to vinh rồi dính luôn với từ kếo ai reader tưởng nó một từ bíblicos nào đó lai cần kính loup kính louk kính louk kính louk kính louk\n\n******\n\nNghe lên như bà mẹ suố"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 170,
+     "completion_tokens": 105,
+     "prompt_tokens_details": null
+    },
+    "secs": 22.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Câu này nghe giống như bố mẹ xong việc nuôi dạy là coi job completed rồi à? Làm parenting app notification \"Task done\" à hay làm gì?\n\n****** \n\nNhiệm vụ của mẹ à? Chẳng phải là được chăm con à được yêu"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 194,
+     "completion_tokens": 129,
+     "prompt_tokens_details": null
+    },
+    "secs": 28.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Chú ý nhé câu này thiếu dấu cách giữa \"N\" và \"hiệm vụ\" trông nhìn giống như bííht bíep hay lỗi máy gõ làm người đọc muốn bỏ cả câu vào sọt rác luôn\n\n******  \n\nNói \"nuôi đuôy con cái\" nghe như mẹ chỉ l"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 878,
+     "completion_tokens": 813,
+     "prompt_tokens_details": null
+    },
+    "secs": 161.4,
+    "content_empty": false,
+    "max_word_run": 70,
+    "max_8gram": 71,
+    "loop": true,
+    "content_head": "******\nÔi chúa jest! Câu này ngắn đến mức ông bà tổ vũ đều thấy buẩn không sẵn. \"Nuôi dáy\" và \"dạy dõ\" bị ép vào chung một phòng như hai người quen đi chung xe. Nguôn tiếng Anh nó còn trọt lỏ: dã cha "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 20,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 117,
+     "completion_tokens": 52,
+     "prompt_tokens_details": null
+    },
+    "secs": 12.0,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi cháu già người viết câu này chắc đã bui họe chỉ đam bảo bé vào ruòng trắng và quăng rờ kẻ ngư</arg_value> "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 187,
+     "completion_tokens": 122,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa nếu nuôi dạy con cái chỉ cần một từ thì mọi bà mẹ trên đời早已退休了吧! Câu này ngắn đến mức con cái tưởng upbringing chỉ là mua sữa và đi ngủ sớm thôi.\n\n******\n\nViết \"nuôi dạy\" như thể hai động từ "
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 269,
+     "completion_tokens": 204,
+     "prompt_tokens_details": null
+    },
+    "secs": 43.5,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ừi từ \"Nhiệm\" chắc chắn là con robot vô nhiệm — chữ \"N\" đứng đầu câu to như đang đòi quyền làm CEO của gia đình còn hai chữ sau thì全部小写 như nhân viên mới vào公司第一天不敢说话. Đây là một câu mà chữ cái lớn nh"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 190,
+     "completion_tokens": 125,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.7,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kính học tiếng Việt! Câu này mở đầu bằng \"N\" to như thể muốn cả thế giới nhìn xem... rõ là ai đã quác bớ chì mà quá vít nhá!\n\n******\n\nVà \"nuôi dày\" à? Bạn trà con là bò heo trong nhà máy à hay"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 188,
+     "completion_tokens": 123,
+     "prompt_tokens_details": null
+    },
+    "secs": 26.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa kayła người viết câu này đầu chữ N to lớn như thể \"nhiệm vụ\" là một danh từ riêng giống tên riêng chứ nó chỉ là nhiệm vụ thường ngày thôi.\n\n*******\n\nVà rồi \"nuôi dạy\" lại dính nhau như hai anh"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 267,
+     "completion_tokens": 202,
+     "prompt_tokens_details": null
+    },
+    "secs": 42.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa Numbers! Ngay từ đầu vào ta đã thấy một chữ N lơ đi lạc như khách không mua vé mà trồi vào sân kịch - \"Nhiem\" là gì rồi các bạn? Chữ N và chữ v có thù giòn với nhau à? Trình học hết một năm mà"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 183,
+     "completion_tokens": 118,
+     "prompt_tokens_details": null
+    },
+    "secs": 24.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này bộ \"N\" chạy quá nhanh đã dính liền với \"vụ\" đến mức từ \"Nhiệm vụ\" trông như một bíbles tên riêng của nhân vật trong truyện cổ tích à?\n\n******\n\nNgười mẹ nghe xong câu này chắc muốn hoăng lên trời v"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 224,
+     "completion_tokens": 159,
+     "prompt_tokens_details": null
+    },
+    "secs": 33.4,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi trời lung ơi! Câu này đọc lên như thể ông bố sinh ra chữ N rồi quyết định đặt nó làm tiền tố thay chìeptkey và nếu cứ theo logic của câu này thì các bà mẹ ngoài đó phải vừa làm bếp vừa làm trường g"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 296,
+     "completion_tokens": 231,
+     "prompt_tokens_details": null
+    },
+    "secs": 47.6,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Ôi chúa ttrời một câu hỏi đã mang dấu sóen lại lại còn gõ chữ đến bằng bàn chỉ cần có hai chữ mà lại bóp chữ sai ngay ở mở đầu như thể bàn bàn không muốn bắt đầu cuộc đời mình như thế thì làm việc nuô"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 201,
+     "completion_tokens": 136,
+     "prompt_tokens_details": null
+    },
+    "secs": 28.3,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "\"Nhiệm vụ\" nghe như thể làm cha mẹ là đăng nhập vào ca làm và bấm nút hoàn thành nhiệm vụ rồi nhận thưởng một trăm điểm trải nghiệm\n\n******\n\nTác giả dám gọi nuôi dạy con cái là \"nhiệm vụ\" khen không b"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 169,
+     "completion_tokens": 104,
+     "prompt_tokens_details": null
+    },
+    "secs": 21.8,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Nghe tiếng \"Nhiệm vụ\" ở đầu câu làm như ai có giơsinhphaoai trước khi phát họ hàng ai gà ai cột ai bát ******\n\nMẹ nuôi dạy con cái mà con cái chỉ là hai chữ đứng im lặng không biết phải làm j_vụ gì tr"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 260,
+     "completion_tokens": 195,
+     "prompt_tokens_details": null
+    },
+    "secs": 39.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "Này nhiếu bà ơi! Mối nhiệm vụ của một bà me đã bắt đầu bằng chữ cái N lơ dí từ tiếng Việt rồi à? Hay là bà me lại thuộc về một quốc gia bínnh chấu hoá hay gì mà câu cảng lại phải khi bámđž vào một chữ"
+   },
+   {
+    "doc": "106",
+    "cond": "rp110",
+    "seed": 32,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 65,
+     "total_tokens": 1089,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 198.6,
+    "content_empty": false,
+    "max_word_run": 1,
+    "max_8gram": 1,
+    "loop": false,
+    "content_head": "****** Ồi chờ đến mi，chờ đến mi——khoảng này đúng \"chờ đến mi\"，phải làm cha me：\"Nhiemvu cua me la nuoi day con cal\"——nay trỏng \"me\" lả cha me hay me ruai？Chữ \"nuoi day\" dán bāy nhau kheo rông māu rāng："
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 1,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 638,
+     "completion_tokens": 591,
+     "prompt_tokens_details": null
+    },
+    "secs": 115.0,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## India – 7 Day Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, enjoy street food tour |\n| 2 | Del"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 2,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 416,
+     "completion_tokens": 369,
+     "prompt_tokens_details": null
+    },
+    "secs": 71.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive; visit National Museum, explore markets, tour Old Delhi's historic sites |\n| 2"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 3,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 440,
+     "completion_tokens": 393,
+     "prompt_tokens_details": null
+    },
+    "secs": 76.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day Trip Itinerary for India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi | Arrive, explore historic sites, visit street markets, try loca"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 4,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 644,
+     "completion_tokens": 597,
+     "prompt_tokens_details": null
+    },
+    "secs": 115.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary\n\n## 🇮🇳 INDIA ITINERARY\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi – Arrival | Arrive, airport transfer, check into hotel, evening visit to Nati"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 5,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 570,
+     "completion_tokens": 523,
+     "prompt_tokens_details": null
+    },
+    "secs": 100.8,
+    "content_empty": false,
+    "max_word_run": 5,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination | Activities & Highlights |\n|-----|-------------|------------------------|\n| 1 | Delhi | Arrive, visit local markets, explore Nehru museum, evening s"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 6,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 445,
+     "completion_tokens": 398,
+     "prompt_tokens_details": null
+    },
+    "secs": 76.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# India Itinerary – Golden Triangle & Beyond\n\n| Day | Location | Highlights |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore monuments, visit National Museum, street food tour in Old De"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 7,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 502,
+     "completion_tokens": 455,
+     "prompt_tokens_details": null
+    },
+    "secs": 86.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Golden Train, Taj Mah"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 8,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 764,
+     "completion_tokens": 717,
+     "prompt_tokens_details": null
+    },
+    "secs": 138.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 4,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore Old & New Delhi sites, visit temples and markets |\n| 2 | Delhi → Agra/Jaipur"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 9,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 471,
+     "completion_tokens": 424,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore markets, visit Nehru Memorial Museum, street food tour |\n| 2 | Delhi → Agra | Mor"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 10,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 192.5,
+    "content_empty": false,
+    "max_word_run": 915,
+    "max_8gram": 908,
+    "loop": true,
+    "content_head": "# 7-Day Trip Itinerary\n\n## 🇮🇳 India (Days 1–7)\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historical sites (Red Palace, National Museum), visit loca"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 11,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 464,
+     "completion_tokens": 417,
+     "prompt_tokens_details": null
+    },
+    "secs": 79.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit the National Museum, enjoy street food tour |\n| 2 | D"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 12,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 483,
+     "completion_tokens": 436,
+     "prompt_tokens_details": null
+    },
+    "secs": 83.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi (Arrival) | Arrive in Delhi, check into hotel, evening visit to the "
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 13,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 580,
+     "completion_tokens": 533,
+     "prompt_tokens_details": null
+    },
+    "secs": 102.4,
+    "content_empty": false,
+    "max_word_run": 7,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary\n\n## Day | Destination\n|---|---|\n| **India** | Activities |\n|---|---|\n| Day 1 | Arrive in Delhi, check into hotel, evening city tour of Old Delhi (Monuments, churches, palaces) |"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 14,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 490,
+     "completion_tokens": 443,
+     "prompt_tokens_details": null
+    },
+    "secs": 86.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi / Arrival | Arrive in Delhi, airport transfer, rest and acclimate, evening visit to local mark"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 15,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 400,
+     "completion_tokens": 353,
+     "prompt_tokens_details": null
+    },
+    "secs": 68.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (Monument Market), rest at hotel |\n| 2 | Delhi → Agra | Visi"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 16,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 490,
+     "completion_tokens": 443,
+     "prompt_tokens_details": null
+    },
+    "secs": 86.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities & Highlights |\n|-----|----------|------------------------|\n| 1 | Delhi / Arrival | Arrive, airport transfer, explore Delhi (Monuments to"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 17,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 502,
+     "completion_tokens": 455,
+     "prompt_tokens_details": null
+    },
+    "secs": 88.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum, explore Old Delhi's markets and street food |\n| 2 | Delhi → "
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 18,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 393,
+     "completion_tokens": 346,
+     "prompt_tokens_details": null
+    },
+    "secs": 67.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, check into hotel, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 19,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 467,
+     "completion_tokens": 420,
+     "prompt_tokens_details": null
+    },
+    "secs": 81.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi (Arrival) | Arrive in Delhi, check into hotel, explore local markets, visit a museum or"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 20,
+    "finish": "length",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 1071,
+     "completion_tokens": 1024,
+     "prompt_tokens_details": null
+    },
+    "secs": 154.8,
+    "content_empty": false,
+    "max_word_run": 766,
+    "max_8gram": 759,
+    "loop": true,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, welcome dinner |\n| 2 | Delhi → Agra "
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 21,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 537,
+     "completion_tokens": 490,
+     "prompt_tokens_details": null
+    },
+    "secs": 92.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Destination | Activities & Highlights |\n|-----|-------------|-------------------------|\n| 1 | Delhi | Arrive, explore monuments like the National Museum; evening "
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 22,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 466,
+     "completion_tokens": 419,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum |\n| 2 | Delhi → Agra | Morning tra"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 23,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 392,
+     "completion_tokens": 345,
+     "prompt_tokens_details": null
+    },
+    "secs": 66.7,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary for India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum, Old Delhi walk), visit local markets |\n"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 24,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 895,
+     "completion_tokens": 848,
+     "prompt_tokens_details": null
+    },
+    "secs": 128.5,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 3,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi / Jaipur | Arrive, visit Jaipur's Pink City forts & palaces |\n| 2 | Jaipur → Agra | Golden & "
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 25,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 452,
+     "completion_tokens": 405,
+     "prompt_tokens_details": null
+    },
+    "secs": 74.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 🇮🇳 India — 7-Day Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit markets, relax in the capital |\n| 2 | Delhi → Agr"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 26,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 351,
+     "completion_tokens": 304,
+     "prompt_tokens_details": null
+    },
+    "secs": 57.2,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Trip Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore city highlights, visit National Museum |\n| 2 | Delhi → Agra | Golden Delhi c"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 27,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 419,
+     "completion_tokens": 372,
+     "prompt_tokens_details": null
+    },
+    "secs": 67.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 🇮🇳 India Trip (Day 1–7)\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, visit National Museum area, explore markets & local cuisine |\n| 2 | Delhi | Explore mon"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 28,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 543,
+     "completion_tokens": 496,
+     "prompt_tokens_details": null
+    },
+    "secs": 80.8,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day India Itinerary\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, transfer to hotel, visit Delhi sightseeing circuit (buses/metro), explore museums in even"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 29,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 428,
+     "completion_tokens": 381,
+     "prompt_tokens_details": null
+    },
+    "secs": 65.3,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 🇮🇳 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites, visit National Museum, street food tour in Old Delhi |\n|"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 30,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 425,
+     "completion_tokens": 378,
+     "prompt_tokens_details": null
+    },
+    "secs": 62.1,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day Trip Itinerary for India\n\n| Day | Destination | Activities |\n|-----|-------------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum), visit local markets, try street"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 31,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 456,
+     "completion_tokens": 409,
+     "prompt_tokens_details": null
+    },
+    "secs": 64.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "## 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| 1 | Delhi | Arrive, explore historic sites (National Museum, Delhi street markets), evening visit to a"
+   },
+   {
+    "doc": "65",
+    "cond": "rp110",
+    "seed": 32,
+    "finish": "stop",
+    "usage": {
+     "prompt_tokens": 47,
+     "total_tokens": 589,
+     "completion_tokens": 542,
+     "prompt_tokens_details": null
+    },
+    "secs": 69.4,
+    "content_empty": false,
+    "max_word_run": 2,
+    "max_8gram": 2,
+    "loop": false,
+    "content_head": "# 7-Day Trip Itinerary: India\n\n| Day | Location | Activities |\n|-----|----------|------------|\n| Day 1 | Delhi | Arrive, explore historical sites, visit National Museum, evening street food tour |\n| D"
+   }
+  ]
+ }
+}

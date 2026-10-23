@@ -73,7 +73,7 @@ serve:
     HF_MODEL: zai-org/GLM-5.3-Flash
     GLM53_WEIGHTS_REVISION: 91b69215804f2d2036a8867f6ce44848e278dcda
     # converted-weight cache on tt-model's persistent /weight-cache mount: the first boot converts the FP8 parent
-    # (~25 min, ~124 GB written); every later boot loads the cache (~110 s)
+    # (~23 min, 121 GiB written); a later boot loads the cache and is healthy after 196-241 s (stage-11 scorecard)
     GLM53_CACHE_DIR: /weight-cache/glm53_flash
     # parent snapshot + tt/e192_mask.json overlay (symlinks + the mask; a few KB)
     GLM53_CKPT_OVERLAY_DIR: /weight-cache/glm53_ckpt_overlay
@@ -149,14 +149,30 @@ card:
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
     `zai-org/GLM-5.3-Flash`. Thinking is always on (the chat template opens `<think>`): the reasoning is in the
     message's `reasoning` field, the answer in `content`. Set `"chat_template_kwargs": {"reasoning_effort": "low"}` for
-    short reasoning, and give requests a large `max_tokens`. Tool calls use the `glm47` parser.
+    short reasoning, and give requests a large `max_tokens`. The template accepts `reasoning_effort` `low` or `high`
+    only; any other value, or no value, gives `max`. Tool calls use the `glm47` parser.
 
     ### First start, disk and time
-    - Disk on the host: the parent FP8 snapshot (328 GB in your HF cache, all 288 experts) plus the converted weight
-      cache (121 GB under `~/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights`). Plan for 470 GB free.
+    Recommended first start:
+    ```
+    tt-model pull raahemnabeel/glm-5.3-flash-e192-blackhole --with-weights
+    tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole --detach
+    tt-model logs raahemnabeel/glm-5.3-flash-e192-blackhole -f    # until the server is ready; then curl :20000/health
+    ```
+    - `pull --with-weights` downloads the weights into your HF cache on the host, with progress. `tt-model serve
+      <repo>` without an earlier pull also downloads them on the host first.
+    - A plain `tt-model pull <repo>` (without `--with-weights`) downloads no weights. The model then downloads the
+      snapshot inside the container at the first start: no progress in tt-model, and the download counts against the
+      engine's 2-hour start limit. Use `--with-weights`.
+    - The first start takes about 29 minutes after the download, near tt-model's 30-minute ready wait. Use
+      `--detach` and `tt-model logs -f` for the first start. If `serve` stops waiting, the container continues to
+      start; it does not stop.
+    - Disk on the host: the parent FP8 snapshot (328 GB in your HF cache, all 288 experts), the converted weight
+      cache (130 GB = 121 GiB, under `~/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights`), the kernel cache
+      (about 4 GB) and the image (8.6 GB). Plan for about 500 GB free.
     - Measured on a fresh p300x2 (stage 11): the snapshot download took 48 minutes at 113 MB/s; the first start then
-      converted the weights (23 minutes) and compiled the kernels, healthy after 29 minutes. Later starts load the
-      cache and are healthy after 3 to 4 minutes (196-241 s).
+      converted the weights (23 minutes) and compiled the kernels, healthy after 29 minutes (1,730 s). Later starts
+      load the cache and are healthy after 3 to 4 minutes (196-241 s).
 
     ### Profiles
     `tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole --profile <name>`. The context is limited by device
@@ -210,18 +226,22 @@ card:
     | profile | TTFT | TPOT | decode tokens/s |
     | --- | ---: | ---: | ---: |
     | `p300x2-long` (1 x 344,064) | 245 ms | 49.9 ms | 20.1 |
-    | `p300x2-1m` (1 x 1,048,576) | 251 ms | 71.5 ms | 14.0 |
+    | `p300x2-1m` (1 x 1,048,576) [1] | 251 ms | 71.5 ms | 14.0 |
     | `p300x2` (default, 16 x 262,144) | 259 ms | 75.2 ms | 13.3 |
     | `p300x2-wide` (32 x 159,744) | 274 ms | 124.5 ms | 8.0 |
 
-    Long prompts (one request): `p300x2` 8,192 tokens TTFT 4.9 s, 131,072 tokens TTFT 93.8 s (1,400 prompt tokens/s);
-    near-limit prompts answer: 262,080 tokens in 219 s (`p300x2`), 159,680 in 121 s (`p300x2-wide`), 344,000 in 311 s
+    [1] From the TTI release benchmark of 2026-10-21: the release worktree server (not this bundle), the pruned E192
+    checkpoint, vllm-tt-plugin 92403f3. The other rows are from this bundle.
+
+    Long prompts (one request): `p300x2` 8,192 tokens TTFT 4.9 s, 131,072 tokens TTFT 93.8 s (1,400 prompt tokens/s).
+    Prefill on `p300x2-1m` is about 3 times slower: 8,192 tokens TTFT 15.1 s, 131,072 tokens 288 s [1].
+    Near-limit prompts answer: 262,080 tokens in 219 s (`p300x2`), 159,680 in 121 s (`p300x2-wide`), 344,000 in 311 s
     (`p300x2-long`), 1,040,000 in 2,291 s (`p300x2-1m`).
     More users: `p300x2` 77 output tokens/s at 16 users (128 / 128, 178 ms per token per user), 71 tokens/s at 16 users
     with 1,024 / 256; `p300x2-wide` 141 output tokens/s at 32 users (166 ms per token per user). 32 concurrent
     100 / 100 requests on `p300x2` (16 slots, the rest queue): 75 output tokens/s, mean TTFT 19.8 s.
     Overload: 16 concurrent 20,000-token prompts on `p300x2` exceed the shared KV pool; vLLM preempts and every request
-    completes (the resumed request equals its solo run).
+    completes (a spot-check request equals its solo run).
     Accuracy evals (TTI, effort low): see Accuracy; per-profile tables: doc/tti_release/RUN_NOTES.md in the autoport.
 
     ### Limitations
@@ -239,8 +259,16 @@ card:
       above 32, samples from the top 32. Requests with logprobs, `min_p`, `logit_bias`, bad words or structured output
       sample on the host (slower).
     - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
+    - Rare repetition loops at temperature 1.0: a sampled answer can repeat one token or phrase until `max_tokens`
+      (1.4 % of 353 TTI eval answers; prompt-dependent, up to 6 of 32 seeded draws on one Vietnamese prompt).
+      Most other seeds of the same prompt do not loop (greedy did not loop in one run per prompt). In a probe of
+      two looping prompts, neither `repetition_penalty` 1.05 or 1.10 nor temperature 0.6 removed the loops.
+      Mitigation: set `max_tokens`, detect a loop in the client, and retry with another seed. An HF reference check
+      of one loop: the reference also repeats once the loop has started, but at the loop entry the TT next-token
+      distribution was flatter than the reference (not fixed in this release).
     - No multi-token prediction (the MTP layer is not served).
     - The p150x4 profile is derived by the sizing rule for the same (1, 4) mesh as p300x2; it was not run on p150
       boards.
-    - Needs vllm-tt-plugin 92403f3 plus fix 16febac (branch `glm53_finished_ids_fix`). An unfixed plugin loses
-      finished requests under KV pressure, and the engine stops with "no free device state slot".
+    - The image contains vllm-tt-plugin 92403f3 plus fix 16febac (branch `glm53_finished_ids_fix`). Without this fix
+      the plugin loses finished requests under KV pressure, and the engine stops with "no free device state slot".
+      The plugin fix and the tt-metal commit of this build are not public yet; the plugin fix must go upstream.

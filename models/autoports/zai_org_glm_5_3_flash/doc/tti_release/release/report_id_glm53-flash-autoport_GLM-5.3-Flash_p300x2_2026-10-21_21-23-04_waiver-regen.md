@@ -31,6 +31,10 @@
 - Agentic Targets: 🟨 `NA` (no blocks present)
 - All acceptance criteria passed.
 
+Waived rows (TTI `known_issues` of the model spec):
+
+- `evals:LLM Eval — gpqa_diamond_cot_zeroshot`: Accuracy check failed. (waived: Issue-waived (stage 11, lead/user decision 2026-10-23; models/autoports/zai_org_glm_5_3_flash/doc/tti_release/RUN_NOTES.md). lm-eval full set 66.67 %, CI subset 70.0 %; card protocol 74.24 % against the card's 79.8 % (same effort, budget and sampling). The stage-8 non-expert precision changes are ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant); answer extraction, effort rendering and budget handling checked. The residual -5.6 points (about 1.8 sigma) exceeds the card's stated +/-2-3 point run noise and is unexplained; bfp4 vs NVFP4 routed experts were not tested.)
+
 ---
 
 ### Accuracy Evaluations for zai-org/GLM-5.3-Flash on P300X2
@@ -38,7 +42,7 @@
 | Task                      | Tolerance | Published Score | Published Score Ref                                                                                    | gpu_reference_score_ref                           | Score | Ratio to Published | Ratio to Reference | Accuracy Check | priority | mean_seconds_per_task |
 |:--------------------------|:----------|:----------------|:-------------------------------------------------------------------------------------------------------|:--------------------------------------------------|:------|:-------------------|:-------------------|:---------------|:---------|:----------------------|
 | ifeval                    | 0.05      | N/A             | none: no IFEval number for GLM-5.3-Flash or its E192 subset                                            | none: no same-setting reference of the E192 model | 74.31 | N/A                | N/A                | 🟨 NA          | must     | 100.2                 |
-| gpqa_diamond_cot_zeroshot | 0.05      | 79.8            | https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens) | N/A                                               | 70    | 0.8772             | N/A                | ❌ FAIL        | must     | 49.88                 |
+| gpqa_diamond_cot_zeroshot | 0.05      | 79.8            | https://huggingface.co/autotrust/GLM5.3-Flash-E192-DGX-Spark (GPQA-Diamond, effort=low, 65,536 tokens) | N/A                                               | 70    | 0.8772             | N/A                | WAIVED (known issue)        | must     | 49.88                 |
 
 Note: The ratio to published scores defines if eval ran roughly correctly, as the exact methodology of the model publisher cannot always be reproduced. For this reason the accuracy check is based first on being equivalent to the GPU reference within a +/- tolerance. If a value GPU reference is not available, the accuracy check is based on the direct ratio to the published score.
 

@@ -685,7 +685,7 @@
                 "skipped": 0,
                 "blockers": {},
                 "waived": {
-                    "evals:LLM Eval \u2014 gpqa_diamond_cot_zeroshot": "Accuracy check failed. (waived: Issue-waived (stage 11, lead/user decision 2026-10-23; models/autoports/zai_org_glm_5_3_flash/doc/tti_release/RUN_NOTES.md). lm-eval full set 66.67 %, CI subset 70.0 %; card protocol 74.24 % against the card's 79.8 % (same model, effort, budget and sampling); precision ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant); answer extraction, effort rendering and budget handling checked (no misses, template-correct effort, budget-cut rate as in the card); the residual 5.6 points sit within the card's single-run noise plus the quantization difference.)"
+                    "evals:LLM Eval \u2014 gpqa_diamond_cot_zeroshot": "Accuracy check failed. (waived: Issue-waived (stage 11, lead/user decision 2026-10-23; models/autoports/zai_org_glm_5_3_flash/doc/tti_release/RUN_NOTES.md). lm-eval full set 66.67 %, CI subset 70.0 %; card protocol 74.24 % against the card's 79.8 % (same effort, budget and sampling). The stage-8 non-expert precision changes are ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant); answer extraction, effort rendering and budget handling checked. The residual -5.6 points (about 1.8 sigma) exceeds the card's stated +/-2-3 point run noise and is unexplained; bfp4 vs NVFP4 routed experts were not tested.)"
                 }
             },
             {

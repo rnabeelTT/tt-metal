@@ -5,6 +5,7 @@ slot_remap, page-table padding, row -> slot sampling params, the async-ahead mer
 tt-model.yaml in sync, precision policy, parent-checkpoint overlay), and the adapter's calls
 into a fake Glm53Generator that implements the API of doc/vllm/DESIGN.md section 9."""
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -360,6 +361,9 @@ def test_resolve_checkpoint_parent_overlay(monkeypatch, tmp_path, expect_error):
     (snap / "mtp").mkdir(parents=True)
     (snap / "config.json").write_text("{}")
     (snap / "model-00001-of-00002.safetensors").write_bytes(b"x")
+    (snap / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a.weight": "model-00001-of-00002.safetensors"}})
+    )
     seen = {}
 
     def fake_snapshot_download(repo, revision=None, local_files_only=False):
@@ -384,6 +388,65 @@ def test_resolve_checkpoint_parent_overlay(monkeypatch, tmp_path, expect_error):
     monkeypatch.delenv("GLM53_CKPT")
     with expect_error(RuntimeError, "was made for"):
         gv.resolve_checkpoint(SimpleNamespace(_name_or_path="someone/other-model"))
+
+
+def test_resolve_checkpoint_downloads_missing_weights(monkeypatch, tmp_path, expect_error):
+    """`tt-model pull` without --with-weights + serve: the cache has no snapshot, or only vLLM's config / tokenizer
+    files. resolve_checkpoint downloads the pinned snapshot (online snapshot_download, the same HF cache), and a failed
+    download raises a RuntimeError that names the host-side fetch."""
+    import huggingface_hub
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    rev = "91b69215804f2d2036a8867f6ce44848e278dcda"
+    snap = tmp_path / "hub" / "snapshots" / rev
+    snap.mkdir(parents=True)
+    (snap / "config.json").write_text("{}")  # what vLLM fetched before the model loads: no index, no shards
+    calls = []
+
+    def complete():
+        (snap / "model-00001-of-00001.safetensors").write_bytes(b"x")
+        (snap / "model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {"a.weight": "model-00001-of-00001.safetensors"}})
+        )
+
+    def fake(repo, revision=None, local_files_only=False, fail_online=False, absent=False):
+        calls.append((repo, revision, local_files_only))
+        if local_files_only:
+            if absent:
+                raise LocalEntryNotFoundError("not cached")
+            return str(snap)
+        if fail_online:
+            raise OSError("network unreachable")
+        complete()
+        return str(snap)
+
+    monkeypatch.delenv("GLM53_CKPT", raising=False)
+    monkeypatch.setenv("GLM53_CKPT_OVERLAY_DIR", str(tmp_path / "overlay"))
+    monkeypatch.setenv("GLM53_WEIGHTS_REVISION", rev)
+    cfg = SimpleNamespace(_name_or_path="zai-org/GLM-5.3-Flash")
+    # 1) partial snapshot (config only) and a failing download: a clear error with the fix
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda *a, **k: fake(*a, **k, fail_online=True))
+    with expect_error(RuntimeError, "--with-weights"):
+        gv.resolve_checkpoint(cfg)
+    assert calls == [("zai-org/GLM-5.3-Flash", rev, True), ("zai-org/GLM-5.3-Flash", rev, False)]
+    # 2) nothing cached at all: download, then the overlay
+    calls.clear()
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda *a, **k: fake(*a, **k, absent=True))
+    root = Path(gv.resolve_checkpoint(cfg))
+    assert calls == [("zai-org/GLM-5.3-Flash", rev, True), ("zai-org/GLM-5.3-Flash", rev, False)]
+    assert (root / "model.safetensors.index.json").is_symlink() and (root / "e192_mask.json").is_file()
+    # 3) complete now: the cache is used offline, no second download
+    calls.clear()
+    monkeypatch.delenv("GLM53_CKPT")
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake)
+    assert Path(gv.resolve_checkpoint(cfg)) == root
+    assert calls == [("zai-org/GLM-5.3-Flash", rev, True)]
+    # 4) an index that names a missing shard (interrupted download) counts as incomplete
+    (snap / "model-00001-of-00001.safetensors").unlink()
+    calls.clear()
+    monkeypatch.delenv("GLM53_CKPT")
+    gv.resolve_checkpoint(cfg)
+    assert [c[2] for c in calls] == [True, False]
 
 
 def test_get_max_tokens_all_users(monkeypatch, expect_error):

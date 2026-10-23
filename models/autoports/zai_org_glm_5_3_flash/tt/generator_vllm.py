@@ -165,15 +165,65 @@ def _overlay_root() -> Path:
     return Path(os.environ.get("TT_CACHE_PATH", Path.home() / ".cache" / "ttnn")) / "glm53_ckpt_overlay"
 
 
+# the published tt-model bundle of this autoport: the host-side weight fetch that error messages name
+BUNDLE_REPO = "raahemnabeel/glm-5.3-flash-e192-blackhole"
+
+
+def _snapshot_complete(snap: Path) -> bool:
+    """True when the snapshot has model.safetensors.index.json and every shard file the index names."""
+    idx = snap / "model.safetensors.index.json"
+    try:
+        shards = set(json.loads(idx.read_text())["weight_map"].values())
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return bool(shards) and all((snap / f).is_file() for f in shards)
+
+
+def _weights_snapshot(name: str, rev) -> Path:
+    """The complete HF snapshot of `name` at `rev`. A cached snapshot can be partial: `tt-model pull` without
+    --with-weights fetches no weights, and vLLM fetches only the config and tokenizer files before the model loads.
+    Then download the snapshot here. The container mounts the host HF cache read-write, so the files stay on the host,
+    and the download resumes after an interruption."""
+    from huggingface_hub import snapshot_download
+
+    at = f"{name}@{rev or 'default ref'}"
+    try:
+        snap = Path(snapshot_download(name, revision=rev, local_files_only=True))
+    except Exception:  # noqa: BLE001 - not in the cache (or not resolvable offline): download below
+        snap = None
+    if snap is not None and _snapshot_complete(snap):
+        return snap
+    host_fix = (
+        f"On the host, run `tt-model pull {BUNDLE_REPO} --with-weights` (or `hf download {name}"
+        + (f" --revision {rev}" if rev else "")
+        + "`), then serve again."
+    )
+    logger.warning(
+        f"weights {at}: no complete snapshot in the HF cache ({snap or 'none'}). Downloading it now (the parent FP8 "
+        f"snapshot is about 328 GB; tt-model shows no progress, see `tt-model logs -f`). {host_fix}"
+    )
+    try:
+        snap = Path(snapshot_download(name, revision=rev))
+    except Exception as e:  # noqa: BLE001 - offline, no disk space, network or auth error
+        raise RuntimeError(
+            f"weights {at} are not in the HF cache and the download failed ({type(e).__name__}: {e}). {host_fix}"
+        ) from e
+    if not _snapshot_complete(snap):
+        raise RuntimeError(f"weights {at}: {snap} has no complete model.safetensors.index.json shard set. {host_fix}")
+    return snap
+
+
 def resolve_checkpoint(hf_config) -> str:
     """The checkpoint directory the model reads (sets GLM53_CKPT). Order:
     1. GLM53_CKPT if set (the E192 build of the bring-up host);
     2. the served model path (hf_config._name_or_path) when it is a local directory (an E192 build, or a parent
        snapshot that carries e192_mask.json);
-    3. the local HF snapshot of that repo id at GLM53_WEIGHTS_REVISION (the bundle's pinned parent revision; unset =
-       the cached default ref), overlaid with the autoport's tt/e192_mask.json: a directory of symlinks to the snapshot
-       files plus the mask, under GLM53_CKPT_OVERLAY_DIR (the parent snapshot has 288 experts and no mask;
-       CheckpointReader reads the 192 kept experts through the mask)."""
+    3. the HF snapshot of that repo id at GLM53_WEIGHTS_REVISION (the bundle's pinned parent revision; unset = the
+       default ref), overlaid with the autoport's tt/e192_mask.json: a directory of symlinks to the snapshot files plus
+       the mask, under GLM53_CKPT_OVERLAY_DIR (the parent snapshot has 288 experts and no mask; CheckpointReader reads
+       the 192 kept experts through the mask). The local snapshot is used when it is complete (the safetensors index
+       and every shard it names). Otherwise the snapshot is downloaded here (into the HF cache, which tt-model
+       bind-mounts from the host); if that fails, a RuntimeError names the host-side fetch."""
     env = os.environ.get("GLM53_CKPT")
     if env:
         return env
@@ -181,10 +231,8 @@ def resolve_checkpoint(hf_config) -> str:
     if Path(name).is_dir():
         os.environ["GLM53_CKPT"] = name
         return name
-    from huggingface_hub import snapshot_download
-
     rev = os.environ.get("GLM53_WEIGHTS_REVISION") or None
-    snap = Path(snapshot_download(name, revision=rev, local_files_only=True))
+    snap = _weights_snapshot(name, rev)
     if (snap / "e192_mask.json").exists():
         os.environ["GLM53_CKPT"] = str(snap)
         return str(snap)

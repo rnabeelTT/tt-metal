@@ -1,6 +1,27 @@
 # GLM-5.3-Flash (E192) on p300x2: stages 9-11 device queue and release checklist
 
-Status 2026-10-18: host work done, no device job ran for stages 9-11. Template: the GLM-4.5-Air release
+Status 2026-10-23: all steps done; the plan below is the 2026-10-18 version (estimates and file names kept as
+written then). Completion record:
+
+- A1-A9: stages 9 and 10 (clean-pass), evidence in `doc/vllm/evidence/final/` and `doc/optimized_vllm/`.
+- A10: TTI smoke and release (ci-nightly) on p300x2-1m, no Docker: `RUN_NOTES.md` (Commands, Results).
+- A11: bundle build with `scripts/11-package-rel.sh` (the clean release worktree `~/tt-metal-rel-glm53`), not
+  `11-package.sh`.
+- A12: cold verify on p300x2 with `scripts/11-verify-rel.sh` (`COLD=1`): PASS on attempt 4 (RUN_NOTES "tt-model
+  bundle").
+- A13: warm verify p300x2-1m (PASS with the documented placement exception) and the bundle scorecard on
+  p300x2 / p300x2-wide / p300x2-long (all smokes PASS).
+- A14: Hub verify of rev 8b8a71f8: PASS. After the stage-11 review fixes the bundle was rebuilt, republished and
+  verified again (RUN_NOTES "Stage-11 review fixes").
+- B1: disk. Actual need: parent snapshot 328 GB + converted weight cache 130 GB (121 GiB) + kernel cache about
+  4 GB + image 8.6 GB; plan for about 500 GB free. Deleted (lead-approved): the bring-up E192 checkpoint, the
+  bring-up weight cache, `~/.cache/tt-metal-cache`.
+- B9: the card has no TODO left; the first-start section recommends `tt-model pull <repo> --with-weights`.
+- B10: published public + catalog (`scripts/11-publish.sh`, lead go).
+- B11: copy-back done (`doc/tti_release/`).
+- D, TTI accuracy reference: option (b) for ifeval; the GPQA row is issue-waived (RUN_NOTES).
+
+Template: the GLM-4.5-Air release
 (`models/autoports/zai_org_glm_4_5_air`, `~/glm45-air-bringup`, Hub `raahemnabeel/glm-4.5-air-blackhole`) and the
 Qwen3.5-122B TTI run (`models/autoports/qwen_qwen3_5_122b_a10b/doc/tti_release/RUN_NOTES.md`).
 

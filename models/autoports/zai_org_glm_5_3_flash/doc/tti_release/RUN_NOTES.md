@@ -1,8 +1,9 @@
 # GLM-5.3-Flash (E192) - TTI release run notes (stage 11)
 
-Status: DRAFT (2026-10-21). The release workflow ran to completion. Its acceptance is FAIL with one blocker, the
-GPQA CI subset. A full 198-question GPQA run is queued as the resolution path. A loop diagnostic (below) runs
-first. The bundle build, fresh-device verification and Hub publish sections are pending.
+Status: final (2026-10-23). The release workflow ran to completion (acceptance FAIL with one blocker, the GPQA CI
+subset). The GPQA row is issue-waived after the full-set and card-protocol runs; the re-aggregated report passes
+(see "Stage-11 status"). The bundle is built, verified on a fresh device and published to the Hub, then republished
+after the stage-11 review fixes (see "Stage-11 review fixes").
 
 ## Server mode, host, versions
 - Topology: external server, no Docker. The autoport vLLM server runs from this tt-metal code. TTI v0.22.0 is a
@@ -30,8 +31,8 @@ first. The bundle build, fresh-device verification and Hub publish sections are 
   - This equals `doc/context_contract.json` `supported_context` (1,048,576 = HF-advertised).
   - The served `/v1/models` reports `max_model_len` 1048576 (`release/models.json`).
   - It is the report of record because the release spec must preserve the contract (stage-9 rule).
-  - The default customer profile p300x2 (16 x 243,712) appears only as a supplementary benchmark, outside this
-    directory.
+  - The default customer profile p300x2 (16 x 262,144 in the bundle; 16 x 239,616 as served by the GPQA run below)
+    appears only as supplementary evidence: the full GPQA runs and the bundle scorecard.
 - Server command and env: `logs/servercmd-release.txt`.
   - Flags: `--block-size 128 --max-num-seqs 1 --max-model-len 1048576 --enable-auto-tool-choice
     --tool-call-parser glm47 --reasoning-parser glm45 --additional-config {"tt": {sample_on_device_mode all,
@@ -104,9 +105,11 @@ first. The bundle build, fresh-device verification and Hub publish sections are 
 | spec tests (VLLMParamConformanceTest) | **22/22** | - | PASS |
 | benchmarks (12 sweep points, 1 slot) | all requests completed, 0 failed | no perf targets exist | NA (informational) |
 
-- Acceptance: **FAIL, 1 blocker** (gpqa). Nothing is waived.
-- The 6 structured-output benchmark tasks that TTI's benchmark config lists did not run: the run produced 12
-  sweep blocks only. To be followed up.
+- Acceptance: **FAIL, 1 blocker** (gpqa). Nothing is waived in this run. (Superseded: the GPQA row was later
+  issue-waived, and the re-aggregated report passes; see "Release report with the GPQA waiver".)
+- The 6 structured-output benchmark tasks that TTI's benchmark config lists: **not applicable**. The TTI v0.22.0
+  LLM runner is text-only. It drops every benchmark parameter set that is not a text task with an ISL and an OSL
+  (`llm_module/benchmark_configs.py` lines 27-60), so the run produced the 12 text sweep blocks only.
 
 Benchmark rows (p300x2-1m, concurrency 1):
 
@@ -165,8 +168,11 @@ Benchmark rows (p300x2-1m, concurrency 1):
   - TTI rule against the E192 card's 79.8: ratio 0.835, needs >= 0.95 (>= 150/198) -> **FAIL** (run.py rc 1,
     Acceptance FAIL).
   - The gap is about 3.9 standard errors, so it is not sampling noise.
-  - 4/198 answers have empty content: the think block hit the 65,536-token budget (docs 79, 127, 170, 196). These
-    are coherent long derivations, not loops (max word run <= 6). They count as wrong.
+  - 4/198 answers have empty content: the think block hit the 65,536-token budget (docs 79, 127, 170, 196). They
+    count as wrong. Correction (stage-11 review): docs 196 and 170 are phrase loops. An 8-gram of words repeats
+    2,412 times (doc 196) and 679 times (doc 170) in the think block. Doc 79 repeats one 8-gram 37 times; doc 127
+    has no repeat by this rule. The earlier "not loops" came from a single-word run metric (max word run <= 6),
+    which does not see phrase loops. See "Repetition loops: rate over all saved generations".
   - Generated tokens: median 400, mean 3,067, maximum 65,536.
   - The first 40 documents score 31/40 here vs 28/40 in the release CI subset (a different realisation, sampled at
     temperature 1.0).
@@ -219,8 +225,8 @@ Benchmark rows (p300x2-1m, concurrency 1):
       weights; chosen for the pool size), max_model_len 70,016.
     - Run 2026-10-22 23:17 to 2026-10-23 about 02:40.
     - **Result: 147/198 = 74.24 %** (0 errors; 14 answers without an extracted ANSWER, 8 of them budget cuts).
-      Against the card's 79.8: -5.6 points (about 1.8 sigma). That is within the card's stated +/-2-3 points of
-      run noise plus NVFP4 vs bfp4 weights.
+      Against the card's 79.8: -5.6 points (about 1.8 sigma). That is more than the card's stated +/-2-3 points of
+      run noise, and it is not explained. bfp4 vs NVFP4 routed experts were not tested.
     - Per subject (card protocol vs the lm-eval run, same questions): Physics 72/86 vs 69/86, Chemistry 63/93 vs
       51/93, Biology 12/19 vs 12/19.
     - Paired: both right 111, card protocol only 36, lm-eval only 21.
@@ -228,16 +234,16 @@ Benchmark rows (p300x2-1m, concurrency 1):
       12 questions under the card's prompt.
 - **GPQA row classification: issue-waived (lead decision, 2026-10-23).** Evidence:
   - lm-eval full set 66.67 %, CI subset 70.0 %.
-  - Card protocol 74.24 % against the card's 79.8 % (same model, effort, budget and sampling).
-  - Precision ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped 54.8 %, not significant).
+  - Card protocol 74.24 % against the card's 79.8 % (same effort, budget and sampling; the card ran NVFP4 weights).
+  - The stage-8 non-expert precision changes are ruled out (H1 chemistry: stage-7 policy 58.1 % vs shipped
+    54.8 %, not significant).
   - Answer extraction, effort rendering and budget handling checked: no misses, template-correct effort,
     budget-cut rate as in the card.
-  - The residual 5.6 points sit within the card's single-run noise plus the quantization difference.
-  - No bug hunt (user decision).
-  - These data cannot separate the methodology gap from a port quality gap. The row is classified
-    **readiness-fail pending a lead / owner waiver decision**. Per the lead's instruction it was not retried.
+  - The residual -5.6 points (about 1.8 sigma) exceeds the card's stated +/-2-3 points of run noise and is
+    unexplained. bfp4 vs NVFP4 routed experts were not tested.
+  - No bug hunt (user decision). Per the lead's instruction the row was not retried.
 
-### ifeval: two degenerate single-token loops (under diagnosis)
+### ifeval: two degenerate single-token loops
 - 2 of 109 answers loop on a single token until the 32,768-token budget:
   - Doc 65 (India/China itinerary table): " boat" from content token 161.
   - Doc 106 (Vietnamese critique): " cả" from content token 14.
@@ -267,22 +273,111 @@ Benchmark rows (p300x2-1m, concurrency 1):
   - Doc 106 B, the host path: the loop token is the argmax at every onset step. The repeated token " ca" has
     p 0.538 at position 30, then 0.493 / 0.851 / 0.784 at the first repeats, with alternatives " lich" 0.038 and
     " lam" 0.034. It rises to 0.9999 in the loop tail.
+  - Correction (stage-11 review): on doc 106, seeds 1 and 6 of case C hit the 1,024-token budget with empty
+    content. The diagnostic saved no reasoning text, so these two draws are unclassified (the table counts them as
+    not looped). Doc 106 C is therefore 0/6 classified, 2 unclassified.
   - Classification: **not a device-sampler defect**. The host-sampled path loops the same way, and the device and
     host paths agree. It is a **model repetition attractor** at temperature 1.0, prompt-dependent and rare: about
-    1/8 draws on doc 65, and 2/109 in the eval run.
-  - Not settled by these data: whether the TT logits at this prefix deviate from the HF reference. That needs an
-    HF teacher-forced comparison of positions 30-33, which was not run.
+    1/8 draws on doc 65, and 2/109 in the eval run. The rate over all saved eval generations is in "Repetition loops:
+    rate over all saved generations".
+  - Not settled by these data: whether the TT logits at this prefix deviate from the HF reference. See "HF
+    teacher-forced control of a doc-106 loop onset" (stage-11 review).
   - Scorecard caveats:
     - 2/109 ifeval answers are single-token loops (model repetition attractor at temperature 1.0).
     - The per-draw rate is about 1/8 on doc 65. The host-sampled path reproduces the loop; greedy and top_p 1.0 do
       not loop.
     - Vietnamese output quality is poor even without loops. This is consistent with the E192 card's lower
       non-English scores (C-Eval 78.3 % vs 89.4 % for E256).
-  - HF teacher-forced check of positions 30-33 on the doc-106 prefix: NOT RUN (lead decision: host RAM; allowed
-    only after all release device work is done and the host is idle).
+  - HF teacher-forced check of the doc-106 loop onset: not run at that time (lead decision: host RAM). It ran
+    after the stage-11 review (see "HF teacher-forced control of a doc-106 loop onset").
   - Reproducibility note: doc 65 at seed 42 replayed differently from the eval run. It diverged at the first
     heading. In the eval run the request followed 64 others in the same session; in the replay it was the first
     request after boot. Doc 106 replayed bit-identically.
+
+### Repetition loops: rate over all saved generations (stage-11 review, P2-2)
+- Scanner: `~/glm53-flash-bringup/scripts/11-loopscan.py` -> `artifacts/s11/loopscan/loopscan.json`. Rule: a
+  generation loops when one 8-gram of whitespace words occurs >= 20 times, or one word repeats >= 50 times in a row,
+  in the reasoning + content text. The earlier scans (word runs >= 5, 4-grams >= 20 on the content only) missed
+  loops in the think block, where a looped answer leaves the content empty.
+- Result, every stage-11 eval generation whose full text is saved:
+
+  | set (policy) | loops / generations | looped docs (largest 8-gram count) |
+  |---|---:|---|
+  | smokes: ifeval 3 + gpqa 3 (shipped, p300x2-1m) | 0 / 6 | - |
+  | release ifeval, 109 (shipped, p300x2-1m) | 2 / 109 | 65 (32,516), 106 (32,706): single-token loops |
+  | release gpqa CI subset, 40 (shipped, p300x2-1m) | 0 / 40 | - |
+  | gpqa full set, 198 (shipped, p300x2) | 3 / 198 | 196 (2,412), 170 (679), 79 (37): budget cuts |
+  | H1 chemistry, 93 (stage-7 policy, p300x2) | 6 / 93 | 69 (6,980), 121 (322), 89 (316), 47 (131), 36 (56), 125 (23) |
+
+  - Shipped policy: **5 / 353 = 1.4 %** of the generations loop; 4 of them strongly (8-gram count >= 679).
+  - All valid sets: 11 / 446 = 2.5 %. The invalid H1 attempt 1 (engine crash) is not counted (0 / 198 by the rule).
+  - Every loop is a budget-exhausted answer (32,768 tokens for ifeval, 65,536 for gpqa). 3 of the 4 gpqa budget
+    cuts with the shipped policy are loops by this rule (doc 127 is not).
+  - Not scannable: the H2 card-protocol run saved only the last 300 content characters (0 loops in them; 8 budget
+    cuts, whose think text is not saved); the loop diagnostic saved no reasoning text.
+
+### Repetition loops: mitigation probe on the bundle (stage-11 review, P2-2)
+- `scripts/11-loopprobe.py`, run inside `11-verify-rel.sh` (`LOOPPROBE=...`) on the published bundle (image
+  34ec4c80e68b, profile p300x2, warm), 2026-10-23 09:42-10:03 and 10:04-10:23. Prompts: ifeval docs 106 and 65;
+  reasoning_effort low, top_p 0.95, 1,024 tokens, seeds 1-32 per prompt and condition, 16 requests in flight.
+  Loop rule as in the scan above. Results (`artifacts/s11/loopprobe/loopprobe{,2}.json`):
+
+  | condition | doc 106 | doc 65 | both |
+  |---|---:|---:|---:|
+  | temperature 1.0 (the eval setting) | 6/32 | 1/32 | 7/64 |
+  | temperature 1.0, repetition_penalty 1.05 | 5/32 | 1/32 | 6/64 |
+  | temperature 1.0, repetition_penalty 1.10 | 1/32 (+1 unclassified) | 2/32 | 3/64 |
+  | temperature 0.6 | 9/32 (+2 unclassified) | 2/32 | 11/64 |
+
+  - "Unclassified" = budget cut with empty content and no loop in the text.
+  - repetition_penalty 1.05 does not reduce the rate. 1.10 gives 3/64 vs 7/64 (not significant at this n; doc 65
+    goes up). A lower temperature does not help (11/64).
+  - So the card recommends no sampling setting. It recommends a `max_tokens` bound, a client-side loop check and a
+    retry with another seed (most seeds of a looping prompt do not loop).
+  - The per-draw rate on doc 106 (6/32 on p300x2) is higher than in the eval (1 draw, looped) and in the loop
+    diagnostic on p300x2-1m (0/6 classified). The loops are strongly prompt-dependent; the eval-wide rate is in the
+    scan above.
+  - The same sessions repeated the Hub smokes (`SMOKE_RESULT PASS`, burst 16/16) and exercised
+    `tt-model pull <repo> --with-weights` with the weights cached: rc 0 in 26 s, "weights -> host HF cache" at
+    `~/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b69215...`. The second session used a plain
+    `tt-model pull` (no weight fetch); the container found the complete cached snapshot and served.
+
+### HF teacher-forced control of a doc-106 loop onset (stage-11 review, P2-2)
+- Tool: `~/glm53-flash-bringup/scripts/11-hfloop.py` (uses `tools/hf_full_ref.py` FullModel, the stage-6 HF CPU
+  reference: unmodified HF `Glm5NextTextModel`, E192-masked experts dequantized from the FP8 checkpoint). The
+  checkpoint is the parent snapshot @91b69215 + `tt/e192_mask.json` (a host symlink overlay;
+  `CheckpointReader` applies the mask). Run 2026-10-23 10:23-10:30 with the device queue empty, under
+  `systemd-run -p MemoryMax=40G`: 102 tokens in 389 s, peak RSS 39.6 GB (`--expert-cache-gb 12`).
+- Trajectory: the looped doc-106 draw with the earliest single-token onset from the bundle probe (seed 9, base,
+  host-sampled because it asked for logprobs): 65 prompt tokens (the HF tokenizer render matches the served
+  count) + 23 reasoning tokens + content "Ôi chúa thay ở ai ai ai ...". The run of " ai" starts at completion
+  position 30. TT probabilities = the served logprobs (raw model output, top 5). Output:
+  `artifacts/s11/loopprobe/hfloop.json`.
+- Result at the onset (p of the emitted token, TT / HF; top-1 of each side):
+
+  | pos | token | TT p | HF p (HF rank) | TT top-1 | HF top-1 |
+  |---:|---|---:|---:|---|---|
+  | 26 | " ch" | 0.471 | 0.071 (1) | " ch" 0.47 | " trời" 0.81 |
+  | 27 | "úa" | 0.960 | 0.784 (0) | "úa" | "úa" |
+  | 28 | " thay" | 0.0101 | 0.00004 (551) | " " 0.090 | " may" 0.636 |
+  | 29 | " ở" | 0.0012 | 0.0004 (63) | " một" 0.48 | " câu" 0.21 |
+  | 30 | " ai" | 0.0055 | 0.0002 (104) | " đầu" 0.67 | " đầu" 0.28 |
+  | 31 | " ai" | 0.087 | 0.100 (0) | " một" 0.29 | " ai" 0.10 |
+  | 32-37 | " ai" | 0.31 / 0.24 / 0.86 / 0.88 / 0.92 / 0.83 | 0.61 / 0.24 / 0.84 / 0.83 / 0.79 / 0.70 (all rank 0) | " ai" | " ai" |
+
+  Over all 38 scored positions: HF top-1 = TT top-1 at 81.6 %, the TT token is the HF argmax at 76 % and in the
+  HF top 5 at 87 %, mean |p_TT - p_HF| of the emitted token 0.084.
+- Conclusions:
+  - The attractor is a model property: once two " ai" are in the context, the HF reference also predicts " ai" as
+    its argmax at every repeat (p 0.10 rising to 0.84), as TT does.
+  - The entry into the loop is not: it comes from three low-probability samples (positions 28-30). Under the HF
+    reference these tokens are 25 to 250 times less likely than under TT. At position 28 the TT distribution is
+    flat (top-1 " " 0.09; HF's top-1 " may" 0.64 is not in the TT top 5), and at 26 TT and HF rank " ch" / " trời"
+    the other way. So at this prefix the TT logits deviate from the HF reference, and the deviation makes the loop
+    entry more likely. The reasoning tokens (positions 0-23) agree well: 22/24 top-1 (the other two have top-1 p 0.28-0.41).
+  - One onset only; the cause of the deviation (the bfp4 / LoFi precision policy, or the low-resource language) is
+    not separated here. This answers the earlier open point ("whether the TT logits at this prefix deviate from the
+    HF reference"): yes, at the loop entry.
 
 ## Seeded reproducibility on p300x2-1m (stage-11 finding)
 - Symptom: doc 65 at seed 42 gave a different output in the eval than in a replay on a fresh server.
@@ -324,18 +419,46 @@ Benchmark rows (p300x2-1m, concurrency 1):
   slots, plus `tests/test_seed_stream_host.py`) is WITHDRAWN. The seed streams were already identical. It is kept
   only as a hardening note, the same rule as the shared `tt_transformers` generator (#51981).
 
-## Known limitation found by the bundle verify (no bundle change in this release)
-- `tt-model serve <staged tt_kernel_manifest.json>` does not fetch the pinned weights. Only `tt-model pull` does
-  (`tt_kernel.container_cli._download_weights` into the host HF cache).
-- The container cannot fetch them itself: the adapter (`generator_vllm.resolve_checkpoint`) reads the local
-  snapshot at `GLM53_WEIGHTS_REVISION` and builds the E192 overlay from it.
-- Without the snapshot, the container fails at boot with an opaque `FileNotFoundError` for
+## Weights on the host: which commands fetch them (found by the bundle verify; fixed after the stage-11 review)
+tt-model (tt-model-manager 3695747, the version used here) puts the pinned weights into the host HF cache only in
+these cases (`tt_kernel.container_cli.pull_container` -> `_download_weights` = `snapshot_download(repo, revision)`):
+- `tt-model pull <repo> --with-weights`;
+- `tt-model serve <repo>` when the bundle is not pulled yet (its automatic pull fetches the weights).
+These commands do NOT fetch the weights:
+- a plain `tt-model pull <repo>` (`with_weights=False` is the default, `cli.py` pull);
+- `tt-model serve` of a pulled bundle or of a staged `tt_kernel_manifest.json`. It only prints "the model will
+  download them inside the container at first load".
+The download goes to `huggingface_hub.constants.HF_HUB_CACHE` on the host (default `~/.cache/huggingface/hub`). The
+container gets the same directory: `container.compose_run` bind-mounts `HF_HOME` read-write at `/hf` with
+`HF_HOME=/hf` (plus `/hf-hub` when `HF_HUB_CACHE` is outside `HF_HOME`), and forwards `HF_TOKEN` when the host
+sets it. tt-model sets no `HF_HUB_OFFLINE` in the container. The parent repo is public, so no token is needed.
+
+The problem (before the fix):
+- `generator_vllm.resolve_checkpoint` read the snapshot with `snapshot_download(..., local_files_only=True)` only.
+  After a plain `pull`, vLLM had fetched only the config and tokenizer files into the snapshot. The overlay then
+  had no `model.safetensors.index.json`, and the boot failed with an opaque `FileNotFoundError` for
   `/weight-cache/glm53_ckpt_overlay/<rev>/model.safetensors.index.json` (stage-11 cold-verify attempt 2,
-  2026-10-23).
+  2026-10-23; see "Cold attempts 1 and 2" below for the log status).
 - A failed host fetch (attempt 1: a wrong PYTHONPATH broke huggingface_hub's import) is printed by `serve`, but the
   command still exits 0.
-- Users who follow the Hub path (`tt-model pull` / `serve <repo>`) are not affected.
-- The staged verify does the pull-equivalent fetch itself (`scripts/11-verify-rel.sh`).
+- tt-model-manager has no manifest field that makes `pull` fetch the weights by default or marks them as
+  required (`WeightsRef` has only repo, revision, allow / ignore patterns and repo type).
+
+The fix (stage-11 review, P2-1):
+- `resolve_checkpoint` uses the local snapshot only when it is complete: `model.safetensors.index.json` and
+  every shard it names. Otherwise it calls `snapshot_download(name, revision=rev)` (online) into the mounted HF
+  cache, with a warning that names `tt-model pull <repo> --with-weights`. If that download fails (offline, no
+  disk, network), it raises a `RuntimeError` that names `tt-model pull raahemnabeel/glm-5.3-flash-e192-blackhole
+  --with-weights` and `hf download zai-org/GLM-5.3-Flash --revision <rev>`.
+- Host test: `tests/test_generator_vllm_host.py::test_resolve_checkpoint_downloads_missing_weights` (mocked
+  `snapshot_download`: partial snapshot + failed download -> the RuntimeError; no snapshot -> download + overlay;
+  complete snapshot -> no download; index with a missing shard -> download). 26/26 host tests pass.
+- The in-container download is slow: no progress in tt-model, and it counts against the engine start limit
+  (`VLLM_ENGINE_READY_TIMEOUT_S` 7,200 s). At the measured 113 MB/s it takes about 48 minutes, so the first start
+  fits in 2 hours (48 + 23 minutes conversion + kernel compile). The card recommends `pull --with-weights`.
+- Not tested on a device: an empty-cache boot through the in-container download. This host has no disk space for a
+  second 328 GB copy of the parent snapshot (about 96 GB free), and the cached snapshot cannot be removed. The
+  Hub verify after the republish ran with the weights cached (see "Stage-11 review fixes").
 
 ## Bundle parent-snapshot path: first exercised by the stage-11 cold verify (bug fixed in da072e3719b)
 - The bundle reads the 288-expert parent snapshot @91b69215 through `tt/e192_mask.json`. The env has
@@ -355,8 +478,8 @@ Benchmark rows (p300x2-1m, concurrency 1):
   Dense 0-2 have no experts; layers 3-44 have 192 experts, every mapped name exists, and the router has 192 rows;
   MTP has 288. `build_e192_ckpt.py` copied the tensors verbatim, so the parent path reads the same tensors as the
   pruned build.
-- A host regression test for the dense-layer case (`tests/test_ckpt_mask_host.py`) was offered to the lead
-  (`artifacts/s11/maskfix.patch`). It fails on the old code with KeyError 0 and passes with the fix.
+- A host regression test for the dense-layer case (`tests/test_ckpt_mask_host.py`) is committed in 4c3619165da
+  (from `artifacts/s11/maskfix.patch`). It fails on the old code with KeyError 0 and passes with the fix.
 
 ## Autoport implementation check
 - The TTI-written run spec (`run_specs/runtime_model_spec_release.json`) has:
@@ -421,6 +544,29 @@ Benchmark rows (p300x2-1m, concurrency 1):
   - **Classified PASS with this documented exception (lead decision); not rerun.**
   - Attempts 1-3 failed before serving and are recorded above (verify-script PYTHONPATH leak, staged serve does not
     fetch weights, ckpt mask KeyError).
+  - Cold attempts 1 and 2: no failure logs exist. Their serve and server logs were overwritten by the later attempts
+    (the same file names), and their chain logs (`~/glm53-flash-bringup/logs/11/verify-cold-attempt{1,2}.chain.log`,
+    started 05:01 and 05:13) end at `serve exit=0`, without an exit line (the jobs were stopped). The other
+    evidence: `logs/11/disk.log` (free 569 / 567 GB before each serve, so no weight download happened), and the
+    attempt-3 chain log, which is the first with the separate weight fetch (`weights fetch rc=0 after 2859 s`).
+    The causes above are the diagnosis of the stage-11 agent at the time, not a saved error message.
+
+## Bundle (parent-snapshot path) vs stage 9 (pruned build): bit-identical smokes
+- The stage-9 served smokes ran on the pruned E192 checkpoint (`GLM53_CKPT`); the bundle reads the parent snapshot
+  through the mask. Compare `doc/vllm/evidence/final/p300x2_smoke.log.txt` with `bundle/staged-p300x2-cold-smoke.log`,
+  and `doc/vllm/evidence/final/1m_smoke.log.txt` with `bundle/staged-p300x2-1m-smoke.log`.
+- Every deterministic smoke line is identical, text and logprobs: chat, tool-call arguments, logprobs (the same
+  three logprob values to all printed digits), repetition penalty, min_p, seeded, greedy repeat, non-aligned
+  lengths 1-4,223, page growth, max-effort thinking.
+- The only differences: the random tool-call ids; the burst size (8 vs 16 on p300x2; 2 vs 1 on p300x2-1m, where the
+  burst depends on block placement); the long-prompt length (a different smoke setting).
+- So the parent-snapshot path loads the same model as the pruned build (consistent with the host check above:
+  `build_e192_ckpt.py` copied the tensors verbatim).
+
+## Hub README: "Runs on p300x2 or p300x2 or ..."
+- The README line "Runs on **p300x2** or **p300x2** or **p300x2** or **p300x2** or **p150x4**" is a tt-model
+  rendering issue: `tt_kernel/build.py` (tt-model-manager 3695747, line 1044) joins the hardware of every serve
+  profile without removing duplicates. The manifest is correct: four profiles run on p300x2. No manifest change.
 
 ## Scorecard run on the bundle (`scripts/11-scorecard.sh`, 2026-10-23 07:48-08:50, one ticket, `tt-model serve` per profile)
 - Method: the staged bundle (image e279dbf74b34), warm cache. Rows from `10-perf-sweep.py`: greedy, random-token
@@ -474,6 +620,12 @@ Benchmark rows (p300x2-1m, concurrency 1):
   - Spec tests: PASS (22/22). Benchmarks: NA (no targets).
 - Report: `release/report_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2_2026-10-21_21-23-04_waiver-regen.md`
   (+ `reports_output/release/data/`). The original Acceptance FAIL report stays next to it.
+- Re-run after the stage-11 review (P2-3, 2026-10-23; host only, same command): the `known_issues` reason now says
+  "the stage-8 non-expert precision changes are ruled out; the residual -5.6 points (about 1.8 sigma) exceeds the
+  card's stated +/-2-3 point run noise and is unexplained; bfp4 vs NVFP4 routed experts were not tested". The
+  decision is unchanged. The regen script now also marks the gpqa row "WAIVED (known issue)" in the markdown
+  (TTI's renderer keeps the raw FAIL) and lists each waived row with its reason under the acceptance criteria.
+  Result: Acceptance PASS, blockers {}.
 
 ## Stage-11 status
 **release-readiness-ci-subset-pass, with the GPQA row issue-waived.**
@@ -483,13 +635,17 @@ Benchmark rows (p300x2-1m, concurrency 1):
 
 | row | result | classification |
 |---|---|---|
-| ifeval (109 docs, effort low) | 74.31 % prompt-strict | no reference exists anywhere; reported as measured (decision (b)); 2/109 loops = model repetition attractor |
-| gpqa_diamond_cot_zeroshot | 70.0 % (CI subset); full set 66.67 %; card protocol 74.24 % vs card 79.8 % | issue-waived (evidence above) |
+| ifeval (109 docs, effort low) | 74.31 % prompt-strict | no reference exists anywhere; reported as measured (decision (b)); 2/109 loops = model repetition attractor (all saved generations: 5/353 with the shipped policy) |
+| gpqa_diamond_cot_zeroshot | 70.0 % (CI subset); full set 66.67 %; card protocol 74.24 % vs card 79.8 % | issue-waived: the stage-8 non-expert precision changes are ruled out; the residual -5.6 points (about 1.8 sigma) exceeds the card's stated +/-2-3 noise and is unexplained; bfp4 vs NVFP4 experts were not tested |
 | spec tests | 22/22 | pass (3 recorded TTI harness patches) |
 | benchmarks (12 rows) | all requests completed | informational (no targets) |
 
-- Bundle: built from 6853aab7971 (plugin 16febac). The cold fresh-device verify passed on p300x2. The p300x2-1m
-  warm verify passed, with the documented placement exception. The scorecard passed on every profile.
+- Bundle: the cold fresh-device verify (p300x2), the p300x2-1m warm verify and the scorecard ran on image
+  e279dbf74b34, built from da072e3719b (plugin 16febac). The cold verify passed; the p300x2-1m warm verify passed,
+  with the documented placement exception; the scorecard passed on every profile. The published image
+  34ec4c80e68b is built from 6853aab7971; the `tt/` code is the same as in da072e3719b (the later commits change
+  a test, the card and docs only). Only the Hub verify ran on 34ec4c80e68b. After the stage-11 review, the bundle was rebuilt
+  and republished (see "Stage-11 review fixes").
 
 ## Hub publish
 - `scripts/11-publish.sh`: `tt-model push <staged> --repo raahemnabeel/glm-5.3-flash-e192-blackhole --public --publish`
@@ -503,9 +659,25 @@ Benchmark rows (p300x2-1m, concurrency 1):
   files, 877 on the Hub (+ .gitattributes), 0 missing, 0 LFS sha256 mismatches. Not re-pushed.
 
 ## Hub verify (2026-10-23 09:03-09:11, `scripts/11-verify-rel.sh raahemnabeel/glm-5.3-flash-e192-blackhole p300x2`)
-- `tt-model pull raahemnabeel/glm-5.3-flash-e192-blackhole`: rc 0 in 35 s (the weights were already cached).
+- `tt-model pull raahemnabeel/glm-5.3-flash-e192-blackhole`: rc 0 in 35 s. This plain pull fetched no weights
+  (correction, stage-11 review: the weights were in the HF cache from the cold verify's fetch; a plain pull does not
+  download them, see "Weights on the host").
 - Warm serve of the Hub bundle on p300x2: healthy after 231 s; `/v1/models` 262,144.
 - Smokes PASS: chat, tool, sampling parameters, non-aligned lengths, burst 16/16 identical to solo (66.9 tok/s),
   max-effort thinking, an 8,192-token prompt.
 - `tt-model curl`: "Hello, it's wonderful to see you here!".
 - VERIFY_RESULT PASS hub-p300x2. The container was stopped and the device reset by run-locked.
+
+## Stage-11 review fixes (2026-10-23)
+- P2-1 weights fetch: `resolve_checkpoint` downloads an incomplete / missing parent snapshot, or raises a clear
+  error that names `tt-model pull <repo> --with-weights`; host test; card First start (see "Weights on the host").
+- P2-2 loops: corrected GPQA and loop-diagnostic statements; n-gram loop rate over all saved generations; the
+  mitigation probe; the HF teacher-forced control; a card Limitations line. Copies of the results in this directory:
+  `loopdiag/loopscan.json`, `loopdiag/loopprobe_summary.json` (without token ids), `loopdiag/hfloop.json`.
+- P2-3 GPQA waiver wording: RUN_NOTES, the TTI `known_issues` reason, the re-aggregated report (gpqa row shown as
+  waived, with the reason).
+- P3: stale RUN_NOTES lines, cold attempts 1-2 log status, card performance footnote and 1m prefill, disk units,
+  first-start note (`--detach`, `tt-model logs -f`), the yaml comment, "spot-check request", structured-output
+  benchmarks (not applicable), the plugin line, RELEASE_CHECKLIST and PLAN, the bit-identical smoke comparison, the
+  `reasoning_effort` note, the README hardware line.
+- Rebuild, republish and Hub verify: recorded below.
