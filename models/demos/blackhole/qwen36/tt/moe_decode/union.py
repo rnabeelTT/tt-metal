@@ -22,8 +22,8 @@ import torch
 import ttnn
 
 from .experts import (
-    KERNEL_DIR, ROUTERS, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout, gu_ring,
-    logits_row_bytes, place_along_rows,
+    KERNEL_DIR, RING_BYTES, ROUTERS, TILE, TILE_BYTES, _cb, _kernels, _page_bytes, _range_set, bank_workers, gu_layout,
+    gu_ring, logits_row_bytes, place_along_rows,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -293,9 +293,11 @@ class ExpertDownRows:
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
         self.cols = self.m // readers
         assert self.groups * self.cols <= (8 if self.dst_full else 4), (self.groups, self.cols)
+        self.tile_bytes = TILE_BYTES[weight_dtype]
+        # two chunks of [chunk * K, cols] weight tiles in cb_w: <= RING_BYTES (GLM-4.5-Air: hidden 4096, 8 slots = 835 KB)
+        chunk = max(2, min(chunk, RING_BYTES // (2 * self.kt * self.cols * self.tile_bytes)))
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
         self.max_slots = min(num_experts, rows * k) + 1
-        self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
