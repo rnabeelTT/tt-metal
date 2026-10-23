@@ -1,0 +1,25 @@
+[10:23:53] [rss 1.0 GB] loaded layer 0 (linear_attention, dense)
+[10:23:55] [rss 2.9 GB] loaded layer 9 (linear_attention, sparse)
+[10:23:57] [rss 4.1 GB] loaded layer 18 (linear_attention, sparse)
+[10:23:59] [rss 5.7 GB] loaded layer 27 (indexed_attention, sparse)
+[10:24:00] [rss 6.9 GB] loaded layer 36 (linear_attention, sparse)
+[10:24:02] [rss 8.0 GB] model built in 9 s
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `chunk_kda` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+[10:30:31] [rss 38.9 GB] scored 102 tokens in 389 s
+24 'Ô' TT p 0.09376 HF p 0.04023 HF rank 4 | TT [('Ng', 0.13643), ('Ô', 0.09376), ('N', 0.08808)] | HF [('C', 0.52165), ('Đ', 0.07515), ('N', 0.05853)]
+25 'i' TT p 0.99863 HF p 0.99685 HF rank 0 | TT [('i', 0.99863), ('I', 0.00025), ('iT', 0.00023)] | HF [('i', 0.99685), ('ng', 0.00059), ('ì', 0.00012)]
+26 ' ch' TT p 0.47083 HF p 0.07106 HF rank 1 | TT [(' ch', 0.47083), (' trời', 0.4423), ('天', 0.00631)] | HF [(' trời', 0.81324), (' ch', 0.07106), (' tr', 0.00427)]
+27 'úa' TT p 0.96048 HF p 0.78379 HF rank 0 | TT [('úa', 0.96048), ('à', 0.00238), ('ào', 0.00197)] | HF [('úa', 0.78379), ('ao', 0.05334), ('ào', 0.03902)]
+28 ' thay' TT p 0.01008 HF p 4e-05 HF rank 551 | TT [(' ', 0.08985), (' t', 0.02917), (' ky', 0.01883)] | HF [(' may', 0.63558), (' May', 0.05912), ('may', 0.03817)]
+29 ' ở' TT p 0.00119 HF p 0.00036 HF rank 63 | TT [(' một', 0.47928), (' chữ', 0.1556), ('!', 0.06486)] | HF [(' câu', 0.20566), (' chữ', 0.18149), ('!', 0.14135)]
+30 ' ai' TT p 0.00547 HF p 0.0002 HF rank 104 | TT [(' đầu', 0.67305), (' đâu', 0.08038), (' một', 0.03797)] | HF [(' đầu', 0.28137), (' câu', 0.21913), (' một', 0.13291)]
+31 ' ai' TT p 0.08731 HF p 0.1004 HF rank 0 | TT [(' một', 0.28627), (' là', 0.23732), (' ai', 0.08731)] | HF [(' ai', 0.1004), (' một', 0.0886), (' "', 0.07819)]
+32 ' ai' TT p 0.31477 HF p 0.60642 HF rank 0 | TT [(' ai', 0.31477), (' chữ', 0.24515), (' một', 0.14869)] | HF [(' ai', 0.60642), (' chữ', 0.04978), (' "', 0.04393)]
+33 ' ai' TT p 0.23935 HF p 0.24012 HF rank 0 | TT [(' ai', 0.23935), ('!', 0.19843), (' một', 0.15454)] | HF [(' ai', 0.24012), (' là', 0.16504), (' một', 0.04442)]
+34 ' ai' TT p 0.86242 HF p 0.84258 HF rank 0 | TT [(' ai', 0.86242), (' một', 0.02298), ('!', 0.02028)] | HF [(' ai', 0.84258), (' một', 0.01202), (' là', 0.01061)]
+35 ' ai' TT p 0.88052 HF p 0.83456 HF rank 0 | TT [(' ai', 0.88052), ('!', 0.01515), (' một', 0.01256)] | HF [(' ai', 0.83456), ('!', 0.00987), (' một', 0.00818)]
+36 ' ai' TT p 0.9207 HF p 0.78788 HF rank 0 | TT [(' ai', 0.9207), (' một', 0.01089), ('!', 0.00848)] | HF [(' ai', 0.78788), ('!', 0.01741), (' một', 0.01273)]
+37 ' ai' TT p 0.82565 HF p 0.69618 HF rank 0 | TT [(' ai', 0.82565), ('!', 0.03007), (' —', 0.02342)] | HF [(' ai', 0.69618), ('!', 0.04181), (' —', 0.02699)]
+HFLOOP_SUMMARY {"draw": {"doc": "106", "cond": "base", "seed": 9, "finish": "length", "max_word_run": 994, "max_8gram": 987}, "onset_pos": 30, "loop_token": " ai", "scored_positions": 38, "hf_top1_agree_with_tt_top1": 0.8157894736842105, "tt_token_hf_rank0": 0.7631578947368421, "tt_token_hf_top5": 0.868421052631579, "mean_abs_dp_emitted": 0.084, "peak_rss_gb": 39.56708908081055}
+exit 0

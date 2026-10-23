@@ -1,0 +1,53 @@
+=== start Fri Oct 23 10:41:10 AM UTC 2026 : timeout -k 60 7200 env GLM53_LOCKED=1 TAGSUF=-r2 LONG=8192 /home/raahem/glm53-flash-bringup/scripts/11-verify-rel.sh raahemnabeel/glm-5.3-flash-e192-blackhole p300x2
+=== verify raahemnabeel/glm-5.3-flash-e192-blackhole profile p300x2 (16 x 262144) cold=0 disk free 75G 2026-10-23T10:41:10+00:00
+tt-smi -ls exit=0
+device holders before serve: 0
+disk free before serve: 75 GB 2026-10-23T10:41:10+00:00
+tt-model pull rc=0 after 33 s
+Fetching 74 files:   0%|          | 0/74 [00:00<?, ?it/s][A[AFetching 74 files: 100%|██████████| 74/74 [00:00<00:00, 9868.64it/s]
+✓ weights → host HF cache
+/home/raahem/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b
+69215804f2d2036a8867f6ce44848e278dcda
+  ✓ pulled raahemnabeel/glm-5.3-flash-e192-blackhole
+  → next:  tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole
+serve exit=0
+bundle healthy after 245 s (first boot incl. download/convert when cold) 2026-10-23T10:45:15+00:00; disk free 75G
+3.9G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/cache
+121G	/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights
+MODELS [('zai-org/GLM-5.3-Flash', 262144)]
+SMOKE_CHAT stop reasoning 0 content '```python\ns[::-1]\n```\n\nOr as a full one-liner with assignment:\n\n```python\ns_reversed = s[::-1]\n```\n\nThis uses slice notation with a step of `-1`, which walks th'
+SMOKE_TOOL tool_calls [{'id': 'chatcmpl-tool-9ae59fb5dbeb8085', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{"path": "src/main.py"}'}}]
+SMOKE_LOGPROBS ' #write Fibonacci series up to n\n    a, b = 0,' {' #': -1.0510714054107666, ' \n': -1.1760714054107666, ' ': -2.1760714054107666}
+SMOKE_REPPEN ' #write Fibonacci series up to n\n    a, b = 0, 1\n    while b < n:\n        print('
+SMOKE_MINP ' \n    if n == 0: \n        return 0\n    if n == 1: \n        return 1\n    return f'
+SMOKE_SEEDED ' #defining the function\n    if n == 0:\n        return 0\n    elif n == 1:\n       '
+SMOKE_GREEDY_REPEAT True ' \n    return np.exp(x)/np.sum(np.exp(x), axis=0)\n\ndef softmax_2(x):\n    return n'
+SMOKE_NONALIGNED 1 1 'Scoped-thing\nScoped-thing\n'
+SMOKE_NONALIGNED 3 3 ' Gutenberg EBook of The Iliad'
+SMOKE_NONALIGNED 127 127 ', 2010]\n\nLanguage: English'
+SMOKE_NONALIGNED 129 129 '2010]\n\nLanguage: English\n\nCharacter'
+SMOKE_NONALIGNED 2049 2049 ' Dover road lay before him; and the'
+SMOKE_NONALIGNED 2051 2051 ' the people were; but when the mail'
+SMOKE_NONALIGNED 2381 2381 'dry crust of the earth, and through'
+SMOKE_NONALIGNED 4223 4223 ' I got this, through\nyour hand'
+SMOKE_PAGE_GROWTH 400 're a sleeper\nmore inscrutable than its busy inhabitants are,'
+SMOKE_BURST 16 ok, 1024 tokens in 15.3s = 66.9 tok/s; 16/16 identical to solo greedy
+SMOKE_MAXEFFORT stop 756 tokens; reasoning 2426 chars: 'The user wants a haiku about machine learning. A haiku is a three-line poem with a 5-7-5 syllable structure.\n\nLet me thi' ... 'uest is simple, so a short response
+SMOKE_MAXEFFORT stop 142 tokens; reasoning 261 chars: 'The train leaves at 3:40 pm and arrives at 6:15 pm.\n\nFrom 3:40 to 6:40 would be 3 hours. But arrival is at 6:15, which i' ... 'than 6:40.\n\nSo 3 hours minus 25 mi
+SMOKE_LONG 8192 wall 6.2s 'tower of some kind.\nUntil he got his napkin to his left arm,'
+SMOKE_RESULT PASS
+tt-model curl exit=0
+(EngineCore pid=110) 2026-10-23 10:42:14.615 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:get_max_tokens_all_users:394 - GLM53 KV pool (replicated DSA layout): 16 slots -> 2073 blocks = 265344 to
+(EngineCore pid=110) 2026-10-23 10:42:14.691 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/opt/tt-metal/models/autoports/zai_org_
+(EngineCore pid=110) 2026-10-23 10:42:14.692 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.precision:_load:219 - precision policy: stage-8 selected 'combo_a_kv_dense4_g4' (/opt/tt-metal/models/autoports/zai_org_
+(EngineCore pid=110) 2026-10-23 10:42:14.771 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /weight-cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e
+(EngineCore pid=110) 2026-10-23 10:44:07.939 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.model:__init__:233 - model weights loaded in 113.2s (weight cache /weight-cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50af
+(EngineCore pid=110) 2026-10-23 10:44:13.305 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:allocate_kv_cache:485 - DSA pools: 2072 vLLM blocks + 1 dummy x 128 tokens in 11 DSA layers (vLLM spec la
+(EngineCore pid=110) 2026-10-23 10:45:01.709 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_prefill:511 - warm-up phase 1 (programs) done in 48s
+(EngineCore pid=110) 2026-10-23 10:45:02.426 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:warmup_model_decode:528 - warm-up phase 2 (model + sampler traces) done in 1s; PROGRAM_GUARD active
+=== stop 2026-10-23T10:49:22+00:00
+  ✓ stopped 1 container(s)
+device holders after stop: 0
+disk free after verify: 75G 2026-10-23T10:49:29+00:00
+VERIFY_RESULT PASS hub-p300x2-r2
+=== exit code: 0 Fri Oct 23 10:49:29 AM UTC 2026

@@ -680,4 +680,25 @@ The fix (stage-11 review, P2-1):
   first-start note (`--detach`, `tt-model logs -f`), the yaml comment, "spot-check request", structured-output
   benchmarks (not applicable), the plugin line, RELEASE_CHECKLIST and PLAN, the bit-identical smoke comparison, the
   `reasoning_effort` note, the README hardware line.
-- Rebuild, republish and Hub verify: recorded below.
+- Commit of the fixes: dd6542a592e (code, test, card, docs).
+- Rebuild: release worktree `~/tt-metal-rel-glm53` fast-forwarded to dd6542a592e (clean);
+  `scripts/11-package-rel.sh` (via `11-package-watch.sh`, MemoryMax 40G) with vllm-tt-plugin 16febac, 10:32-10:39:
+  host tests 26 passed, `package exit=0`, image `tt-model/glm-5.3-flash-e192-blackhole:a3925c21fe33`
+  (`bundle/package-rel-r2.log`).
+- Republish: `scripts/11-publish.sh` (the same flags: `--public --publish`; the checker skips `.cache/`), 10:40:
+  Hub rev **4d1085f0b72d8ac696f751d69fd3c5e820d7ef23**, public, tt-model catalog; 876 staged files, 877 on the Hub
+  (+ .gitattributes; the old image blobs were dropped by `tt-model push`), 0 missing, 0 LFS mismatches
+  (`bundle/publish-r2.log`).
+- Hub verify on the device, 10:41-10:49 (`TAGSUF=-r2 LONG=8192 11-verify-rel.sh raahemnabeel/glm-5.3-flash-e192-blackhole
+  p300x2`, `bundle/verify-hub-r2.chain.log`):
+  - `tt-model pull <repo> --with-weights`: rc 0 in 33 s; "weights -> host HF cache" (cached: metadata check only);
+    the image a3925c21fe33 was already loaded from the local build (tt-model compares the digest, so no re-download).
+  - Warm serve p300x2: healthy after 245 s; `/v1/models` 262,144; the adapter logged the complete cached snapshot
+    (`checkpoint: /hf/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b69215...`), no download.
+  - Smokes PASS (chat, tool, sampling parameters, non-aligned lengths, burst 16/16 identical to solo at 66.9 tok/s,
+    max-effort thinking, an 8,192-token prompt); `tt-model curl` exit 0. **VERIFY_RESULT PASS hub-p300x2-r2.**
+  - Not tested: a true empty-cache start (in-container download, or `--with-weights` downloading 328 GB). This
+    host has about 75 GB free, not enough for a second copy of the parent snapshot. By the tt-model code
+    (3695747), `pull --with-weights` and the auto-pull of `serve <repo>` call `snapshot_download` into
+    `huggingface_hub.constants.HF_HUB_CACHE`, the directory the container mounts at `/hf` (see "Weights on the
+    host"); the in-container path is covered by the host test only.
