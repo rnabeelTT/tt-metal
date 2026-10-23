@@ -517,8 +517,11 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 
 ### Run queue (2026-10-23)
 
-`~/ornith-fusion/runs/run_queue.sh`: after the 122B chain, in order: q122_card_chain (package + card rows + scorecard
-subsets), c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers).
+`~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
+c30_chain, glm_chain, ornith_p150_chain, cn_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
+(ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
+multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
+profile picks one; that choice stays).
 
 ## Plan (in order; each step ends with a measurement)
 
