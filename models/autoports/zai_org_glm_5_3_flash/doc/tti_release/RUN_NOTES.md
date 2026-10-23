@@ -3,8 +3,9 @@
 Status: final (2026-10-23). The release workflow ran to completion (acceptance FAIL with one blocker, the GPQA CI
 subset). The GPQA row is issue-waived after the full-set and card-protocol runs; the re-aggregated report passes
 (see "Stage-11 status"). The bundle is built, verified on a fresh device and published to the Hub, then republished
-after the stage-11 review fixes (see "Stage-11 review fixes") and again after the review #2 fixes (Hub rev
-0a807cdf; see "Stage-11 review #2 fixes").
+after the stage-11 review fixes (see "Stage-11 review fixes"), after the review #2 fixes (Hub rev 0a807cdf;
+see "Stage-11 review #2 fixes") and, last, with the card wording of reviews #3 and #4 (Hub rev b9b5d334; see
+"Stage-11 final republish"). Stage review #4: CLEAN PASS.
 
 ## Server mode, host, versions
 - Topology: external server, no Docker. The autoport vLLM server runs from this tt-metal code. TTI v0.22.0 is a
@@ -821,3 +822,14 @@ The fix (stage-11 review, P2-1):
   was skipped (lead decision: the model math is unchanged).
 - The bfp4-expert attribution (scoped by review #3 and #4) is published with the card-only rebuild of
   add66f08a3e's successor; see "Stage-11 final republish" for the image, the Hub revision and the short verify.
+
+## Stage-11 final republish (2026-10-23)
+- Reviews #3 (P2: the HF-bfp4 0.92 agreement was for the `none` policy) and #4 (CLEAN PASS; P3: scope the precision
+  claim; stale republish record) are fixed in add66f08a3e and a8e94018d4d (card and RUN_NOTES wording only; no
+  tt/ code change since 75134275232).
+- Bundle: release worktree at a8e94018d4d (clean), image e71477c87041, plugin 16febac, host tests 26 passed
+  (`bundle/package-rel-r4.log`).
+- Publish: Hub rev b9b5d334a890b3b3700179c212cce822648244e7, public, catalog; 876 staged files, 0 missing, 0 LFS
+  mismatches (`bundle/publish-r4.log`).
+- Hub verify r4 (p300x2, warm): `pull --with-weights` rc 0 in 35 s; healthy after 246 s; smokes PASS, burst 16/16
+  identical to solo (66.9 tok/s); `tt-model curl` exit 0 (`bundle/verify-hub-r4.chain.log`, `bundle/hub-p300x2-r4-*`).

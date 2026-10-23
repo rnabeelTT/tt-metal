@@ -1,0 +1,10 @@
+  • image tt-model/glm-5.3-flash-e192-blackhole:e71477c87041 already loaded
+weights → host HF cache…
+
+
+Fetching 74 files:   0%|          | 0/74 [00:00<?, ?it/s][A[AFetching 74 files: 100%|██████████| 74/74 [00:00<00:00, 9937.84it/s]
+✓ weights → host HF cache
+/home/raahem/.cache/huggingface/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b
+69215804f2d2036a8867f6ce44848e278dcda
+  ✓ pulled raahemnabeel/glm-5.3-flash-e192-blackhole
+  → next:  tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole
