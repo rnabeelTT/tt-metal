@@ -29,8 +29,8 @@ def load(label):
     rt = RUNS / label / "realtext.txt"
     real = None
     if rt.exists():
-        m = re.search(r"decode ([\d.]+) tok/s \(([\d.]+) ms/token\)", rt.read_text())
-        real = (float(m.group(1)), float(m.group(2))) if m else None
+        m = re.search(r"median ([\d.]+)", rt.read_text())  # per-prompt median: one near-fully-accepted prompt skews the total
+        real = (float(m.group(1)),) if m else None
     return out, real
 
 
@@ -65,8 +65,8 @@ def section(profile, new, pub):
             f"| {a['e2el']:.2f} -> {b['e2el']:.2f} |"
         )
     if real_n and real_p:
-        lines += ["", f"Real text, single user (12 chat prompts x 384 tokens, temperature 0): {real_p[0]:.1f} -> "
-                      f"**{real_n[0]:.1f} tok/s** ({pct(real_n[0], real_p[0])})."]
+        lines += ["", f"Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): "
+                      f"{real_p[0]:.1f} -> **{real_n[0]:.1f} tok/s** ({pct(real_n[0], real_p[0])})."]
     for isl, osl in ((128, 128), (1024, 256)):
         conc = sorted(k for k in rn if k[0] == isl and k[1] == osl and k[2] > 1)
         if not conc:

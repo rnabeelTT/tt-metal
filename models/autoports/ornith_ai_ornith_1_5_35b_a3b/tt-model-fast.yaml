@@ -125,22 +125,30 @@ verify:
 
 card:
   description: >
-    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet +
-    gated attention, vision tower, MTP head) served on Blackhole through vLLM and the Tenstorrent plugin on four, two or
-    one dies: tensor-parallel mixers, experts sharded on the intermediate dimension, expert-sorted MoE prefill,
-    on-device sampling, single-user multi-token prediction, text + image chat, tool calling, 262144-token context, up
-    to 32 concurrent sequences.
+    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the v2 bundle (raahemnabeel/ornith-1.5-35b-a3b) plus a fused MoE decode for 1-32 concurrent users and a replicated-residual layer boundary. Same weights, profiles and serving recipe; 34-83 % more concurrent output and up to 44 % faster single-user decode on four dies, prefill unchanged.
   quickstart: |
-    ### What v2 changes
-    v2 serves Ornith-1.5-35B-A3B through the Blackhole code of the Qwen3.5-122B-A10B / Qwen3-Coder-Next ports (the same
-    `qwen3_5_moe` architecture): tensor-parallel Gated DeltaNet and gated attention, routed experts sharded on the
-    intermediate dimension, expert-sorted MoE prefill, on-device sampling, decode traces for 1-32 users, multi-token
-    prediction from the checkpoint's own MTP head, and the vision tower. The v1 package
-    ([raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1)) served one die per vLLM
-    process at batch 1 with host sampling and a ~400 tok/s MoE prefill.
+    ### What blackhole-fast changes
+    This is [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b) (v2) with its decode
+    step rebuilt around fused kernels. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is
+    unchanged. The changes, in the order they were made (each measured, kept only if it won):
 
-    Same single p150, v1 -> v2: TTFT at 4K tokens 9.9 -> 1.5 s, 16K 40.4 -> 5.9 s, 64K 166 -> 27.3 s, 128K not runnable ->
-    65 s; peak aggregate output 30.6 -> 206 tok/s (32 concurrent users instead of 1).
+    1. **Router.** The router matmul runs as one 1D matmul (it was a DRAM-sharded matmul on 8 cores), and the top-8 +
+       softmax + shared-gate sigmoid run on the RISC cores in one op instead of a 7-op chain (MoE 177 -> 137 us per layer
+       on 4 dies).
+    2. **Fused MoE decode.** Routed + shared experts in three ops (route, gate|up + SwiGLU, down) that stream each
+       selected expert's weights in place from the existing DRAM layout (no duplicate copy), for every decode width: 1 to
+       32 rows, the MTP verify rows included (several users' experts as one union, each weight column read once for all
+       rows). MoE 137 -> 38 us per layer at 1 user on 4 dies; 2 dies at 16 users 1291 -> 541 us.
+    3. **Replicated-residual decode boundary.** The decode residual stays replicated on every die: each mixer / MoE output
+       is one all-reduce + add + local RMSNorm (two collectives per layer instead of four, no gathers); boundary 89 -> 52 us
+       per layer on 2 dies.
+
+    Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (exactly what the LoFi expert
+    matmul reads, so the rounding is no longer a bias), activations / routing weights rounded to the 7 bits the matmul's
+    other operand reads. Output quality is checked below.
+
+    On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout yet, so those profiles keep
+    the v2 MoE and gain only the router change.
 
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -150,16 +158,29 @@ card:
     `image_url` parts on the multi-die profiles.
 
     ### Profiles
-    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile <name>`:
-    - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images: the 4-die accuracy at ~80 % of its
-      throughput on half the hardware.
+    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast --profile <name>`:
+    - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images.
     - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
-    - `p150` - one die, bfp4 routed experts (bfp8 does not fit one die), text only.
+    - `p150` / `p100` - one die, bfp4 routed experts, text only (v2 MoE).
 
     Every profile: 32 concurrent sequences, 262144-token context, MTP speculative decoding while one request is live.
-
+  performance: |
     ### Accuracy
-    Teacher forcing against the Hugging Face bf16 model (100 greedy tokens; top-1 / top-5 / top-100 agreement):
+    Benchmark evals through the served API (p300 profile, MTP on, thinking off, one sample per question, seed 42, temperature
+    0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness), the same settings as the v2 baseline run on the same box:
+
+    | Eval | v2 (published) | blackhole-fast |
+    | --- | ---: | ---: |
+    | GPQA-Diamond (40 questions) | 0.775 | 0.85 |
+    | IFEval prompt-level strict (100) | 0.76 | 0.77 |
+    | LiveCodeBench v6 (50) | 0.36 | 0.40 |
+
+    All within the error bars of these subset sizes (GPQA +-0.06, LiveCodeBench +-0.07): no measurable quality change.
+    A long-context garble probe (non-word rate of sampled continuations, 6 runs) scores 7.4-9.0 per 1k words vs 7.2-10.7
+    for v2 on the same prompts. Layer-level PCC against Hugging Face (real weights) is unchanged: decode >= 0.9999 at
+    1 user, per-user minimum >= 0.9999 at 32 users. Teacher forcing (v2 numbers below) was not re-run.
+
+    Teacher forcing against the Hugging Face bf16 model (v2 numbers; 100 greedy tokens, top-1 / top-5 / top-100):
 
     | profile | code chat prompt | 2048-token book prompt |
     | --- | --- | --- |
@@ -167,114 +188,63 @@ card:
     | 2 dies (bfp8 experts) | 0.96 / 1.00 / 1.00 | 0.91 / 0.97 / 1.00 |
     | 1 die (bfp4 experts) | 0.96 / 1.00 / 1.00 | 0.84 / 0.94 / 0.99 |
 
-    vLLM sampling-parameter conformance on 4 dies: 71 passed; the 2 failures are the thinking-on-by-default artefact the
-    Qwen3.5-122B-A10B bundle also has (`content` is empty while the model is still thinking). Benchmark evals (GPQA,
-    LiveCodeBench, IFEval) were not re-run for v2.
-
     ### Performance
-    Measured 2026-10-07 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
-    with the same code this package ships, served from the source tree. Random-token prompts of exactly the input length,
-    output pinned with ignore_eos, greedy, streamed; users are concurrent requests in a closed loop; TTFT = time to first
-    streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per input length. Single-user rows run MTP
-    speculative decoding, whose speed-up depends on how predictable the text is (random-token prompts make it vary from
-    row to row); concurrent rows run plain decode.
+    Measured 2026-10-23 on one QuietBox 2 (4 Blackhole p300c dies; p300 and p150 rows on a subset of it), both bundles
+    served exactly as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time, the v2 card's method:
+    random-token prompts of exactly the input length, output pinned with ignore_eos, streamed; users are concurrent requests
+    in a closed loop; TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per
+    row. Single-user rows run MTP speculative decoding, whose gain depends on how predictable the text is: random-token
+    prompts understate it, so a real-text row (12 chat prompts, 384 output tokens, temperature 0) is added. Each cell is
+    `v2 -> blackhole-fast`.
 
-    #### p300x2 (4 dies)
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 4 | 167 | 766 | 51.1 | 2.66 |
+    | p300x2 | 1024 | 256 | 32 | 128 | 7,380 | 139 | 26.3 | 17.04 |
 
-    Latency, batch 1 (single user)
+    #### p300x2
 
-    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 178 | 717 | 10.9 | 91.4 | 1.57 |
-    | 1,024 | 256 | 290 | 3,526 | 16.2 | 61.8 | 4.42 |
-    | 4,096 | 256 | 719 | 5,695 | 19.0 | 52.5 | 5.57 |
-    | 16,384 | 256 | 2,726 | 6,010 | 20.5 | 48.8 | 7.95 |
-    | 32,768 | 256 | 5,722 | 5,727 | 11.1 | 90.5 | 8.54 |
-    | 65,536 | 256 | 12,577 | 5,211 | 12.6 | 79.4 | 15.79 |
-    | 130,816 | 256 | 30,027 | 4,357 | 27.1 | 36.9 | 36.93 |
-
-    Concurrency (peak aggregate output: 350.8 tok/s at 1024 input / 256 output tokens, 32 concurrent users)
-
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 4 | 178 | 10.9 | 91.4 | 80.0 | 1.57 |
-    | 128 | 128 | 2 | 8 | 352 | 24.7 | 40.4 | 73.3 | 3.49 |
-    | 128 | 128 | 4 | 16 | 702 | 28.3 | 35.3 | 118.8 | 4.31 |
-    | 128 | 128 | 8 | 32 | 1,177 | 37.0 | 27.0 | 173.8 | 5.88 |
-    | 128 | 128 | 16 | 64 | 2,190 | 55.1 | 18.2 | 222.8 | 9.20 |
-    | 128 | 128 | 32 | 128 | 4,169 | 60.2 | 16.6 | 346.9 | 11.78 |
-    | 1,024 | 256 | 1 | 4 | 290 | 16.2 | 61.8 | 57.5 | 4.42 |
-    | 1,024 | 256 | 2 | 8 | 564 | 24.2 | 41.3 | 75.9 | 6.74 |
-    | 1,024 | 256 | 4 | 16 | 1,126 | 28.3 | 35.3 | 122.7 | 8.34 |
-    | 1,024 | 256 | 8 | 32 | 2,056 | 37.0 | 27.0 | 177.9 | 11.51 |
-    | 1,024 | 256 | 16 | 64 | 3,869 | 55.3 | 18.1 | 227.5 | 17.99 |
-    | 1,024 | 256 | 32 | 128 | 7,541 | 62.0 | 16.1 | 350.8 | 23.35 |
-
-    #### p300 (2 dies)
-
-    Latency, batch 1 (single user)
+    Latency, batch 1 (single user): published v2 -> blackhole-fast
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 208 | 616 | 13.3 | 75.0 | 1.90 |
-    | 1,024 | 256 | 344 | 2,978 | 18.0 | 55.6 | 4.93 |
-    | 4,096 | 256 | 889 | 4,606 | 18.7 | 53.6 | 5.65 |
-    | 16,384 | 256 | 3,427 | 4,781 | 19.1 | 52.3 | 8.30 |
-    | 32,768 | 256 | 7,062 | 4,640 | 12.2 | 81.8 | 10.18 |
-    | 65,536 | 256 | 15,322 | 4,277 | 23.4 | 42.7 | 21.30 |
-    | 130,816 | 256 | 35,786 | 3,655 | 16.5 | 60.5 | 40.00 |
+    | 128 | 128 | 179 -> 167 | 717 -> 766 | 22.4 -> 19.6 | 44.5 -> **51.1** (+15 %) | 3.04 -> 2.66 |
+    | 1,024 | 256 | 287 -> 274 | 3,572 -> 3,731 | 20.3 -> 19.4 | 49.2 -> **51.4** (+5 %) | 5.48 -> 5.24 |
+    | 4,096 | 256 | 728 -> 713 | 5,625 -> 5,742 | 22.0 -> 19.2 | 45.4 -> **52.1** (+15 %) | 6.34 -> 5.61 |
+    | 16,384 | 256 | 2,760 -> 2,748 | 5,936 -> 5,962 | 24.4 -> 20.9 | 41.0 -> **47.9** (+17 %) | 8.98 -> 8.08 |
+    | 32,768 | 256 | 5,716 -> 5,750 | 5,733 -> 5,699 | 25.4 -> 17.6 | 39.3 -> **56.7** (+44 %) | 12.20 -> 10.25 |
+    | 65,536 | 256 | 12,607 -> 12,650 | 5,198 -> 5,181 | 23.3 -> 18.1 | 43.0 -> **55.2** (+28 %) | 18.54 -> 17.27 |
+    | 130,816 | 256 | 30,102 -> 30,197 | 4,346 -> 4,332 | 26.1 -> 23.2 | 38.4 -> **43.0** (+12 %) | 36.75 -> 36.12 |
 
-    Concurrency (peak aggregate output: 275.4 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): 58.5 -> **84.0 tok/s** (+44 %).
 
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 4 | 208 | 13.3 | 75.0 | 63.1 | 1.90 |
-    | 128 | 128 | 2 | 8 | 278 | 28.0 | 35.7 | 64.8 | 4.01 |
-    | 128 | 128 | 4 | 16 | 722 | 34.5 | 29.0 | 100.3 | 5.10 |
-    | 128 | 128 | 8 | 32 | 1,272 | 48.0 | 20.8 | 138.8 | 7.37 |
-    | 128 | 128 | 16 | 64 | 2,358 | 74.9 | 13.3 | 172.0 | 11.89 |
-    | 128 | 128 | 32 | 128 | 4,534 | 81.6 | 12.3 | 275.4 | 14.87 |
-    | 1,024 | 256 | 1 | 4 | 344 | 18.0 | 55.6 | 50.3 | 4.93 |
-    | 1,024 | 256 | 2 | 8 | 649 | 28.2 | 35.5 | 65.3 | 7.84 |
-    | 1,024 | 256 | 4 | 16 | 1,296 | 34.4 | 29.1 | 101.6 | 10.07 |
-    | 1,024 | 256 | 8 | 32 | 2,416 | 48.1 | 20.8 | 139.5 | 14.67 |
-    | 1,024 | 256 | 16 | 64 | 4,623 | 75.2 | 13.3 | 171.8 | 23.84 |
-    | 1,024 | 256 | 32 | 128 | 9,060 | 84.1 | 11.9 | 268.9 | 30.51 |
+    Concurrency, 128 input / 128 output tokens: published v2 -> blackhole-fast
 
-    #### p150 (1 die)
-
-    Latency, batch 1 (single user)
-
-    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 247 | 519 | 15.9 | 63.0 | 2.26 |
-    | 1,024 | 256 | 455 | 2,251 | 18.9 | 52.8 | 5.28 |
-    | 4,096 | 256 | 1,504 | 2,723 | 17.5 | 57.1 | 5.98 |
-    | 16,384 | 256 | 5,944 | 2,757 | 29.1 | 34.3 | 13.38 |
-    | 32,768 | 256 | 12,427 | 2,637 | 23.1 | 43.2 | 18.33 |
-    | 65,536 | 256 | 27,314 | 2,399 | 26.8 | 37.3 | 34.15 |
-    | 130,816 | 256 | 64,703 | 2,022 | 28.6 | 35.0 | 71.98 |
+    | 2 | 8 | 340 -> 343 | 24.8 -> 14.4 | 40.3 -> 69.5 | 73.3 -> **117.8** (+61 %) | 3.49 -> 2.17 |
+    | 4 | 16 | 680 -> 680 | 28.4 -> 15.3 | 35.2 -> 65.5 | 118.9 -> **196.9** (+66 %) | 4.30 -> 2.61 |
+    | 8 | 32 | 1,135 -> 1,182 | 37.0 -> 18.1 | 27.0 -> 55.1 | 175.0 -> **296.3** (+69 %) | 5.85 -> 3.45 |
+    | 16 | 64 | 2,112 -> 2,087 | 55.1 -> 23.6 | 18.2 -> 42.4 | 225.0 -> **400.9** (+78 %) | 9.11 -> 5.12 |
+    | 32 | 128 | 3,975 -> 3,940 | 62.0 -> 38.0 | 16.1 -> 26.3 | 345.8 -> **464.6** (+34 %) | 11.84 -> 8.87 |
 
-    Concurrency (peak aggregate output: 206.1 tok/s at 128 input / 128 output tokens, 32 concurrent users)
+    Concurrency, 1024 input / 256 output tokens: published v2 -> blackhole-fast
 
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 4 | 247 | 15.9 | 63.0 | 56.3 | 2.26 |
-    | 128 | 128 | 2 | 8 | 421 | 37.0 | 27.1 | 50.0 | 5.11 |
-    | 128 | 128 | 4 | 16 | 835 | 45.9 | 21.8 | 76.8 | 6.67 |
-    | 128 | 128 | 8 | 32 | 1,502 | 64.5 | 15.5 | 105.7 | 9.69 |
-    | 128 | 128 | 16 | 64 | 2,822 | 100.7 | 9.9 | 131.1 | 15.62 |
-    | 128 | 128 | 32 | 128 | 5,442 | 112.9 | 8.9 | 206.1 | 19.76 |
-    | 1,024 | 256 | 1 | 4 | 455 | 18.9 | 52.8 | 45.9 | 5.28 |
-    | 1,024 | 256 | 2 | 8 | 839 | 36.5 | 27.4 | 50.4 | 10.15 |
-    | 1,024 | 256 | 4 | 16 | 1,668 | 45.9 | 21.8 | 76.6 | 13.37 |
-    | 1,024 | 256 | 8 | 32 | 3,169 | 64.6 | 15.5 | 104.2 | 19.65 |
-    | 1,024 | 256 | 16 | 64 | 6,159 | 101.3 | 9.9 | 128.0 | 32.00 |
-    | 1,024 | 256 | 32 | 128 | 12,133 | 119.7 | 8.4 | 191.6 | 42.65 |
-
-    ### Limitations
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 561 -> 556 | 24.3 -> 14.0 | 41.2 -> 71.3 | 75.8 -> **123.8** (+63 %) | 6.75 -> 4.14 |
+    | 4 | 16 | 1,119 -> 1,110 | 28.4 -> 15.4 | 35.2 -> 65.1 | 122.5 -> **205.5** (+68 %) | 8.36 -> 5.01 |
+    | 8 | 32 | 1,996 -> 1,998 | 37.0 -> 18.3 | 27.0 -> 54.7 | 178.9 -> **307.4** (+72 %) | 11.44 -> 6.64 |
+    | 16 | 64 | 3,814 -> 3,802 | 55.3 -> 23.7 | 18.1 -> 42.1 | 228.6 -> **418.3** (+83 %) | 17.93 -> 9.81 |
+    | 32 | 128 | 7,347 -> 7,380 | 61.8 -> 38.0 | 16.2 -> 26.3 | 353.8 -> **481.5** (+36 %) | 23.12 -> 17.04 |
+  limitations: |
+    - The single-user MTP pass still runs the v2 (unfused) rows path for its verify / commit; on random-token prompts the
+      MTP-on single-user TPOT is above the plain fused decode step (p300: 19.4 vs 15.1 ms), on real text MTP still wins
+      (74 vs 66 tok/s). Moving the MTP pass onto the fused kernels is the next step.
+    - One die (`p150`, `p100`) keeps the v2 MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and expert,
+      one die holds 4 (and p100 has 7 banks).
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
-    - One die serves text only, with bfp4 routed experts (book-prompt top-1 0.84 vs 0.89-0.91 on more dies). A gate/up bfp4 +
-      down bfp8 policy scores 0.86 / 0.97 / 1.00 but leaves almost no KV pool at 32 sequences (opt-in:
-      `QWEN35_PRECISION_CONFIG=.../configs/ornith_routed_gu_bfp4_down_bfp8_mixers_bfp8.json`).
     - The device sampler supports `top_k` up to 32.
+    - Benchmark evals ran on subsets (40 / 100 / 50 questions) on the p300 profile only.
+  related: >
+    The v2 bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b). Engineering log with every measurement: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `ornith_fusion` branch of github.com/rnabeelTT/tt-metal.
