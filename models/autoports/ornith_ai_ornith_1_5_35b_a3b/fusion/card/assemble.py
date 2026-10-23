@@ -3,6 +3,7 @@
     python assemble.py p300x2 p300 p150
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,14 @@ RELATED = (
     "`ornith_fusion` branch of github.com/rnabeelTT/tt-metal."
 )
 
+P150_NOTE = (
+    "One die keeps the v2 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or "
+    "more dies, and the replicated boundary needs a mesh), so p150 decode is the v2 code and the tables below show "
+    "parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not "
+    "repeat on one die (the v2 build measured 15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs); the v2 card's p150 "
+    "latency rows still describe this bundle."
+)
+
 
 def block(key, text):
     body = "\n".join(("    " + l) if l.strip() else "" for l in text.strip("\n").splitlines())
@@ -45,7 +54,7 @@ def main():
     profiles = sys.argv[1:] or ["p300x2", "p300", "p150"]
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), "card_new", "card_pub", *profiles],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, env={**os.environ, "SAME_DECODE": "p150", "SAME_DECODE_NOTE": P150_NOTE},
     ).stdout
     perf = (HERE / "performance_head.md").read_text().replace("### Performance", TEACHER.strip() + "\n\n### Performance")
     perf += "\n" + tables

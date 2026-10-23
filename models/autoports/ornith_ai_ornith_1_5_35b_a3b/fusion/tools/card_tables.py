@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 
 RUNS = Path(os.environ.get("RUNS", Path.home() / "ornith-fusion" / "runs"))
+# Profiles whose decode code is unchanged (e.g. one die falls back to the v2 MoE): their single-user random-token rows
+# measure only adaptive-MTP run-to-run variance, so the latency table is replaced by SAME_DECODE_NOTE.
+SAME_DECODE = set(filter(None, os.environ.get("SAME_DECODE", "").split(",")))
+SAME_DECODE_NOTE = os.environ.get("SAME_DECODE_NOTE", "Decode code unchanged on this profile; single-user rows omitted.")
 
 
 def load(label):
@@ -49,12 +53,16 @@ def section(profile, new, pub):
     (rn, real_n), (rp, real_p) = new, pub
     lines = [f"#### {profile}", ""]
     lat = sorted(k for k in rn if k[2] == 1)
-    lines += [
-        "Latency, batch 1 (single user): published v2 -> blackhole-fast",
-        "",
-        "| Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    if profile in SAME_DECODE:
+        lat = []
+        lines += [SAME_DECODE_NOTE]
+    else:
+        lines += [
+            "Latency, batch 1 (single user): published v2 -> blackhole-fast",
+            "",
+            "| Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
     for k in lat:
         a, b = rp.get(k), rn[k]
         if a is None:
@@ -98,7 +106,7 @@ def summary(profiles, data):
     for p in profiles:
         rn = data[p][0][0]
         for k in ((128, 128, 1), (1024, 256, 32)):
-            if k in rn:
+            if k in rn and not (p in SAME_DECODE and k[2] == 1):
                 b = rn[k]
                 lines.append(f"| {p} | {k[0]} | {k[1]} | {k[2]} | {b['n']} | {fmt(b['ttft'], 0)} | {fmt(b['prefill'], 0)} "
                              f"| {b['decode']:.1f} | {b['e2el']:.2f} |")
