@@ -1,0 +1,4 @@
+PERF_CONFIG linear_attention traced_decode_b1: sorted_min_tokens=128 pairs_max_tokens=32 gather_max=4
+PERF linear_attention traced_decode_b1: mesh(1x4) 0.490 ms per step (2039 tok/s aggregate at this layer rate)
+PERF_CONFIG full_attention traced_decode_b1: sorted_min_tokens=128 pairs_max_tokens=32 gather_max=4
+PERF full_attention traced_decode_b1: mesh(1x4) 0.437 ms per step (2290 tok/s aggregate at this layer rate)

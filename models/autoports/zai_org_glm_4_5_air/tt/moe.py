@@ -59,6 +59,10 @@ ROUTER_WEIGHTS = os.environ.get("QWEN35_ROUTER_WEIGHTS", "onehot")
 ROUTER_L1 = (
     os.environ.get("QWEN35_ROUTER_L1", "0") == "1"
 )  # L1-resident router intermediates for decode rows (experiment)
+# GLM router for decode rows (<= 32) as ONE op (moe_decode/union.py RouteScores: per row, fixed-point sigmoid +
+# selection-bias top-k + normalized weights on the data-movement cores) instead of the 12-op sigmoid / add / topk /
+# one-hot / sum / div / typecast chain; the router matmul keeps its FP32 output.
+ROUTER_FUSED_SIGB = os.environ.get("QWEN35_ROUTER_FUSED_SIGB", "0") == "1"
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -198,6 +202,19 @@ class Qwen35MoE:
             b = state_dict["gate.e_score_correction_bias"].to(torch.float64)
             b = (b - b.mean()).to(torch.float32).reshape(1, 1, 1, -1)
             self.router_bias = upload(b, ttnn.float32, "gate.e_score_correction_bias.centered")
+            self._route_op = None
+            if ROUTER_FUSED_SIGB:
+                from models.demos.blackhole.qwen36.tt.moe_decode.union import RouteScores, upload_selection_bias
+
+                assert float(getattr(args, "routed_scaling_factor", 1.0)) == 1.0 and getattr(args, "norm_topk_prob", True)
+                ops = args.__dict__.setdefault("_glm_route_scores", {})
+                key = (self.num_experts, self.top_k)
+                if key not in ops:
+                    ops[key] = RouteScores(mesh_device, self.num_experts, self.top_k, router="sigb")
+                    for rows in range(1, TILE + 1):
+                        ops[key].outputs(rows)  # persistent outputs, uploaded before any trace capture
+                self._route_op = ops[key]
+                self._sel_bias = upload_selection_bias(mesh_device, state_dict["gate.e_score_correction_bias"])
             self._expert_iota = ttnn.from_torch(  # [1,1,1,E] expert ids for the one-hot weight select
                 torch.arange(self.num_experts, dtype=torch.float32).reshape(1, 1, 1, -1),
                 dtype=ttnn.float32,
@@ -351,8 +368,9 @@ class Qwen35MoE:
                 routed = self._routed_masked(x4, scores, ids, T, chunk=TILE)
         else:
             routed = self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
-        ttnn.deallocate(scores)
-        ttnn.deallocate(ids)
+        if not getattr(self, "_route_persistent", False):  # the fused router's outputs are model-wide buffers
+            ttnn.deallocate(scores)
+            ttnn.deallocate(ids)
         shared = self._shared(x4)
         out = ttnn.add(routed, shared, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(routed)
@@ -404,6 +422,14 @@ class Qwen35MoE:
     def _route_sigmoid_bias(self, x4, r_mc):
         """GLM router (module docstring): fp32 sigmoid scores, top-k of score + centered bias, normalized gathered
         scores. Returns bf16 weights [1,1,T,k] and uint16 ids [1,1,T,k] like the softmax router."""
+        T = x4.shape[-2]
+        self._route_persistent = False
+        if getattr(self, "_route_op", None) is not None and T <= TILE and list(x4.padded_shape)[-2] == TILE:
+            logits = self._router_logits(x4, ttnn.L1_MEMORY_CONFIG, dtype=ttnn.float32)
+            scores, ids = self._route_op(logits, T, bias=self._sel_bias)
+            ttnn.deallocate(logits)
+            self._route_persistent = True
+            return scores, ids
         logits = self._router_logits(x4, r_mc, dtype=ttnn.float32)
         sig = ttnn.sigmoid(logits, memory_config=r_mc)
         ttnn.deallocate(logits)

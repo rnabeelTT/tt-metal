@@ -1,0 +1,140 @@
+{
+  "results": {
+    "livecodebench_v6": {
+      "alias": "livecodebench_v6",
+      "acc,none": 0.36,
+      "acc_stderr,none": 0.06857142857142856
+    }
+  },
+  "group_subtasks": {
+    "livecodebench_v6": []
+  },
+  "configs": {
+    "livecodebench_v6": {
+      "task": "livecodebench_v6",
+      "dataset_path": "json",
+      "dataset_kwargs": {
+        "data_files": {
+          "test": [
+            "hf://datasets/livecodebench/code_generation_lite/test6.jsonl"
+          ]
+        }
+      },
+      "validation_split": "test",
+      "doc_to_text": "def doc_to_text_with_format(doc: dict) -> str:\n    \"\"\"\n    Generate the full prompt text including the format prompt.\n    This function creates the complete prompt that will be sent to the model.\n    Uses the exact format from evalscope implementation.\n    \"\"\"\n    # System prompt (this would typically be handled by the model's system message)\n    system_prompt = 'You are an expert Python programmer. You will be given a question (problem specification) and will generate a correct Python program that matches the specification and passes all tests. You will NOT return anything except for the program.'\n    \n    # Generate format prompt based on starter_code - exact EvalScope logic\n    FORMATTING_MESSAGE_WITH_STARTER_CODE = 'You will use the following starter code to write the solution to the problem and enclose your code within delimiters.'\n    FORMATTING_WITHOUT_STARTER_CODE = 'Read the inputs from stdin solve the problem and write the answer to stdout (do not directly test on the sample inputs). Enclose your code within delimiters as follows.'\n    \n    if doc.get('starter_code'):\n        format_prompt = f'### Format: {FORMATTING_MESSAGE_WITH_STARTER_CODE}\\n'\n        format_prompt += f\"```python\\n{doc['starter_code']}\\n```\\n\\n\"\n    else:\n        format_prompt = f'### Format: {FORMATTING_WITHOUT_STARTER_CODE}\\n'\n        format_prompt += '```python\\n# YOUR CODE HERE\\n```\\n\\n'\n    \n    # Use the exact prompt template format from EvalScope\n    prompt_template = '### Question:\\n{question_content}\\n\\n{format_prompt} ### Answer: (use the provided format with backticks)\\n\\n'\n    \n    # Format the template with the actual content\n    full_prompt = prompt_template.format(\n        question_content=doc['question_content'],\n        format_prompt=format_prompt\n    )\n    \n    return full_prompt\n",
+      "doc_to_target": "def doc_to_target(doc: dict) -> dict:\n    \"\"\"\n    Returns the document with properly formatted input_output field.\n    Uses the same transformation logic as evalscope.\n    \"\"\"\n    # Make a copy to avoid modifying the original\n    processed_doc = doc.copy()\n    \n    # Transform the document using evalscope logic\n    transformed_doc = transform_data_item(processed_doc)\n    \n    # The evaluation_sample field becomes the input_output field\n    transformed_doc['input_output'] = transformed_doc['evaluation_sample']\n    \n    return transformed_doc\n",
+      "unsafe_code": false,
+      "process_results": "def process_results(doc: dict, results: List[str]) -> Dict[str, float]:\n    \"\"\"\n    Processes the results for a single document and calculates accuracy.\n\n    :param doc: The document dictionary.\n    :param results: A list of model generations (typically one for pass@1).\n    :return: A dictionary with the accuracy metric.\n    \"\"\"\n    global _global_problem_counter, _global_problems_passed, _global_total_problems\n    \n    # Reset counters on first problem\n    if _global_problem_counter == 0:\n        reset_global_counters()\n        # DEBUG: Starting evaluation message - commenting out for production\n        # message = f\"\\n🚀 Starting LiveCodeBench Evaluation...\"\n        # print(message)\n        # sys.stdout.flush()\n    \n    if not results:\n        update_global_counters(passed=False)\n        return {\"acc\": 0.0}\n\n    # DEBUG: Raw model response logging - commenting out for production\n    # if _global_problem_counter < 5:  # Debug first 5 problems\n    #     newline_char = '\\n'\n    #     print(f\"\\n\" + \"=\"*80)\n    #     print(f\"🔍 RAW MODEL RESPONSE DEBUG #{_global_problem_counter + 1}\")\n    #     print(f\"=\"*80)\n    #     print(f\"📝 Question ID: {doc.get('question_id', 'unknown')}\")\n    #     print(f\"🤖 Raw Model Output:\")\n    #     print(f\"{'─'*60}\")\n    #     print(f\"'{results[0]}'\")\n    #     print(f\"{'─'*60}\")\n    #     print(f\"📏 Response Length: {len(results[0])} characters\")\n    #     print(f\"📄 Response Lines: {len(results[0].split(newline_char))} lines\")\n    #     print(f\"=\"*80)\n    #     sys.stdout.flush()\n\n    # We typically evaluate the first generation for pass@1\n    generated_code = postprocess_generation(results[0])\n\n    # Transform the document to ensure input_output field exists\n    transformed_doc = transform_data_item(doc.copy())\n    transformed_doc['input_output'] = transformed_doc['evaluation_sample']\n\n    # The `codegen_metrics` function expects lists of samples and generations\n    samples_list = [transformed_doc]\n    generations_list = [[generated_code]]\n\n    timeout = 6 \n    debug = False\n\n    try:\n        # DEBUG: Detailed evaluation logging - commenting out for production\n        # question_id = doc.get('question_id', 'unknown')\n        # difficulty = doc.get('difficulty', 'unknown')\n        # question_content = doc.get('question_content', '')\n        # question_preview = question_content[:200] + ('...' if len(question_content) > 200 else '')\n        # \n        # eval_header = f\"\\n{'='*80}\\n🔍 LIVECODEBENCH EVALUATION - Processing Question {_global_problem_counter + 1}\\n{'='*80}\"\n        # question_id_info = f\"📝 Question ID: {question_id}\"\n        # difficulty_info = f\"⚡ Difficulty: {difficulty}\"\n        # question_content_info = f\"📄 Question Content (first 200 chars): {question_preview}\"\n        # \n        # print(eval_header)\n        # print(question_id_info)\n        # print(difficulty_info)\n        # print(question_content_info)\n        # \n        # # LOG THE GENERATED CODE\n        # generated_code_header = f\"🤖 Generated Code:\"\n        # generated_code_separator = f\"{'-'*60}\"\n        # print(generated_code_header)\n        # print(generated_code_separator)\n        # if generated_code.strip():\n        #     print(generated_code)\n        # else:\n        #     print(\"(No code generated or code extraction failed)\")\n        # print(generated_code_separator)\n        # \n        # sys.stdout.flush()\n        \n        metrics, eval_results, final_metadata = codegen_metrics(\n            samples_list=samples_list,\n            generations_list=generations_list,\n            k_list=[1],\n            num_process_evaluate=1,\n            timeout=timeout,\n            debug=debug,\n        )\n        # Extract pass@1 and convert from percentage to decimal\n        pass_at_1 = metrics.get(\"pass@1\", 0.0)\n        accuracy = pass_at_1 / 100.0\n        \n        # Update global counters\n        problem_passed = accuracy > 0.0\n        update_global_counters(passed=problem_passed)\n        \n        # DEBUG: Progress update logging - commenting out for production\n        # current_accuracy = (_global_problems_passed / _global_problem_counter) * 100\n        # progress_message = f\"📈 Progress: {_global_problem_counter} problems evaluated, {_global_problems_passed} passed ({current_accuracy:.1f}% overall)\"\n        # closing_separator = f\"{'='*80}\"\n        # \n        # print(progress_message)\n        # print(closing_separator)\n        # sys.stdout.flush()\n        \n        logger.debug(f\"Pass@1: {pass_at_1}, Accuracy: {accuracy}\")\n        \n    except Exception as e:\n        import traceback\n        error_traceback = traceback.format_exc()\n        logger.error(f\"Error during livecodebench metric calculation for doc_id {doc.get('id', 'unknown')}: {e}\")\n        logger.error(f\"Full traceback: {error_traceback}\")\n        accuracy = 0.0\n        \n        # Update global counters for failed evaluation\n        update_global_counters(passed=False)\n\n    return {\"acc\": accuracy}\n",
+      "description": "",
+      "target_delimiter": " ",
+      "fewshot_delimiter": "\n\n",
+      "fewshot_config": {
+        "sampler": "default",
+        "split": null,
+        "process_docs": null,
+        "fewshot_indices": null,
+        "samples": null,
+        "doc_to_text": "<function doc_to_text_with_format at 0x7cbaa28bb100>",
+        "doc_to_choice": null,
+        "doc_to_target": "<function doc_to_target at 0x7cbaa2920ae0>",
+        "gen_prefix": null,
+        "fewshot_delimiter": "\n\n",
+        "target_delimiter": " "
+      },
+      "num_fewshot": 0,
+      "metric_list": [
+        {
+          "metric": "acc",
+          "aggregation": "mean",
+          "higher_is_better": true
+        }
+      ],
+      "output_type": "generate_until",
+      "generation_kwargs": {
+        "until": [
+          "<|endoftext|>",
+          "<|im_end|>"
+        ],
+        "do_sample": true,
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_gen_toks": 4096
+      },
+      "repeats": 1,
+      "should_decontaminate": false,
+      "metadata": {
+        "version": 1.0,
+        "model": "ornith-ai/Ornith-1.5-35B-A3B",
+        "base_url": "http://localhost:20000/v1/chat/completions",
+        "num_concurrent": 8,
+        "max_retries": 3,
+        "tokenized_requests": false,
+        "timeout": 3600
+      }
+    }
+  },
+  "versions": {
+    "livecodebench_v6": 1.0
+  },
+  "n-shot": {
+    "livecodebench_v6": 0
+  },
+  "higher_is_better": {
+    "livecodebench_v6": {
+      "acc": true
+    }
+  },
+  "n-samples": {
+    "livecodebench_v6": {
+      "original": 175,
+      "effective": 50
+    }
+  },
+  "config": {
+    "model": "local-chat-completions",
+    "model_args": {
+      "model": "ornith-ai/Ornith-1.5-35B-A3B",
+      "base_url": "http://localhost:20000/v1/chat/completions",
+      "num_concurrent": 8,
+      "max_retries": 3,
+      "tokenized_requests": false,
+      "timeout": 3600
+    },
+    "batch_size": 1,
+    "batch_sizes": [],
+    "device": "cuda:0",
+    "use_cache": null,
+    "limit": 50.0,
+    "bootstrap_iters": 100000,
+    "gen_kwargs": {
+      "do_sample": true,
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "max_gen_toks": 4096
+    },
+    "random_seed": 42,
+    "numpy_seed": 42,
+    "torch_seed": 42,
+    "fewshot_seed": 42
+  },
+  "git_hash": "be23028b",
+  "date": 1792638242.802145,
+  "pretty_env_info": "N/A (torch not installed)",
+  "transformers_version": "N/A",
+  "lm_eval_version": "0.4.10.dev0",
+  "upper_git_hash": null,
+  "task_hashes": {
+    "livecodebench_v6": "e33de704e4e29dce322a7da4da5f02e378330288a85bc0a1242d5a8c31150287"
+  },
+  "model_source": "local-chat-completions",
+  "model_name": "ornith-ai/Ornith-1.5-35B-A3B",
+  "model_name_sanitized": "ornith-ai__Ornith-1.5-35B-A3B",
+  "system_instruction": null,
+  "system_instruction_sha": null,
+  "fewshot_as_multiturn": true,
+  "chat_template": "",
+  "chat_template_sha": null,
+  "total_evaluation_time_seconds": "679.7954873579874"
+}
