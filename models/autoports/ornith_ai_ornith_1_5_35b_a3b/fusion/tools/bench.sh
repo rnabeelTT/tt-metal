@@ -23,4 +23,6 @@ for r in "${ROWS[@]}"; do
     --percentile-metrics ttft,tpot,itl,e2el --save-result --result-dir /tmp/bench --result-filename $F 2>&1 \
     | grep -E 'Median (TTFT|TPOT)|Output token throughput|Successful requests' || true
   docker cp $C:/tmp/bench/$F $OUT/$F >/dev/null
+  python3 -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(r['completed'] == 0)" $OUT/$F \
+    || echo "ROW FAILED: 0 of $N requests completed (model id $MODEL_ID?)"
 done

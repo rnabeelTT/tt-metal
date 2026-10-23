@@ -2,6 +2,7 @@
 # eval.sh <label> [tasks...]   The scorecard's abbreviated evals against the server on :20000 (thinking off at the server):
 # r1_gpqa_diamond 40, livecodebench_v6 50, ifeval 100; one sample per question, seed 42, temperature 0.6 / top_p 0.95 /
 # top_k 20, 8 in flight (CONC overrides: 1 exercises the single-user decode path); max gen 4096 (ifeval 2048).
+# GPQA_LIMIT=198 runs the whole diamond set.
 set -e
 MODEL_ID=${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B}
 L=$1; shift
@@ -13,7 +14,7 @@ export HF_ALLOW_CODE_EVAL=1 NLTK_DATA=${NLTK_DATA:-$HOME/ornith-fusion/nltk_data
 cd ${LMEVAL:-$HOME/lm-eval-poc}
 for T in "${TASKS[@]}"; do
   case $T in
-    r1_gpqa_diamond) LIM=40; MAXG=4096;;
+    r1_gpqa_diamond) LIM=${GPQA_LIMIT:-40}; MAXG=4096;;
     livecodebench_v6) LIM=50; MAXG=4096;;
     ifeval) LIM=100; MAXG=2048;;
   esac
