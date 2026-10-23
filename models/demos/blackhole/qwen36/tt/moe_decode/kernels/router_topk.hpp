@@ -185,7 +185,8 @@ inline void topk_softmax(const uint32_t* words, uint32_t* ids, uint16_t* weights
 // union expert i).
 template <uint32_t topk>
 inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni) {
-    uint32_t mask[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    constexpr uint32_t words = 16;  // experts < 512 (fused.supported); 256 bits dropped Coder-Next's experts 256..511
+    uint32_t mask[words] = {};
     for (uint32_t r = 0; r < rows; ++r) {
         for (uint32_t j = 0; j < topk; ++j) {
             const uint32_t e = table[32 * r + j];
@@ -193,7 +194,7 @@ inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni)
         }
     }
     uint32_t u = 0;
-    for (uint32_t w = 0; w < 8; ++w) {
+    for (uint32_t w = 0; w < words; ++w) {
         for (uint32_t m = mask[w]; m; m &= m - 1) {
             const uint32_t e = 32 * w + __builtin_ctz(m);
             uni[u] = static_cast<uint16_t>(e);
