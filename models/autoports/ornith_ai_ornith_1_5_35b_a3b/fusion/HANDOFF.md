@@ -426,7 +426,22 @@ Greedy text differs from the published build's (rounded weights), coherent on bo
 - 2026-10-23: op test `q122` passed (single row out PCC 0.99998, rows 1..32 worst row >= 0.99996, ids exact) after the
   ExpertDown readers fix. Layer PCC vs HF (real weights, 4 dies, shipped policy), fused / unfused: GDN decode 0.99965 /
   0.99967, attention decode 0.99471 / 0.99477, B=32 per-user min GDN 0.99719 / 0.99717, attention 0.99532 / 0.99548;
-  prefill identical. Served runs next (`runs/q122/`, `runs/q122_new`, `runs/q122_pub`).
+  prefill identical.
+- Served milestone 2026-10-23 (p300x2, Ornith fast image + q122 models/ vs the published image; MTP on at 1 user):
+
+  | row | published | fused |
+  | --- | --- | --- |
+  | real text, 1 user (median, 12 x 384) | 46.8 tok/s | 64.9 tok/s (+39 %) |
+  | 1 user 2048/128 | 29.57 ms | 22.06 ms |
+  | 8 users | 63.75 ms (15.7 tok/s/u) | 36.18 ms (27.6 tok/s/u) |
+  | 16 users | 96.03 ms (10.4 tok/s/u) | 51.32 ms (19.5 tok/s/u) |
+  | 32 users | 114.00 ms (8.8 tok/s/u, 198 total) | 66.51 ms (15.0 tok/s/u, 278 total) |
+  | 1024/256, 32 users | 115.09 ms | 67.99 ms |
+  | TTFT 128 / 2048 / 32 users | 295 / 687 / 6284 ms | 259 / 640 / 6301 ms |
+
+  1 user 128/128 random tokens: 21.49 -> 21.22 ms (adaptive MTP, noisy). Garble gate: mean 5.86 -> 4.21 per 1k,
+  the fused max (14.4) is technical vocabulary the word list lacks (outlier, ablation, rescale). Greedy text differs
+  (rounded weights), coherent. Card chain `runs/q122_card_chain.sh` running (queue).
 
 ### Shared box (2026-10-23)
 
