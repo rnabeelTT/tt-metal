@@ -20,6 +20,8 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "ckernel.h"
+#include "ckernel_defs.h"
 #ifdef MOE_FUSED
 #include "router_topk.hpp"
 #endif
