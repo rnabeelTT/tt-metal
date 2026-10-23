@@ -1,0 +1,476 @@
+{
+ "doc106_s9": {
+  "default/prefill": {
+   "all": {
+    "n": 38,
+    "top1": 0.737,
+    "top1_in_hf_top5": 0.947,
+    "tt_top5_mass": 0.878,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.665
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.375,
+    "top1_in_hf_top5": 0.875,
+    "tt_top5_mass": 0.644,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.4
+   }
+  },
+  "default/decode": {
+   "all": {
+    "n": 38,
+    "top1": 0.816,
+    "top1_in_hf_top5": 0.921,
+    "tt_top5_mass": 0.895,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.669
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.375,
+    "top1_in_hf_top5": 0.75,
+    "tt_top5_mass": 0.727,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.402
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/prefill": {
+   "all": {
+    "n": 38,
+    "top1": 0.763,
+    "top1_in_hf_top5": 0.921,
+    "tt_top5_mass": 0.881,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.663
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.5,
+    "top1_in_hf_top5": 0.75,
+    "tt_top5_mass": 0.659,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.406
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/decode": {
+   "all": {
+    "n": 38,
+    "top1": 0.737,
+    "top1_in_hf_top5": 0.947,
+    "tt_top5_mass": 0.896,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.666
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.5,
+    "top1_in_hf_top5": 0.875,
+    "tt_top5_mass": 0.737,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.407
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/prefill": {
+   "all": {
+    "n": 38,
+    "top1": 0.763,
+    "top1_in_hf_top5": 0.921,
+    "tt_top5_mass": 0.877,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.662
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.5,
+    "top1_in_hf_top5": 0.75,
+    "tt_top5_mass": 0.651,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.406
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/decode": {
+   "all": {
+    "n": 38,
+    "top1": 0.763,
+    "top1_in_hf_top5": 0.947,
+    "tt_top5_mass": 0.893,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.664
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.5,
+    "top1_in_hf_top5": 0.875,
+    "tt_top5_mass": 0.729,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.404
+   }
+  },
+  "none/prefill": {
+   "all": {
+    "n": 38,
+    "top1": 0.789,
+    "top1_in_hf_top5": 0.947,
+    "tt_top5_mass": 0.883,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.663
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.375,
+    "top1_in_hf_top5": 0.75,
+    "tt_top5_mass": 0.672,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.311
+   }
+  },
+  "none/decode": {
+   "all": {
+    "n": 38,
+    "top1": 0.789,
+    "top1_in_hf_top5": 0.921,
+    "tt_top5_mass": 0.897,
+    "hf_top5_mass": 0.903,
+    "tt_p_of_hf_top1": 0.675
+   },
+   "pos24_31": {
+    "n": 8,
+    "top1": 0.375,
+    "top1_in_hf_top5": 0.625,
+    "tt_top5_mass": 0.713,
+    "hf_top5_mass": 0.773,
+    "tt_p_of_hf_top1": 0.294
+   }
+  }
+ },
+ "para_vi": {
+  "default/prefill": {
+   "all": {
+    "n": 127,
+    "top1": 0.795,
+    "top1_in_hf_top5": 0.992,
+    "tt_top5_mass": 0.814,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.543
+   }
+  },
+  "default/decode": {
+   "all": {
+    "n": 127,
+    "top1": 0.772,
+    "top1_in_hf_top5": 0.984,
+    "tt_top5_mass": 0.818,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.551
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/prefill": {
+   "all": {
+    "n": 127,
+    "top1": 0.811,
+    "top1_in_hf_top5": 1.0,
+    "tt_top5_mass": 0.816,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.549
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/decode": {
+   "all": {
+    "n": 127,
+    "top1": 0.787,
+    "top1_in_hf_top5": 0.992,
+    "tt_top5_mass": 0.821,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.558
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/prefill": {
+   "all": {
+    "n": 127,
+    "top1": 0.787,
+    "top1_in_hf_top5": 1.0,
+    "tt_top5_mass": 0.81,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.543
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/decode": {
+   "all": {
+    "n": 127,
+    "top1": 0.787,
+    "top1_in_hf_top5": 0.992,
+    "tt_top5_mass": 0.814,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.551
+   }
+  },
+  "none/prefill": {
+   "all": {
+    "n": 127,
+    "top1": 0.803,
+    "top1_in_hf_top5": 0.969,
+    "tt_top5_mass": 0.828,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.573
+   }
+  },
+  "none/decode": {
+   "all": {
+    "n": 127,
+    "top1": 0.827,
+    "top1_in_hf_top5": 0.961,
+    "tt_top5_mass": 0.837,
+    "hf_top5_mass": 0.821,
+    "tt_p_of_hf_top1": 0.576
+   }
+  }
+ },
+ "para_fa": {
+  "default/prefill": {
+   "all": {
+    "n": 130,
+    "top1": 0.7,
+    "top1_in_hf_top5": 0.954,
+    "tt_top5_mass": 0.545,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.282
+   }
+  },
+  "default/decode": {
+   "all": {
+    "n": 130,
+    "top1": 0.731,
+    "top1_in_hf_top5": 0.969,
+    "tt_top5_mass": 0.561,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.294
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/prefill": {
+   "all": {
+    "n": 130,
+    "top1": 0.7,
+    "top1_in_hf_top5": 0.954,
+    "tt_top5_mass": 0.546,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.29
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/decode": {
+   "all": {
+    "n": 130,
+    "top1": 0.723,
+    "top1_in_hf_top5": 0.969,
+    "tt_top5_mass": 0.563,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.303
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/prefill": {
+   "all": {
+    "n": 130,
+    "top1": 0.7,
+    "top1_in_hf_top5": 0.954,
+    "tt_top5_mass": 0.537,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.283
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/decode": {
+   "all": {
+    "n": 130,
+    "top1": 0.708,
+    "top1_in_hf_top5": 0.969,
+    "tt_top5_mass": 0.553,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.295
+   }
+  },
+  "none/prefill": {
+   "all": {
+    "n": 130,
+    "top1": 0.708,
+    "top1_in_hf_top5": 0.977,
+    "tt_top5_mass": 0.535,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.29
+   }
+  },
+  "none/decode": {
+   "all": {
+    "n": 130,
+    "top1": 0.669,
+    "top1_in_hf_top5": 0.969,
+    "tt_top5_mass": 0.553,
+    "hf_top5_mass": 0.555,
+    "tt_p_of_hf_top1": 0.305
+   }
+  }
+ },
+ "para_zh": {
+  "default/prefill": {
+   "all": {
+    "n": 84,
+    "top1": 0.726,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.785,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.494
+   }
+  },
+  "default/decode": {
+   "all": {
+    "n": 84,
+    "top1": 0.786,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.793,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.509
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/prefill": {
+   "all": {
+    "n": 84,
+    "top1": 0.738,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.788,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.5
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/decode": {
+   "all": {
+    "n": 84,
+    "top1": 0.774,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.796,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.515
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/prefill": {
+   "all": {
+    "n": 84,
+    "top1": 0.738,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.782,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.495
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/decode": {
+   "all": {
+    "n": 84,
+    "top1": 0.774,
+    "top1_in_hf_top5": 0.964,
+    "tt_top5_mass": 0.79,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.511
+   }
+  },
+  "none/prefill": {
+   "all": {
+    "n": 84,
+    "top1": 0.786,
+    "top1_in_hf_top5": 0.988,
+    "tt_top5_mass": 0.807,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.523
+   }
+  },
+  "none/decode": {
+   "all": {
+    "n": 84,
+    "top1": 0.786,
+    "top1_in_hf_top5": 0.976,
+    "tt_top5_mass": 0.816,
+    "hf_top5_mass": 0.849,
+    "tt_p_of_hf_top1": 0.54
+   }
+  }
+ },
+ "para_en": {
+  "default/prefill": {
+   "all": {
+    "n": 100,
+    "top1": 0.8,
+    "top1_in_hf_top5": 0.98,
+    "tt_top5_mass": 0.869,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.607
+   }
+  },
+  "default/decode": {
+   "all": {
+    "n": 100,
+    "top1": 0.8,
+    "top1_in_hf_top5": 0.98,
+    "tt_top5_mass": 0.864,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.596
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/prefill": {
+   "all": {
+    "n": 100,
+    "top1": 0.84,
+    "top1_in_hf_top5": 0.99,
+    "tt_top5_mass": 0.867,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.604
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_hifi2/decode": {
+   "all": {
+    "n": 100,
+    "top1": 0.81,
+    "top1_in_hf_top5": 0.99,
+    "tt_top5_mass": 0.863,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.597
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/prefill": {
+   "all": {
+    "n": 100,
+    "top1": 0.82,
+    "top1_in_hf_top5": 0.99,
+    "tt_top5_mass": 0.863,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.599
+   }
+  },
+  "combo_a_kv_dense4_g4_lm8_lofi/decode": {
+   "all": {
+    "n": 100,
+    "top1": 0.81,
+    "top1_in_hf_top5": 0.99,
+    "tt_top5_mass": 0.859,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.591
+   }
+  },
+  "none/prefill": {
+   "all": {
+    "n": 100,
+    "top1": 0.86,
+    "top1_in_hf_top5": 1.0,
+    "tt_top5_mass": 0.877,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.6
+   }
+  },
+  "none/decode": {
+   "all": {
+    "n": 100,
+    "top1": 0.85,
+    "top1_in_hf_top5": 1.0,
+    "tt_top5_mass": 0.881,
+    "hf_top5_mass": 0.886,
+    "tt_p_of_hf_top1": 0.603
+   }
+  }
+ }
+}

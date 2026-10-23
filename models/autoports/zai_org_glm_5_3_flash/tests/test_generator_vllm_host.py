@@ -385,6 +385,15 @@ def test_resolve_checkpoint_parent_overlay(monkeypatch, tmp_path, expect_error):
     assert (root / "e192_mask.json").read_bytes() == (sp.MODEL_DIR / "tt" / "e192_mask.json").read_bytes()
     monkeypatch.delenv("GLM53_CKPT")
     assert Path(gv.resolve_checkpoint(SimpleNamespace(_name_or_path="zai-org/GLM-5.3-Flash"))) == root  # idempotent
+    # a stale link (another HF cache mount, e.g. the container's /hf) and a broken link are re-pointed
+    (root / "config.json").unlink()
+    (root / "config.json").symlink_to("/hf/hub/blobs/elsewhere")
+    (root / "model-00001-of-00002.safetensors").unlink()
+    (root / "model-00001-of-00002.safetensors").symlink_to(tmp_path / "missing")
+    monkeypatch.delenv("GLM53_CKPT")
+    gv.resolve_checkpoint(SimpleNamespace(_name_or_path="zai-org/GLM-5.3-Flash"))
+    for f in ("config.json", "model-00001-of-00002.safetensors"):
+        assert Path(os.readlink(root / f)) == (snap / f).resolve() and (root / f).exists()
     monkeypatch.delenv("GLM53_CKPT")
     with expect_error(RuntimeError, "was made for"):
         gv.resolve_checkpoint(SimpleNamespace(_name_or_path="someone/other-model"))
@@ -429,6 +438,9 @@ def test_resolve_checkpoint_downloads_missing_weights(monkeypatch, tmp_path, exp
     with expect_error(RuntimeError, "--with-weights"):
         gv.resolve_checkpoint(cfg)
     assert calls == [("zai-org/GLM-5.3-Flash", rev, True), ("zai-org/GLM-5.3-Flash", rev, False)]
+    with expect_error(RuntimeError, "no readable model.safetensors.index.json, and the download failed"):
+        gv.resolve_checkpoint(cfg)
+    calls.clear()
     # 2) nothing cached at all: download, then the overlay
     calls.clear()
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda *a, **k: fake(*a, **k, absent=True))
@@ -447,6 +459,12 @@ def test_resolve_checkpoint_downloads_missing_weights(monkeypatch, tmp_path, exp
     monkeypatch.delenv("GLM53_CKPT")
     gv.resolve_checkpoint(cfg)
     assert [c[2] for c in calls] == [True, False]
+    # 5) the error of a failed download names the missing shard (not "not in the HF cache")
+    (snap / "model-00001-of-00001.safetensors").unlink()
+    monkeypatch.delenv("GLM53_CKPT")
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda *a, **k: fake(*a, **k, fail_online=True))
+    with expect_error(RuntimeError, r"is missing 1 shard files \(model-00001-of-00001\.safetensors\)"):
+        gv.resolve_checkpoint(cfg)
 
 
 def test_get_max_tokens_all_users(monkeypatch, expect_error):

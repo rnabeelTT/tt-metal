@@ -169,14 +169,33 @@ def _overlay_root() -> Path:
 BUNDLE_REPO = "raahemnabeel/glm-5.3-flash-e192-blackhole"
 
 
-def _snapshot_complete(snap: Path) -> bool:
-    """True when the snapshot has model.safetensors.index.json and every shard file the index names."""
+def _missing_shards(snap: Path) -> list[str] | None:
+    """The shard files that model.safetensors.index.json names and the snapshot lacks ([] = complete); None when the
+    index is missing or unreadable."""
     idx = snap / "model.safetensors.index.json"
     try:
         shards = set(json.loads(idx.read_text())["weight_map"].values())
     except (OSError, ValueError, KeyError, TypeError):
-        return False
-    return bool(shards) and all((snap / f).is_file() for f in shards)
+        return None
+    return sorted(f for f in shards if not (snap / f).is_file()) if shards else None
+
+
+def _snapshot_complete(snap: Path) -> bool:
+    """True when the snapshot has model.safetensors.index.json and every shard file the index names."""
+    return _missing_shards(snap) == []
+
+
+def _snapshot_state(snap: Path | None) -> str:
+    """What is wrong with a cached snapshot, for the log and error messages."""
+    if snap is None:
+        return "no snapshot in the HF cache"
+    miss = _missing_shards(snap)
+    if miss is None:
+        return f"{snap} has no readable model.safetensors.index.json"
+    if miss:
+        more = f" and {len(miss) - 3} more" if len(miss) > 3 else ""
+        return f"{snap} is missing {len(miss)} shard files ({', '.join(miss[:3])}{more})"
+    return f"{snap} is complete"
 
 
 def _weights_snapshot(name: str, rev) -> Path:
@@ -199,17 +218,17 @@ def _weights_snapshot(name: str, rev) -> Path:
         + "`), then serve again."
     )
     logger.warning(
-        f"weights {at}: no complete snapshot in the HF cache ({snap or 'none'}). Downloading it now (the parent FP8 "
+        f"weights {at}: {_snapshot_state(snap)}. Downloading the missing files now (the parent FP8 "
         f"snapshot is about 328 GB; tt-model shows no progress, see `tt-model logs -f`). {host_fix}"
     )
     try:
         snap = Path(snapshot_download(name, revision=rev))
     except Exception as e:  # noqa: BLE001 - offline, no disk space, network or auth error
         raise RuntimeError(
-            f"weights {at} are not in the HF cache and the download failed ({type(e).__name__}: {e}). {host_fix}"
+            f"weights {at}: {_snapshot_state(snap)}, and the download failed ({type(e).__name__}: {e}). {host_fix}"
         ) from e
     if not _snapshot_complete(snap):
-        raise RuntimeError(f"weights {at}: {snap} has no complete model.safetensors.index.json shard set. {host_fix}")
+        raise RuntimeError(f"weights {at}: after the download, {_snapshot_state(snap)}. {host_fix}")
     return snap
 
 
@@ -246,9 +265,14 @@ def resolve_checkpoint(hf_config) -> str:
     root.mkdir(parents=True, exist_ok=True)
     for f in snap.iterdir():
         link = root / f.name
-        if link.is_symlink() or link.exists():
+        tgt_f = f.resolve() if f.is_file() else f
+        if link.is_symlink():
+            if Path(os.readlink(link)) == tgt_f and link.exists():
+                continue
+            link.unlink()  # stale (another snapshot or HF cache mount) or broken: re-point it
+        elif link.exists():
             continue
-        link.symlink_to(f.resolve() if f.is_file() else f)
+        link.symlink_to(tgt_f)
     tgt = root / "e192_mask.json"
     if not tgt.exists() or tgt.read_bytes() != mask.read_bytes():
         tmp = root / ".e192_mask.json.tmp"

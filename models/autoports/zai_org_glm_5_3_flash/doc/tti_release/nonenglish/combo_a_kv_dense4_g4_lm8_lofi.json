@@ -1,0 +1,82 @@
+{
+ "id": "combo_a_kv_dense4_g4_lm8_lofi",
+ "description": "stage-8 selected policy with the LM head at bfp8 (LoFi, stage-7 LM head program): stage-11 review #2 non-English A/B",
+ "requant": {
+  "kda_in": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dsa_proj": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "shared_expert": {
+   "dtype": "bfp4",
+   "layers": "inner"
+  },
+  "dense_mlp": {
+   "dtype": "bfp4",
+   "layers": [
+    1,
+    2
+   ]
+  }
+ },
+ "fidelity": {
+  "kda_in": "LoFi",
+  "kda_out": "LoFi",
+  "dsa_proj": "LoFi",
+  "dense_mlp": "LoFi",
+  "shared_expert": "LoFi",
+  "lm_head": "LoFi"
+ },
+ "kv_latent_dtype": "fp8_e4m3",
+ "decode_specs": {
+  "kda_in": {
+   "spec": "1d:c29:ib4",
+   "layers": "inner"
+  },
+  "kda_out": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "dsa_o": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "dsa_qb": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "pack_a_spec": {
+   "spec": "1d:c16:ib32",
+   "layers": "inner"
+  },
+  "shared_gu": {
+   "spec": "1d:c16:ib64",
+   "layers": "inner"
+  },
+  "shared_dn": {
+   "spec": "1d:c16:ib16",
+   "layers": "inner"
+  },
+  "mlp_gu": {
+   "spec": "1d:c16:ib8",
+   "layers": [
+    1,
+    2
+   ]
+  },
+  "mlp_dn": {
+   "spec": "1d:c16:ib16",
+   "layers": [
+    1,
+    2
+   ]
+  }
+ }
+}

@@ -1,5 +1,5 @@
 {
- "rule": "loop = an 8-gram of whitespace words repeated >= 20 times, or one word repeated >= 50 times in a row, in reasoning + content",
+ "rule": "loop = an 8-gram of whitespace words repeated >= 20 times, or one word repeated >= 50 times in a row, or one 16-character substring repeated >= 1,000 times (overlapping), in reasoning + content",
  "sets": {
   "smoke ifeval (3 docs, p300x2-1m)": {
    "file": "tti/workflow_logs/reports_output/evals/zai-org__GLM-5.3-Flash_p300x2_evals/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2/zai-org__GLM-5.3-Flash/samples_ifeval_2026-10-21T15-16-17.207329.jsonl",
@@ -18,14 +18,28 @@
   "release ifeval (109 docs, p300x2-1m)": {
    "file": "tti/workflow_logs/reports_output/release/zai-org__GLM-5.3-Flash_p300x2_release/eval_id_glm53-flash-autoport_GLM-5.3-Flash_p300x2/zai-org__GLM-5.3-Flash/samples_ifeval_2026-10-21T19-44-35.100275.jsonl",
    "generations": 109,
-   "loops": 2,
+   "loops": 3,
    "looped_docs": {
     "65": {
      "words": 32685,
      "max_word_run": 32523,
      "max_8gram": 32516,
      "top_8gram": "boat boat boat boat boat boat boat boat",
+     "max_16char": 32520,
+     "top_16char": " boat boat boat ",
      "loop": true,
+     "loop_char_only": false,
+     "content_empty": false
+    },
+    "87": {
+     "words": 47,
+     "max_word_run": 2,
+     "max_8gram": 1,
+     "top_8gram": "Write a poem in Persian (Persian language) about",
+     "max_16char": 16295,
+     "top_16char": "‌ی‌ی‌ی‌ی‌ی‌ی‌ی‌ی",
+     "loop": true,
+     "loop_char_only": true,
      "content_empty": false
     },
     "106": {
@@ -33,7 +47,10 @@
      "max_word_run": 32713,
      "max_8gram": 32706,
      "top_8gram": "cả cả cả cả cả cả cả cả",
+     "max_16char": 32708,
+     "top_16char": " cả cả cả cả cả ",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": false
     }
    },
@@ -56,7 +73,10 @@
      "max_word_run": 2,
      "max_8gram": 37,
      "top_8gram": "Can derive? Use A+2G=115 and total=88 => C+T",
+     "max_16char": 154,
+     "top_16char": "molecular weight",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "170": {
@@ -64,7 +84,10 @@
      "max_word_run": 1,
      "max_8gram": 679,
      "top_8gram": "known rule: For monosubstituted benzene, para product yield",
+     "max_16char": 683,
+     "top_16char": "weight fraction ",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "196": {
@@ -72,7 +95,10 @@
      "max_word_run": 1,
      "max_8gram": 2412,
      "top_8gram": "reduces COOH to H? Hmm. Red P/HI reduces",
+     "max_16char": 7237,
+     "top_16char": " reduces COOH to",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     }
    },
@@ -95,7 +121,10 @@
      "max_word_run": 2,
      "max_8gram": 56,
      "top_8gram": "not Wittig but \"phosphazide\" creates \"alkenyl phosphonium\" that",
+     "max_16char": 238,
+     "top_16char": " 3-bromopentane ",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "47": {
@@ -103,7 +132,10 @@
      "max_word_run": 2,
      "max_8gram": 131,
      "top_8gram": "Let's examine. In substituted cyclohexane, ring flip changes",
+     "max_16char": 526,
+     "top_16char": "equatorial hydro",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "69": {
@@ -111,7 +143,10 @@
      "max_word_run": 6893,
      "max_8gram": 6980,
      "top_8gram": "hmm: hmm: hmm: hmm: hmm: hmm: hmm: hmm:",
+     "max_16char": 7263,
+     "top_16char": " hmm: hmm: hmm: ",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "89": {
@@ -119,7 +154,10 @@
      "max_word_run": 1,
      "max_8gram": 316,
      "top_8gram": "Choices C/D differ acid vs aldehyde at C1.",
+     "max_16char": 1115,
+     "top_16char": " carboxylic acid",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "121": {
@@ -127,7 +165,10 @@
      "max_word_run": 2,
      "max_8gram": 322,
      "top_8gram": "\"treated with bromine\" often means monobromination via HV;",
+     "max_16char": 662,
+     "top_16char": "bromoacetic acid",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     },
     "125": {
@@ -135,7 +176,10 @@
      "max_word_run": 1,
      "max_8gram": 23,
      "top_8gram": "It might undergo intramolecular hydride delivery? Hmm LAH",
+     "max_16char": 253,
+     "top_16char": ".\n\nPotential iss",
      "loop": true,
+     "loop_char_only": false,
      "content_empty": true
     }
    },
@@ -159,13 +203,13 @@
  "total_full_text": {
   "all valid": {
    "generations": 446,
-   "loops": 11,
-   "rate": 0.0247
+   "loops": 12,
+   "rate": 0.0269
   },
   "shipped policy": {
    "generations": 353,
-   "loops": 5,
-   "rate": 0.0142
+   "loops": 6,
+   "rate": 0.017
   }
  }
 }

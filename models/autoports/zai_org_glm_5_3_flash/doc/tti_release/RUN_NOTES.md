@@ -243,12 +243,14 @@ Benchmark rows (p300x2-1m, concurrency 1):
     unexplained. bfp4 vs NVFP4 routed experts were not tested.
   - No bug hunt (user decision). Per the lead's instruction the row was not retried.
 
-### ifeval: two degenerate single-token loops
-- 2 of 109 answers loop on a single token until the 32,768-token budget:
+### ifeval: three degenerate loops
+- 3 of 109 answers loop until the 32,768-token budget:
   - Doc 65 (India/China itinerary table): " boat" from content token 161.
   - Doc 106 (Vietnamese critique): " cả" from content token 14.
-- Their think blocks are short and normal. No other ifeval or gpqa output repeats (scan: word runs >= 5, 4-grams
-  >= 20). Both count as wrong in 74.31.
+  - Doc 87 (Persian poem): the pair zero-width non-joiner + "ی" from content character 143, 16,295 repeats of the
+    16-character unit. The content is garbled Persian before the loop. Correction (stage-11 review #2): the
+    whitespace-word scans missed this loop, because the repeated pair contains no space (one "word").
+- Their think blocks are short and normal. All three count as wrong in 74.31.
 - Settings: temperature 1.0, top_p 0.95, seed 42, effort low, device sampler.
 - Diagnostic ticket `11-tti.sh loopdiag` (`~/glm53-flash-bringup/scripts/11-loopdiag.py`) replays both requests:
   - A: exact replay
@@ -278,16 +280,18 @@ Benchmark rows (p300x2-1m, concurrency 1):
     not looped). Doc 106 C is therefore 0/6 classified, 2 unclassified.
   - Classification: **not a device-sampler defect**. The host-sampled path loops the same way, and the device and
     host paths agree. It is a **model repetition attractor** at temperature 1.0, prompt-dependent and rare: about
-    1/8 draws on doc 65, and 2/109 in the eval run. The rate over all saved eval generations is in "Repetition loops:
+    1/8 draws on doc 65, and 3/109 in the eval run. The rate over all saved eval generations is in "Repetition loops:
     rate over all saved generations".
   - Not settled by these data: whether the TT logits at this prefix deviate from the HF reference. See "HF
     teacher-forced control of a doc-106 loop onset" (stage-11 review).
   - Scorecard caveats:
-    - 2/109 ifeval answers are single-token loops (model repetition attractor at temperature 1.0).
+    - 3/109 ifeval answers are loops (two single-token loops, one two-character loop; model repetition attractor at
+      temperature 1.0).
     - The per-draw rate is about 1/8 on doc 65. The host-sampled path reproduces the loop; greedy and top_p 1.0 do
       not loop.
-    - Vietnamese output quality is poor even without loops. This is consistent with the E192 card's lower
-      non-English scores (C-Eval 78.3 % vs 89.4 % for E256).
+    - Non-English output quality is poor even without loops (doc 106 Vietnamese, docs 18 Kannada, 50 Marathi, 87
+      Persian). The HF teacher-forced control and the device precision A/B of the stage-11 review #2 measured the
+      cause: see "Non-English output: device precision A/B and HF controls (stage-11 review #2)".
   - HF teacher-forced check of the doc-106 loop onset: not run at that time (lead decision: host RAM). It ran
     after the stage-11 review (see "HF teacher-forced control of a doc-106 loop onset").
   - Reproducibility note: doc 65 at seed 42 replayed differently from the eval run. It diverged at the first
@@ -297,20 +301,23 @@ Benchmark rows (p300x2-1m, concurrency 1):
 ### Repetition loops: rate over all saved generations (stage-11 review, P2-2)
 - Scanner: `~/glm53-flash-bringup/scripts/11-loopscan.py` -> `artifacts/s11/loopscan/loopscan.json`. Rule: a
   generation loops when one 8-gram of whitespace words occurs >= 20 times, or one word repeats >= 50 times in a row,
-  in the reasoning + content text. The earlier scans (word runs >= 5, 4-grams >= 20 on the content only) missed
-  loops in the think block, where a looped answer leaves the content empty.
+  or (character rule, added in the stage-11 review #2) one 16-character substring occurs >= 1,000 times, in the
+  reasoning + content text. The earlier scans (word runs >= 5, 4-grams >= 20 on the content only) missed loops in
+  the think block, where a looped answer leaves the content empty. The word rules missed loops without whitespace
+  (doc 87). Recount with the character rule: `artifacts/s11/loopscan/loopscan_r2.json`.
 - Result, every stage-11 eval generation whose full text is saved:
 
   | set (policy) | loops / generations | looped docs (largest 8-gram count) |
   |---|---:|---|
   | smokes: ifeval 3 + gpqa 3 (shipped, p300x2-1m) | 0 / 6 | - |
-  | release ifeval, 109 (shipped, p300x2-1m) | 2 / 109 | 65 (32,516), 106 (32,706): single-token loops |
+  | release ifeval, 109 (shipped, p300x2-1m) | 3 / 109 | 65 (32,516), 106 (32,706): single-token loops; 87 (16-char unit x16,295, character rule only) |
   | release gpqa CI subset, 40 (shipped, p300x2-1m) | 0 / 40 | - |
   | gpqa full set, 198 (shipped, p300x2) | 3 / 198 | 196 (2,412), 170 (679), 79 (37): budget cuts |
   | H1 chemistry, 93 (stage-7 policy, p300x2) | 6 / 93 | 69 (6,980), 121 (322), 89 (316), 47 (131), 36 (56), 125 (23) |
 
-  - Shipped policy: **5 / 353 = 1.4 %** of the generations loop; 4 of them strongly (8-gram count >= 679).
-  - All valid sets: 11 / 446 = 2.5 %. The invalid H1 attempt 1 (engine crash) is not counted (0 / 198 by the rule).
+  - Shipped policy: **6 / 353 = 1.7 %** of the generations loop; 5 of them strongly (8-gram or 16-character count
+    >= 679).
+  - All valid sets: 12 / 446 = 2.7 %. The invalid H1 attempt 1 (engine crash) is not counted (0 / 198 by the rule).
   - Every loop is a budget-exhausted answer (32,768 tokens for ifeval, 65,536 for gpqa). 3 of the 4 gpqa budget
     cuts with the shipped policy are loops by this rule (doc 127 is not).
   - Not scannable: the H2 card-protocol run saved only the last 300 content characters (0 loops in them; 8 budget
@@ -378,6 +385,71 @@ Benchmark rows (p300x2-1m, concurrency 1):
   - One onset only; the cause of the deviation (the bfp4 / LoFi precision policy, or the low-resource language) is
     not separated here. This answers the earlier open point ("whether the TT logits at this prefix deviate from the
     HF reference"): yes, at the loop entry.
+
+### Non-English output: device precision A/B and HF controls (stage-11 review #2)
+- Finding of the review: sampled non-English output (temperature 1.0) is often garbled. Doc 106 (Vietnamese): 20 of
+  32 bundle draws mix scripts or are word salad (`loopdiag/loopprobe_summary.json`); release ifeval docs 18
+  (Kannada), 50 (Marathi) and 87 (Persian, the two-character loop) are broken. English is clean.
+- Question: is the cause the stage-8 precision policy (the bfp4 / LoFi non-expert groups or the bfp4 LM head), the
+  decode path, or something shared by every policy (the bfp4 routed experts, which every policy needs to fit)?
+- Tools (copies in `nonenglish/`): `11r2-tf-device.py` scores fixed token texts on the device under one policy
+  (`GLM53_PRECISION`), through prefill (one forward over the whole text) and through traced decode (one forced
+  token per step), and saves the top-20 next-token distribution per position. `11r2-tf-hf.py` is the same on the
+  HF CPU reference (`tools/hf_full_ref.py`, bf16). `11r2-tf-compare.py` compares them.
+- Texts (`nonenglish/texts.json`): the saved seed-9 doc-106 trajectory (65 prompt + 38 tokens, the rows of
+  `loopdiag/hfloop.json`), and four hand-written answer paragraphs after a chat prompt (reasoning_effort low,
+  `</think>` forced): Vietnamese (127 scored positions), Persian (130), Chinese (84), English control (100).
+- Device run (`11r2-tfab.sh`, 2026-10-23 11:10-11:26, ticket glm53-s11-tfab): code = `git archive` of d16b35f3094
+  (md5 of `tt/*.py` in `nonenglish/tfab_device.log`); 1 slot, max_seq_len 4,096; the bundle's converted weight
+  cache, read only (the cache guard checks the key and the checkpoint fingerprint first; 0 tensors written). The
+  policies only re-quantize or change fidelity on top of the cached bfp8 weights, so no new cache was needed.
+  Policies: shipped (`combo_a_kv_dense4_g4`); the shipped policy with the LM head at bfp8 (HiFi2 = the stage-7 LM
+  head, and LoFi = `lm8_lofi`); `GLM53_PRECISION=none` (the stage-7 policy: every non-expert group bfp8, bf16 DSA
+  latent; the highest-precision policy that fits).
+- HF reference: `11r2-tf-hf.py`, 2026-10-23 11:26-11:59, device queue empty, `systemd-run -p MemoryMax=40G`, peak
+  RSS 39.4 GB.
+- Result, top-1 agreement with HF (TT argmax = HF argmax), prefill / traced decode:
+
+  | text (positions) | shipped | LM head bfp8 HiFi2 | LM head bfp8 LoFi | none (stage-7) |
+  |---|---|---|---|---|
+  | doc 106, positions 24-31 (8) | 0.38 / 0.38 | 0.50 / 0.50 | 0.50 / 0.50 | 0.38 / 0.38 |
+  | doc 106, all (38) | 0.74 / 0.82 | 0.76 / 0.74 | 0.76 / 0.76 | 0.79 / 0.79 |
+  | Vietnamese paragraph (127) | 0.80 / 0.77 | 0.81 / 0.79 | 0.79 / 0.79 | 0.80 / 0.83 |
+  | Persian paragraph (130) | 0.70 / 0.73 | 0.70 / 0.72 | 0.70 / 0.71 | 0.71 / 0.67 |
+  | Chinese paragraph (84) | 0.73 / 0.79 | 0.74 / 0.77 | 0.74 / 0.77 | 0.79 / 0.79 |
+  | English paragraph (100) | 0.80 / 0.80 | 0.84 / 0.81 | 0.82 / 0.81 | 0.86 / 0.85 |
+
+  - The TT argmax is in the HF top 5 at 0.92-1.00 of the positions for every text and policy (doc 106 window:
+    0.62-0.88).
+  - Top-5 probability mass, TT (shipped, decode) / HF: doc 106 window 0.73 / 0.77, all doc 106 0.90 / 0.90,
+    Vietnamese 0.82 / 0.82, Persian 0.56 / 0.56, Chinese 0.79 / 0.85, English 0.86 / 0.89. On these texts the TT
+    distributions are not flatter than HF; only Chinese is slightly flatter.
+  - Shipped traced decode = the served bundle on doc 106 (top-1 0.38 / 0.82, the same per-position values), so
+    the decode path and the serving path add nothing. Prefill and decode agree within the noise.
+  - At doc-106 position 28 every policy misses HF's top-1 " may" (p 0.64): shipped " " 0.09, LM head bfp8
+    " " 0.10, none " " 0.69.
+  - Decode step at 1 slot (model + sampler trace, `s7_probe.run_decode`): shipped 49.3 ms, LM head bfp8 HiFi2
+    49.5 ms, LM head bfp8 LoFi 49.5 ms, none 51.4 ms.
+- Interpretation:
+  - No policy restores agreement. The highest-precision policy (none) gains about 0.05 top-1 on English and Chinese,
+    nothing on Vietnamese and Persian, and nothing at the doc-106 loop entry. The LM head at bfp8 gains at most one
+    position of eight at the loop entry (noise at n = 8) and 0.00-0.04 elsewhere.
+  - The TT-HF top-1 gap is 0.15-0.30 on these hand-written texts in every language, also English (the stage-8 gate
+    texts are HF greedy continuations, where top-1 is 0.91-0.95). English is only somewhat better (0.80 vs
+    0.70-0.80).
+  - So the deviation comes from a part that every policy shares. The parts outside the stage-8 policy are the bfp4
+    LoFi routed experts (bfp8 experts in all layers do not fit), the fp32 KDA / mHC kernels and the DSA kernels.
+    The attribution to the bfp4 experts is by elimination (non-expert precision, LM head and decode path ruled out);
+    the direct test, an HF reference with the routed experts rounded to bfp4, is in the next item.
+  - HF with bfp4-rounded routed experts (`11r2-tf-hf.py --expert-fmt bfp4`, the port's block grid from
+    `tests/hf_ref/bfp.py`, doc 106 + English only, 40 GB memory cap): pending at this commit.
+- Decision: **the default precision does not change.** No candidate restores agreement, so a precision change has
+  no benefit to pay for.
+- What is still true: non-English sampled output at temperature 1.0 can be garbled (mixed scripts, word salad) and
+  can enter loops; the TT next-token distribution deviates from the HF reference in every language (top-1 0.70-0.86
+  on hand-written text), more for Persian and Chinese than for English. Chinese (claimed by the E192 card) was
+  checked on TT by this teacher forcing only: top-1 0.73-0.79, top-5 mass slightly below HF; sampled Chinese output
+  was not probed.
 
 ## Seeded reproducibility on p300x2-1m (stage-11 finding)
 - Symptom: doc 65 at seed 42 gave a different output in the eval than in a replay on a fresh server.
@@ -635,7 +707,7 @@ The fix (stage-11 review, P2-1):
 
 | row | result | classification |
 |---|---|---|
-| ifeval (109 docs, effort low) | 74.31 % prompt-strict | no reference exists anywhere; reported as measured (decision (b)); 2/109 loops = model repetition attractor (all saved generations: 5/353 with the shipped policy) |
+| ifeval (109 docs, effort low) | 74.31 % prompt-strict | no reference exists anywhere; reported as measured (decision (b)); 3/109 loops = model repetition attractor (all saved generations: 6/353 = 1.7 % with the shipped policy) |
 | gpqa_diamond_cot_zeroshot | 70.0 % (CI subset); full set 66.67 %; card protocol 74.24 % vs card 79.8 % | issue-waived: the stage-8 non-expert precision changes are ruled out; the residual -5.6 points (about 1.8 sigma) exceeds the card's stated +/-2-3 noise and is unexplained; bfp4 vs NVFP4 experts were not tested |
 | spec tests | 22/22 | pass (3 recorded TTI harness patches) |
 | benchmarks (12 rows) | all requests completed | informational (no targets) |

@@ -1,0 +1,3 @@
+# from ~/glm53-flash-bringup/logs/11/hub-p300x2-r2-server.log (Hub verify r2, image of Hub 4d1085f0): the checkpoint the served model reads
+(EngineCore pid=110) 2026-10-23 10:42:14.715 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.generator_vllm:resolve_checkpoint:258 - checkpoint: /hf/hub/models--zai-org--GLM-5.3-Flash/snapshots/91b69215804f2d2036a8867f6ce44848e278dcda (revision 91b69215804f2d2036a8867f6ce44848e278dcda) + tt/e192_mask.json overlay at /weight-cache/glm53_ckpt_overlay/91b69215804f2d2036a8867f6ce44848e278dcda
+(EngineCore pid=110) 2026-10-23 10:42:14.771 | INFO     | models.autoports.zai_org_glm_5_3_flash.tt.weight_cache:weight_cache_from_env:350 - weight cache: /weight-cache/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40

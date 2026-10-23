@@ -1,0 +1,40 @@
+=== policy default () Fri Oct 23 11:10:36 AM UTC 2026
+TFAB cache guard OK /home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40
+TFAB built in 321 s; cache {'root': '/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40', 'hits': 918, 'stored': 0}
+TFAB doc106_s9: forced-token top-1 rate {'prefill': 0.763, 'decode': 0.789}
+TFAB para_vi: forced-token top-1 rate {'prefill': 0.453, 'decode': 0.516}
+TFAB para_fa: forced-token top-1 rate {'prefill': 0.359, 'decode': 0.374}
+TFAB para_zh: forced-token top-1 rate {'prefill': 0.424, 'decode': 0.412}
+TFAB para_en: forced-token top-1 rate {'prefill': 0.545, 'decode': 0.564}
+S7 DECODE S=1 active=1: {"model_ms": 49.33262230362743, "model_enqueue_ms": 0.001979181542992592, "sampler_ms": 0.3895777789875865, "tokenout_ms": 49.71931977663189, "generate_ms": 49.82594455592334, "generate_tsu": 20.069865386648637}
+=== policy default exit=0 Fri Oct 23 11:17:07 AM UTC 2026
+=== policy combo_a_kv_dense4_g4_lm8_hifi2 (/home/raahem/glm53-flash-bringup/artifacts/s11/r2/configs/combo_a_kv_dense4_g4_lm8_hifi2.json) Fri Oct 23 11:17:07 AM UTC 2026
+TFAB cache guard OK /home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40
+TFAB built in 114 s; cache {'root': '/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40', 'hits': 917, 'stored': 0}
+TFAB doc106_s9: forced-token top-1 rate {'prefill': 0.711, 'decode': 0.711}
+TFAB para_vi: forced-token top-1 rate {'prefill': 0.484, 'decode': 0.531}
+TFAB para_fa: forced-token top-1 rate {'prefill': 0.351, 'decode': 0.366}
+TFAB para_zh: forced-token top-1 rate {'prefill': 0.424, 'decode': 0.412}
+TFAB para_en: forced-token top-1 rate {'prefill': 0.545, 'decode': 0.564}
+S7 DECODE S=1 active=1: {"model_ms": 49.474646798335016, "model_enqueue_ms": 0.0019014207646250725, "sampler_ms": 0.3890167223289609, "tokenout_ms": 49.86292108427733, "generate_ms": 49.97680265922099, "generate_tsu": 20.009283243242745}
+=== policy combo_a_kv_dense4_g4_lm8_hifi2 exit=0 Fri Oct 23 11:20:06 AM UTC 2026
+=== policy none (none) Fri Oct 23 11:20:06 AM UTC 2026
+TFAB cache guard OK /home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40
+TFAB built in 123 s; cache {'root': '/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40', 'hits': 734, 'stored': 0}
+TFAB doc106_s9: forced-token top-1 rate {'prefill': 0.711, 'decode': 0.711}
+TFAB para_vi: forced-token top-1 rate {'prefill': 0.531, 'decode': 0.539}
+TFAB para_fa: forced-token top-1 rate {'prefill': 0.366, 'decode': 0.366}
+TFAB para_zh: forced-token top-1 rate {'prefill': 0.424, 'decode': 0.459}
+TFAB para_en: forced-token top-1 rate {'prefill': 0.594, 'decode': 0.574}
+S7 DECODE S=1 active=1: {"model_ms": 51.35449233930558, "model_enqueue_ms": 0.0021240580826997757, "sampler_ms": 0.38873315788805485, "tokenout_ms": 51.73952823970467, "generate_ms": 51.818793239071965, "generate_tsu": 19.29801790995759}
+=== policy none exit=0 Fri Oct 23 11:23:15 AM UTC 2026
+=== policy combo_a_kv_dense4_g4_lm8_lofi (/home/raahem/glm53-flash-bringup/artifacts/s11/r2/configs/combo_a_kv_dense4_g4_lm8_lofi.json) Fri Oct 23 11:23:15 AM UTC 2026
+TFAB cache guard OK /home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40
+TFAB built in 115 s; cache {'root': '/home/raahem/.cache/tt-model/glm-5.3-flash-e192-blackhole/weights/glm53_flash/v1-mesh1x4-opt_s5_pf-56b50afe6f-ckptc0e1b7bf40', 'hits': 917, 'stored': 0}
+TFAB doc106_s9: forced-token top-1 rate {'prefill': 0.711, 'decode': 0.763}
+TFAB para_vi: forced-token top-1 rate {'prefill': 0.484, 'decode': 0.531}
+TFAB para_fa: forced-token top-1 rate {'prefill': 0.366, 'decode': 0.374}
+TFAB para_zh: forced-token top-1 rate {'prefill': 0.424, 'decode': 0.412}
+TFAB para_en: forced-token top-1 rate {'prefill': 0.545, 'decode': 0.574}
+S7 DECODE S=1 active=1: {"model_ms": 49.47541059926152, "model_enqueue_ms": 0.002001621760427952, "sampler_ms": 0.38947457913309336, "tokenout_ms": 49.85823268070817, "generate_ms": 49.969130819663405, "generate_tsu": 20.012355300094374}
+=== policy combo_a_kv_dense4_g4_lm8_lofi exit=0 Fri Oct 23 11:26:15 AM UTC 2026

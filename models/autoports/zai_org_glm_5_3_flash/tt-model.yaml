@@ -172,7 +172,10 @@ card:
       (about 4 GB) and the image (8.6 GB). Plan for about 500 GB free.
     - Measured on a fresh p300x2 (stage 11): the snapshot download took 48 minutes at 113 MB/s; the first start then
       converted the weights (23 minutes) and compiled the kernels, healthy after 29 minutes (1,730 s). Later starts
-      load the cache and are healthy after 3 to 4 minutes (196-241 s).
+      load the cache and are healthy after 3 to 4 minutes (196-245 s).
+    - The README that tt-model generates for this bundle says that the first start compiles kernels and "takes
+      several minutes". For this model that is not correct: the first start also converts the weights and takes about
+      29 minutes after the download. Later starts take 3 to 4 minutes.
 
     ### Profiles
     `tt-model serve raahemnabeel/glm-5.3-flash-e192-blackhole --profile <name>`. The context is limited by device
@@ -259,13 +262,22 @@ card:
       above 32, samples from the top 32. Requests with logprobs, `min_p`, `logit_bias`, bad words or structured output
       sample on the host (slower).
     - No prefix caching; no scheduler-level chunked prefill (a long prompt delays the other users' decode).
-    - Rare repetition loops at temperature 1.0: a sampled answer can repeat one token or phrase until `max_tokens`
-      (1.4 % of 353 TTI eval answers; prompt-dependent, up to 6 of 32 seeded draws on one Vietnamese prompt).
+    - Rare repetition loops, seen at temperature 1.0 and 0.6: a sampled answer can repeat one token, a character pair
+      or a phrase until `max_tokens` (1.7 % of 353 TTI eval answers; prompt-dependent, up to 6 of 32 seeded draws on
+      one Vietnamese prompt).
       Most other seeds of the same prompt do not loop (greedy did not loop in one run per prompt). In a probe of
       two looping prompts, neither `repetition_penalty` 1.05 or 1.10 nor temperature 0.6 removed the loops.
       Mitigation: set `max_tokens`, detect a loop in the client, and retry with another seed. An HF reference check
       of one loop: the reference also repeats once the loop has started, but at the loop entry the TT next-token
       distribution was flatter than the reference (not fixed in this release).
+    - Languages: English is the validated language (the accuracy evals and the teacher-forcing gate are English).
+      Non-English output sampled at temperature 1.0 can be garbled (mixed scripts, word salad) and can loop: seen on
+      Vietnamese, Persian, Kannada and Marathi prompts. Teacher forcing against the HF reference (stage-11 review)
+      shows a deviation of the TT next-token distribution in every language (top-1 agreement 0.70-0.86 on
+      hand-written text, English 0.80), more for Persian and Chinese than for English. No precision setting that fits
+      removes it (LM head bfp8 and the all-bfp8 non-expert policy were tested); it is not fixed in this release.
+      Chinese, which the E192 card claims, was checked on TT by teacher forcing only (top-1 0.73-0.79), not by
+      sampled output.
     - No multi-token prediction (the MTP layer is not served).
     - The p150x4 profile is derived by the sizing rule for the same (1, 4) mesh as p300x2; it was not run on p150
       boards.
