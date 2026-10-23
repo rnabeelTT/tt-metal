@@ -1,7 +1,8 @@
 #!/bin/bash
 # eval_coder.sh <label> [tasks...]: the Qwen3-Coder-Next card's eval set through the served chat API (port PORT, default
 # 20000): humaneval_chat (lm_tasks/; humaneval_instruct's gen_prefix is not continued by the chat API, it scores 0),
-# mbpp_instruct (+ rescore_mbpp.py), gsm8k_cot_llama, ifeval at temperature 0, 8 in flight, full sets unless LIMIT is set.
+# mbpp_instruct (+ rescore_mbpp.py), gsm8k_cot_llama_hf (lm_tasks/: the stock task's dataset id 'gsm8k' no longer
+# resolves), ifeval at temperature 0, 8 in flight, full sets unless LIMIT is set.
 # Run on both bundles with the same settings (the card's exact task variants were not recorded).
 set -e
 L=$1; shift
@@ -9,7 +10,7 @@ TD=$(cd "$(dirname "$0")" && pwd)
 MODEL_ID=${MODEL_ID:-Qwen/Qwen3-Coder-Next}
 OUT=${RUNS:-$HOME/ornith-fusion/runs}/$L/evals
 mkdir -p $OUT
-TASKS=("$@"); [ ${#TASKS[@]} -eq 0 ] && TASKS=(humaneval_chat mbpp_instruct gsm8k_cot_llama ifeval)
+TASKS=("$@"); [ ${#TASKS[@]} -eq 0 ] && TASKS=(humaneval_chat mbpp_instruct gsm8k_cot_llama_hf ifeval)
 export HF_HUB_CACHE=$HOME/.cache/huggingface/hub HF_DATASETS_CACHE=$HOME/.cache/huggingface/datasets
 export HF_ALLOW_CODE_EVAL=1 NLTK_DATA=${NLTK_DATA:-$HOME/ornith-fusion/nltk_data}
 cd ${LMEVAL:-$HOME/lm-eval-poc}
