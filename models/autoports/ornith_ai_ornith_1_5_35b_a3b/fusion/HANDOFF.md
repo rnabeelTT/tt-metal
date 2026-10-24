@@ -716,6 +716,28 @@ Next candidates: the head's q / k norms (6.9 us of hi / lo splits per unit) and 
 cores at low batch (b1 runs 8 of 110 cores); the router matmul with K split across more cores; cross-layer add + norm
 (layer L's h + all-reduce and layer L+1's first norm in one call: -2 us per layer).
 
+**Step 6 served result (2026-10-24, Ornith p300x2, same setup as attnms_f1; MTP off):** addnorm ON (`step6ms`, with
+the handshake): 1 user 6.49 ms (vs 6.48), 8 users 10.77 ms, then a hang at 32 users (a second, not yet understood hang:
+the 1 / 8-user rows passed). The per-layer profile gain (-4 us / layer, measured before the handshake) did not reach the
+served step. **Dropped: addnorm stays in the tree behind its flag, off, not shipped.** The GDN head fix alone
+(`step6b`, addnorm off): 1 user 6.48 -> **6.37 ms (154.3 -> 157.0 tok/s)**, real text 166.5 -> **169.0 tok/s**, 2K / 8K /
+16K 6.62 / 6.72 / 6.89 -> 6.54 / 6.63 / 6.80 ms, 8 users 10.89 -> 10.73 ms (91.8 -> 93.2 tok/s/u, 735 -> 746 total), 32
+users 26.93 -> 27.18 ms (noise level), TTFT unchanged (119 / 121, 338 / 337, 1283 / 1284, 2622 / 2653 ms), greedy 8 / 8
+identical to step 5 (the change only reorders reads), garble 6.06 (8.04 at step 5; sampling noise). -0.11 ms matches the
+profile (-3 us x 30 GDN layers).
+
+### v2 releases (2026-10-24, user: publish new repos + scorecards when free)
+
+Queue `runs/run_queue2.sh`: `cn_v2_chain` (Coder-Next blackhole-fast-v2: GDN + attention ops; card rows p300x2 / p300 +
+HumanEval / MBPP / GSM8K / IFEval vs the release-time blackhole-fast runs card_cnnew_* / cn_new), `ornith_v2_chain`
+(tt-model-fast-v2.yaml: GDN + attention ops, MTP off on the multi-die profiles, one die unchanged; card rows vs
+card_new_*, GPQA 40 / IFEval 100 / LCB 50 on p300 vs fast_p300), `q122_v2_chain` (same for the 122B, MTP off; vs
+card_q122new_* / q122ev_new), then glm_chain, ornith_p150_chain, q122_hub_smoke, the MTP sweeps. Repos (new, private
+until checked): raahemnabeel/{qwen3-coder-next,ornith-1.5-35b-a3b,qwen3-5-122b-a10b}-blackhole-fast-v2. MTP decision:
+off wherever the fused GDN step runs (Ornith real text 169 vs 86 tok/s, 122B 94 vs 60): the verify pass keeps the
+unfused path; a fused multi-token verify is the way back to MTP. Kernel work continues in ~/tt-metal-gdnwip only (the
+release trees are packaged from ornith_fusion / q122_fusion / coder_next_fusion as they stand).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
