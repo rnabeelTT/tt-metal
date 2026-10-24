@@ -1506,7 +1506,7 @@ class TPGatedDeltaNet:
         self._active_masks = cache[key]
 
     def _gdn_ops_setup(self):
-        """The model-wide GdnDecode (cached on args: shared conv_out / output buffers, one per width) and this layer's
+        """The model-wide GdnDecode (cached on args) and this layer's
         constants (conv taps as full tiles, the per-die params tile), uploaded here, before any trace."""
         from models.demos.blackhole.qwen36.tt.gdn_decode.ops import GdnDecode
 
@@ -1517,11 +1517,7 @@ class TPGatedDeltaNet:
         P = int(self.tw["qkvz"].shape[-1])
         key = (id(self.mesh), self.Nk, self.Nv, self.Dk, self.Dv, P, self.B)
         if key not in cache:
-            ops = GdnDecode(self.mesh, self.Nk, self.Nv, self.Dk, self.Dv, P, float(self.scale), max_batch=self.B)
-            for w in (1, 2, 4, 8, 16, 32):
-                if w <= self.B:
-                    ops.output(w)
-            cache[key] = ops
+            cache[key] = GdnDecode(self.mesh, self.Nk, self.Nv, self.Dk, self.Dv, P, float(self.scale), max_batch=self.B)
         self._gdn_ops = cache[key]
         self._gdn_taps, self._gdn_params = self._gdn_ops.prepare(
             self.tw["conv_taps"], self.tw["neg_exp_A"], self.tw["dt_bias"], self.tw["norm_w"]
@@ -1538,8 +1534,8 @@ class TPGatedDeltaNet:
         )
         y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B)
         ttnn.deallocate(proj)
-        # y is the persistent per-width L1 buffer: call the out-proj directly (matmul_1d_decode frees its input's L1
-        # "copy", which for an L1-interleaved input is the input itself)
+        # call the out-proj directly (matmul_1d_decode frees its input's L1 "copy", which for an L1-interleaved input is
+        # the input itself); y is freed after it
         part = ttnn.linear(
             y,
             self.tw["out"],
@@ -1548,6 +1544,7 @@ class TPGatedDeltaNet:
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
             **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
         )
+        ttnn.deallocate(y)
         part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
         if partial:
             return part
