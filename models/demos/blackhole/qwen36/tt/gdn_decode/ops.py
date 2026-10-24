@@ -34,7 +34,7 @@ NUM_CBS = 64
 CB = dict(q=0, k=1, v=2, gin=3, beta=4, S=5, o=6, state=7, sdh=8, sdl=9, vread=10, uh=11, kcol=12, dcol=13, qnh=14,
           knh=15, nrm=16, scr=17, xh=18, xl=19, qnl=20, knl=21, kcoll=22, ul=23, sdx=24, qsd=25, qk=26, kn1h=27,
           kn1l=28, z=29, w=30, y=31)
-UNPACK_FP32 = ("q", "k", "v", "gin", "beta", "vread", "dcol", "nrm", "sdx", "qsd", "qk", "w")
+UNPACK_FP32 = ("q", "k", "v", "gin", "vread", "dcol", "nrm", "qsd", "qk", "w")
 
 
 def _bits(x):
@@ -196,12 +196,11 @@ class GdnDecode:
         Kt, Vt = self.Kt, self.Vt
         kv = Kt * Vt
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
-        sizes = dict(q=(f32, 2 * Kt), k=(f32, 2 * Kt), v=(f32, 2 * Vt), gin=(f32, 8), beta=(f32, 1), S=(bf, kv),
-                     o=(f32, Vt), state=(bf, kv), sdh=(f32, kv), sdl=(f32, kv), vread=(f32, Vt), uh=(f32, Vt),
-                     kcol=(f32, Kt), dcol=(f32, 1), qnh=(f32, Kt), knh=(f32, Kt), nrm=(f32, 1), scr=(f32, 4),
-                     xh=(f32, Kt), xl=(f32, Kt), qnl=(f32, Kt), knl=(f32, Kt), kcoll=(f32, Kt), ul=(f32, Vt),
-                     sdx=(f32, kv), qsd=(f32, Vt), qk=(f32, 1), kn1h=(f32, Kt), kn1l=(f32, Kt), z=(bf, 2 * Vt),
-                     w=(f32, Vt), y=(bf, 2 * Vt))
+        sizes = dict(q=(f32, 2 * Kt), k=(f32, 2 * Kt), v=(f32, 2 * Vt), gin=(f32, 8), S=(bf, kv), o=(f32, Vt),
+                     state=(bf, kv), vread=(f32, Vt), uh=(f32, Vt), kcol=(f32, Kt), dcol=(f32, 2), qnh=(f32, Kt),
+                     knh=(f32, Kt), nrm=(f32, 2), scr=(f32, 4), xh=(f32, 2 * Kt), xl=(f32, 2 * Kt), qnl=(f32, Kt),
+                     knl=(f32, Kt), kcoll=(f32, Kt), ul=(f32, Vt), qsd=(f32, Vt), qk=(f32, 1), kn1h=(f32, Kt),
+                     kn1l=(f32, Kt), z=(bf, 2 * Vt), w=(f32, Vt), y=(bf, 2 * Vt))
         cbs = [_cb(cr, CB[k], dt, tb, n) for k, ((dt, tb), n) in sizes.items()]
         rd_ct = [Kt, Vt, self.Nv, self.Nk, self.qkv // TILE, self.proj_dim // TILE, self.z_tile, self.a_tile,
                  self.b_tile, CB["q"], CB["k"], CB["v"], CB["gin"], CB["S"], CB["z"], CB["w"], CB["scr"]]

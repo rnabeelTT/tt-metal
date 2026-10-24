@@ -570,6 +570,15 @@ container): all pass at the ops-off PCC. Traced decode steps 0-3 0.999985 / 0.99
 real weights vs HF decode pos 37 / 333 0.99998 / 0.99999, prefill after traced decode, non-aligned continuation,
 fallback audit. (test_mc_shipped_policy_pcc fails with ops off and on alike: the HF reference module's 3072 vs 2048
 shape mismatch, a test issue.)
+Per-layer profile (`runs/prof/gdnops_f{0,1}`, GDN layer, traced batched decode, device 0), ops off -> on: b1 mixer
+46 ops 203.8 us -> 4 ops 108.1 us (in-proj 19.3, conv 7.8 on 64 cores, head 68.3 on 8 cores, out-proj 8.0), layer
+285.3 -> 189.9 us; b8 mixer 261.0 -> 115.0 us (head 72.0 on 64 cores), layer 460.7 -> 314.3 us. The head kernel is the
+gap to the 42 us projection: device zones per unit (math thread, `runs/prof/gdnzones`): gates 15.8, q/k L2 norms 13.3,
+gated norm 11.1, decay pass 10.3, delta 6.4, read_state 4.7, rank-1 4.5, q.k + transposes 1.2 us. The matmuls are
+cheap; the time is full-tile SFPU / pack work on tiles that carry one row. Head v2 (in progress): decay folded out (k.(dS)
+= d (k.S), the bf16 state goes straight into the matmuls with no split, rank-1 = d S + k (x) u in DST), row-vector SFPU
+on rows 0-1 only (VectorMode::R, 1 iteration), per-unit scalars read back by value (read_tile_value) instead of
+column broadcasts, sdh / sdl / sdx CBs gone (192 KB of L1), S double-buffered.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
