@@ -223,26 +223,30 @@ card:
 
     ### Performance
     Measured with this bundle (`tt-model serve`) on p300x2, vLLM 0.26, greedy, random-token prompts sent as token ids,
-    output length pinned, async decode on (stage-11 scorecard, 2026-10-23). TTFT: time to first token. TPOT: time per
+    output length pinned, async decode on (stage-12 scorecard, 2026-10-24). TTFT: time to first token. TPOT: time per
     output token. One request, 128 input / 128 output tokens:
 
     | profile | TTFT | TPOT | decode tokens/s |
     | --- | ---: | ---: | ---: |
-    | `p300x2-long` (1 x 344,064) | 245 ms | 49.9 ms | 20.1 |
+    | `p300x2-long` (1 x 344,064) | 244 ms | 49.4 ms | 20.3 |
     | `p300x2-1m` (1 x 1,048,576) [1] | 251 ms | 71.5 ms | 14.0 |
-    | `p300x2` (default, 16 x 262,144) | 259 ms | 75.2 ms | 13.3 |
-    | `p300x2-wide` (32 x 159,744) | 274 ms | 124.5 ms | 8.0 |
+    | `p300x2` (default, 16 x 262,144) | 270 ms | 74.8 ms | 13.4 |
+    | `p300x2-wide` (32 x 159,744) | 272 ms | 124.1 ms | 8.1 |
 
     [1] From the TTI release benchmark of 2026-10-21: the release worktree server (not this bundle), the pruned E192
     checkpoint, vllm-tt-plugin 92403f3. The other rows are from this bundle.
 
-    Long prompts (one request): `p300x2` 8,192 tokens TTFT 4.9 s, 131,072 tokens TTFT 93.8 s (1,400 prompt tokens/s).
+    Long prompts (one request): `p300x2` 8,192 tokens TTFT 4.9 s, 131,072 tokens TTFT 93.5 s (1,400 prompt tokens/s).
     Prefill on `p300x2-1m` is about 3 times slower: 8,192 tokens TTFT 15.1 s, 131,072 tokens 288 s [1].
     Near-limit prompts answer: 262,080 tokens in 219 s (`p300x2`), 159,680 in 121 s (`p300x2-wide`), 344,000 in 311 s
     (`p300x2-long`), 1,040,000 in 2,291 s (`p300x2-1m`).
-    More users: `p300x2` 77 output tokens/s at 16 users (128 / 128, 178 ms per token per user), 71 tokens/s at 16 users
-    with 1,024 / 256; `p300x2-wide` 141 output tokens/s at 32 users (166 ms per token per user). 32 concurrent
-    100 / 100 requests on `p300x2` (16 slots, the rest queue): 75 output tokens/s, mean TTFT 19.8 s.
+    More users: `p300x2` 78 output tokens/s at 16 users (128 / 128, 177 ms per token per user), 71 tokens/s at 16 users
+    with 1,024 / 256; `p300x2-wide` 141 output tokens/s at 32 users (165 ms per token per user). 32 concurrent
+    100 / 100 requests on `p300x2` (16 slots, the rest queue): 75 output tokens/s, mean TTFT 19.7 s.
+    Stage 12 (this release) turns on a once-per-step MoE sentinel and ping-pong persistent all-gathers: outputs are
+    bit-identical to stage 11, decode is about 0.5 % faster, and the decode trace region is 2.6 MiB smaller. Per-row DSA
+    decode buckets (about 5.6 ms faster per step) stay off by default (`GLM53_DSA_ROW_BUCKETS=1` to try them): beyond
+    2,048 positions they select other cache pools than the evaluated path. Details: doc/decode_perf_stage12/README.md.
     Overload: 16 concurrent 20,000-token prompts on `p300x2` exceed the shared KV pool; vLLM preempts and every request
     completes (a spot-check request equals its solo run).
     Accuracy evals (TTI, effort low): see Accuracy; per-profile tables: doc/tti_release/RUN_NOTES.md in the autoport.
