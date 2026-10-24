@@ -673,6 +673,36 @@ Ports (`runs/ports_attn.sh`, 2026-10-24, p300x2, GDN ops on in both arms):
   (16 KB per core per width). Fix (ac88dc55d3d / 2332a6e2bd3): outputs allocated per call and freed after use; op test
   16 / 16 again. Rerun queued (`runs/q122attn_f1.sh`).
 
+### Step 6: decode add + RMSNorm boundary op (`QWEN35_ADDNORM_DECODE=1`, models/demos/blackhole/qwen36/tt/addnorm)
+
+One generic op on the 16 replicated-residual cores (decode_boundary.py layout: [1, 1, B, H] width-sharded, T = H / 512
+tiles per core) replaces LayerNorm (sharded) + sharded->interleaved (+ the residual add): h = residual (+ all-reduce
+result), per-core sum of squares as a matmul with an all-ones tile (every column = the row sum), that tile sent to all
+16 cores (face 0 only for <= 16 rows) + one semaphore increment each, sum of the 16 tiles, rsqrt, out = h x r (column
+broadcast) x gamma (DST reuse) written L1 interleaved for the mixer / MoE matmuls. residual / reduced / h are CBs on
+their own shards (`ttnn.cb_descriptor_from_sharded_tensor`; generic_op's cache re-binds the addresses). Layer
+(`layer.py _forward_decode_addnorm`): norm(x) -> mixer -> all-reduce (no add) -> (h, norm(h)) -> MoE -> h + all-reduce.
+Op test (`tests/test_addnorm_ops.py`, H 2048 / 3072, B 1 / 8 / 32, add / no add): out PCC >= 0.999995, h within one
+bf16 ulp. v1 9.4-10 us per call (slower than LayerNorm 6.2 + S2I 1.0): zones showed the exchange 3.4 us (32 x 1 KB
+writes + 16 increments) and the local copies; v2 (CBs on the shards, face-0 exchange, 4 output tiles per acquire)
+7.3 us (exchange 2.0, add + squares + partial sum 1.5, r 0.7, output 0.5); HiFi2 / LoFi measured no faster and lose
+accuracy. Lesson: a runtime-arg layout change must move every index (v2 first hung: the NOC-coordinate loop still
+started at the old index, so the semaphore increments went to the wrong cores).
+GDN head (same step): the compute's unpack thread waited ~5 us for the gated-norm weight (the reader sent it after
+zeroing + three params-tile DRAM reads) before the first gates; now the weight is waited for before the first gated norm
+only and sent after the first unit's state, k is zeroed before the q / k gather and v after: head b1 31.1 -> 27.8 us, b8
+34.3 -> 31.5 us (op test unchanged). The gate SFPU now runs on the row-0 iterations only (no measurable change: the
+gates were waiting, not computing; at B=32 a warm unit's gates take 0.9 us).
+Ornith layer profile (p300x2, GDN + attention ops on), step 5 -> step 6: GDN layer b1 153.4 -> 145.5 us (mixer 71.1 ->
+66.5, boundary + MoE 82.3 -> 79.0), b8 278.5 -> 268.8; attention layer b1 148.1 -> 144.6, b8 269.9 -> 270.7. Layer tests
+34 / 34. Applied to ornith_fusion / q122_fusion / coder_next_fusion (fbf834d99f9 / 1d436cf9402 / 1f4c6bf6f73). Served
+(`runs/step6_ms.sh`, vs attnms_f1) and ports (`runs/ports_step6.sh`) running.
+Remaining b1 GDN layer (145.5 us): boundary 50 (2 x all-reduce 9-11, 2 x addnorm 7.8, router matmul 8.3 on 9 cores
+(1 MB bf16, ~15 GB/s per core), 2 x I2S 1.3, add 1.6), mixer 66.5 (in-proj 19, conv 7.8, head ~28, out-proj 8), MoE 28.
+Next candidates: the head's q / k norms (6.9 us of hi / lo splits per unit) and splitting a unit's V columns across
+cores at low batch (b1 runs 8 of 110 cores); the router matmul with K split across more cores; cross-layer add + norm
+(layer L's h + all-reduce and layer L+1's first norm in one call: -2 us per layer).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
