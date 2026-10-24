@@ -82,6 +82,8 @@ column above, about 0.5 % faster than stage 11; the release scorecard measures i
 | 128 / 128, 16 users | 178.03 ms | 172.03 ms |
 | 1024 / 256, 16 users | 180.72 ms | 173.93 ms |
 
+Release scorecard on the r6 bundle (shipped defaults, row buckets off; `scorecard_r6/`): 128 / 128 at 1 user 74.80 ms, at 16 users 177.01 ms (77.8 output tokens/s); 1024 / 256 at 16 users 178.83 ms. TTFT 270 ms (128), 4.93 s (8,192), 93.5 s (131,072).
+
 Scope of these numbers:
 - **All timed steps were all-short** (positions about 300, every row in the 16,384 bucket). Such a step runs the
   plain narrow selection (range (0, 0)).
@@ -103,10 +105,10 @@ Scripts `scripts/s12/gate.sh` and `gate2.sh` (review #2: a base with `ag_persist
 | --- | --- |
 | stage-11 paths (`GLM53_MC=ag_persistent=0 GLM53_SENT_ONCE=0`) vs cd (sentinel + ag_persistent), prompt 2,100 | bit-identical, top-1 29 / 29 (`base_mc0_vs_cd.json`) |
 | same, prompt 4,000 | bit-identical, top-1 29 / 29 (`base_mc0_vs_cd.json`) |
-| ag_persistent on, sentinel off vs cd, prompts 2,100 / 4,000 (first gate run: its base left `DEFAULT_MC` on) | bit-identical, top-1 29 / 29 (`base_vs_cd.json`) |
-| base vs all (+ row buckets), prompt 2,100 | **not identical**, top-1 24 / 29, max \|d\| 0.9 .. 7.9 logits |
-| base vs all, prompt 4,000 | **not identical**, top-1 23 / 29, max \|d\| 0.3 .. 11.2 logits |
-| 1 slot (p300x2-long / -1m shape), ag_persistent off vs on, 966 teacher-forced rows | bit-identical |
+| ag_persistent on, sentinel off vs cd, prompts 2,100 / 4,000 (first gate run: its base left `DEFAULT_MC` on) | bit-identical, top-1 29 / 29 (`logs/s12/gate.chain.log`; gate2 overwrote that run's `base_vs_cd.json`) |
+| base vs all (+ row buckets), prompt 2,100 | **not identical**, top-1 24 / 29, max \|d\| 0.13 .. 14.2 logits |
+| base vs all, prompt 4,000 | **not identical**, top-1 23 / 29, max \|d\| 0.28 .. 13.7 logits |
+| 1 slot (4,096-token build: replicated layout, no DSA buckets), ag_persistent off vs on, 966 teacher-forced rows | bit-identical. The p300x2-long bucket path and the sharded p300x2-1m layout are covered by the served release checks (scorecard p300x2-long smokes, p300x2-1m verify), not by this A/B |
 | prompt 12,000 | not run: the test's 1,024-block shared pool is too small for 16 x 12,000 tokens |
 
 Cause: on the device, the bf16 top-k selects a different top-512 set at a different width
@@ -138,7 +140,7 @@ costs (`tt/dsa_buckets.py` `row_dsa_trace_estimate`, `serving_profiles.json` `tr
 
 | Item | Estimate | Effort |
 | --- | --- | --- |
-| Per-width whole-stack decode traces (Qwen `decode_buckets`): run KDA / DSA / mHC / router / shared expert on the active prefix only | 1 user: ~52-55 ms per step (from 69.9 ms) | 3-5 days; trace region per width must be measured first |
+| Per-width whole-stack decode traces (Qwen `decode_buckets`): run KDA / DSA / mHC / router / shared expert on the active prefix only | 1 user: ~52-55 ms per step (from 74.8 ms shipped) | 3-5 days; trace region per width must be measured first |
 | Single-read MoE for 8-16 rows that is exact vs the pairs path (each active expert read once per step) | 16 users: ~77 -> ~120 tok/s | 3-5 days; must stay bit-exact for served batch invariance |
 
 These estimates come from the gap report (made before stage 12), not from a measurement. The 1-user estimate
