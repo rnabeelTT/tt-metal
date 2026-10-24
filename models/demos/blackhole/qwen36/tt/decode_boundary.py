@@ -108,6 +108,27 @@ class DecodeBoundary:
         """A [1, 1, B, H] partial sum -> the all-reduce input layout (BFP8, residual shards)."""
         return ttnn.to_memory_config(x, self.mc, dtype=ttnn.bfloat8_b)
 
+    def all_reduce(self, partial, site):
+        """Sum over devices of partial ([1, 1, B, H] per-device partial sums) in the residual layout (bf16); frees
+        partial."""
+        p = self.to_partial(partial)
+        if p.buffer_address() != partial.buffer_address():
+            ttnn.deallocate(partial)
+        scratch, sem = self.sites[site]
+        red = ttnn.experimental.all_reduce_async(
+            p,
+            scratch,
+            cluster_axis=1,
+            mesh_device=self.mesh_device,
+            multi_device_global_semaphore=sem,
+            memory_config=self.mc,
+            dtype=ttnn.bfloat16,
+            topology=self.topology,
+            num_links=1,
+        )
+        ttnn.deallocate(p)
+        return red
+
     def reduce_add(self, partial, residual, site):
         """residual + sum over devices of partial ([1, 1, B, H] per-device partial sums); frees partial."""
         p = self.to_partial(partial)
