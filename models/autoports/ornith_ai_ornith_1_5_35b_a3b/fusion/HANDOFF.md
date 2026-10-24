@@ -630,6 +630,30 @@ mul, RoPE twice with transposes / slices / concat, 2 FillPad (4.7 each), 2 paged
 mul), concat heads, reshard). A fused attention-decode op (QKV out -> norm + RoPE + cache write + gate, then SDPA, then
 o-proj) targets ~50 us: ~1 ms off Ornith's 7.2 ms MTP-off token (10 attention layers; the 122B has 12, Coder-Next 12).
 
+### Step 5: attention decode ops (`QWEN35_ATTN_DECODE_OPS=1`, models/demos/blackhole/qwen36/tt/attn_decode)
+
+Two generic ops around the existing QKV matmul / paged cache update / paged SDPA decode / o-proj:
+- prep: from the fused [q | k | v | gate] projection row of each user, the heads as tile rows (the layout SDPA decode
+  and paged_update_cache read): q / k RMSNorm x (1 + w) + rotate-half RoPE on the first 64 dims, v copied, sigmoid gate.
+  Work items (user, q / k+v / gate) over 3 B cores. q goes to DRAM (SDPA decode takes an interleaved Q from DRAM only),
+  k / v straight into the KV-update height shard (no reshard), gate L1. Persistent per-width outputs (one set per model).
+- post: SDPA output x gate, each head row written into the user's row of the o-proj input (one item per user).
+Replaces 41 ops (b1) with 7. Bugs / lessons:
+- Blackhole DRAM reads keep the address modulo 64: a 32-byte row read into a destination at another offset modulo 64
+  lands wrong (odd heads came back zero). The reader reads the 576-byte 64-aligned span holding a row's two face rows
+  into scratch and copies the rows on the RISC (non-volatile unrolled copy: 4.7 -> ~1 us per q item vs volatile).
+- QKV output in L1 instead of DRAM: no gain at b1 (7 us reads either way), 2x slower at b8 (L1 bank contention).
+- Compute on the FPU (row-broadcast (1 + w), r from a matmul of the squares with an all-ones tile so r fills every
+  column, DST-reuse multiply; RoPE products as row broadcasts): 10.2 -> 4.4 us per q item; gate sigmoid on rows 0..15
+  only (VectorMode::R): 4.1 -> 2.25 us. Rows other than the heads are never zeroed (never read downstream).
+Op test (`tests/test_attn_decode_ops.py`, tp4 / tp2 / q122 shapes, B = 1 / 2 / 8 / 32): q / k PCC 0.999997 (TF32 FPU
+operands; max error 5-9e-3 of max, bf16 rounding is 3.9e-3), v exact, gate 0.999996, post 0.999999.
+Ornith attention layer tests 17 / 17 (decode vs HF 0.99994 on vs 0.99994 off). Per-layer profile (p300x2, b1 traced,
+GDN ops on): attention mixer 155.5 -> 67.1 us (QKV matmul 17.0, prep 10.6, 2 x cache update 3.1, SDPA 12.4, post 4.7,
+o-proj 8.1), layer 237 -> 148 us; b8 mixer 196 -> 80 us, layer 387 -> 270 us. MTP verify (rows mode) keeps the op
+chain. Cherry-picked to coder_next_fusion and q122_fusion. Served A/B: `runs/attn_ms.sh` (Ornith, MTP off),
+`runs/ports_attn.sh` (Coder-Next / 122B layer tests, profiles, served A/B).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
