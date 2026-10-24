@@ -41,7 +41,7 @@ def block(key, text):
 def main():
     profiles = sys.argv[1:] or ["p300x2", "p300"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), "card_cnv2", "card_cnfast", *profiles],
+        [sys.executable, str(TOOLS / "card_tables.py"), "card_cnv2", "card_cnnew", *profiles],
         check=True, capture_output=True, text=True,
         env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "blackhole-fast"},
     ).stdout
