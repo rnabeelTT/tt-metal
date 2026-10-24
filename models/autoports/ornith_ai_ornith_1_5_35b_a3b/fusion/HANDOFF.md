@@ -515,6 +515,13 @@ weighting / sum.
   (op tests, decode vs HF fused off / on, package, card rows both bundles on p300x2 + evals HumanEval / MBPP / GSM8K /
   IFEval, p300 (the default profile), p150 single-user + greedy (one die: all 128 experts in one window)). Card sources
   in `qwen3_coder_30b_a3b/fusion_card` (c30_fusion 13ff64c527e): fill the eval placeholders, `python assemble.py`.
+- Measured 2026-10-24 (both bundles as shipped, `runs/card_c30{new,pub}_*`): decode PCC vs HF 6/6 fused off and on;
+  op test ep rows 1..32 PCC >= 0.99996. Single user, 128/128 TPOT published -> fast: p300x2 20.2 -> 10.5 ms (49.5 ->
+  95.5 tok/s real text, +93 %), p300 26.3 -> 11.6 ms (38.0 -> 86.3 tok/s, +127 %), p150 36.6 -> 12.9 ms (27.2 -> 76.9
+  tok/s, +183 %). 32 users 1024/256 p300x2: 37.8 -> 23.8 ms, 26.5 -> 42.0 tok/s/u, 617 -> 853 total (+38 %); p300 49.8 ->
+  32.9 ms, 479 -> 645 total. TTFT flat or lower on every row (p300x2 128k 12.70 -> 12.64 s). Evals p300x2 (full sets,
+  published -> fast): HumanEval 0.939 / 0.933, MBPP 0.802 / 0.786, GSM8K strict 0.919 / 0.914, IFEval prompt strict
+  0.795 / 0.813; greedy coherent, parts from the published after 17-1074 chars. Card filled (c30_fusion e3baa73624a).
 
 ### Step 4 design: GDN decode mixer (op survey 2026-10-24, before the gdn_prof numbers)
 Shipped decode mixer (`qwen36/tt/gdn/tp.py:1584-1737` forward_decode, recurrence in
@@ -544,13 +551,15 @@ Design (generic_op kernels in models/, like moe_decode, so every tree and image 
   gating and norm-gate outside, hi/lo-split fp32 matmuls); the gdn_prof chain (POC on/off, b1/b8) gives their per-op
   times. MTP verify keeps the unfused rows path (step 7) - the layouts above keep it working.
 
-Implemented (2026-10-24, not yet run on device): `models/demos/blackhole/qwen36/tt/gdn_decode/` (ops.py: GdnDecode
+Implemented (2026-10-24): `models/demos/blackhole/qwen36/tt/gdn_decode/` (ops.py: GdnDecode
 conv + head programs; kernels conv_* / head_*), wired into `TPGatedDeltaNet.forward_decode` behind
 `QWEN35_GDN_DECODE_OPS=1` (gdn/tp.py `_gdn_ops_setup` / `_forward_decode_ops`; bf16 state, needs the tile-padded fused
 qkvzab weight and the 1D decode matmuls; per-width output buffers 1..32 built in the constructor). Op test
 `tests/test_gdn_decode_ops.py` (tp4 / tp2 / q122 shapes, B 1 / 2 / 8 / 32, vs torch FP32: conv shift exact, users >= B
 untouched, conv / y / state PCC). `runs/gdn_op.sh` (queued after the Coder-30B chain): op test -> Ornith GDN layer
 tests ops 0 / 1 -> per-layer profile b1 / b8 ops 0 / 1.
+Op test on device (2026-10-24, first run, all pass): tp4 / tp2 / q122, B 1 / 2 / 8 / 32, two trials each: conv PCC
+1.000000 and shift exact, y PCC >= 0.999998 (max err <= 2.9e-3 of max), state PCC 0.999999 (max err <= 3.1e-3 of max).
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
@@ -567,7 +576,7 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 ### Run queue (2026-10-23)
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
-q122_longctx, q122_gpqa (done; 122B published), c30_chain (running), glm_chain, ornith_p150_chain, cn_hub_smoke,
+q122_longctx, q122_gpqa (done; 122B published), c30_chain (done; publishing), glm_chain, ornith_p150_chain, cn_hub_smoke,
 q122_hub_smoke, then the MTP sweeps; gdn_op (step 4 op test + layer tests + profile) runs right after c30_chain
 (ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
 multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
