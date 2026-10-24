@@ -653,6 +653,13 @@ GDN ops on): attention mixer 155.5 -> 67.1 us (QKV matmul 17.0, prep 10.6, 2 x c
 o-proj 8.1), layer 237 -> 148 us; b8 mixer 196 -> 80 us, layer 387 -> 270 us. MTP verify (rows mode) keeps the op
 chain. Cherry-picked to coder_next_fusion and q122_fusion. Served A/B: `runs/attn_ms.sh` (Ornith, MTP off),
 `runs/ports_attn.sh` (Coder-Next / 122B layer tests, profiles, served A/B).
+Served A/B 2026-10-24 (`runs/attn_ms.sh`: Ornith p300x2, published fast image + gdn_wip models/, fast env + GDN ops,
+MTP off; `runs/attnms_f*`), attention ops off -> on: 1 user 7.22 -> 6.48 ms (138.5 -> 154.3 tok/s); real text 149.3 ->
+166.5 tok/s (+11.5 %, median prompt 138.3 -> 153.5); 2K / 8K / 16K input 7.29 / 7.40 / 7.58 -> 6.62 / 6.72 / 6.89 ms;
+8 users 11.83 -> 10.89 ms (84.5 -> 91.8 tok/s/u, 676 -> 735 total); 32 users 29.03 -> 26.93 ms (34.4 -> 37.1 tok/s/u,
+1102 -> 1188 total); TTFT unchanged (128 121 / 119, 2K 338 / 338, 8K 1300 / 1283, 16K 2624 / 2622 ms); garble 9.43 /
+8.04 (max 15.3 / 16.2); greedy coherent (parts at chars 22 / 122, equally good wording).
+Ornith MTP off vs the published blackhole-fast (MTP on, 86.5 tok/s real text): 166.5 tok/s, 1.92x.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
