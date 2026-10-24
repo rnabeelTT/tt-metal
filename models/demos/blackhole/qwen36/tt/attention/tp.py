@@ -160,6 +160,86 @@ class TPAttention:
         self.paged_k = None
         self.paged_v = None
         self.use_paged = False
+        # Decode head prep / output gate ops (QWEN35_ATTN_DECODE_OPS=1, ../attn_decode/ops.py): the q / k RMSNorm + RoPE,
+        # v and the sigmoid gate from the fused QKV output in one generic_op (heads as tile rows, the layout SDPA decode and
+        # paged_update_cache read), and the SDPA output x gate written straight into the o-proj input rows in another.
+        # Paged KV, the fused [q|k|v|gate] weight and the 1D decode matmuls only; MTP rows mode keeps the op chain.
+        self._attn_ops = None
+        if (
+            os.environ.get("QWEN35_ATTN_DECODE_OPS", "0") == "1"
+            and self._fused_qkv
+            and getattr(args, "proj_1d_decode", False)
+            and getattr(args, "out_proj_1d_decode", None) in (None, True)
+            and not getattr(args, "fuse_out_mmrs_decode", False)
+            and self.rope_dim == 64
+            and self.HD % tpc.TILE_SIZE == 0
+            and self.B <= tpc.TILE_SIZE
+        ):
+            self._attn_ops_setup()
+
+    def _attn_ops_setup(self):
+        """The model-wide prep / post ops (cached on args: shared output buffers, one set per width) and this layer's
+        (1 + w) norm constant, built here, before any trace."""
+        from models.demos.blackhole.qwen36.tt.attn_decode.ops import AttnDecodePost, AttnDecodePrep
+
+        cache = getattr(self.args, "_qwen36_attn_ops", None)
+        if cache is None:
+            cache = {}
+            self.args._qwen36_attn_ops = cache
+        key = (id(self.mesh), self.NH, self.NKV, self.HD, self.rope_dim, self.B)
+        if key not in cache:
+            prep = AttnDecodePrep(self.mesh, self.NH, self.NKV, self.HD, self.rope_dim, max_batch=self.B)
+            post = AttnDecodePost(self.mesh, self.NH, self.HD)
+            for w in (1, 2, 4, 8, 16, 32):
+                if w <= self.B:
+                    prep.outputs(w)
+                    post.output(w)
+            cache[key] = (prep, post)
+        self._attn_ops = cache[key]
+        self._attn_const = self._attn_ops[0].prepare(self.tw["q_norm"], self.tw["k_norm"])
+
+    def _forward_decode_ops(self, x, cur_pos_tt, cos_tt, sin_tt, page_table, partial):
+        prep, post = self._attn_ops
+        B = x.shape[-2]
+        qkv = tpc.matmul_1d_decode(
+            x, self.tw["wqkv_fused"], self.args.attn_qkv_decode_1d_progcfg, self.compute_cfg,
+            out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+        q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B)  # persistent buffers: not deallocated
+        ttnn.deallocate(qkv)
+        _kv_cfg = self._kv_shard_cfg(B)
+        k_sh = ttnn.to_memory_config(k, _kv_cfg)
+        v_sh = ttnn.to_memory_config(v, _kv_cfg)
+        ttnn.experimental.paged_update_cache(self.paged_k, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+        ttnn.experimental.paged_update_cache(self.paged_v, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+        ttnn.deallocate(k_sh)
+        ttnn.deallocate(v_sh)
+        grid = self.mesh.compute_with_storage_grid_size()
+        cfg = ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=(grid.x, grid.y), exp_approx_mode=False,
+            q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
+            k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),
+        )
+        attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
+            q, self.paged_k, self.paged_v, page_table_tensor=page_table, cur_pos_tensor=cur_pos_tt, scale=self.scale,
+            program_config=cfg, memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        y = post(attn_out, gate, B)
+        ttnn.deallocate(attn_out)
+        # y is the persistent per-width L1 buffer: the o-proj matmul is called directly (matmul_1d_decode frees its
+        # input's L1 "copy", which for an L1-interleaved input is the input itself)
+        part = ttnn.linear(
+            y, self.tw["wo"], compute_kernel_config=self.compute_cfg, program_config=self.args.attn_wo_decode_1d_progcfg,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
+        )
+        part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
+        if partial:
+            return part
+        return tt_all_reduce(
+            part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
 
     def set_paged_kv_cache(self, k_cache, v_cache):
         """Attach an externally-allocated paged KV cache (one call after allocate_kv_caches)."""
@@ -550,6 +630,15 @@ class TPAttention:
         B = x.shape[-2]
         _L1 = ttnn.L1_MEMORY_CONFIG  # keep decode head-prep + attn output L1-resident
         use_paged = self.use_paged and page_table is not None
+        if (
+            self._attn_ops is not None
+            and use_paged
+            and not getattr(self, "kv_only", False)
+            and not (getattr(self, "rows_kv_write", False) and B > 1)
+        ):
+            if len(x.shape) == 3:
+                x = ttnn.reshape(x, (1, 1, x.shape[-2], x.shape[-1]))
+            return self._forward_decode_ops(x, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
         if not use_paged and self.k_caches is None:
             self.reset_state()
 
