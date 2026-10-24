@@ -25,7 +25,7 @@ import ttnn
 from models.demos.blackhole.qwen36.tt.gdn_decode.ops import TILE, _bits, _cb, _ndev, _per_device, _range_set, _rt
 
 KERNEL_DIR = Path(__file__).parent / "kernels"
-SEM = 0
+SEM, SEM_READY = 0, 1
 
 
 class AddNorm:
@@ -74,7 +74,7 @@ class AddNorm:
         rd_ct = [T, int(add), 0, 1, 2, 3] + ttnn.TensorAccessorArgs(gamma).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(self.ones).get_compile_time_args()
         rd_rt = [[gamma.buffer_address(), self.ones.buffer_address(), i] for i in range(NC)]
-        wr_ct = [T, NC, SEM, 6, 7, 9, faces] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        wr_ct = [T, NC, SEM, 6, 7, 9, faces, SEM_READY] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
         wr_rt = [[out.buffer_address(), i] + self.noc for i in range(NC)]
         fid = getattr(ttnn.MathFidelity, os.environ.get("QWEN35_ADDNORM_FIDELITY", "HiFi4"))
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=fid, fp32_dest_acc_en=True,
@@ -96,8 +96,9 @@ class AddNorm:
                 runtime_args=_rt(self.cores, [[] for _ in range(NC)]), config=cfg,
             ),
         ]
-        sem = ttnn.SemaphoreDescriptor(id=SEM, core_type=ttnn.CoreType.WORKER, core_ranges=self.crs, initial_value=0)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[sem], cbs=cbs)
+        sems = [ttnn.SemaphoreDescriptor(id=i, core_type=ttnn.CoreType.WORKER, core_ranges=self.crs, initial_value=0)
+                for i in (SEM, SEM_READY)]
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
         io = [residual] + ([reduced] if add else []) + [gamma, self.ones] + ([h] if add else []) + [out]
         ttnn.generic_op(io, program)
         return h, out
