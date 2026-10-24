@@ -516,6 +516,34 @@ weighting / sum.
   IFEval, p300 (the default profile), p150 single-user + greedy (one die: all 128 experts in one window)). Card sources
   in `qwen3_coder_30b_a3b/fusion_card` (c30_fusion 13ff64c527e): fill the eval placeholders, `python assemble.py`.
 
+### Step 4 design: GDN decode mixer (op survey 2026-10-24, before the gdn_prof numbers)
+Shipped decode mixer (`qwen36/tt/gdn/tp.py:1584-1737` forward_decode, recurrence in
+`experimental/gated_attention_gated_deltanet/tt/ttnn_delta_rule_ops.py:397-524`), TP4 b1, device 0
+(`runs/prof/fused3`): 46 ops, 161 us kernel + 45 us gaps = 207 us. In-proj 20.4 (qkvzab [2048, 3136] bfp8, 63 % of
+DRAM BW), out-proj 7.9 ([1024, 2048] bfp8); everything between is overhead around ~1 us of real state traffic (8 heads x
+128 x 128 bf16 read + write): 4 slices 7.8, conv shift copies 8.7, conv mul/mac/silu 25.5 (12 of it gaps), q/k/v slices
+12.3, one-hot GQA expand matmuls 23.1, reshapes ~40, gating 9.1, q/k L2 norms on 1 core 10.5, recurrence 9 ops 36.1,
+gated norm + silu(z) 11.3. TP2 b1: 272 us; TP2 b16: ~456 us kernel, the recurrence ~208 of it (state moved by 4 ops).
+
+Design (generic_op kernels in models/, like moe_decode, so every tree and image picks them up without a ttnn rebuild):
+- **Op A, conv:** split over the qkv width tiles (64 at TP4) x all B rows (conv_states rows of different users share
+  tiles, so the split must be by tile column, as the POC's kda_decode_conv does). Reads the in-proj output (L1), the 3
+  carried rows, taps; writes silu(conv) for q/k/v and shifts conv_states[1..3] in place (layout unchanged: the MTP
+  pass's rebuild_conv_carry / commit_scan / snapshot read it).
+- **Op B, head core:** one unit per (user, value head) (B x Nv: 8 at b1 TP4, 256 at b32): GQA by index (k head =
+  v head / 2, no expand matmul), q/k L2 norm (fold scale), beta = sigmoid(b), g = -exp(A) softplus(a + dt_bias),
+  recurrence on the head's own [128, 128] state tiles (bf16 in DRAM, FP32 in DST; option fp32 state), o, then the
+  per-head RMSNorm x silu(z) (the norm is over the 128-wide head, local to the unit), written in the out-proj input
+  layout. rec_state layout unchanged ([Bmax, Nv, 128, 128] TILE).
+- In-proj and out-proj stay ttnn matmuls (later: tune toward full BW, ~13 + ~5 us; or fold the in-proj into op A's
+  reader).
+- Projected TP4 b1: 20 + 8 (projections) + A ~4 + B ~8 + 4 gaps ~= 42 us vs 207 -> ~5 ms off the 14 ms token (30 GDN
+  layers). Multi-row: B's work scales with the state bytes (b32 TP4: 8 MB read + write, ~40 us), vs the 4-op state
+  shuffle today. The same kernels serve the 122B (Nv 16 per die at TP4, hidden 3072) and Qwen3-Coder-Next (also GDN).
+- Starting point: the POC kernels (ttnn experimental kda recurrent_decode / kda_decode_conv: fp32-only, DRAM-only,
+  gating and norm-gate outside, hi/lo-split fp32 matmuls); the gdn_prof chain (POC on/off, b1/b8) gives their per-op
+  times. MTP verify keeps the unfused rows path (step 7) - the layouts above keep it working.
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
