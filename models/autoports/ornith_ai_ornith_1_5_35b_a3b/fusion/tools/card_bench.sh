@@ -13,7 +13,7 @@ docker rm -f $C >/dev/null 2>&1
 tt-model serve "$B" --profile $P --detach --port 20000 --no-update-check ${SERVE_ARGS:+-- $SERVE_ARGS} > $RUNS/$L/serve.log 2>&1
 t0=$(date +%s)
 until curl -sf localhost:20000/v1/models >/dev/null; do
-  docker ps --format '{{.Names}}' | grep -qx $C || { echo "$L: server died"; docker logs $C 2>&1 | grep -v DEBUG | tail -n 30 > $RUNS/$L/boot_fail.log; exit 1; }
+  docker ps --format '{{.Names}}' | grep -qx $C || { echo "$L: server died"; docker logs $C 2>&1 | grep -v DEBUG | grep -v riscv | tail -n 300 > $RUNS/$L/boot_fail.log; exit 1; }
   sleep 10
 done
 echo "$L: $C up after $(( $(date +%s) - t0 )) s"
