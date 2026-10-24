@@ -94,13 +94,11 @@ void kernel_main() {
     const auto s_par = TensorAccessor(params_args, params_addr, F32_TILE);
     const auto s_state = TensorAccessor(state_args, state_addr, BF_TILE);
 
-    // the double-buffered row CBs: zero once (the gathers only ever write row 0 / column 0)
-    zero(get_write_ptr(cb_q), 2 * Kt * F32_TILE);
-    zero(get_write_ptr(cb_k), 2 * Kt * F32_TILE);
-    zero(get_write_ptr(cb_v), 2 * Vt * F32_TILE);
-    zero(get_write_ptr(cb_gin), 2 * 4 * F32_TILE);
-    zero(get_write_ptr(cb_z), 2 * Vt * BF_TILE);
-    zero(get_write_ptr(cb_w), Vt * F32_TILE);
+    // k and v must be zero outside row 0 (the rank-1 update k^T (x) u sums over all rows; 0 * garbage could be NaN). The
+    // other gathered tiles only reach rows / elements the compute never reads back. Zero the first slot of the two
+    // (double-buffered) here, the second one after the first unit is handed over.
+    zero(get_write_ptr(cb_k), Kt * F32_TILE);
+    zero(get_write_ptr(cb_v), Vt * F32_TILE);
     // params: [1, 1, 32, 128] FP32 per die (row 0: -exp(A_log) per head, row 1: dt_bias, row 2: gated-norm weight)
     const uint32_t scr = get_write_ptr(cb_scr);
     for (uint32_t t = 0; t < 4; ++t) {
@@ -144,6 +142,9 @@ void kernel_main() {
         gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
         gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
         noc_async_read_barrier();
+        // scr is rewritten by the NOC for every unit and read here by the RISC: drop the cached lines (Blackhole L1
+        // cache), or a unit can read an earlier unit's a / b
+        invalidate_l1_cache();
         volatile tt_l1_ptr uint16_t* ab = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(scr);
         const uint32_t a_bits = static_cast<uint32_t>(ab[h & 15]) << 16;
         const uint32_t b_bits = static_cast<uint32_t>(ab[32 + (h & 15)]) << 16;
@@ -157,6 +158,10 @@ void kernel_main() {
         cb_push_back(cb_v, Vt);
         cb_push_back(cb_z, Vt);
         cb_push_back(cb_gin, 4);
+        if (w == 0) {
+            zero(get_write_ptr(cb_k), Kt * F32_TILE);  // the second slot (the S read barrier below covers it)
+            zero(get_write_ptr(cb_v), Vt * F32_TILE);
+        }
 
         cb_reserve_back(cb_S, kv);
         const uint32_t s = get_write_ptr(cb_S);
