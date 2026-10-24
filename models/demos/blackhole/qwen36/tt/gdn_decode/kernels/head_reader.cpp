@@ -8,11 +8,13 @@
 //   * the gate inputs as column 0 of four FP32 tiles (every row): a, dt_bias, -exp(A_log), b (a / b are the in-proj's
 //     columns a_tile * 32 + h / b_tile * 32 + h; dt_bias / -exp(A_log) from the per-die params tensor);
 //   * the head's Kt x Vt state tiles ([Bmax, Nv, Dk, Dv] TILE, DRAM).
-// Once per launch: the gated-norm weight row (params row 2) into Vt FP32 tiles, persistent (the compute never pops it).
+// Once per launch (after the first unit's state): the gated-norm weight row (params row 2) into Vt FP32 tiles, persistent
+// (the compute pops it after the last unit).
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 namespace {
 constexpr uint32_t F32_FACE = 1024, F32_ROW = 64;  // fp32 face / face row bytes
@@ -94,75 +96,76 @@ void kernel_main() {
     const auto s_par = TensorAccessor(params_args, params_addr, F32_TILE);
     const auto s_state = TensorAccessor(state_args, state_addr, BF_TILE);
 
+    static_assert(Nv <= 32, "the per-head params sit in params tile 0");
+    const uint32_t scr = get_write_ptr(cb_scr);
+    volatile tt_l1_ptr uint32_t* par = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr);
+    // the gate inputs of a unit as column 0 of four FP32 tiles (a / b: the bf16 face rows holding column h of the a / b
+    // tiles, row b, read to scr + 4 tiles; dt_bias / -exp(A_log) from params tile 0 at scr)
+    auto push_gates = [&](uint32_t b, uint32_t h) {
+        const uint32_t ab_l1 = scr + 4 * F32_TILE;
+        noc_async_read(s_proj.get_noc_addr(a_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), ab_l1, BF_ROW);
+        noc_async_read(s_proj.get_noc_addr(b_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), ab_l1 + 64, BF_ROW);
+        cb_reserve_back(cb_gin, 4);
+        noc_async_read_barrier();
+        // scr is rewritten by the NOC for every unit and read here by the RISC: drop the cached lines (Blackhole L1
+        // cache), or a unit can read an earlier unit's a / b
+        invalidate_l1_cache();
+        volatile tt_l1_ptr uint16_t* ab = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(ab_l1);
+        const uint32_t a_bits = static_cast<uint32_t>(ab[h & 15]) << 16;
+        const uint32_t b_bits = static_cast<uint32_t>(ab[32 + (h & 15)]) << 16;
+        const uint32_t g = get_write_ptr(cb_gin);
+        fill_col0(g, a_bits);
+        fill_col0(g + F32_TILE, par[f32_idx(1, h)]);
+        fill_col0(g + 2 * F32_TILE, par[f32_idx(0, h)]);
+        fill_col0(g + 3 * F32_TILE, b_bits);
+        cb_push_back(cb_gin, 4);
+    };
+    // params: [1, 1, 32, 128] FP32 per die (row 0: -exp(A_log) per head, row 1: dt_bias, row 2: gated-norm weight).
+    // Tile 0 and the first unit's gate inputs go first (the compute starts on them), then the zeroing and the weight.
+    {
+        DeviceZoneScopedN("rd_gates0");
+        noc_async_read(s_par.get_noc_addr(0), scr, F32_TILE);
+        push_gates(start / Nv, start % Nv);
+    }
     // k and v must be zero outside row 0 (the rank-1 update k^T (x) u sums over all rows; 0 * garbage could be NaN). The
     // other gathered tiles only reach rows / elements the compute never reads back. Zero the first slot of the two
     // (double-buffered) here, the second one after the first unit is handed over.
     zero(get_write_ptr(cb_k), Kt * F32_TILE);
-    zero(get_write_ptr(cb_v), Vt * F32_TILE);
-    // params: [1, 1, 32, 128] FP32 per die (row 0: -exp(A_log) per head, row 1: dt_bias, row 2: gated-norm weight)
-    const uint32_t scr = get_write_ptr(cb_scr);
-    for (uint32_t t = 0; t < 4; ++t) {
-        noc_async_read(s_par.get_noc_addr(t), scr + t * F32_TILE, F32_TILE);
-    }
     noc_async_read_barrier();
-    volatile tt_l1_ptr uint32_t* par = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr);
-    uint32_t neg_a[Nv], dt[Nv];
-    for (uint32_t h = 0; h < Nv; ++h) {
-        neg_a[h] = par[(h >> 5) * 1024 + f32_idx(0, h & 31)];
-        dt[h] = par[(h >> 5) * 1024 + f32_idx(1, h & 31)];
-    }
-    {
-        cb_reserve_back(cb_w, Vt);
-        volatile tt_l1_ptr uint32_t* w = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_w));
-        for (uint32_t j = 0; j < Vt; ++j) {
-            for (uint32_t col = 0; col < 32; ++col) {
-                w[j * 1024 + f32_idx(0, col)] = par[j * 1024 + f32_idx(2, col)];
-            }
-        }
-        cb_push_back(cb_w, Vt);
-    }
+    bool v_zeroed = false;
 
     for (uint32_t w = 0; w < count; ++w) {
         const uint32_t n = start + w;
         const uint32_t b = n / Nv;
         const uint32_t h = n - b * Nv;
         const uint32_t hk = h / GQA;
+        if (w > 0) {
+            push_gates(b, h);
+        }
 
-        // a / b: the bf16 face rows holding columns h of the a / b tiles, row b
-        // the gate inputs first (the compute starts on them while the rows below are in flight)
-        noc_async_read(s_proj.get_noc_addr(a_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), scr, BF_ROW);
-        noc_async_read(s_proj.get_noc_addr(b_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), scr + 64, BF_ROW);
-        cb_reserve_back(cb_gin, 4);
-        noc_async_read_barrier();
-        // scr is rewritten by the NOC for every unit and read here by the RISC: drop the cached lines (Blackhole L1
-        // cache), or a unit can read an earlier unit's a / b
-        invalidate_l1_cache();
-        volatile tt_l1_ptr uint16_t* ab = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(scr);
-        const uint32_t a_bits = static_cast<uint32_t>(ab[h & 15]) << 16;
-        const uint32_t b_bits = static_cast<uint32_t>(ab[32 + (h & 15)]) << 16;
-        const uint32_t g = get_write_ptr(cb_gin);
-        fill_col0(g, a_bits);
-        fill_col0(g + F32_TILE, dt[h]);
-        fill_col0(g + 2 * F32_TILE, neg_a[h]);
-        fill_col0(g + 3 * F32_TILE, b_bits);
-        cb_push_back(cb_gin, 4);
-
+        DeviceZoneScopedN("rd_unit");
+        // q / k first (the norms start on them), then v / z (v's first slot zeroed on the way)
         cb_reserve_back(cb_q, Kt);
         cb_reserve_back(cb_k, Kt);
-        cb_reserve_back(cb_v, Vt);
-        cb_reserve_back(cb_z, Vt);
         gather_row(s_conv, get_write_ptr(cb_q), hk * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
         gather_row(s_conv, get_write_ptr(cb_k), (Nk + hk) * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
+        if (!v_zeroed) {
+            zero(get_write_ptr(cb_v), Vt * F32_TILE);
+        }
         noc_async_read_barrier();
         cb_push_back(cb_q, Kt);
         cb_push_back(cb_k, Kt);
+        cb_reserve_back(cb_v, Vt);
+        cb_reserve_back(cb_z, Vt);
+        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
+        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
+        noc_async_read_barrier();
         cb_push_back(cb_v, Vt);
         cb_push_back(cb_z, Vt);
         if (w == 0) {
-            zero(get_write_ptr(cb_k), Kt * F32_TILE);  // the second slot (the S read barrier below covers it)
+            zero(get_write_ptr(cb_k), Kt * F32_TILE);  // the second slots (the S read barrier below covers them)
             zero(get_write_ptr(cb_v), Vt * F32_TILE);
+            v_zeroed = true;
         }
 
         cb_reserve_back(cb_S, kv);
@@ -170,7 +173,24 @@ void kernel_main() {
         for (uint32_t i = 0; i < kv; ++i) {
             noc_async_read(s_state.get_noc_addr(n * kv + i), s + i * BF_TILE, BF_TILE);
         }
+        if (w == 0) {
+            // the gated-norm weight (params row 2), read once: the compute needs it last
+            for (uint32_t t = 1; t < 4; ++t) {
+                noc_async_read(s_par.get_noc_addr(t), scr + t * F32_TILE, F32_TILE);
+            }
+        }
         noc_async_read_barrier();
         cb_push_back(cb_S, kv);
+        if (w == 0) {
+            invalidate_l1_cache();
+            cb_reserve_back(cb_w, Vt);
+            volatile tt_l1_ptr uint32_t* wt = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_w));
+            for (uint32_t j = 0; j < Vt; ++j) {
+                for (uint32_t col = 0; col < 32; ++col) {
+                    wt[j * 1024 + f32_idx(0, col)] = par[j * 1024 + f32_idx(2, col)];
+                }
+            }
+            cb_push_back(cb_w, Vt);
+        }
     }
 }
