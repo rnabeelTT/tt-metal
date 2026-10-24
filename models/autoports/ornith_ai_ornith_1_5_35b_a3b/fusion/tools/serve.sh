@@ -14,7 +14,7 @@ CACHE=$HOME/.cache/tt-model/${CACHE_NAME:-ornith-1.5-35b-a3b-v2}
 case $PROFILE in
   p300)   MESH=P300;   VIS="--env TT_VISIBLE_DEVICES=${DEVS:-0,1}"; FAB=FABRIC_1D; QV=1; MM='{"image": 4, "video": 0}';;
   p300x2) MESH=P300x2; VIS="";                             FAB=FABRIC_1D; QV=1; MM='{"image": 4, "video": 0}';;
-  p150)   MESH=P150;   VIS="--env TT_VISIBLE_DEVICES=0";   FAB=DISABLED;  QV=0; MM='{"image": 0, "video": 0}';;
+  p150)   MESH=P150;   VIS="--env TT_VISIBLE_DEVICES=${DEVS:-0} --env TT_MESH_GRAPH_DESC_PATH=/opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto";   FAB=DISABLED;  QV=0; MM='{"image": 0, "video": 0}';;
 esac
 case $MODEL_ID in  # each bundle's serving recipe (its tt-model.yaml)
   ornith-ai/*) MENV="--env QWEN35_BATCHED_PREFILL=0 --env QWEN35_VISION=$QV --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304"
