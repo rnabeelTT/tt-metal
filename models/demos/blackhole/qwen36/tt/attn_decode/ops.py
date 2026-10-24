@@ -39,7 +39,7 @@ KERNEL_DIR = Path(__file__).parent / "kernels"
 NUM_CBS = 64
 # prep program CB ids (kernels/prep_compute.cpp)
 CB = dict(x=0, w=1, cs=2, ones=3, sq=4, r=5, xn=6, out=7, v=8, scr=9)
-UNPACK_FP32 = ("w", "r", "xn")  # sq is a matmul operand (Default unpack)
+UNPACK_FP32 = ()  # every FP32 CB is an FPU operand (Default unpack)
 
 
 def _dm(source, cores, ct, rt, riscv, noc):
@@ -58,14 +58,13 @@ class AttnDecodePrep:
         self.mesh = mesh_device
         self.NH, self.NKV, self.HD, self.rd = num_heads, num_kv_heads, head_dim, rope_dim
         assert head_dim % TILE == 0 and rope_dim == 2 * TILE, "rotate-half over the first two tiles of a head"
-        assert num_heads <= TILE and num_kv_heads <= TILE and max_batch <= TILE
+        assert num_heads <= 16 and num_kv_heads <= 16 and max_batch <= TILE  # the gate sigmoid covers rows 0..15
         self.Ht = head_dim // TILE
         self.eps = eps
         self.max_batch = max_batch
         self._rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if _ndev(mesh_device) > 1 else {}
-        # matmul operand for the per-row sum of squares: column 0 all ones
-        ones = torch.zeros(1, 1, TILE, TILE)
-        ones[..., :, 0] = 1.0
+        # matmul operand for the per-row sum of squares: all ones (every column of the product = the row's sum)
+        ones = torch.ones(1, 1, TILE, TILE)
         self.ones = ttnn.from_torch(ones, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device,
                                     memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
         self._out = {}
@@ -82,12 +81,16 @@ class AttnDecodePrep:
         return ttnn.from_torch(w, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
                                memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
 
-    def outputs(self, B):
-        """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, L1 interleaved, persistent."""
+    def outputs(self, B, kv_memcfg=None):
+        """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, persistent. q DRAM interleaved (SDPA decode takes an
+        interleaved Q from DRAM only), gate L1 interleaved, k / v ``kv_memcfg`` (the paged_update_cache height shard, one
+        user's tile row per core) or L1 interleaved."""
         if B not in self._out:
-            mk = lambda h: ttnn.from_torch(torch.zeros(1, B, h, self.HD), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-                                           device=self.mesh, memory_config=ttnn.L1_MEMORY_CONFIG, **self._rep)
-            self._out[B] = (mk(self.NH), mk(self.NKV), mk(self.NKV), mk(self.NH))
+            mk = lambda h, mc: ttnn.from_torch(torch.zeros(1, B, h, self.HD), dtype=ttnn.bfloat16,
+                                               layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=mc, **self._rep)
+            kv = kv_memcfg or ttnn.L1_MEMORY_CONFIG
+            self._out[B] = (mk(self.NH, ttnn.DRAM_MEMORY_CONFIG), mk(self.NKV, kv), mk(self.NKV, kv),
+                            mk(self.NH, ttnn.L1_MEMORY_CONFIG))
         return self._out[B]
 
     def __call__(self, qkv, cos, sin, const, B):
@@ -101,7 +104,7 @@ class AttnDecodePrep:
         Ht = self.Ht
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
         sizes = dict(x=(bf, 2 * Ht), w=(f32, 2 * Ht), cs=(bf, 8), ones=(bf, 1), sq=(f32, Ht), r=(f32, 1), xn=(f32, 2),
-                     out=(bf, 2 * Ht), v=(bf, 2 * Ht), scr=(bf, -(-self.NH * Ht * 128 // 2048)))
+                     out=(bf, 2 * Ht), v=(bf, 2 * Ht), scr=(bf, -(-self.NH * Ht * 640 // 2048)))  # 640-byte slot per (head, tile): prep_reader SLOT
         cbs = [_cb(cr, CB[n], dt, tb, c) for n, ((dt, tb), c) in sizes.items()]
         wq = qkv.shape[-1] // TILE  # tiles per qkv row
         rd_ct = [Ht, self.NH, self.NKV, wq, CB["x"], CB["w"], CB["cs"], CB["ones"], CB["v"], CB["scr"]]
