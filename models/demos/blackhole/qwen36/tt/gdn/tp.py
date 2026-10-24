@@ -326,6 +326,21 @@ class TPGatedDeltaNet:
         self._fused_decode = os.environ.get("QWEN35_GDN_FUSED_DECODE", "0") == "1" and self.K == 4
         if self._fused_decode:
             self._fused_decode_consts()
+        # Decode mixer ops (QWEN35_GDN_DECODE_OPS=1, ../gdn_decode/ops.py): the conv and the whole head step (gating,
+        # norms, delta rule on the bf16 state, gated RMSNorm x silu(z)) as two generic_op programs between the in- and
+        # out-projections. Needs the fused [qkv|z|a|b] weight with tile-padded a / b and the 1D decode matmuls.
+        self._gdn_ops = None
+        if (
+            os.environ.get("QWEN35_GDN_DECODE_OPS", "0") == "1"
+            and self.K == 4
+            and not self._fused_decode
+            and self._fuse_ab
+            and getattr(self.args, "gdn_ab_tile_pad", False)
+            and getattr(self.args, "proj_1d_decode", False)
+            and not getattr(self.args, "fuse_out_mmrs_decode", False)
+            and self.B <= tpc.TILE_SIZE
+        ):
+            self._gdn_ops_setup()
 
     def reset_state(self, batch_size=None):
         # batch_size is accepted so this matches Qwen36GatedDeltaNet.reset_state, which
@@ -1488,6 +1503,53 @@ class TPGatedDeltaNet:
             cache[key] = masks
         self._active_masks = cache[key]
 
+    def _gdn_ops_setup(self):
+        """The model-wide GdnDecode (cached on args: shared conv_out / output buffers, one per width) and this layer's
+        constants (conv taps as full tiles, the per-die params tile), uploaded here, before any trace."""
+        from models.demos.blackhole.qwen36.tt.gdn_decode.ops import GdnDecode
+
+        cache = getattr(self.args, "_qwen36_gdn_ops", None)
+        if cache is None:
+            cache = {}
+            self.args._qwen36_gdn_ops = cache
+        P = int(self.tw["qkvz"].shape[-1])
+        key = (id(self.mesh), self.Nk, self.Nv, self.Dk, self.Dv, P, self.B)
+        if key not in cache:
+            ops = GdnDecode(self.mesh, self.Nk, self.Nv, self.Dk, self.Dv, P, float(self.scale), max_batch=self.B)
+            for w in (1, 2, 4, 8, 16, 32):
+                if w <= self.B:
+                    ops.output(w)
+            cache[key] = ops
+        self._gdn_ops = cache[key]
+        self._gdn_taps, self._gdn_params = self._gdn_ops.prepare(
+            self.tw["conv_taps"], self.tw["neg_exp_A"], self.tw["dt_bias"], self.tw["norm_w"]
+        )
+
+    def _forward_decode_ops(self, x, partial=False):
+        if self.conv_states is None:
+            self.reset_state()
+        if len(x.shape) == 4:
+            x = ttnn.reshape(x, (1, x.shape[-2], x.shape[-1]))
+        B = x.shape[-2]
+        proj = tpc.matmul_1d_decode(
+            x, self.tw["qkvz"], self.args.gdn_qkvz_decode_1d_progcfg, self.cfg, out_memory_config=ttnn.L1_MEMORY_CONFIG
+        )
+        y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B)
+        ttnn.deallocate(proj)
+        part = self._row_proj(y, self.tw["out"])  # y is the persistent per-width buffer: not deallocated
+        part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
+        if partial:
+            return part
+        return tt_all_reduce(
+            part,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+
     def _forward_decode_fused(self, x, partial=False):
         tw, Nk, Nv, Dv = self.tw, self.Nk, self.Nv, self.Dv
         Bmax = self.B
@@ -1585,6 +1647,8 @@ class TPGatedDeltaNet:
         """partial: return the out-projection's per-device partial sum instead of the reduce-scattered output."""
         if self._fused_decode:
             return self._forward_decode_fused(x, partial)
+        if self._gdn_ops is not None:
+            return self._forward_decode_ops(x, partial)
         tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
         Bmax = self.B
         _L1 = ttnn.L1_MEMORY_CONFIG  # keep decode conv→recurrence→norm/gate chain L1-resident
