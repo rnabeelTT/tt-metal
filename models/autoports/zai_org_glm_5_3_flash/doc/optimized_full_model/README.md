@@ -402,7 +402,9 @@ during the re-test was the generator teardown leak, now fixed: `Glm53Generator.t
 Stage 12 (d86fe3c874d): **adopted** with ping-pong buffers, one per (call site, shape, dtype, layer parity). A buffer
 read at layer L is written again at layer L+2, after every die issued its layer-(L+1) collectives. `DEFAULT_MC` now
 sets `ag_persistent=True`. Full model, 16 slots: bit-identical logits on 29 rows, token-out 75.0 -> 74.6 ms (1 active)
-and 177.8 -> 176.8 ms (16 active), trace region -2.6 MiB (`../decode_perf_stage12/README.md`).
+and 177.8 -> 176.8 ms (16 active), measured together with the once-per-step MoE sentinel; the -2.6 MiB trace-region
+saving comes from the sentinel (the capture is the same size with ag_persistent on or off;
+`../decode_perf_stage12/README.md`).
 
 The 2026-10-17 record, superseded: the persistent all-gather was taken in stage-5 round 6 and reverted on 2026-10-18
 after `s7_final_s1_agp1_TFfail.log` (teacher forcing 14 / 32 / 90) and `s7_det_reduced_s8.log` (8 slots not repeating).

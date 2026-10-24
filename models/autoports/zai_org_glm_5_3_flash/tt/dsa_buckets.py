@@ -22,8 +22,8 @@ Prefill (eager): a sparse chunk scores W_b keys (indexer_score_dsa kv_len = W_b)
 chunk's last position, and ranks only those columns.
 
 GLM53_DSA_BUCKETS: "auto" (default; on for max_seq_len >= GLM53_DSA_BUCKET_MIN_T) | "0" / "off" (the full-width code,
-unchanged) | comma list of bucket contexts (forces it on). 1 slot: the bucket of the batch's largest position. S >= 2
-(stage 12, GLM53_DSA_ROW_BUCKETS=1 default): per-row buckets (DsaBuckets row mode, contexts GLM53_DSA_ROW_CONTEXTS,
+unchanged) | comma list of bucket contexts (forces it on). 1 slot: the bucket of the batch's largest position. S >= 2:
+no auto DSA buckets by default; stage 12, opt-in GLM53_DSA_ROW_BUCKETS=1: per-row buckets (DsaBuckets row mode, contexts GLM53_DSA_ROW_CONTEXTS,
 default 16,384 then T): every row selects at its own bucket width, so the selection does not depend on the other slots.
 Every bucket program is compiled by install() (eager, before any capture).
 """

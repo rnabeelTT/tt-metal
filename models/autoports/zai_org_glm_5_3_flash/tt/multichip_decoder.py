@@ -207,7 +207,8 @@ DEFAULT_MC = MCOpts(
     mix_chunks_decode=16,
     # stage 12: ON with per-layer-parity (ping-pong) buffers (MeshCCL). Full model, 16 slots, 243,712 (with the
     # once-per-step MoE sentinel): bit-identical to the shipped path on 29 logit rows (1 and 16 active), token-out
-    # 75.0 -> 74.6 ms at 1 active, 177.8 -> 176.8 ms at 16, trace region -2.6 MiB (artifacts/s12/ab1). History: the
+    # 75.0 -> 74.6 ms at 1 active, 177.8 -> 176.8 ms at 16 (artifacts/s12/ab1; the -2.6 MiB trace region is the
+    # sentinel's: the decode capture is the same size with ag_persistent on or off). History: the
     # 2026-10-17 rejection was the logits-pad lifetime bug (46b2a5a601d); stage 7 kept it off for the start-barrier
     # race of one buffer per site shared by all 45 layers, which the parity buffers remove.
     ag_persistent=True,

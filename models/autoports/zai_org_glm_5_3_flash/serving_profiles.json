@@ -174,7 +174,7 @@
   },
   "decode_no_dsa_source": {
    "16": "stage 12, 83.9 MiB: ag_persistent on, MoE buckets 1/2/4/8/16 (~/glm53-flash-bringup/logs/s12/dec_ab1.log)",
-   "32": "stage 10 t21, 101.6 MiB, trace_bytes_model_plus_greedy_sampler of doc/vllm/capacity/s10_s32/capacity.json: ag_persistent off, per-layer MoE sentinel, sampler included (the check adds it again). An upper bound for the stage-12 code (ag_persistent took -2.6 MiB at 16 slots)"
+   "32": "stage 10 t21, 101.6 MiB, trace_bytes_model_plus_greedy_sampler of doc/vllm/capacity/s10_s32/capacity.json: ag_persistent off, per-layer MoE sentinel, sampler included (the check adds it again). An upper bound for the stage-12 code (the once-per-step MoE sentinel took -2.6 MiB at 16 slots)"
   },
   "sampler_bytes": 838861,
   "sampler_source": "stage-9 G9 probe: about 0.8 MiB of sampler traces (tt/dsa_buckets.py trace-region model)"

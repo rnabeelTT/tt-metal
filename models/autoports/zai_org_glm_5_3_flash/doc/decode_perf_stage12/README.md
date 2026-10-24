@@ -59,7 +59,7 @@ All paths are under `~/glm53-flash-bringup/`.
 Correctness (dense regime, positions about 300; for the sparse regime see the gate below):
 - base vs cd and base vs all: bit-identical logits, top-1 29 / 29 rows (1 and 16 active). These positions are below
   `DENSE_MAX_POSITION` (2,050), where DSA reads every pool, so this check does not test the selection.
-- Served invariance (p300x2): identical tokens solo, next to a long request, and solo again (`solo_repeat_equal`,
+- Served invariance (p300x2, measured with the opt-in row buckets on, `served_inv_rowbk.json`): identical tokens solo, next to a long request, and solo again (`solo_repeat_equal`,
   `concurrent_equal`, `long_still_decoding`: true). Commit ad427402ba2 also reports a standalone check: a target
   request alone vs next to a 70K filler was bit-identical, with the mixed bucket range included.
 
@@ -71,7 +71,7 @@ Standalone token-out (16-slot build, 243,712, shared 1,024-block pool):
 | ---: | ---: | ---: | ---: |
 | 1 | 75.0 ms | 74.6 ms | 69.9 ms |
 | 16 | 177.8 ms | 176.8 ms | 172.1 ms |
-| Trace region | 86.6 MiB | 83.9 MiB | 88.1 MiB |
+| Trace region | 86.6 MiB | 83.9 MiB (the sentinel's saving; ag_persistent does not change it) | 88.1 MiB |
 
 Served TPOT, p300x2, greedy, same host load (stage 12 = with the opt-in row buckets on; the shipped default is the cd
 column above, about 0.5 % faster than stage 11; the release scorecard measures it):
@@ -95,14 +95,15 @@ Scope of these numbers:
 
 ## Sparse-regime gate
 
-Script `scripts/s12/gate.sh` on the committed code (snapshot of ad427402ba2), 16 slots, 243,712, 1 and 16 active,
+Scripts `scripts/s12/gate.sh` and `gate2.sh` (review #2: a base with `ag_persistent` really off) on the committed code (snapshot of ad427402ba2), 16 slots, 243,712, 1 and 16 active,
 6 greedy decode steps after the prompt. Evidence: `artifacts/s12/gate_p{2100,4000}/base_vs_{cd,all}.json`,
 `artifacts/s12/gate_tf1_{off,on}.json`, `logs/s12/gate.chain.log`.
 
 | Check | Result |
 | --- | --- |
-| base vs cd (sentinel + ag_persistent), prompt 2,100 | bit-identical, top-1 29 / 29 |
-| base vs cd, prompt 4,000 | bit-identical, top-1 29 / 29 |
+| stage-11 paths (`GLM53_MC=ag_persistent=0 GLM53_SENT_ONCE=0`) vs cd (sentinel + ag_persistent), prompt 2,100 | bit-identical, top-1 29 / 29 (`base_mc0_vs_cd.json`) |
+| same, prompt 4,000 | bit-identical, top-1 29 / 29 (`base_mc0_vs_cd.json`) |
+| ag_persistent on, sentinel off vs cd, prompts 2,100 / 4,000 (first gate run: its base left `DEFAULT_MC` on) | bit-identical, top-1 29 / 29 (`base_vs_cd.json`) |
 | base vs all (+ row buckets), prompt 2,100 | **not identical**, top-1 24 / 29, max \|d\| 0.9 .. 7.9 logits |
 | base vs all, prompt 4,000 | **not identical**, top-1 23 / 29, max \|d\| 0.3 .. 11.2 logits |
 | 1 slot (p300x2-long / -1m shape), ag_persistent off vs on, 966 teacher-forced rows | bit-identical |
@@ -141,5 +142,5 @@ costs (`tt/dsa_buckets.py` `row_dsa_trace_estimate`, `serving_profiles.json` `tr
 | Single-read MoE for 8-16 rows that is exact vs the pairs path (each active expert read once per step) | 16 users: ~77 -> ~120 tok/s | 3-5 days; must stay bit-exact for served batch invariance |
 
 These estimates come from the gap report (made before stage 12), not from a measurement. The 1-user estimate
-included the full-width DSA selection, which stage 12 already removed at short positions; the remaining saving can
-be smaller.
+included the full-width DSA selection. The opt-in row buckets remove it at short positions; with them on, the
+remaining saving can be smaller.

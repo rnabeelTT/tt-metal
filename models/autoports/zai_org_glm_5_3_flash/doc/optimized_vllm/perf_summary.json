@@ -17,7 +17,7 @@
       "decode_tps_user": 14.3,
       "evidence": "doc/vllm/evidence/final/p300x2_vllm_benchmark.json",
       "code": "0a2663d0b6b (holds for 0bcf89f7fd6 at <= 16 slots, see README)",
-      "shipped_code_note": "measured with the multi-slot DSA decode buckets on; the shipped code turns them off at S >= 2 (served batch invariance, t23 / t24). Estimated +4 to +5 ms TPOT, not measured; the final scorecard run measures it. Stage 12 (ad427402ba2): per-row DSA buckets on again at S >= 2 (batch invariant), doc/decode_perf_stage12/README.md"
+      "shipped_code_note": "measured with the multi-slot DSA decode buckets on; the shipped code turns them off at S >= 2 (served batch invariance, t23 / t24). Estimated +4 to +5 ms TPOT, not measured; the final scorecard run measures it. Stage 12 (ad427402ba2): per-row DSA buckets at S >= 2 (batch invariant) are opt-in only (GLM53_DSA_ROW_BUCKETS=1; default off since a6ceb44bd5b), so these numbers do not describe the shipped default; doc/decode_perf_stage12/README.md"
     }
   },
   "ci_serving_burst": {
