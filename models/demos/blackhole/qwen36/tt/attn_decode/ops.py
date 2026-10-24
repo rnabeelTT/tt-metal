@@ -13,7 +13,7 @@ heads of a user as the rows of its tiles (the layout SDPA decode and paged_updat
 
 Work items: (user, part) with part 0 = q, 1 = k + v, 2 = gate. cos / sin are the decode tables [1, B, 1, rope_dim]
 (TILE, row 0 of each user's tile row). Constants (``prepare``): one [2, 1, 32, HD] FP32 tensor, row 0 of slice 0 = 1 +
-w_q, of slice 1 = 1 + w_k. Outputs are persistent per width (``outputs``; build every width before trace capture).
+w_q, of slice 1 = 1 + w_k. Outputs are allocated per call (``outputs``); the caller frees them.
 """
 
 from __future__ import annotations
@@ -51,8 +51,7 @@ def _dm(source, cores, ct, rt, riscv, noc):
 
 
 class AttnDecodePrep:
-    """One instance per model (shape set); the layers share its output buffers (each layer consumes them before the next
-    writes them)."""
+    """One instance per model (shape set)."""
 
     def __init__(self, mesh_device, num_heads, num_kv_heads, head_dim, rope_dim, max_batch=32, eps=1e-6):
         self.mesh = mesh_device
@@ -67,7 +66,6 @@ class AttnDecodePrep:
         ones = torch.ones(1, 1, TILE, TILE)
         self.ones = ttnn.from_torch(ones, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device,
                                     memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
-        self._out = {}
 
     def prepare(self, q_norm_w, k_norm_w):
         """(1 + w) norm weights as ttnn tensors or torch vectors of HD -> the [2, 1, 32, HD] FP32 constant."""
@@ -82,19 +80,18 @@ class AttnDecodePrep:
                                memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
 
     def outputs(self, B, kv_memcfg=None):
-        """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, persistent. q DRAM interleaved (SDPA decode takes an
-        interleaved Q from DRAM only), gate L1 interleaved, k / v ``kv_memcfg`` (the paged_update_cache height shard, one
-        user's tile row per core) or L1 interleaved."""
-        if B not in self._out:
-            mk = lambda h, mc: ttnn.from_torch(torch.zeros(1, B, h, self.HD), dtype=ttnn.bfloat16,
-                                               layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=mc, **self._rep)
-            kv = kv_memcfg or ttnn.L1_MEMORY_CONFIG
-            self._out[B] = (mk(self.NH, ttnn.DRAM_MEMORY_CONFIG), mk(self.NKV, kv), mk(self.NKV, kv),
-                            mk(self.NH, ttnn.L1_MEMORY_CONFIG))
-        return self._out[B]
+        """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, freshly allocated (the caller frees them; persistent
+        per-width buffers pinned enough L1, the k / v shards most, to clash with the 122B prefill matmul CBs). q DRAM
+        interleaved (SDPA decode takes an interleaved Q from DRAM only), gate L1 interleaved, k / v ``kv_memcfg`` (the
+        paged_update_cache height shard, one user's tile row per core) or L1 interleaved."""
+        mk = lambda h, mc: ttnn.allocate_tensor_on_device(ttnn.Shape([1, B, h, self.HD]), ttnn.bfloat16,
+                                                          ttnn.TILE_LAYOUT, self.mesh, mc)
+        kv = kv_memcfg or ttnn.L1_MEMORY_CONFIG
+        return (mk(self.NH, ttnn.DRAM_MEMORY_CONFIG), mk(self.NKV, kv), mk(self.NKV, kv),
+                mk(self.NH, ttnn.L1_MEMORY_CONFIG))
 
-    def __call__(self, qkv, cos, sin, const, B):
-        q, k, v, g = self.outputs(B)
+    def __call__(self, qkv, cos, sin, const, B, kv_memcfg=None):
+        q, k, v, g = self.outputs(B, kv_memcfg)
         units = 3 * B
         grid = self.mesh.compute_with_storage_grid_size()
         ncores = min(units, grid.x * grid.y)
@@ -139,21 +136,17 @@ class AttnDecodePrep:
 
 class AttnDecodePost:
     """attn_out ([1, B, NH, HD] from SDPA decode, heads as rows) x gate ([1, B, NH, HD], sigmoid already applied) ->
-    the user's row of the out-projection input [1, B, NH * HD] (bf16 TILE L1, persistent per width): one work item per
+    the user's row of the out-projection input [1, B, NH * HD] (bf16 TILE L1, allocated per call): one work item per
     user, the product's row h of tile j written to row b of tile h * Ht + j (two 32-byte face-row writes)."""
 
     def __init__(self, mesh_device, num_heads, head_dim):
         self.mesh = mesh_device
         self.NH, self.HD, self.Ht = num_heads, head_dim, head_dim // TILE
         self._rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if _ndev(mesh_device) > 1 else {}
-        self._y = {}
 
     def output(self, B):
-        if B not in self._y:
-            self._y[B] = ttnn.from_torch(torch.zeros(1, B, self.NH * self.HD), dtype=ttnn.bfloat16,
-                                         layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                                         memory_config=ttnn.L1_MEMORY_CONFIG, **self._rep)
-        return self._y[B]
+        return ttnn.allocate_tensor_on_device(ttnn.Shape([1, B, self.NH * self.HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                              self.mesh, ttnn.L1_MEMORY_CONFIG)
 
     def __call__(self, attn_out, gate, B):
         y = self.output(B)

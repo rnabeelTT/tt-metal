@@ -178,8 +178,8 @@ class TPAttention:
             self._attn_ops_setup()
 
     def _attn_ops_setup(self):
-        """The model-wide prep / post ops (cached on args: shared output buffers, one set per width) and this layer's
-        (1 + w) norm constant, built here, before any trace."""
+        """The model-wide prep / post ops (cached on args) and this layer's (1 + w) norm constant, built here, before any
+        trace."""
         from models.demos.blackhole.qwen36.tt.attn_decode.ops import AttnDecodePost, AttnDecodePrep
 
         cache = getattr(self.args, "_qwen36_attn_ops", None)
@@ -190,10 +190,6 @@ class TPAttention:
         if key not in cache:
             prep = AttnDecodePrep(self.mesh, self.NH, self.NKV, self.HD, self.rope_dim, max_batch=self.B)
             post = AttnDecodePost(self.mesh, self.NH, self.HD)
-            for w in (1, 2, 4, 8, 16, 32):
-                if w <= self.B:
-                    prep.outputs(w, self._kv_shard_cfg(w))
-                    post.output(w)
             cache[key] = (prep, post)
         self._attn_ops = cache[key]
         self._attn_const = self._attn_ops[0].prepare(self.tw["q_norm"], self.tw["k_norm"])
@@ -205,11 +201,13 @@ class TPAttention:
             x, self.tw["wqkv_fused"], self.args.attn_qkv_decode_1d_progcfg, self.compute_cfg,
             out_memory_config=ttnn.DRAM_MEMORY_CONFIG,  # L1 measured slower for the prep's row reads (bank contention)
         )
-        # persistent buffers (not deallocated); k / v already in the paged_update_cache height shard
-        q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B)
+        # k / v written straight into the paged_update_cache height shard
+        q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B, self._kv_shard_cfg(B))
         ttnn.deallocate(qkv)
         ttnn.experimental.paged_update_cache(self.paged_k, k, update_idxs_tensor=cur_pos_tt, page_table=page_table)
         ttnn.experimental.paged_update_cache(self.paged_v, v, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
         grid = self.mesh.compute_with_storage_grid_size()
         cfg = ttnn.SDPAProgramConfig(
             compute_with_storage_grid_size=(grid.x, grid.y), exp_approx_mode=False,
@@ -220,15 +218,16 @@ class TPAttention:
             q, self.paged_k, self.paged_v, page_table_tensor=page_table, cur_pos_tensor=cur_pos_tt, scale=self.scale,
             program_config=cfg, memory_config=ttnn.L1_MEMORY_CONFIG,
         )
+        ttnn.deallocate(q)
         y = post(attn_out, gate, B)
         ttnn.deallocate(attn_out)
-        # y is the persistent per-width L1 buffer: the o-proj matmul is called directly (matmul_1d_decode frees its
-        # input's L1 "copy", which for an L1-interleaved input is the input itself)
+        ttnn.deallocate(gate)
         part = ttnn.linear(
             y, self.tw["wo"], compute_kernel_config=self.compute_cfg, program_config=self.args.attn_wo_decode_1d_progcfg,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
             **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
         )
+        ttnn.deallocate(y)
         part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
         if partial:
             return part

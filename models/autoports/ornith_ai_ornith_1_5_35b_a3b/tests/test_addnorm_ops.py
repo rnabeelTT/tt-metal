@@ -45,7 +45,7 @@ def check(dev, H, B, add, op, trials=2):
             hg = ttnn.to_torch(h).float()[..., :B, :]
             dh = (hg - hr).abs().max().item()
             msg += f", h max diff {dh:.2e}"
-            assert dh <= 0.0625 * hr.abs().max().item() / 128, msg
+            assert dh <= hr.abs().max().item() / 128, msg  # one bf16 ulp at the largest magnitude (packer rounding)
             ttnn.deallocate(h)
         print(msg)
         assert p > 0.99999, msg

@@ -43,7 +43,7 @@ void kernel_main() {
         h.reserve_back(T);
         pack_reconfig_data_format(cb_h);
         reconfig_data_format(cb_res, cb_red);
-        add_tiles_init(cb_res, cb_red);
+        add_init(cb_res, cb_red);
         for (uint32_t t0 = 0; t0 < T; t0 += 4) {
             tile_regs_acquire();
             for (uint32_t t = t0; t < t0 + 4 && t < T; t++) {
@@ -101,7 +101,7 @@ void kernel_main() {
     pack_reconfig_data_format(cb_r);
     tile_regs_acquire();
     reconfig_data_format(cb_slots, cb_slots);
-    add_tiles_init(cb_slots, cb_slots);
+    add_init(cb_slots, cb_slots);
     add_tiles(cb_slots, cb_slots, 0, 1, 0);
     add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_slots);
     for (uint32_t s = 2; s < NC; s++) {
