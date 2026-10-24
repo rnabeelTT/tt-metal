@@ -522,6 +522,8 @@ weighting / sum.
   32.9 ms, 479 -> 645 total. TTFT flat or lower on every row (p300x2 128k 12.70 -> 12.64 s). Evals p300x2 (full sets,
   published -> fast): HumanEval 0.939 / 0.933, MBPP 0.802 / 0.786, GSM8K strict 0.919 / 0.914, IFEval prompt strict
   0.795 / 0.813; greedy coherent, parts from the published after 17-1074 chars. Card filled (c30_fusion e3baa73624a).
+- Published 2026-10-24: raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast (public, catalog), c30_fusion e3baa73624a,
+  image 8b91e57afdd3 (models/ + ttnn python identical to the measured 15bb5792c390; only the card changed).
 
 ### Step 4 design: GDN decode mixer (op survey 2026-10-24, before the gdn_prof numbers)
 Shipped decode mixer (`qwen36/tt/gdn/tp.py:1584-1737` forward_decode, recurrence in
@@ -576,7 +578,7 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 ### Run queue (2026-10-23)
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
-q122_longctx, q122_gpqa (done; 122B published), c30_chain (done; publishing), glm_chain, ornith_p150_chain, cn_hub_smoke,
+q122_longctx, q122_gpqa (done; 122B published), c30_chain (done; Coder-30B published), glm_chain, ornith_p150_chain, cn_hub_smoke,
 q122_hub_smoke, then the MTP sweeps; gdn_op (step 4 op test + layer tests + profile) runs right after c30_chain
 (ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
 multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
