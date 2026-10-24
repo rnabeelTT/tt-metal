@@ -608,6 +608,19 @@ Consequence: with the fused mixer, MTP off beats the shipped MTP-on default by +
 and MTP off also frees chunked prefill. The MTP sweeps (`ornith_mtp.sh`, `q122_mtp.sh`) now run on this build
 (models/ mounted, ops on), so the k / MTP-off decision is made against it; a fused multi-token verify is only worth it
 if the sweep shows MTP gaining on top of 149 tok/s.
+Coder-Next (coder_next_fusion: step-4 commits cherry-picked; same GDN shapes, 36 GDN layers, no MTP head), `runs/cn_gdn.sh`
+2026-10-24: layer tests 17 / 17 ops off and on (B=32 min 0.99997, B=16 0.99996); GDN layer b1 293.7 -> 162.7 us (mixer
+203.9 -> 72.1); served p300x2 (published image + this tree, fused env), ops off -> on: 1 user 14.29 -> 8.82 ms, real text
+69.8 -> 113.0 tok/s (+62 %); 2K / 8K input 14.40 / 14.55 -> 8.91 / 9.08 ms; 8 users 22.72 -> 15.76 ms; 32 users 53.95 ->
+42.22 ms (128/128), 70.15 -> 59.47 ms (1024/256); TTFT unchanged (182 / 484 / 1850 -> 175 / 485 / 1843 ms).
+Reader: gate inputs pushed first (afbafb1224c): head 32.0 -> 30.9 us per unit.
+
+Attention layer next (Ornith, b1, `runs/prof/attn_b1`): layer 237 us = boundary 44 + mixer 156 (41 ops: 124 kernel + 31.5
+gaps) + MoE 37. In the mixer only the QKV matmul (16.8), SDPA decode (13.6) and o-proj (8.1) are substantive; ~85 us is
+glue (3 slices / copies after the QKV matmul, create-heads, 3 sharded->interleaved, q / k RMSNorm on 1 core each + gate
+mul, RoPE twice with transposes / slices / concat, 2 FillPad (4.7 each), 2 paged cache updates, sigmoid gate (unary +
+mul), concat heads, reshard). A fused attention-decode op (QKV out -> norm + RoPE + cache write + gate, then SDPA, then
+o-proj) targets ~50 us: ~1 ms off Ornith's 7.2 ms MTP-off token (10 attention layers; the 122B has 12, Coder-Next 12).
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
