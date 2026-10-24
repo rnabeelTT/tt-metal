@@ -97,8 +97,7 @@ def _per_device(t):
 
 
 class GdnDecode:
-    """One instance per model (shape set); the layers share its conv_out / output buffers (each layer consumes them
-    before the next writes them)."""
+    """One instance per model (shape set)."""
 
     def __init__(self, mesh_device, num_k_heads, num_v_heads, head_k_dim, head_v_dim, proj_dim, scale, max_batch=32,
                  eps=1e-6, norm_eps=1e-6):
@@ -117,11 +116,8 @@ class GdnDecode:
         self.scale, self.eps, self.norm_eps = scale, eps, norm_eps
         self.max_batch = max_batch
         self._rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if _ndev(mesh_device) > 1 else {}
-        self.conv_out = ttnn.from_torch(
-            torch.zeros(1, 1, TILE, self.qkv), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh_device,
-            memory_config=ttnn.L1_MEMORY_CONFIG, **self._rep,
-        )
-        self._y = {}
+        self.keep_conv = False  # op test: keep the last call's conv_out (self.conv_out) instead of freeing it
+        self.conv_out = None
 
     # ---- constants ---------------------------------------------------------------------------------------------
     def prepare(self, conv_taps, neg_exp_a, dt_bias, norm_w):
@@ -145,17 +141,18 @@ class GdnDecode:
                                    memory_config=ttnn.DRAM_MEMORY_CONFIG, **shard)
         return taps_t, params_t
 
+    def _l1(self, shape, dtype):
+        """Per-call L1 buffers (conv_out, y): persistent L1 buffers lower every core's L1 ceiling, and the 2-chip prefill
+        in-proj's circular buffers then clashed with them at warmup (Ornith p300)."""
+        return ttnn.allocate_tensor_on_device(ttnn.Shape(shape), dtype, ttnn.TILE_LAYOUT, self.mesh, ttnn.L1_MEMORY_CONFIG)
+
     def output(self, B):
-        """The [1, B, Nv * Dv] bf16 out-proj input for width B (persistent: build every width before trace capture)."""
-        if B not in self._y:
-            self._y[B] = ttnn.from_torch(
-                torch.zeros(1, B, self.vdim), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                memory_config=ttnn.L1_MEMORY_CONFIG, **self._rep,
-            )
-        return self._y[B]
+        """The [1, B, Nv * Dv] bf16 out-proj input for width B (allocated per call; the caller frees it)."""
+        return self._l1([1, B, self.vdim], ttnn.bfloat16)
 
     # ---- programs -------------------------------------------------------------------------------------------------
     def conv(self, proj, st1, st2, st3, taps):
+        conv_out = self._l1([1, 1, TILE, self.qkv], ttnn.float32)
         cols = self.qkv // TILE
         ncores = min(cols, self.mesh.compute_with_storage_grid_size().x * self.mesh.compute_with_storage_grid_size().y)
         cores = _cores(self.mesh, ncores)
@@ -167,10 +164,10 @@ class GdnDecode:
         rd_ct = [cb_x, cb_h, cb_t, cols]
         for t in (proj, st1, taps):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        wr_ct = [cb_o] + ttnn.TensorAccessorArgs(self.conv_out).get_compile_time_args()
+        wr_ct = [cb_o] + ttnn.TensorAccessorArgs(conv_out).get_compile_time_args()
         rd_rt = [[proj.buffer_address(), st1.buffer_address(), st2.buffer_address(), st3.buffer_address(),
                   taps.buffer_address(), s, c] for s, c in work]
-        wr_rt = [[self.conv_out.buffer_address(), s, c] for s, c in work]
+        wr_rt = [[conv_out.buffer_address(), s, c] for s, c in work]
         kernels = [
             _dm("conv_reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             _dm("conv_writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
@@ -182,9 +179,9 @@ class GdnDecode:
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([proj, st1, st2, st3, taps, self.conv_out], program)
+        return ttnn.generic_op([proj, st1, st2, st3, taps, conv_out], program)
 
-    def head(self, proj, params, state, B):
+    def head(self, conv_out, proj, params, state, B):
         assert state.dtype == ttnn.bfloat16, "bf16 recurrent state"
         y = self.output(B)
         units = B * self.Nv
@@ -204,12 +201,12 @@ class GdnDecode:
         cbs = [_cb(cr, CB[k], dt, tb, n) for k, ((dt, tb), n) in sizes.items()]
         rd_ct = [Kt, Vt, self.Nv, self.Nk, self.qkv // TILE, self.proj_dim // TILE, self.z_tile, self.a_tile,
                  self.b_tile, CB["q"], CB["k"], CB["v"], CB["gin"], CB["S"], CB["z"], CB["w"], CB["scr"]]
-        for t in (self.conv_out, proj, params, state):
+        for t in (conv_out, proj, params, state):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [Kt, Vt, self.Nv, CB["state"], CB["y"]]
         for t in (state, y):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        rd_rt = [[self.conv_out.buffer_address(), proj.buffer_address(), params.buffer_address(),
+        rd_rt = [[conv_out.buffer_address(), proj.buffer_address(), params.buffer_address(),
                   state.buffer_address(), s, c] for s, c in work]
         wr_rt = [[state.buffer_address(), y.buffer_address(), s, c] for s, c in work]
         cp_ct = [Kt, Vt, _bits(self.eps), _bits(self.scale), _bits(self.norm_eps), _bits(1.0 / self.Dv),
@@ -229,10 +226,15 @@ class GdnDecode:
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([self.conv_out, proj, params, state, y], program)
+        return ttnn.generic_op([conv_out, proj, params, state, y], program)
 
     def __call__(self, proj, conv_states, taps, params, state, B):
         """proj: the [1, B, P] in-proj output (L1); conv_states: the layer's 4 carried-row tensors; -> the [1, B, Nv *
-        Dv] gated output (the out-proj input)."""
-        self.conv(proj, conv_states[1], conv_states[2], conv_states[3], taps)
-        return self.head(proj, params, state, B)
+        Dv] gated output (the out-proj input; a fresh L1 tensor the caller frees)."""
+        conv_out = self.conv(proj, conv_states[1], conv_states[2], conv_states[3], taps)
+        y = self.head(conv_out, proj, params, state, B)
+        if self.keep_conv:
+            self.conv_out = conv_out
+        else:
+            ttnn.deallocate(conv_out)
+        return y

@@ -99,6 +99,7 @@ def check(dev, B, Nk, Nv, label, D=128, trials=2):
     scale = D**-0.5
     rep = {}
     ops = GdnDecode(dev, Nk, Nv, D, D, P, scale)
+    ops.keep_conv = True
     for t in range(trials):
         proj = bf(torch.randn(TILE, P))
         st = [bf(torch.randn(TILE, qkv)) for _ in range(3)]
@@ -170,7 +171,7 @@ def check(dev, B, Nk, Nv, label, D=128, trials=2):
                 print(f"  n{n} (core {c} #{i}): err vs own scalars {e0:.3g}; best swaps {[(k_, round(v_, 4)) for k_, v_ in tries[:3]]}")
             print(f"{label} B={B}: {len(bad)} bad units of {B * Nv}: " + ", ".join(f"n{n}(core {pos[n][0]} #{pos[n][1]}/{pos[n][2]})" for n in bad[:40]))
         assert p_conv > 0.9999 and p_y > 0.999 and p_s > 0.9999, label
-        for t_ in [proj_t, state, taps_t, params_t] + cs + tap_t:
+        for t_ in [proj_t, state, taps_t, params_t, y, ops.conv_out] + cs + tap_t:
             ttnn.deallocate(t_)
 
 
