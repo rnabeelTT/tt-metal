@@ -163,23 +163,25 @@ void gates(uint32_t sp_beta, uint32_t sp_rbeta, uint32_t sp_thr) {
     copy_tile(cb_gin, 1, 1);  // dt_bias
     copy_tile(cb_gin, 2, 3);  // -exp(A_log)
     copy_tile(cb_gin, 3, 2);  // b
+    // only element (0, 0) is read back: the first two SFPU iterations of face 0 (they span row 0)
     add_binary_tile_init();
     MATH((SFPU_BINARY_CALL(
         DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary,
-        (APPROX, ckernel::BinaryOp::ADD, 8, DST_ACCUM_MODE, ckernel::DstRoundingMode::Default), 0, 1, 0,
+        (APPROX, ckernel::BinaryOp::ADD, ROW_ITERS, DST_ACCUM_MODE, ckernel::DstRoundingMode::Default), 0, 1, 0,
         VectorMode::None)));
     softplus_tile_init();
     MATH((SFPU_UNARY_CALL(
-        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_softplus, (APPROX, DST_ACCUM_MODE), 0, VectorMode::None, sp_beta,
-        sp_rbeta, sp_thr)));
+        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_softplus, (APPROX, DST_ACCUM_MODE, ROW_ITERS), 0, VectorMode::None,
+        sp_beta, sp_rbeta, sp_thr)));
     mul_binary_tile_init();
     MATH((SFPU_BINARY_CALL(
-        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary_mul, (APPROX, ckernel::BinaryOp::MUL, 8, DST_ACCUM_MODE),
-        0, 3, 0, VectorMode::None)));
+        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary_mul,
+        (APPROX, ckernel::BinaryOp::MUL, ROW_ITERS, DST_ACCUM_MODE), 0, 3, 0, VectorMode::None)));
     exp_tile_init();
-    exp_tile(0, VectorMode::None);
+    exp_tile<false, false, InputClamping::ClampToNegative, ROW_ITERS>(0, VectorMode::None);
     sigmoid_tile_init();
-    sigmoid_tile<VectorMode::None>(2);
+    MATH((SFPU_UNARY_CALL(
+        DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sigmoid, (false, DST_ACCUM_MODE, ROW_ITERS), 2, VectorMode::None)));
     tile_regs_commit();
     tile_regs_wait();
     pack_tile(0, cb_dcol);
@@ -519,8 +521,6 @@ void kernel_main() {
     CircularBuffer q(cb_q), k(cb_k), v(cb_v), S(cb_S), w(cb_w);
     CircularBuffer qnh(cb_qnh), qnl(cb_qnl), knh(cb_knh), knl(cb_knl), vread(cb_vread), qsd(cb_qsd);
     CircularBuffer uh(cb_uh), ul(cb_ul), kcol(cb_kcol), kcoll(cb_kcoll), kn1h(cb_kn1h), kn1l(cb_kn1l);
-    w.wait_front(Vt);
-
     for (uint32_t it = 0; it < count; it++) {
         uint32_t g[2];
         {
@@ -594,6 +594,9 @@ void kernel_main() {
         ul.pop_front(Vt);
         S.pop_front(kv);
 
+        if (it == 0) {
+            w.wait_front(Vt);  // the reader sends the gated-norm weight after the first unit's state
+        }
         {
             DeviceZoneScopedN("norm_gate");
             norm_gate<Vt>(norm_eps_bits, inv_dv_bits);

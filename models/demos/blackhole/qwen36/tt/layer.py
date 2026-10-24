@@ -7,6 +7,7 @@ based on the layer index. Both share the same RMSNorm + residual pattern and MLP
 """
 
 import math
+import os
 
 import ttnn
 from models.common.rmsnorm import RMSNorm
@@ -121,6 +122,24 @@ class Qwen36DecoderLayer:
         self.feed_forward = self._build_feed_forward(
             mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl
         )
+        # Decode add + RMSNorm op (QWEN35_ADDNORM_DECODE=1, addnorm/ops.py) on the replicated-residual boundaries: the
+        # attention norm and residual + all-reduce + ffn norm each in one program (sharded norm + add + the mixer's
+        # sharded->interleaved copy before). Built here (gamma tensors) so nothing allocates during trace capture.
+        self._addnorm = None
+        if self._decode_replicated and os.environ.get("QWEN35_ADDNORM_DECODE", "0") == "1":
+            self._addnorm_setup()
+
+    def _addnorm_setup(self):
+        from models.demos.blackhole.qwen36.tt.addnorm.ops import AddNorm
+        from models.demos.blackhole.qwen36.tt.decode_boundary import CORES
+
+        op = self.args.__dict__.get("_qwen36_addnorm")
+        if op is None:
+            op = AddNorm(self.device, self.args.dim, cores=CORES, eps=self.args.norm_eps)
+            self.args._qwen36_addnorm = op
+        self._addnorm = op
+        self._g_attn = op.prepare(self.attention_norm.norm.weight)
+        self._g_ffn = op.prepare(self.ffn_norm.norm.weight)
 
     def _build_feed_forward(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
         """Build this layer's feed-forward block.
@@ -327,6 +346,8 @@ class Qwen36DecoderLayer:
         from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 
         bnd = decode_boundary(self.args, self.device)
+        if self._addnorm is not None:
+            return self._forward_decode_addnorm(bnd, x, cos, sin, position_tensor, page_table)
         nc = bnd.norm_config
         attn_input = self.attention_norm.norm(x, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
         if self.is_full_attention:
@@ -336,6 +357,24 @@ class Qwen36DecoderLayer:
         ttnn.deallocate(attn_input)
         h = bnd.reduce_add(part, x, "mixer")
         ff_input = self.ffn_norm.norm(h, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        ff_part = self.feed_forward.forward(ff_input, mode="decode", partial=True)
+        ttnn.deallocate(ff_input)
+        out = bnd.reduce_add(ff_part, h, "mlp")
+        ttnn.deallocate(h)
+        return out
+
+    def _forward_decode_addnorm(self, bnd, x, cos, sin, position_tensor, page_table):
+        """_forward_decode_replicated with the add + RMSNorm op (addnorm/ops.py): norm(x) -> mixer -> all-reduce ->
+        (h, norm(h)) in one program -> MoE -> h + all-reduce."""
+        _, attn_input = self._addnorm(x, None, self._g_attn)
+        if self.is_full_attention:
+            part = self.attention.forward_decode(attn_input, position_tensor, cos, sin, page_table=page_table, partial=True)
+        else:
+            part = self.attention.forward_decode(attn_input, partial=True)
+        ttnn.deallocate(attn_input)
+        red = bnd.all_reduce(part, "mixer")
+        h, ff_input = self._addnorm(x, red, self._g_ffn)
+        ttnn.deallocate(red)
         ff_part = self.feed_forward.forward(ff_input, mode="decode", partial=True)
         ttnn.deallocate(ff_input)
         out = bnd.reduce_add(ff_part, h, "mlp")
