@@ -84,6 +84,14 @@ column above, about 0.5 % faster than stage 11; the release scorecard measures i
 
 Release scorecard on the r6 bundle (shipped defaults, row buckets off; `scorecard_r6/`): 128 / 128 at 1 user 74.80 ms, at 16 users 177.01 ms (77.8 output tokens/s); 1024 / 256 at 16 users 178.83 ms. TTFT 270 ms (128), 4.93 s (8,192), 93.5 s (131,072).
 
+Release verify of the r6 bundle on `p300x2-1m` (warm, 2026-10-24, `~/glm53-flash-bringup/logs/11/verify-staged-p300x2-1m-r6.chain.log`):
+- Healthy after 166 s, served `max_model_len` 1,048,576: the ping-pong all-gather buffers fit next to the full
+  1,048,704-token sharded DSA pool.
+- All smokes pass, and a 262,144-token prompt answers coherently in 582 s.
+- The script verdict is FAIL on one gate only: `SMOKE_BURST 1 ... 0/1 identical to solo greedy`. Stage 11 had the
+  same result (`doc/tti_release/RUN_NOTES.md`, warm verify p300x2-1m). It is the documented block-placement numerics
+  of the sharded layout, not a stage-12 change. Classified PASS with that exception, as in stage 11.
+
 Scope of these numbers:
 - **All timed steps were all-short** (positions about 300, every row in the 16,384 bucket). Such a step runs the
   plain narrow selection (range (0, 0)).
