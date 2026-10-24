@@ -4,17 +4,18 @@ Both bundles evaluated side by side on the same box, p300x2, through the served 
 
 | Eval | published | blackhole-fast |
 | --- | ---: | ---: |
-| HumanEval pass@1 (164) | {HE_PUB} | {HE_NEW} |
-| MBPP pass@1 (500) | {MBPP_PUB} | {MBPP_NEW} |
-| GSM8K exact match, strict (1319) | {GSM_PUB} | {GSM_NEW} |
-| IFEval prompt-level strict (541) | {IFS_PUB} | {IFS_NEW} |
-| IFEval prompt-level loose (541) | {IFL_PUB} | {IFL_NEW} |
+| HumanEval pass@1 (164) | 0.939 | 0.933 |
+| MBPP pass@1 (500) | 0.802 | 0.786 |
+| GSM8K exact match, strict (1319) | 0.919 | 0.914 |
+| IFEval prompt-level strict (541) | 0.795 | 0.813 |
+| IFEval prompt-level loose (541) | 0.839 | 0.861 |
 
-{EVAL_NOTE} The harness's stock chat variants do not work through a chat API (`humaneval_instruct` and `mbpp_instruct`
+Every difference is within one standard error of the difference (HumanEval 1 problem, MBPP 8, GSM8K 7; IFEval goes the other way). The harness's stock chat variants do not work through a chat API (`humaneval_instruct` and `mbpp_instruct`
 pre-fill the assistant turn, which the API does not continue), so HumanEval uses a chat prompt that asks for the whole
 function in one code block, and MBPP answers are scored from their first code block; `gsm8k_cot_llama` is the stock
 8-shot task with the dataset's current id. The task files are in `fusion/tools/lm_tasks` on the source branch. Greedy
-outputs of the p300 and p150 profiles were checked against the published bundle's.
+outputs on every profile were checked against the published bundle's: they stay coherent and part after 17 to 1074
+characters (the fused MoE decode rounds differently).
 
 ### Performance
 Measured 2026-10-24 on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them, p150 on one), both bundles
