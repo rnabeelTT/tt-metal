@@ -154,3 +154,10 @@ costs (`tt/dsa_buckets.py` `row_dsa_trace_estimate`, `serving_profiles.json` `tr
 These estimates come from the gap report (made before stage 12), not from a measurement. The 1-user estimate
 included the full-width DSA selection. The opt-in row buckets remove it at short positions; with them on, the
 remaining saving can be smaller.
+
+Publish (2026-10-24): the r6 bundle (image `8770c660cc9f`, built from `a6ceb44bd5b`; later commits change comments,
+docs and the model card only) is on the Hub at `raahemnabeel/glm-5.3-flash-e192-blackhole` revision `301499e6`
+(public, catalog; 876 files, no LFS mismatch). Hub verify on a freshly reset p300x2 (`tt-model pull` + `serve`,
+`~/glm53-flash-bringup/logs/11/verify-hub-p300x2-r6.chain.log`): healthy after 233 s, burst 16 of 16 identical to
+solo greedy, 262,080-token prompt answered in 219 s, VERIFY_RESULT PASS. The image was already on the host, so the
+pull checked the Hub files and did not download the image again.
