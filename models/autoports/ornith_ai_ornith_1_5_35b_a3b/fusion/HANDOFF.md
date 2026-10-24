@@ -614,6 +614,14 @@ Coder-Next (coder_next_fusion: step-4 commits cherry-picked; same GDN shapes, 36
 69.8 -> 113.0 tok/s (+62 %); 2K / 8K input 14.40 / 14.55 -> 8.91 / 9.08 ms; 8 users 22.72 -> 15.76 ms; 32 users 53.95 ->
 42.22 ms (128/128), 70.15 -> 59.47 ms (1024/256); TTFT unchanged (182 / 484 / 1850 -> 175 / 485 / 1843 ms).
 Reader: gate inputs pushed first (afbafb1224c): head 32.0 -> 30.9 us per unit.
+122B (q122_fusion, step-4 commits cherry-picked; Nv 16 per die at TP4), `runs/q122_gdn.sh` 2026-10-24: layer tests
+20 / 20 ops off and on (B=32 min 0.99719 / 0.99717); GDN layer b1 360.3 -> 211.3 us (mixer 249.3 -> 96.1); served p300x2
+(fast image + this tree), ops off -> on: MTP off 1 user 17.60 -> 11.50 ms (56.8 -> 87.0 tok/s), real text 56.7 -> 86.7
+tok/s (+53 %); MTP on (shipped) 1 user 19.53 -> 20.62 ms, real text 58.0 -> 59.5 (unchanged: verify pass unfused);
+8 users 35.88 -> 26.81 ms (27.9 -> 37.3 tok/s/u, 223 -> 298 total); 32 users 66.57 -> 48.46 ms (15.0 -> 20.6 tok/s/u,
+481 -> 660 total); TTFT unchanged (128: 254 / 257, 2K 640 / 643, 8K 2299 / 2299 ms); garble MTP off 5.92 -> 3.51 (max
+11.38 -> 8.81), MTP on 4.81 -> 5.58; greedy coherent. MTP off beats the shipped MTP-on by +46 % on real text.
+Reader gin-first cherry-picked to q122_fusion (c03bb78b2a5).
 
 Attention layer next (Ornith, b1, `runs/prof/attn_b1`): layer 237 us = boundary 44 + mixer 156 (41 ops: 124 kernel + 31.5
 gaps) + MoE 37. In the mixer only the QKV matmul (16.8), SDPA decode (13.6) and o-proj (8.1) are substantive; ~85 us is
