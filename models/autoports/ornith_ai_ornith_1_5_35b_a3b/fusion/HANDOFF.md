@@ -593,7 +593,21 @@ b1 mixer 108.1 -> 71.9 us (head op 33.2), layer 189.9 -> 154.2 us; b8 mixer 115.
 - FPU work after SFPU work on the same DST tiles needs `TTI_STALLWAIT(STALL_MATH, WAIT_SFPU)`.
 Single-user decode with MTP on runs the verify pass, which keeps the unfused GDN path: the ops help multi-user decode and
 the MTP-off profiles (-longctx); a fused multi-token verify is the follow-up if the served numbers justify it.
-Served A/B (`runs/gdn_ms.sh`, fast image + this tree, ops off vs on, MTP on and off): queued first.
+Served A/B 2026-10-24 (`runs/gdn_ms.sh`: Ornith p300x2, the published fast image + this tree, the fast env, only
+QWEN35_GDN_DECODE_OPS differs; `runs/gdnms_*`), ops off -> on:
+- MTP off, 1 user 128/128: TPOT 11.84 -> 7.22 ms (84.5 -> 138.5 tok/s, +64 %); 16K input 12.16 -> 7.65 ms; real text
+  84.2 -> 149.1 tok/s (median prompt 84.3 -> 138.1; one prompt stopped early with ops on: the translation prompt
+  says it once instead of repeating it).
+- MTP on (the shipped default; verify pass = unfused GDN): 1 user 17.29 -> 17.35 ms, real text 86.5 -> 86.1 tok/s.
+- 8 users 18.31 -> 12.24 ms (54.6 -> 81.7 tok/s/u, 437 -> 654 total, +50 %); 32 users 38.95 -> 28.99 ms (25.7 -> 34.5
+  tok/s/u, 822 -> 1104 total, +34 %).
+- TTFT unchanged: 128 166 / 168 ms, 2K 391 / 395, 8K 1365 / 1366, 16K 2622 / 2638.
+- Garble gate (t0.6, per 1k): MTP off 9.08 / 9.87 (max 14.65 / 23.37), MTP on 10.8 / 13.32 - inside the range of
+  earlier milestones; greedy parts early (chars 20-273) with equally good wording, outputs coherent.
+Consequence: with the fused mixer, MTP off beats the shipped MTP-on default by +73 % on real text (149 vs 86 tok/s),
+and MTP off also frees chunked prefill. The MTP sweeps (`ornith_mtp.sh`, `q122_mtp.sh`) now run on this build
+(models/ mounted, ops on), so the k / MTP-off decision is made against it; a fused multi-token verify is only worth it
+if the sweep shows MTP gaining on top of 149 tok/s.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
