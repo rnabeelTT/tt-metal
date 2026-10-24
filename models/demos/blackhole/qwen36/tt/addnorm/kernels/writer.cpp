@@ -21,10 +21,18 @@ void kernel_main() {
     constexpr uint32_t cb_slots = get_compile_time_arg_val(4);
     constexpr uint32_t cb_out = get_compile_time_arg_val(5);
     constexpr uint32_t FACES = get_compile_time_arg_val(6);  // 1: rows 0..15 only (face 0)
-    constexpr auto out_args = TensorAccessorArgs<7>();
+    constexpr uint32_t SEM_READY = get_compile_time_arg_val(7);
+    constexpr auto out_args = TensorAccessorArgs<8>();
     constexpr uint32_t BF_TILE = 2048, F32_TILE = 4096, F32_FACE = 1024;
     const auto s_out = TensorAccessor(out_args, out_addr, BF_TILE);
     const uint32_t sem = get_semaphore(SEM);
+    const uint32_t ready = get_semaphore(SEM_READY);
+    // this core is in the program: tell every core (a core may start while others still run the previous program, whose
+    // L1 the slot writes below would land in; semaphores are set up before any core of a program starts)
+    for (uint32_t c = 0; c < NC; ++c) {
+        const uint32_t x = get_arg_val<uint32_t>(2 + 2 * c), y = get_arg_val<uint32_t>(3 + 2 * c);
+        noc_semaphore_inc(get_noc_addr(x, y, ready), 1);
+    }
 
     DeviceZoneScopedN("wr");
     cb_reserve_back(cb_slots, NC);
@@ -32,6 +40,9 @@ void kernel_main() {
     cb_wait_front(cb_p, 1);
     {
     DeviceZoneScopedN("xchg");
+    volatile tt_l1_ptr uint32_t* ready_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ready);
+    noc_semaphore_wait(ready_ptr, NC);  // every core started: its slots are free
+    noc_semaphore_set(ready_ptr, 0);
     const uint32_t p = get_read_ptr(cb_p);
     for (uint32_t c = 0; c < NC; ++c) {
         const uint32_t x = get_arg_val<uint32_t>(2 + 2 * c), y = get_arg_val<uint32_t>(3 + 2 * c);
