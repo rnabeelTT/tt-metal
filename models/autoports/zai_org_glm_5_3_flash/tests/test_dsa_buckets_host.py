@@ -203,6 +203,7 @@ def test_trace_estimate_matches_measured_captures():
 def _row_env(monkeypatch, **env):
     for k in ("GLM53_DSA_BUCKETS", "GLM53_DSA_BUCKET_MIN_T", "GLM53_DSA_ROW_BUCKETS", "GLM53_DSA_ROW_CONTEXTS"):
         monkeypatch.delenv(k, raising=False)
+    env.setdefault("GLM53_DSA_ROW_BUCKETS", "1")  # row mode is opt-in (default off since the stage-12 sparse gate)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
 
@@ -247,9 +248,11 @@ def test_row_buckets_off_disables_row_mode_with_explicit_list(monkeypatch):
     _row_env(monkeypatch, GLM53_DSA_BUCKETS="65536", GLM53_DSA_ROW_BUCKETS="1")
     c = _ctl_widths(T, S, B.bucket_contexts(T, slots=S))
     assert c.row_mode and c.dsa_keys == [(0, 0), (0, 1), (1, 1)]
-    _row_env(monkeypatch)  # defaults: row mode on, 1 slot never in row mode
+    _row_env(monkeypatch)  # opt-in: row mode on, 1 slot never in row mode
     assert _ctl_widths(T, S, B.bucket_contexts(T, slots=S)).row_mode
     assert not _ctl_widths(T, 1, [16384, T]).row_mode
+    monkeypatch.delenv("GLM53_DSA_ROW_BUCKETS")  # default: off, S >= 2 takes no auto DSA buckets (stage 11 path)
+    assert B.bucket_contexts(T, slots=S) is None
 
 
 @pytest.mark.parametrize("bad", ["1024", "16400", "16384,3000"])

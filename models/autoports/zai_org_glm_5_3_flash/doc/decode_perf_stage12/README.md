@@ -1,6 +1,8 @@
 # GLM-5.3-Flash (E192) decode performance (stage 12)
 
-Stage 12 makes three changes to the multi-slot decode step. All three are on by default. This page gives the
+Stage 12 makes three changes to the multi-slot decode step. Changes 1 and 2 are on by default and give bit-identical
+outputs. Change 3 (per-row DSA buckets) is opt-in: the sparse-regime gate showed that it changes outputs (see
+"Sparse-regime gate"). This page gives the
 defaults, the switches, the measured numbers and their scope, and the items that stage 12 rejected or did not start.
 
 Commits: d86fe3c874d (MoE sentinel, persistent all-gather), ad427402ba2 (per-row DSA decode buckets).
@@ -36,7 +38,7 @@ Qwen3.5-122B), ranked items 2, 6 and 7.
 | --- | --- | --- |
 | `GLM53_SENT_ONCE` | `1` | `0`: the sentinel is computed in each MoE layer (stage 11). |
 | `GLM53_MC=ag_persistent=0` | `ag_persistent=True` in `DEFAULT_MC` | `0`: per-call collective outputs (stage 11). |
-| `GLM53_DSA_ROW_BUCKETS` | `1` | Any other value: no row mode. With auto buckets, S >= 2 then takes no DSA buckets (stage 11). With an explicit `GLM53_DSA_BUCKETS` list, S >= 2 then runs the batch-max bucket (not batch invariant; diagnostics only). |
+| `GLM53_DSA_ROW_BUCKETS` | `0` | `1`: row mode (opt-in, outputs differ in the sparse regime). Any other value: no row mode. With auto buckets, S >= 2 then takes no DSA buckets (stage 11). With an explicit `GLM53_DSA_BUCKETS` list, S >= 2 then runs the batch-max bucket (not batch invariant; diagnostics only). |
 | `GLM53_DSA_ROW_CONTEXTS` | `16384` | Comma list of row-mode contexts below T. Each must be a multiple of 128 and >= 2,048 (AssertionError otherwise). More widths need more trace region: see "Rejected". |
 | `GLM53_DSA_BUCKETS` | `auto` | `0` / `off`: no DSA decode buckets at any slot count. |
 | `GLM53_DSA_BUCKET_MIN_T` | `65536` | Builds with a smaller context take no DSA decode buckets. |
@@ -54,8 +56,9 @@ All paths are under `~/glm53-flash-bringup/`.
 | Router precision check (rejected item) | `artifacts/s12/router_bf16_check.log` |
 | top-k tie-order probes | `logs/s12/topk_probe.log`, `logs/s12/topk_chunk_probe.log` |
 
-Correctness:
-- base vs cd and base vs all: bit-identical logits, top-1 29 / 29 rows (1 and 16 active).
+Correctness (dense regime, positions about 300; for the sparse regime see the gate below):
+- base vs cd and base vs all: bit-identical logits, top-1 29 / 29 rows (1 and 16 active). These positions are below
+  `DENSE_MAX_POSITION` (2,050), where DSA reads every pool, so this check does not test the selection.
 - Served invariance (p300x2): identical tokens solo, next to a long request, and solo again (`solo_repeat_equal`,
   `concurrent_equal`, `long_still_decoding`: true). Commit ad427402ba2 also reports a standalone check: a target
   request alone vs next to a 70K filler was bit-identical, with the mixed bucket range included.
@@ -70,7 +73,8 @@ Standalone token-out (16-slot build, 243,712, shared 1,024-block pool):
 | 16 | 177.8 ms | 176.8 ms | 172.1 ms |
 | Trace region | 86.6 MiB | 83.9 MiB | 88.1 MiB |
 
-Served TPOT, p300x2, greedy, same host load:
+Served TPOT, p300x2, greedy, same host load (stage 12 = with the opt-in row buckets on; the shipped default is the cd
+column above, about 0.5 % faster than stage 11; the release scorecard measures it):
 
 | Workload (input / output, users) | Stage 11 | Stage 12 |
 | --- | ---: | ---: |
@@ -89,9 +93,31 @@ Scope of these numbers:
   in these runs. A faster device step or a slower host can expose it.
 - The router bf16 check and the trace sizes are p300x2 numbers. p150x4 is derived, not run.
 
-## Sparse-regime gate (pending)
+## Sparse-regime gate
 
-Placeholder. A gate with prompts of 2,100, 4,000 and 12,000 tokens is running. Its results will be added here.
+Script `scripts/s12/gate.sh` on the committed code (snapshot of ad427402ba2), 16 slots, 243,712, 1 and 16 active,
+6 greedy decode steps after the prompt. Evidence: `artifacts/s12/gate_p{2100,4000}/base_vs_{cd,all}.json`,
+`artifacts/s12/gate_tf1_{off,on}.json`, `logs/s12/gate.chain.log`.
+
+| Check | Result |
+| --- | --- |
+| base vs cd (sentinel + ag_persistent), prompt 2,100 | bit-identical, top-1 29 / 29 |
+| base vs cd, prompt 4,000 | bit-identical, top-1 29 / 29 |
+| base vs all (+ row buckets), prompt 2,100 | **not identical**, top-1 24 / 29, max \|d\| 0.9 .. 7.9 logits |
+| base vs all, prompt 4,000 | **not identical**, top-1 23 / 29, max \|d\| 0.3 .. 11.2 logits |
+| 1 slot (p300x2-long / -1m shape), ag_persistent off vs on, 966 teacher-forced rows | bit-identical |
+| prompt 12,000 | not run: the test's 1,024-block shared pool is too small for 16 x 12,000 tokens |
+
+Cause: on the device, the bf16 top-k selects a different top-512 set at a different width
+(`logs/s12/topk_probe.log`: set_equal False between 4,128 and 16,416+ pools; neither width matches the fp32 set).
+Row mode selects at 4,128 pools where stage 11 selects at the full width, so a row in the sparse regime
+(positions 2,051 .. 16,514) attends to other pools. The difference shows already at the first decode step
+(max |d| about 1 logit). Neither selection is the exact one, but the shipped evals (stage 11) ran on the full-width
+selection.
+
+Decision: row mode is opt-in (`GLM53_DSA_ROW_BUCKETS=1`, default `0`). The release keeps the full-width selection
+and ships changes 1 and 2 only. To adopt row mode later: show that its quality is equal (for example a long-context
+teacher-forcing check against the HF reference at positions 2,051 .. 16,514, or the release evals with row mode on).
 
 ## Rejected
 

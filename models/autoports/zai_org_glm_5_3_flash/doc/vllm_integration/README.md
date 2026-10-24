@@ -21,10 +21,11 @@ about 4-5 ms slower per token without the buckets. The p300x2-long and p300x2-1m
 (one slot; 1m has no buckets), but p300x2-long was measured at the old 325,632-token build. The final scorecard run
 re-measures every number on the current code.
 
-**Stage 12 (d86fe3c874d, ad427402ba2).** The multi-slot builds use DSA decode buckets again, in a per-row form: every
-active row selects at its own bucket width, so a row's selection does not depend on the other rows (batch invariant;
-`GLM53_DSA_ROW_BUCKETS=1`, default; 2 widths cut at 16,384). Stage 12 also turns on `ag_persistent` (ping-pong
-buffers) and the once-per-step MoE sentinel. Served TPOT on p300x2 at short positions: 75.32 -> 69.72 ms (1 user),
+**Stage 12 (d86fe3c874d, ad427402ba2).** Stage 12 turns on `ag_persistent` (ping-pong buffers) and the
+once-per-step MoE sentinel (bit-identical outputs). It also adds per-row DSA decode buckets for multi-slot builds
+(every active row selects at its own bucket width; batch invariant). They are opt-in (`GLM53_DSA_ROW_BUCKETS=1`,
+default off): in the sparse regime they select other pools than the full-width selection, so the outputs differ from
+the evaluated path. With them on, served TPOT on p300x2 at short positions was 75.32 -> 69.72 ms (1 user),
 178.03 -> 172.03 ms (16 users). See `../decode_perf_stage12/README.md`.
 
 ## Summary

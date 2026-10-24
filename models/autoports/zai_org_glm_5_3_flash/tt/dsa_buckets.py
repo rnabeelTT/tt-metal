@@ -42,8 +42,8 @@ from .dsa import DENSE_MAX_POSITION, KPOOL, TOPK_POOLS
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
-# Multi-slot builds (S >= 2) took no auto DSA decode buckets before stage 12. Stage 12: per-row buckets (DsaBuckets
-# row mode, GLM53_DSA_ROW_BUCKETS=1 default): every row selects at its own bucket width. History of the batch-max
+# Multi-slot builds (S >= 2) take no auto DSA decode buckets by default. Stage 12: per-row buckets (DsaBuckets row
+# mode, opt-in GLM53_DSA_ROW_BUCKETS=1): every row selects at its own bucket width. History of the batch-max
 # bucket on multi-slot builds: with mixed top-k modes (fused <= 16,384 pools, classic above; they order tied scores
 # differently) a request's selection depended on the other slots' positions (stage-10 review #1 P2-2, ticket t20).
 # Classic-only buckets (contexts from 65,536) passed the reduced proof (t22) but not the served one: a 4,100-token
@@ -55,7 +55,7 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
     """Bucket contexts (tokens) of a T-token cache, ascending, the last one T; None = bucketing off. The block-sharded
     DSA layout (tt/dsa_shard.py) takes no buckets (unmeasured there; its pool iota is shared already). slots >= 2: no
     auto buckets before stage 12 (served batch invariance, t23); stage 12: per-row buckets at the
-    GLM53_DSA_ROW_CONTEXTS contexts (GLM53_DSA_ROW_BUCKETS=1, default). An explicit GLM53_DSA_BUCKETS list still
+    GLM53_DSA_ROW_CONTEXTS contexts (opt-in GLM53_DSA_ROW_BUCKETS=1; default off). An explicit GLM53_DSA_BUCKETS list still
     applies. 1 slot starts at 4,096. Every context below T must be a multiple of 128 and >= 2,048 (AssertionError)."""
     env = os.environ.get("GLM53_DSA_BUCKETS", "auto").strip().lower()
     if env in ("0", "off", "none", "false") or sharded:
@@ -92,10 +92,12 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
 
 
 def row_buckets_on() -> bool:
-    """GLM53_DSA_ROW_BUCKETS: "1" (default) = per-row DSA buckets on multi-slot builds (DsaBuckets row mode); any other
-    value = off. Off: auto buckets give no DSA buckets at S >= 2; an explicit GLM53_DSA_BUCKETS list runs the batch-max
+    """GLM53_DSA_ROW_BUCKETS: "1" = per-row DSA buckets on multi-slot builds (DsaBuckets row mode, opt-in); any other
+    value (default "0") = off. Off by default: in the sparse regime (positions 2,051 .. 16,514) the narrow bf16 top-k
+    selects other pools than the full-width one, so outputs differ from the evaluated stage-11 path (stage-12 gate,
+    top-1 24/29 and 23/29 at prompts 2,100 / 4,000; doc/decode_perf_stage12/README.md). Off: auto buckets give no DSA buckets at S >= 2; an explicit GLM53_DSA_BUCKETS list runs the batch-max
     bucket (the code before stage 12, not batch invariant)."""
-    return os.environ.get("GLM53_DSA_ROW_BUCKETS", "1").strip() == "1"
+    return os.environ.get("GLM53_DSA_ROW_BUCKETS", "0").strip() == "1"
 
 
 # Multi-slot row-mode bucket contexts (below T; T itself is the last bucket). Few buckets: a step computes the selection
