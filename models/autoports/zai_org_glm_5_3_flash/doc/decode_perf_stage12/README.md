@@ -161,3 +161,16 @@ docs and the model card only) is on the Hub at `raahemnabeel/glm-5.3-flash-e192-
 `~/glm53-flash-bringup/logs/11/verify-hub-p300x2-r6.chain.log`): healthy after 233 s, burst 16 of 16 identical to
 solo greedy, 262,080-token prompt answered in 219 s, VERIFY_RESULT PASS. The image was already on the host, so the
 pull checked the Hub files and did not download the image again.
+
+Release accuracy gate on the shipped code (2026-10-24, snapshot of 8a51274702a, runtime code equal to the published
+image; shipped defaults, no `GLM53_*` overrides; 1 slot x 243,712, the shape of `p300x2-long`; `tf_release/`):
+
+| Reference | Teacher forcing top-1 / top-5 / top-100 | Prefill check top-1 / top-5 / top-100 |
+| --- | --- | --- |
+| p0 | 0.92 / 1.00 / 1.00 | 0.92 / 1.00 / 1.00 |
+| p1 | 0.95 / 1.00 / 1.00 | 0.95 / 1.00 / 1.00 |
+| p2 | 0.92 / 1.00 / 1.00 | 0.91 / 1.00 / 1.00 |
+
+PASS (stage-8 gate: min top-1 >= 0.91, top-5 and top-100 = 1.00). The values equal the stage-8 and stage-10 runs.
+The record's `trace_verified` is false because the check expects 2 replays per step, but the decode trace replays
+in segments (DSA and MoE point traces). The replay count (2,376 for 99 steps) equals the stage-10 run.
