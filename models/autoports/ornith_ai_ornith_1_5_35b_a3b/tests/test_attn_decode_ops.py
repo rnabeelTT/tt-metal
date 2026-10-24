@@ -69,6 +69,14 @@ def check(dev, B, NH, NKV, label, trials=2):
             p = pcc(got, r)
             e = ((got - r).abs().max() / r.abs().max()).item()
             msg.append(f"{name} pcc {p:.6f} err {e:.1e}")
+            if os.environ.get("ATTN_DEBUG") and p <= 0.9999:
+                d = (got - r).abs()
+                print(f"{label} B={B} {name}: per-user max err", d.amax((1, 2)).tolist())
+                print("  per-head", d.amax((0, 2)).tolist())
+                print("  per-tile", d.reshape(B, -1, HD // 32, 32).amax((0, 1, 3)).tolist())
+                print("  ratio got/ref per head (tile 3)", (got[..., 96:128].norm(dim=-1) / r[..., 96:128].norm(dim=-1)).tolist())
+                print("  got[0,0,:8]", got[0, 0, :8].tolist(), "ref", r[0, 0, :8].tolist())
+                print("  got[0,0,96:104]", got[0, 0, 96:104].tolist(), "ref", r[0, 0, 96:104].tolist())
             assert p > 0.9999 or (name == "v" and torch.equal(got, r)), f"{label} B={B} {name}"
         att = bf(torch.randn(1, B, NH, HD))
         att_t = ttnn.from_torch(att, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev,
