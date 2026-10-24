@@ -562,6 +562,14 @@ untouched, conv / y / state PCC). `runs/gdn_op.sh` (queued after the Coder-30B c
 tests ops 0 / 1 -> per-layer profile b1 / b8 ops 0 / 1.
 Op test on device (2026-10-24, first run, all pass): tp4 / tp2 / q122, B 1 / 2 / 8 / 32, two trials each: conv PCC
 1.000000 and shift exact, y PCC >= 0.999998 (max err <= 2.9e-3 of max), state PCC 0.999999 (max err <= 3.1e-3 of max).
+Ornith GDN layer tests, 4 dies, shipped policy, ops on (after fix 1f7dd87e04c; the first run's second decode hit a
+freed buffer: `tpc.matmul_1d_decode` deallocates its input's L1 "copy", which for the L1-interleaved persistent y IS
+y; an exception inside trace capture then hangs the test teardown, so trun timeouts must also `docker rm` the
+container): all pass at the ops-off PCC. Traced decode steps 0-3 0.999985 / 0.999988 / 0.999988 / 0.999986 (off
+0.999984 / 0.999988 / 0.999988 / 0.999985), B=32 per-user min 0.99997, B=16 0.99998, 128 decode steps 0.99997,
+real weights vs HF decode pos 37 / 333 0.99998 / 0.99999, prefill after traced decode, non-aligned continuation,
+fallback audit. (test_mc_shipped_policy_pcc fails with ops off and on alike: the HF reference module's 3072 vs 2048
+shape mismatch, a test issue.)
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
