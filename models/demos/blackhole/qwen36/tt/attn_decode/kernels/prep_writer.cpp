@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t q_addr = get_arg_val<uint32_t>(0);
@@ -34,6 +35,7 @@ void kernel_main() {
         const uint32_t b = u / 3;
         const uint32_t part = u - 3 * b;
         cb_wait_front(cb_out, Ht);
+        DeviceZoneScopedN("wr_item");
         const uint32_t o = get_read_ptr(cb_out);
         for (uint32_t j = 0; j < Ht; ++j) {
             const uint32_t page = b * Ht + j;

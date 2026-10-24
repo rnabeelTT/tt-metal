@@ -92,7 +92,8 @@ def main():
         print(f"  {'layer':9s} {'':7s} {'':6s}{'':10s}{'':14s} total {tot:6.1f} us (without the harness ops)")
         if "--ops" in sys.argv:
             step = w[2 * n : 3 * n]
-            for i in segments(step)["moe"]:
+            seg = next((a.split("=")[1] for a in sys.argv if a.startswith("--seg=")), "moe")
+            for i in segments(step)[seg]:
                 x = step[i]
                 print(
                     f"    {i:3d} {name(x)[:30]:30s} {us(x, 'DEVICE KERNEL DURATION [ns]'):6.1f} us "

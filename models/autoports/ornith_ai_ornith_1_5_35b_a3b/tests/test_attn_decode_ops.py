@@ -58,7 +58,7 @@ def check(dev, B, NH, NKV, label, trials=2):
         wq, wk = 1 + 0.2 * torch.randn(HD), 1 + 0.2 * torch.randn(HD)
         to = lambda x, mc=ttnn.DRAM_MEMORY_CONFIG: ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                                                  device=dev, memory_config=mc)
-        qkv_t = to(qkv[:, :, :B].contiguous())
+        qkv_t = to(qkv[:, :, :B].contiguous(), ttnn.L1_MEMORY_CONFIG if t % 2 else ttnn.DRAM_MEMORY_CONFIG)  # model: L1
         cos_t, sin_t = to(cos), to(sin)
         const = op.prepare(wq, wk)
         outs = op(qkv_t, cos_t, sin_t, const, B)
