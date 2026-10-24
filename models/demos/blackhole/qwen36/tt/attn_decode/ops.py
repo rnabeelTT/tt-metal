@@ -38,7 +38,7 @@ from models.demos.blackhole.qwen36.tt.gdn_decode.ops import (
 KERNEL_DIR = Path(__file__).parent / "kernels"
 NUM_CBS = 64
 # prep program CB ids (kernels/prep_compute.cpp)
-CB = dict(x=0, w=1, cs=2, ones=3, sq=4, r=5, xn=6, out=7, v=8)
+CB = dict(x=0, w=1, cs=2, ones=3, sq=4, r=5, xn=6, out=7, v=8, scr=9)
 UNPACK_FP32 = ("w", "r", "xn")  # sq is a matmul operand (Default unpack)
 
 
@@ -101,10 +101,10 @@ class AttnDecodePrep:
         Ht = self.Ht
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
         sizes = dict(x=(bf, 2 * Ht), w=(f32, 2 * Ht), cs=(bf, 8), ones=(bf, 1), sq=(f32, Ht), r=(f32, 1), xn=(f32, 2),
-                     out=(bf, 2 * Ht), v=(bf, 2 * Ht))
+                     out=(bf, 2 * Ht), v=(bf, 2 * Ht), scr=(bf, -(-self.NH * Ht * 128 // 2048)))
         cbs = [_cb(cr, CB[n], dt, tb, c) for n, ((dt, tb), c) in sizes.items()]
         wq = qkv.shape[-1] // TILE  # tiles per qkv row
-        rd_ct = [Ht, self.NH, self.NKV, wq, CB["x"], CB["w"], CB["cs"], CB["ones"], CB["v"]]
+        rd_ct = [Ht, self.NH, self.NKV, wq, CB["x"], CB["w"], CB["cs"], CB["ones"], CB["v"], CB["scr"]]
         for t in (qkv, cos, sin, const, self.ones):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [Ht, CB["out"], CB["v"]]

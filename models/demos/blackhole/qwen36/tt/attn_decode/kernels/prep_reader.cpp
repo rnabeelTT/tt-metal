@@ -28,15 +28,34 @@ inline void zero(uint32_t l1, uint32_t bytes) {
 }
 
 // heads [h0, h0 + n) of row b, starting at qkv tile column c0 (head h at c0 + (h - h0) * Ht), into rows 0..n-1 of the
-// Ht tiles at l1
+// Ht tiles at l1. A DRAM read keeps the source address modulo 64 (Blackhole), and the 32-byte rows land at other offsets
+// modulo 64: read the 64-byte aligned chunks holding the rows into scr, then copy the rows on the RISC.
 template <typename Acc>
-inline void gather_heads(const Acc& src, uint32_t l1, uint32_t wq, uint32_t b, uint32_t c0, uint32_t n, uint32_t Ht) {
+inline void gather_heads(
+    const Acc& src, uint32_t l1, uint32_t scr, uint32_t wq, uint32_t b, uint32_t c0, uint32_t n, uint32_t Ht) {
     const uint32_t page0 = (b >> 5) * wq;
+    const uint32_t off = row_off(b & 31, 0, BF_FACE, BF_ROW);
+    const uint32_t al = off & ~63u;
     for (uint32_t h = 0; h < n; ++h) {
         for (uint32_t j = 0; j < Ht; ++j) {
             for (uint32_t c = 0; c < 2; ++c) {
-                noc_async_read(src.get_noc_addr(page0 + c0 + h * Ht + j, row_off(b & 31, c, BF_FACE, BF_ROW)),
-                               l1 + j * BF_TILE + row_off(h, c, BF_FACE, BF_ROW), BF_ROW);
+                noc_async_read(src.get_noc_addr(page0 + c0 + h * Ht + j, al + c * BF_FACE),
+                               scr + ((h * Ht + j) * 2 + c) * 64, 64);
+            }
+        }
+    }
+    noc_async_read_barrier();
+    invalidate_l1_cache();
+    for (uint32_t h = 0; h < n; ++h) {
+        for (uint32_t j = 0; j < Ht; ++j) {
+            for (uint32_t c = 0; c < 2; ++c) {
+                volatile tt_l1_ptr uint32_t* s =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr + ((h * Ht + j) * 2 + c) * 64 + off - al);
+                volatile tt_l1_ptr uint32_t* d =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1 + j * BF_TILE + row_off(h, c, BF_FACE, BF_ROW));
+                for (uint32_t w = 0; w < BF_ROW / 4; ++w) {
+                    d[w] = s[w];
+                }
             }
         }
     }
@@ -61,7 +80,8 @@ void kernel_main() {
     constexpr uint32_t cb_cs = get_compile_time_arg_val(6);
     constexpr uint32_t cb_ones = get_compile_time_arg_val(7);
     constexpr uint32_t cb_v = get_compile_time_arg_val(8);
-    constexpr auto qkv_args = TensorAccessorArgs<9>();
+    constexpr uint32_t cb_scr = get_compile_time_arg_val(9);
+    constexpr auto qkv_args = TensorAccessorArgs<10>();
     constexpr auto cos_args = TensorAccessorArgs<qkv_args.next_compile_time_args_offset()>();
     constexpr auto sin_args = TensorAccessorArgs<cos_args.next_compile_time_args_offset()>();
     constexpr auto w_args = TensorAccessorArgs<sin_args.next_compile_time_args_offset()>();
@@ -92,6 +112,7 @@ void kernel_main() {
     cb_push_back(cb_ones, 1);
 
     const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
+    const uint32_t scr = get_write_ptr(cb_scr);  // scratch, never pushed
     for (uint32_t i = 0; i < count; ++i) {
         const uint32_t u = start + i;
         const uint32_t b = u / 3;
@@ -99,9 +120,9 @@ void kernel_main() {
         cb_reserve_back(cb_x, Ht);
         const uint32_t x = get_write_ptr(cb_x);
         if (part == 0) {
-            gather_heads(s_qkv, x, wq, b, 0, NH, Ht);
+            gather_heads(s_qkv, x, scr, wq, b, 0, NH, Ht);
         } else if (part == 1) {
-            gather_heads(s_qkv, x, wq, b, NH * Ht, NKV, Ht);
+            gather_heads(s_qkv, x, scr, wq, b, NH * Ht, NKV, Ht);
             for (uint32_t h = NKV; h < NH; ++h) {  // rows a q / gate item left in this slot
                 for (uint32_t j = 0; j < Ht; ++j) {
                     for (uint32_t c = 0; c < 2; ++c) {
@@ -110,7 +131,7 @@ void kernel_main() {
                 }
             }
         } else {
-            gather_heads(s_qkv, x, wq, b, (NH + 2 * NKV) * Ht, NH, Ht);
+            gather_heads(s_qkv, x, scr, wq, b, (NH + 2 * NKV) * Ht, NH, Ht);
         }
         if (part < 2) {
             cb_reserve_back(cb_cs, 4);
@@ -127,7 +148,7 @@ void kernel_main() {
         }
         if (part == 1) {
             cb_reserve_back(cb_v, Ht);
-            gather_heads(s_qkv, get_write_ptr(cb_v), wq, b, (NH + NKV) * Ht, NKV, Ht);
+            gather_heads(s_qkv, get_write_ptr(cb_v), scr, wq, b, (NH + NKV) * Ht, NKV, Ht);
             noc_async_read_barrier();
             cb_push_back(cb_v, Ht);
         }
