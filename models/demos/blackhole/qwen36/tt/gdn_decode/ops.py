@@ -198,7 +198,7 @@ class GdnDecode:
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
         sizes = dict(q=(f32, 2 * Kt), k=(f32, 2 * Kt), v=(f32, 2 * Vt), gin=(f32, 8), S=(bf, kv), o=(f32, Vt),
                      state=(bf, kv), vread=(f32, Vt), uh=(f32, Vt), kcol=(f32, Kt), dcol=(f32, 2), qnh=(f32, Kt),
-                     knh=(f32, Kt), nrm=(f32, 2), scr=(f32, 4), xh=(f32, 2 * Kt), xl=(f32, 2 * Kt), qnl=(f32, Kt),
+                     knh=(f32, Kt), nrm=(f32, 2), scr=(f32, 5), xh=(f32, 2 * Kt), xl=(f32, 2 * Kt), qnl=(f32, Kt),
                      knl=(f32, Kt), kcoll=(f32, Kt), ul=(f32, Vt), qsd=(f32, Vt), qk=(f32, 1), kn1h=(f32, Kt),
                      kn1l=(f32, Kt), z=(bf, 2 * Vt), w=(f32, Vt), y=(bf, 2 * Vt))
         cbs = [_cb(cr, CB[k], dt, tb, n) for k, ((dt, tb), n) in sizes.items()]
