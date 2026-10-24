@@ -192,7 +192,7 @@ class TPAttention:
             post = AttnDecodePost(self.mesh, self.NH, self.HD)
             for w in (1, 2, 4, 8, 16, 32):
                 if w <= self.B:
-                    prep.outputs(w)
+                    prep.outputs(w, self._kv_shard_cfg(w))
                     post.output(w)
             cache[key] = (prep, post)
         self._attn_ops = cache[key]
@@ -203,17 +203,13 @@ class TPAttention:
         B = x.shape[-2]
         qkv = tpc.matmul_1d_decode(
             x, self.tw["wqkv_fused"], self.args.attn_qkv_decode_1d_progcfg, self.compute_cfg,
-            out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            out_memory_config=ttnn.DRAM_MEMORY_CONFIG,  # L1 measured slower for the prep's row reads (bank contention)
         )
-        q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B)  # persistent buffers: not deallocated
+        # persistent buffers (not deallocated); k / v already in the paged_update_cache height shard
+        q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B)
         ttnn.deallocate(qkv)
-        _kv_cfg = self._kv_shard_cfg(B)
-        k_sh = ttnn.to_memory_config(k, _kv_cfg)
-        v_sh = ttnn.to_memory_config(v, _kv_cfg)
-        ttnn.experimental.paged_update_cache(self.paged_k, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-        ttnn.experimental.paged_update_cache(self.paged_v, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-        ttnn.deallocate(k_sh)
-        ttnn.deallocate(v_sh)
+        ttnn.experimental.paged_update_cache(self.paged_k, k, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+        ttnn.experimental.paged_update_cache(self.paged_v, v, update_idxs_tensor=cur_pos_tt, page_table=page_table)
         grid = self.mesh.compute_with_storage_grid_size()
         cfg = ttnn.SDPAProgramConfig(
             compute_with_storage_grid_size=(grid.x, grid.y), exp_approx_mode=False,

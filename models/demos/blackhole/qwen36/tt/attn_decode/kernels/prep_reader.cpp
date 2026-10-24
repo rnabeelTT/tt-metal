@@ -6,11 +6,13 @@
 //     Ht tiles (two 32-byte face-row reads per head and tile), into tiles that are zero elsewhere;
 //   * q / k: cos and sin of user b (tiles b * 2 + t of [1, B, 1, 2 * 32] TILE: row 0 is the user's row);
 //   * k: v's heads the same way into cb_v (straight to the writer).
-// Once per launch: the (1 + w) rows of q and k (row 0 of 2 Ht FP32 tiles, persistent) and the all-ones column tile.
+// Once per launch: the (1 + w) rows of q and k (row 0 of 2 Ht FP32 tiles) and the all-ones tile.
+// Rows other than the heads' are left as they are (never read downstream).
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 namespace {
 constexpr uint32_t BF_FACE = 512, BF_ROW = 32, BF_TILE = 2048;
@@ -20,16 +22,11 @@ inline uint32_t row_off(uint32_t r, uint32_t c, uint32_t face, uint32_t row) {
     return ((r >> 4) * 2 + c) * face + (r & 15) * row;
 }
 
-inline void zero(uint32_t l1, uint32_t bytes) {
-    const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
-    for (uint32_t o = 0; o < bytes; o += MEM_ZEROS_SIZE) {
-        noc_async_read(zeros, l1 + o, MEM_ZEROS_SIZE);
-    }
-}
-
 // heads [h0, h0 + n) of row b, starting at qkv tile column c0 (head h at c0 + (h - h0) * Ht), into rows 0..n-1 of the
 // Ht tiles at l1. A DRAM read keeps the source address modulo 64 (Blackhole), and the 32-byte rows land at other offsets
-// modulo 64: read the 64-byte aligned chunks holding the rows into scr, then copy the rows on the RISC.
+// modulo 64: read the 576-byte span holding the row's two face rows (64-byte aligned) into scr, then copy the rows on
+// the RISC.
+constexpr uint32_t SPAN = BF_FACE + 64, SLOT = SPAN + 64;
 template <typename Acc>
 inline void gather_heads(
     const Acc& src, uint32_t l1, uint32_t scr, uint32_t wq, uint32_t b, uint32_t c0, uint32_t n, uint32_t Ht) {
@@ -38,10 +35,7 @@ inline void gather_heads(
     const uint32_t al = off & ~63u;
     for (uint32_t h = 0; h < n; ++h) {
         for (uint32_t j = 0; j < Ht; ++j) {
-            for (uint32_t c = 0; c < 2; ++c) {
-                noc_async_read(src.get_noc_addr(page0 + c0 + h * Ht + j, al + c * BF_FACE),
-                               scr + ((h * Ht + j) * 2 + c) * 64, 64);
-            }
+            noc_async_read(src.get_noc_addr(page0 + c0 + h * Ht + j, al), scr + (h * Ht + j) * SLOT, SPAN);
         }
     }
     noc_async_read_barrier();
@@ -49,13 +43,10 @@ inline void gather_heads(
     for (uint32_t h = 0; h < n; ++h) {
         for (uint32_t j = 0; j < Ht; ++j) {
             for (uint32_t c = 0; c < 2; ++c) {
-                volatile tt_l1_ptr uint32_t* s =
-                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr + ((h * Ht + j) * 2 + c) * 64 + off - al);
-                volatile tt_l1_ptr uint32_t* d =
-                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1 + j * BF_TILE + row_off(h, c, BF_FACE, BF_ROW));
-                for (uint32_t w = 0; w < BF_ROW / 4; ++w) {
-                    d[w] = s[w];
-                }
+                const uint32_t* s = reinterpret_cast<const uint32_t*>(scr + (h * Ht + j) * SLOT + off - al + c * BF_FACE);
+                uint32_t* d = reinterpret_cast<uint32_t*>(l1 + j * BF_TILE + row_off(h, c, BF_FACE, BF_ROW));
+                const uint32_t w0 = s[0], w1 = s[1], w2 = s[2], w3 = s[3], w4 = s[4], w5 = s[5], w6 = s[6], w7 = s[7];
+                d[0] = w0, d[1] = w1, d[2] = w2, d[3] = w3, d[4] = w4, d[5] = w5, d[6] = w6, d[7] = w7;
             }
         }
     }
@@ -95,9 +86,7 @@ void kernel_main() {
     const auto s_w = TensorAccessor(w_args, w_addr, F32_TILE);
     const auto s_ones = TensorAccessor(ones_args, ones_addr, BF_TILE);
 
-    // the head-row CBs (double-buffered): zero once; every item rewrites its rows, k items also clear rows NKV..NH-1
-    zero(get_write_ptr(cb_x), 2 * Ht * BF_TILE);
-    zero(get_write_ptr(cb_v), 2 * Ht * BF_TILE);
+    // constants: issued now, pushed with the first item (its gather waits for every outstanding read)
     cb_reserve_back(cb_w, 2 * Ht);
     const uint32_t w = get_write_ptr(cb_w);
     for (uint32_t t = 0; t < 2 * Ht; ++t) {  // row 0 only (the compute broadcasts row 0)
@@ -107,32 +96,13 @@ void kernel_main() {
     }
     cb_reserve_back(cb_ones, 1);
     noc_async_read(s_ones.get_noc_addr(0), get_write_ptr(cb_ones), BF_TILE);
-    noc_async_read_barrier();
-    cb_push_back(cb_w, 2 * Ht);
-    cb_push_back(cb_ones, 1);
 
-    const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
     const uint32_t scr = get_write_ptr(cb_scr);  // scratch, never pushed
     for (uint32_t i = 0; i < count; ++i) {
         const uint32_t u = start + i;
         const uint32_t b = u / 3;
         const uint32_t part = u - 3 * b;
-        cb_reserve_back(cb_x, Ht);
-        const uint32_t x = get_write_ptr(cb_x);
-        if (part == 0) {
-            gather_heads(s_qkv, x, scr, wq, b, 0, NH, Ht);
-        } else if (part == 1) {
-            gather_heads(s_qkv, x, scr, wq, b, NH * Ht, NKV, Ht);
-            for (uint32_t h = NKV; h < NH; ++h) {  // rows a q / gate item left in this slot
-                for (uint32_t j = 0; j < Ht; ++j) {
-                    for (uint32_t c = 0; c < 2; ++c) {
-                        noc_async_read(zeros, x + j * BF_TILE + row_off(h, c, BF_FACE, BF_ROW), BF_ROW);
-                    }
-                }
-            }
-        } else {
-            gather_heads(s_qkv, x, scr, wq, b, (NH + 2 * NKV) * Ht, NH, Ht);
-        }
+        DeviceZoneScopedN("rd_item");
         if (part < 2) {
             cb_reserve_back(cb_cs, 4);
             const uint32_t cs = get_write_ptr(cb_cs);
@@ -141,7 +111,20 @@ void kernel_main() {
                 noc_async_read(s_sin.get_noc_addr(b * 2 + t), cs + (2 + t) * BF_TILE, BF_TILE);
             }
         }
+        cb_reserve_back(cb_x, Ht);
+        const uint32_t x = get_write_ptr(cb_x);
+        if (part == 0) {
+            gather_heads(s_qkv, x, scr, wq, b, 0, NH, Ht);
+        } else if (part == 1) {
+            gather_heads(s_qkv, x, scr, wq, b, NH * Ht, NKV, Ht);
+        } else {
+            gather_heads(s_qkv, x, scr, wq, b, (NH + 2 * NKV) * Ht, NH, Ht);
+        }
         noc_async_read_barrier();
+        if (i == 0) {
+            cb_push_back(cb_w, 2 * Ht);
+            cb_push_back(cb_ones, 1);
+        }
         cb_push_back(cb_x, Ht);
         if (part < 2) {
             cb_push_back(cb_cs, 4);
