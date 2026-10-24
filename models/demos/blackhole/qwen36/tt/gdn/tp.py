@@ -337,7 +337,9 @@ class TPGatedDeltaNet:
             and self._fuse_ab
             and getattr(self.args, "gdn_ab_tile_pad", False)
             and getattr(self.args, "proj_1d_decode", False)
+            and getattr(self.args, "out_proj_1d_decode", None) in (None, True)
             and not getattr(self.args, "fuse_out_mmrs_decode", False)
+            and (getattr(self.args, "gdn_state_dtype", None) or ttnn.float32) == ttnn.bfloat16
             and self.B <= tpc.TILE_SIZE
         ):
             self._gdn_ops_setup()
@@ -1536,7 +1538,16 @@ class TPGatedDeltaNet:
         )
         y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B)
         ttnn.deallocate(proj)
-        part = self._row_proj(y, self.tw["out"])  # y is the persistent per-width buffer: not deallocated
+        # y is the persistent per-width L1 buffer: call the out-proj directly (matmul_1d_decode frees its input's L1
+        # "copy", which for an L1-interleaved input is the input itself)
+        part = ttnn.linear(
+            y,
+            self.tw["out"],
+            compute_kernel_config=self.cfg,
+            program_config=self.args.gdn_out_decode_1d_progcfg,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
+        )
         part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
         if partial:
             return part
