@@ -1,7 +1,9 @@
 # tt-model container (v5.1) manifest for Qwen3-Coder-Next "blackhole-fast-v2": blackhole-fast (tt-model-fast.yaml,
 # raahemnabeel/qwen3-coder-next-blackhole-fast) plus the fused Gated DeltaNet decode mixer (QWEN35_GDN_DECODE_OPS: the
 # short conv and the whole recurrent head step as two generic_op programs between the in- and out-projections, for 1-32
-# rows; models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md, step 4). Same weights, plugin build and serving
+# rows; models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md, step 4) and the attention decode ops
+# (QWEN35_ATTN_DECODE_OPS: q / k norm + RoPE, v, gate and the gated output as two generic_op programs around the QKV
+# matmul, cache update and SDPA decode; step 5). Same weights, plugin build and serving
 # recipe; a separate repo so the published bundles stay as they are.
 schema: "5.1"
 
@@ -80,6 +82,7 @@ serve:
     QWEN35_MOE_FUSED_DECODE: "1"
     QWEN35_DECODE_REPLICATED: "1"
     QWEN35_GDN_DECODE_OPS: "1"      # fused GDN decode mixer (gdn/tp.py checks its preconditions and keeps the op chain otherwise)
+    QWEN35_ATTN_DECODE_OPS: "1"     # attention decode prep / post ops (attention/tp.py checks its preconditions likewise)
   # The checkpoint's own generation config is served (temperature 1.0 / top_p 0.95 / top_k 40). The
   # greedy override of 2026-10-05 is gone: the long-context word corruption it worked around was the
   # dies of the mesh drawing different tokens from the device sampler (doc/text_quality/README.md),

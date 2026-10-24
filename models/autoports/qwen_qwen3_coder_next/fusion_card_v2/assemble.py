@@ -17,7 +17,8 @@ DESCRIPTION = (
     "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: "
     "raahemnabeel/qwen3-coder-next-blackhole-fast (fused MoE decode for 1-32 concurrent users, replicated-residual "
     "layer boundary) plus a fused Gated DeltaNet decode mixer (conv + gates + norms + recurrent state update + gated "
-    "norm in 2 device programs instead of ~46 ops per layer), ported from the Ornith-1.5-35B-A3B fusion. Same weights, "
+    "norm in 2 device programs instead of ~46 ops per layer) and attention decode ops (q / k norm + RoPE, gate and the "
+    "gated output in 2 device programs instead of ~34 ops), ported from the Ornith-1.5-35B-A3B fusion. Same weights, "
     "profiles and serving recipe; prefill unchanged."
 )
 
