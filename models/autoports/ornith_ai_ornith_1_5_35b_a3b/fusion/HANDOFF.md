@@ -578,7 +578,22 @@ gated norm 11.1, decay pass 10.3, delta 6.4, read_state 4.7, rank-1 4.5, q.k + t
 cheap; the time is full-tile SFPU / pack work on tiles that carry one row. Head v2 (in progress): decay folded out (k.(dS)
 = d (k.S), the bf16 state goes straight into the matmuls with no split, rank-1 = d S + k (x) u in DST), row-vector SFPU
 on rows 0-1 only (VectorMode::R, 1 iteration), per-unit scalars read back by value (read_tile_value) instead of
-column broadcasts, sdh / sdl / sdx CBs gone (192 KB of L1), S double-buffered.
+column broadcasts, sdh / sdl / sdx CBs gone (192 KB of L1).
+Head v2 done (c125c29a836): per unit 68 -> 32 us (zones: gates 8.6 = mostly the reader's first delivery, q/k norms 6.9,
+rank-1 5.2, gated norm 3.4, read_state 3.2, delta 2.7, q.k 1.1, transposes 0.5). Op test 24 / 24 at the v1 accuracy
+(y PCC >= 0.999998, state >= 0.999999), deterministic over 3 runs; ops-on layer tests all pass (traced step 0
+0.999985, B=32 min 0.99997, 128 steps 0.99997, real weights 0.99998 / 0.99999). Layer profile (`runs/prof/gdnops_v2`):
+b1 mixer 108.1 -> 71.9 us (head op 33.2), layer 189.9 -> 154.2 us; b8 mixer 115.0 -> 79.4 us (head 36.3), layer 314.3
+-> 278.8 us. Bugs found on the way (worth knowing for any generic_op kernel here):
+- a CB push must not wrap: cb_nrm had 2 pages and took a 2-page then a 1-page push per unit, so every other unit's
+  2-page push ran past the CB end into the next CB (the LLK assert is compiled out); the symptom was a wrong 3rd / 5th
+  unit per core that moved with timing and vanished under DPRINT;
+- Blackhole L1 cache: a RISC load of an address the NOC (or the packer) rewrote needs `invalidate_l1_cache()` first;
+- VectorMode::R needs two SFPU iterations to cover row 0 (one covers part of it);
+- FPU work after SFPU work on the same DST tiles needs `TTI_STALLWAIT(STALL_MATH, WAIT_SFPU)`.
+Single-user decode with MTP on runs the verify pass, which keeps the unfused GDN path: the ops help multi-user decode and
+the MTP-off profiles (-longctx); a fused multi-token verify is the follow-up if the served numbers justify it.
+Served A/B (`runs/gdn_ms.sh`, fast image + this tree, ops off vs on, MTP on and off): queued first.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
