@@ -4,11 +4,15 @@
 METAL=${METAL:-$(cd "$(dirname "$(readlink -f "$0")")/../../../../.." && pwd)}
 IMAGE=${IMAGE:-tt-model/ornith-1.5-35b-a3b-v2:0fe927ac6e21}
 mkdir -p $HOME/.cache/tt-model/${CACHE_NAME:-ornith-1.5-35b-a3b-v2}/cache-dev
-exec docker run --rm ${TNAME:+--name $TNAME} --user $(id -u):$(id -g) --device /dev/tenstorrent --ipc host \
+# the container outlives a killed docker client (e.g. `timeout`): remove it on TERM / INT
+N=${TNAME:-trun-$$}
+trap 'docker rm -f $N >/dev/null 2>&1; exit 143' TERM INT
+docker run --rm --name $N --user $(id -u):$(id -g) --device /dev/tenstorrent --ipc host \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   --volume $HOME/.cache/huggingface:/hf --env HF_HOME=/hf --env HF_HUB_OFFLINE=1 \
   --volume $HOME/.cache/tt-model/${CACHE_NAME:-ornith-1.5-35b-a3b-v2}/cache-dev:/cache --env TT_METAL_CACHE=/cache \
   --volume $HOME/ornith-fusion/generated:/opt/tt-metal/generated --volume $METAL/models:/opt/tt-metal/models --volume $METAL/tests:/opt/tt-metal/tests:ro \
   --volume $METAL/conftest.py:/opt/tt-metal/conftest.py:ro --volume $METAL/pytest.ini:/opt/tt-metal/pytest.ini:ro \
   --env ARCH_NAME=blackhole --env HF_MODEL=${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B} --env MESH_DEVICE=${MESH:-P300x2} \
-  --env PYTHONPATH=/opt/tt-metal ${DEVS:+--env TT_VISIBLE_DEVICES=$DEVS} ${TENV:-} --workdir /opt/tt-metal --entrypoint bash $IMAGE -c "$*"
+  --env PYTHONPATH=/opt/tt-metal ${DEVS:+--env TT_VISIBLE_DEVICES=$DEVS} ${TENV:-} --workdir /opt/tt-metal --entrypoint bash $IMAGE -c "$*" &
+wait $!
