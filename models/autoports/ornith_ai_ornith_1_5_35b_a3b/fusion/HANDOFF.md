@@ -544,6 +544,14 @@ Design (generic_op kernels in models/, like moe_decode, so every tree and image 
   gating and norm-gate outside, hi/lo-split fp32 matmuls); the gdn_prof chain (POC on/off, b1/b8) gives their per-op
   times. MTP verify keeps the unfused rows path (step 7) - the layouts above keep it working.
 
+Implemented (2026-10-24, not yet run on device): `models/demos/blackhole/qwen36/tt/gdn_decode/` (ops.py: GdnDecode
+conv + head programs; kernels conv_* / head_*), wired into `TPGatedDeltaNet.forward_decode` behind
+`QWEN35_GDN_DECODE_OPS=1` (gdn/tp.py `_gdn_ops_setup` / `_forward_decode_ops`; bf16 state, needs the tile-padded fused
+qkvzab weight and the 1D decode matmuls; per-width output buffers 1..32 built in the constructor). Op test
+`tests/test_gdn_decode_ops.py` (tp4 / tp2 / q122 shapes, B 1 / 2 / 8 / 32, vs torch FP32: conv shift exact, users >= B
+untouched, conv / y / state PCC). `runs/gdn_op.sh` (queued after the Coder-30B chain): op test -> Ornith GDN layer
+tests ops 0 / 1 -> per-layer profile b1 / b8 ops 0 / 1.
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
@@ -560,7 +568,7 @@ wins up to N users, the serving change is an adaptive threshold (MTP while <= N 
 
 `~/ornith-fusion/runs/run_queue.sh`: after the 122B card chain (package + card rows + scorecard subsets), in order:
 q122_longctx, q122_gpqa (done; 122B published), c30_chain (running), glm_chain, ornith_p150_chain, cn_hub_smoke,
-q122_hub_smoke, gdn_prof_chain (step 4 numbers), then the MTP sweeps
+q122_hub_smoke, then the MTP sweeps; gdn_op (step 4 op test + layer tests + profile) runs right after c30_chain
 (ornith_mtp, q122_mtp). User, 2026-10-23: finish the scorecards and the fused-kernel work first, MTP tuning after;
 multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are exclusive in the plugin, so each
 profile picks one; that choice stays).
