@@ -165,5 +165,18 @@
  "default_profile": "p300x2",
  "default_profile_note": "p300x2 (16 slots) stays the default: single-user decode 69.9 ms per token and 79 output tokens/s at 16 users. p300x2-long for the fastest single-user decode, p300x2-wide for 32 users, p300x2-1m for the full 1,048,576-token context (doc/vllm_integration/README.md, Serving profile choice).",
  "pending": [],
- "trace_region_note": "Per-profile trace regions (stage 10), measured by the stage-10 t21 probes (no DSA decode buckets at S >= 2): 64 MiB at 1 slot (capture 44.9 MiB), 96 MiB at 16 slots (87.3 MiB), 160 MiB at 32 slots (101.6 MiB); doc/vllm/capacity/s10_s1, s10_s16, s10_s32."
+ "trace_region_note": "Per-profile trace regions (stage 10), measured by the stage-10 t21 probes (no DSA decode buckets at S >= 2): 64 MiB at 1 slot (capture 44.9 MiB), 96 MiB at 16 slots (87.3 MiB), 160 MiB at 32 slots (101.6 MiB); doc/vllm/capacity/s10_s1, s10_s16, s10_s32. Stage 12 (ad427402ba2): S >= 2 builds take per-row DSA decode buckets (2 widths, cut at 16,384); p300x2 (16 slots) captures 88.1 MiB of its 96 MiB (83.9 MiB without the DSA points); 3 widths took 95.6 MiB and overflowed with the sampler traces. See trace_budget and doc/decode_perf_stage12/README.md.",
+ "trace_budget": {
+  "about": "Measured decode captures without DSA points, per slot count (bytes per die), for the row-mode DSA fit check (tests/test_dsa_buckets_host.py: base + tt/dsa_buckets.row_dsa_trace_estimate + sampler <= the profile's trace region). Not read by the serving code.",
+  "decode_no_dsa_bytes": {
+   "16": 87975526,
+   "32": 106561536
+  },
+  "decode_no_dsa_source": {
+   "16": "stage 12, 83.9 MiB: ag_persistent on, MoE buckets 1/2/4/8/16 (~/glm53-flash-bringup/logs/s12/dec_ab1.log)",
+   "32": "stage 10 t21, 101.6 MiB, trace_bytes_model_plus_greedy_sampler of doc/vllm/capacity/s10_s32/capacity.json: ag_persistent off, per-layer MoE sentinel, sampler included (the check adds it again). An upper bound for the stage-12 code (ag_persistent took -2.6 MiB at 16 slots)"
+  },
+  "sampler_bytes": 838861,
+  "sampler_source": "stage-9 G9 probe: about 0.8 MiB of sampler traces (tt/dsa_buckets.py trace-region model)"
+ }
 }

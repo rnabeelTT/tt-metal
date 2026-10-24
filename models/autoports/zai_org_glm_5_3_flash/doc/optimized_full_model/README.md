@@ -386,8 +386,8 @@ discriminate.
 The gain matches stage 5's per-layer measurement (7 to 15 µs per layer x 45). The DRAM cost is small and fixed:
 det0 vs det1 measured +71,680 B per bank, about 0.55 MiB per die.
 
-Decision: **not adopted; available via MCOpts** (`GLM53_MC=ag_persistent=1` or `MCOpts(ag_persistent=True)`). The
-reason is correctness risk, not capacity:
+Decision (stage 7): **not adopted; available via MCOpts** (`GLM53_MC=ag_persistent=1` or
+`MCOpts(ag_persistent=True)`). The reason is correctness risk, not capacity:
 - with a persistent output, ttnn skips the all-gather's start barrier
   (`all_gather_async_default_program_factory.cpp:752`: "use synchronize barrier semaphore" = `barrier_semaphore &&
   !using_persistent_buffers`), so nothing orders a remote write into a buffer after its last reader on the receiving
@@ -398,6 +398,11 @@ reason is correctness risk, not capacity:
 
 0.44 ms per token (0.9 %) does not justify that risk. The shipped `DEFAULT_MC` keeps it off. (The same-process OOM
 during the re-test was the generator teardown leak, now fixed: `Glm53Generator.teardown`.)
+
+Stage 12 (d86fe3c874d): **adopted** with ping-pong buffers, one per (call site, shape, dtype, layer parity). A buffer
+read at layer L is written again at layer L+2, after every die issued its layer-(L+1) collectives. `DEFAULT_MC` now
+sets `ag_persistent=True`. Full model, 16 slots: bit-identical logits on 29 rows, token-out 75.0 -> 74.6 ms (1 active)
+and 177.8 -> 176.8 ms (16 active), trace region -2.6 MiB (`../decode_perf_stage12/README.md`).
 
 The 2026-10-17 record, superseded: the persistent all-gather was taken in stage-5 round 6 and reverted on 2026-10-18
 after `s7_final_s1_agp1_TFfail.log` (teacher forcing 14 / 32 / 90) and `s7_det_reduced_s8.log` (8 slots not repeating).

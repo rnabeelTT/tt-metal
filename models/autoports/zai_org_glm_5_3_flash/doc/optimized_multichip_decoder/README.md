@@ -377,7 +377,8 @@ Records: `records/ab{1,2,3,5,6}.jsonl`, `records/pf{2,5,6}.jsonl`, review #2 / #
   references, reduced 8-slot runs repeat, token-out drops 50.40 -> 49.96 ms, and DRAM grows by 71,680 B per bank
   (~0.55 MiB per die). Decision: not adopted; available via MCOpts. Persistent outputs skip the start barrier above,
   one buffer per site serves all 45 layers, and one run per setting cannot exclude a race (ping-pong buffers per
-  layer parity were not tried); 0.44 ms is not worth that risk.
+  layer parity were not tried); 0.44 ms is not worth that risk. Stage 12 (d86fe3c874d): adopted with ping-pong
+  buffers per layer parity (`../decode_perf_stage12/README.md`).
 
 ## Matmul geometry per role (review #1 P1-2)
 
@@ -694,7 +695,7 @@ These are measured costs that stay. None is a deferred option of this stage.
 - 32-user MoE glue: sub-tile expert groups (kernel work in the grouped sparse-matmul factory).
 - Long-context decode: +561 µs per DSA layer at position 130,000 (sparse_sdpa over 2,048 gathered tokens, top-512
   selection over ~32.5K pooled keys); profiled, not optimized here.
-- `ag_persistent`: the stacked-model failure was the logits-pad lifetime bug. On the fixed code it passes and saves 0.44 ms per token (`doc/optimized_full_model/README.md`, "Persistent all-gather"); not adopted (barrier / buffer-reuse race risk); available via MCOpts.
+- `ag_persistent`: the stacked-model failure was the logits-pad lifetime bug. On the fixed code it passes and saves 0.44 ms per token (`doc/optimized_full_model/README.md`, "Persistent all-gather"); not adopted in stage 7 (barrier / buffer-reuse race risk). Stage 12: adopted with ping-pong buffers per layer parity (`../decode_perf_stage12/README.md`).
 
 ## Artifacts
 

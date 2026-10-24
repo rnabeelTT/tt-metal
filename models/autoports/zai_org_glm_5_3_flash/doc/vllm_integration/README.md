@@ -21,6 +21,12 @@ about 4-5 ms slower per token without the buckets. The p300x2-long and p300x2-1m
 (one slot; 1m has no buckets), but p300x2-long was measured at the old 325,632-token build. The final scorecard run
 re-measures every number on the current code.
 
+**Stage 12 (d86fe3c874d, ad427402ba2).** The multi-slot builds use DSA decode buckets again, in a per-row form: every
+active row selects at its own bucket width, so a row's selection does not depend on the other rows (batch invariant;
+`GLM53_DSA_ROW_BUCKETS=1`, default; 2 widths cut at 16,384). Stage 12 also turns on `ag_persistent` (ping-pong
+buffers) and the once-per-step MoE sentinel. Served TPOT on p300x2 at short positions: 75.32 -> 69.72 ms (1 user),
+178.03 -> 172.03 ms (16 users). See `../decode_perf_stage12/README.md`.
+
 ## Summary
 
 | item | result |
@@ -35,7 +41,7 @@ re-measures every number on the current code.
 | Served = standalone | the 6 qualitative prompts give the same tokens through vLLM and through the standalone generator (p300x2-long build) |
 | Overload and preemption (plugin fix 16febac) | p300x2: 16 x 20K-token prompts over the pool, and a slot-leak trigger load: no error, all requests complete (Plugin fix below) |
 | Stage-9 check (`09-vllm.check.sh`) | exit 0 on `readiness_vllm/` |
-| Concurrency determinism | [DSA buckets on] a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2. Short prompts only: every request uses the smallest width bucket, alone or in the burst. Next to a long request the multi-slot DSA buckets made outputs batch-dependent (stage 10; Preemption below); the current code turns them off |
+| Concurrency determinism | [DSA buckets on] a burst of 32 concurrent greedy requests equals the solo outputs on 32 of 32 streams (p300x2-wide, 0bcf89f7fd6); 8 of 8 on p300x2. Short prompts only: every request uses the smallest width bucket, alone or in the burst. Next to a long request the multi-slot DSA buckets made outputs batch-dependent (stage 10; Preemption below); the stage-10 code turns them off. Stage 12 adds per-row buckets, which are batch invariant (`../decode_perf_stage12/README.md`) |
 
 ## Primary single user (128/128/1) and CI burst (100/100/32)
 

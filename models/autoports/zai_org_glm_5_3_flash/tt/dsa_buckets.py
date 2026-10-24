@@ -42,18 +42,21 @@ from .dsa import DENSE_MAX_POSITION, KPOOL, TOPK_POOLS
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
-# Multi-slot builds (S >= 2) took no auto DSA decode buckets before stage 12 (now: per-row buckets, DsaBuckets row mode). With mixed top-k modes (fused <= 16,384 pools, classic
-# above; they order tied scores differently) a request's selection depended on the other slots' positions (stage-10
-# review #1 P2-2, ticket t20). Classic-only buckets (contexts from 65,536) passed the reduced proof (t22) but not the
-# served one: a 4,100-token greedy request differed solo vs next to a ~70K decode (t22, t23 runs ii / iii, async on and
-# off), while the same server with DSA buckets off and MoE row buckets on was identical (t23 run iv). 1 slot keeps them.
+# Multi-slot builds (S >= 2) took no auto DSA decode buckets before stage 12. Stage 12: per-row buckets (DsaBuckets
+# row mode, GLM53_DSA_ROW_BUCKETS=1 default): every row selects at its own bucket width. History of the batch-max
+# bucket on multi-slot builds: with mixed top-k modes (fused <= 16,384 pools, classic above; they order tied scores
+# differently) a request's selection depended on the other slots' positions (stage-10 review #1 P2-2, ticket t20).
+# Classic-only buckets (contexts from 65,536) passed the reduced proof (t22) but not the served one: a 4,100-token
+# greedy request differed solo vs next to a ~70K decode (t22, t23 runs ii / iii, async on and off), while the same
+# server with DSA buckets off and MoE row buckets on was identical (t23 run iv). 1 slot keeps the stage-10 buckets.
 
 
 def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
     """Bucket contexts (tokens) of a T-token cache, ascending, the last one T; None = bucketing off. The block-sharded
     DSA layout (tt/dsa_shard.py) takes no buckets (unmeasured there; its pool iota is shared already). slots >= 2: no
-    auto buckets (served batch invariance, t23); an explicit GLM53_DSA_BUCKETS list still applies. 1 slot starts at
-    4,096."""
+    auto buckets before stage 12 (served batch invariance, t23); stage 12: per-row buckets at the
+    GLM53_DSA_ROW_CONTEXTS contexts (GLM53_DSA_ROW_BUCKETS=1, default). An explicit GLM53_DSA_BUCKETS list still
+    applies. 1 slot starts at 4,096. Every context below T must be a multiple of 128 and >= 2,048 (AssertionError)."""
     env = os.environ.get("GLM53_DSA_BUCKETS", "auto").strip().lower()
     if env in ("0", "off", "none", "false") or sharded:
         return None
@@ -67,15 +70,17 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
         if slots >= 2:
             # stage 12: per-row buckets (DsaBuckets row mode): each row selects at its OWN bucket width, so its
             # selection does not depend on the other slots' positions (served batch invariance)
-            if os.environ.get("GLM53_DSA_ROW_BUCKETS", "1") != "1":
+            if not row_buckets_on():
                 return None
             env_r = os.environ.get("GLM53_DSA_ROW_CONTEXTS", ",".join(str(t) for t in ROW_CONTEXTS_DEFAULT))
             ctx = sorted({int(x) for x in env_r.split(",") if x.strip() and int(x) < T})
-            return (ctx + [T]) if ctx else None
-        ctx, t = [], 4096
-        while t < T:
-            ctx.append(t)
-            t *= 2
+            if not ctx:
+                return None
+        else:
+            ctx, t = [], 4096
+            while t < T:
+                ctx.append(t)
+                t *= 2
     else:
         ctx = sorted({int(s) for s in env.split(",") if s.strip()})
         ctx = [t for t in ctx if t < T]
@@ -84,6 +89,13 @@ def bucket_contexts(T: int, sharded: bool = False, slots: int = 1):
             t % 128 == 0 and t // KPOOL >= TOPK_POOLS
         ), f"bucket context {t}: multiple of 128, >= {TOPK_POOLS * KPOOL}"
     return ctx + [T]
+
+
+def row_buckets_on() -> bool:
+    """GLM53_DSA_ROW_BUCKETS: "1" (default) = per-row DSA buckets on multi-slot builds (DsaBuckets row mode); any other
+    value = off. Off: auto buckets give no DSA buckets at S >= 2; an explicit GLM53_DSA_BUCKETS list runs the batch-max
+    bucket (the code before stage 12, not batch invariant)."""
+    return os.environ.get("GLM53_DSA_ROW_BUCKETS", "1").strip() == "1"
 
 
 # Multi-slot row-mode bucket contexts (below T; T itself is the last bucket). Few buckets: a step computes the selection
@@ -165,6 +177,26 @@ HEADROOM_BYTES = int(
 )  # kept free: the 32-slot point traces and the serving sampler variants are not all measured
 
 
+# Row-mode DSA point traces (stage 12, p300x2, 16 slots, 11 DSA layers, MoE buckets 1 / 2 / 4 / 8 / 16). Decode capture
+# without DSA points 83.9 MiB; 2 widths (3 ranges) 88.1 MiB (+4.2); 3 widths (6 ranges) 95.6 MiB (+11.7; with the
+# ~0.8 MiB sampler traces it overflowed the 96 MiB region). A range (lo, hi) runs hi - lo + 1 selections and hi - lo
+# combine steps (compare, multiply, add). Two constants fitted on these two captures (exact on both, no third point):
+# 0.85 MiB per selection and 0.8 MiB per combine step over the 11 layers.
+DSA_ROW_SEL_BYTES = int(0.85 * (1 << 20) / 11)  # per DSA layer
+DSA_ROW_COMBINE_BYTES = int(0.8 * (1 << 20) / 11)  # per DSA layer
+
+
+def row_dsa_trace_estimate(n_widths: int, n_dsa_layers: int) -> int:
+    """Estimated trace-region bytes of the row-mode DSA point traces: every (lo, hi) range of n_widths bucket widths,
+    one point trace per range and DSA layer (DsaBuckets.dsa_keys)."""
+    per_layer = sum(
+        (hi - lo + 1) * DSA_ROW_SEL_BYTES + (hi - lo) * DSA_ROW_COMBINE_BYTES
+        for lo in range(n_widths)
+        for hi in range(lo, n_widths)
+    )
+    return per_layer * n_dsa_layers
+
+
 def decode_trace_estimate(S: int, n_layers: int, k: int, with_dsa: bool = False) -> int:
     """Estimated trace-region bytes of the segmented decode + sampler traces with k MoE row buckets below S."""
     base = DECODE_BASE_BYTES + DECODE_PER_SLOT_BYTES * (S - 16) + (DSA_POINTS_BYTES if with_dsa else 0)
@@ -240,7 +272,8 @@ class DsaBuckets:
         self.max_context = max_context
         # row mode (S >= 2): a DSA variant is a bucket range (lo, hi); every active row selects at its own bucket width
         # (the smallest W_b >= its visible pools), so a row's pool ids are the ones it gets alone (batch invariance)
-        self.row_mode = bool(self.widths) and S >= 2
+        # GLM53_DSA_ROW_BUCKETS=0: no row mode, also with an explicit GLM53_DSA_BUCKETS list (batch-max bucket)
+        self.row_mode = bool(self.widths) and S >= 2 and row_buckets_on()
         nw = len(self.widths or [])
         self.dsa_keys = [(lo, hi) for lo in range(nw) for hi in range(lo, nw)] if self.row_mode else list(range(nw))
         self.mode = None  # "warm" | "capture" while the hooks are installed

@@ -198,3 +198,110 @@ def test_trace_estimate_matches_measured_captures():
     assert B.decode_trace_estimate(16, 42, 4, True) >= 93.2 * MiB
     # 32 slots, DSA, k = 4: the G9 capture ran out of a 96 MiB region -> the estimate must exceed 96 MiB
     assert B.decode_trace_estimate(32, 42, 4, True) > 96 * MiB
+
+
+def _row_env(monkeypatch, **env):
+    for k in ("GLM53_DSA_BUCKETS", "GLM53_DSA_BUCKET_MIN_T", "GLM53_DSA_ROW_BUCKETS", "GLM53_DSA_ROW_CONTEXTS"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+
+def _ctl_widths(T, S, contexts):
+    """A DsaBuckets built by __init__ (no device): one stand-in DSA layer whose P_alloc is the T-token width."""
+    layer = types.SimpleNamespace(P_alloc=B.width_of(T))
+    return B.DsaBuckets(None, [layer], contexts, (), None, S=S, max_context=T)
+
+
+@pytest.mark.parametrize("S", [1, 16])
+def test_bucket_boundary_at_16384_context(monkeypatch, S):
+    """Exact edge of the 16,384-context bucket (W_0 = 16384 / 4 + 32 = 4,128 pools). A query at position p needs
+    (p + 1) // 4 pools: p = 16,514 needs 4,128 (= W_0, bucket 0), p = 16,515 needs 4,129 (bucket 1)."""
+    _row_env(monkeypatch)
+    T = 243712
+    ctx = B.bucket_contexts(T, slots=16)
+    assert ctx == [16384, T]
+    c = _ctl_widths(T, S, ctx if S >= 2 else [16384, T])
+    W0 = B.width_of(16384)
+    assert c.widths == [W0, B.width_of(T)] and W0 == 4128
+    edge = (W0 + 1) * B.KPOOL - 2  # last position whose need (p + 1) // 4 equals W0
+    assert (edge + 1) // B.KPOOL == W0 and (edge + 2) // B.KPOOL == W0 + 1
+    assert edge == 16514
+    pad = [-1] * (S - 1)
+    for p, want in ((16510, 0), (edge, 0), (edge + 1, 1), (16520, 1)):
+        k = c.bucket([p] + pad)
+        assert (c.dsa_keys[k] if c.row_mode else k) == ((want, want) if c.row_mode else want), p
+    if c.row_mode:  # one row on each side of the edge: the range covers both widths
+        assert c.dsa_keys[c.bucket([edge, edge + 1] + [-1] * (S - 2))] == (0, 1)
+
+
+def test_row_buckets_off_disables_row_mode_with_explicit_list(monkeypatch):
+    """GLM53_DSA_ROW_BUCKETS=0 + an explicit GLM53_DSA_BUCKETS list at S >= 2: the batch-max bucket, not row mode."""
+    T, S = 243712, 16
+    _row_env(monkeypatch, GLM53_DSA_BUCKETS="65536", GLM53_DSA_ROW_BUCKETS="0")
+    ctx = B.bucket_contexts(T, slots=S)
+    assert ctx == [65536, T]
+    c = _ctl_widths(T, S, ctx)
+    assert not c.row_mode and c.dsa_keys == [0, 1]
+    assert c.bucket([100, 70000] + [-1] * 14) == 1  # the batch's largest position decides
+    _row_env(monkeypatch, GLM53_DSA_BUCKETS="65536", GLM53_DSA_ROW_BUCKETS="1")
+    c = _ctl_widths(T, S, B.bucket_contexts(T, slots=S))
+    assert c.row_mode and c.dsa_keys == [(0, 0), (0, 1), (1, 1)]
+    _row_env(monkeypatch)  # defaults: row mode on, 1 slot never in row mode
+    assert _ctl_widths(T, S, B.bucket_contexts(T, slots=S)).row_mode
+    assert not _ctl_widths(T, 1, [16384, T]).row_mode
+
+
+@pytest.mark.parametrize("bad", ["1024", "16400", "16384,3000"])
+def test_row_contexts_are_validated(monkeypatch, expect_error, bad):
+    """GLM53_DSA_ROW_CONTEXTS takes the same rule as GLM53_DSA_BUCKETS: every context below T a multiple of 128 and
+    >= 2,048 (512 pools)."""
+    _row_env(monkeypatch, GLM53_DSA_ROW_CONTEXTS=bad)
+    with expect_error(AssertionError, "multiple of 128"):
+        B.bucket_contexts(243712, slots=16)
+    _row_env(monkeypatch, GLM53_DSA_ROW_CONTEXTS="2048,16384")
+    assert B.bucket_contexts(243712, slots=16) == [2048, 16384, 243712]
+    _row_env(monkeypatch, GLM53_DSA_ROW_CONTEXTS="400000")  # no context below T: no buckets
+    assert B.bucket_contexts(243712, slots=16) is None
+
+
+def test_row_dsa_trace_estimate_matches_captures():
+    """The two stage-12 16-slot captures the constants were fitted on (83.9 MiB without DSA points)."""
+    MiB = 1 << 20
+    assert B.row_dsa_trace_estimate(1, 11) <= B.DSA_ROW_SEL_BYTES * 11
+    assert abs(B.row_dsa_trace_estimate(2, 11) - 4.2 * MiB) < 0.05 * MiB  # 88.1 MiB
+    assert abs(B.row_dsa_trace_estimate(3, 11) - 11.7 * MiB) < 0.05 * MiB  # 95.6 MiB
+
+
+N_DSA_LAYERS = 11  # GLM-5.3-Flash: 11 DSA layers of 45
+
+
+def _row_fit(data, p, n_contexts=None):
+    """(estimate, region, contexts) of a profile's decode trace with its row-mode DSA buckets (S >= 2)."""
+    from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles as SP
+
+    S = int(p["max_num_seqs"])
+    T = SP.model_context(int(p["max_model_len"]))
+    ctx = B.bucket_contexts(T, slots=S)
+    n = n_contexts if n_contexts is not None else (len(ctx) if ctx else 0)
+    tb = data["trace_budget"]
+    base = int(tb["decode_no_dsa_bytes"][str(S)])
+    est = base + (B.row_dsa_trace_estimate(n, N_DSA_LAYERS) if n >= 2 else 0) + int(tb["sampler_bytes"])
+    return est, SP.trace_region(data, p), ctx
+
+
+def test_row_dsa_buckets_fit_trace_region(monkeypatch):
+    """Every multi-slot serving profile: measured decode capture without DSA points + the row-mode DSA point traces of
+    its default contexts + the sampler fit its trace region. 3 widths on p300x2 must not fit (measured overflow)."""
+    from models.autoports.zai_org_glm_5_3_flash.tt import serving_profiles as SP
+
+    _row_env(monkeypatch)
+    data = SP.load()
+    multi = [p for p in SP.profiles(data) if int(p["max_num_seqs"]) >= 2]
+    assert multi
+    for p in multi:
+        est, region, ctx = _row_fit(data, p)
+        assert ctx is not None and len(ctx) == 2, (p["name"], ctx)
+        assert est <= region, f"{p['name']}: DSA row buckets {ctx} need ~{est / 2**20:.1f} of {region / 2**20:.0f} MiB"
+    est3, region, _ = _row_fit(data, SP.profile(data, "p300x2"), n_contexts=3)
+    assert est3 > region

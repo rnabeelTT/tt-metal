@@ -42,6 +42,7 @@
   "base": {
    "optimized_decoder.SELECTED": "opt_s5_pf",
    "multichip_decoder.DEFAULT_MC": "stage-5 default of commit 9fcc17c0dc4 (incl. sinkhorn_faces, dsa_q_mm, dsa_q_mm_ib=64, dsa_tail_shared, kda_conv_max_batch=16; ag_persistent=False)",
+   "multichip_decoder.DEFAULT_MC_stage12_note": "the selection was measured with ag_persistent=False (history above). Stage 12 (d86fe3c874d) sets ag_persistent=True in DEFAULT_MC with ping-pong buffers per layer parity: bit-identical logits on 29 rows (doc/decode_perf_stage12/README.md). The precision overrides of this file do not change",
    "mesh": "(1, 4), TP4, FABRIC_1D",
    "measured_on": "selection: 3-reference reselection on git archive 9fcc17c0dc4 (logits-pad fix) + tt/precision.py (HEAD + the stage-8 review-3 hunks), runs/*_h9 (the reselection) and runs/final_default_h9 (GLM53_PRECISION unset)"
   },

@@ -500,15 +500,16 @@ class MeshCCL:
         self.mesh, self.tt_ccl, self.mc = mesh, tt_ccl, mc
         self._topo = {}
         # ag_persistent output buffers, one per (call site, shape, dtype, layer parity), shared by the layers of one
-        # parity on this TT_CCL. ON in DEFAULT_MC since stage 12 (parity buffers). History: the 2026-10-17 stacked failures (reduced 0 / 3 / 4 8-slot runs not repeating,
-        # 45-layer teacher forcing 14 / 32 / 90) were the logits-pad lifetime bug, not this option; on the fixed code it
-        # passes (stage-7 review #2, b3270061cca: TF identical on 3 references, 8-slot runs repeat, -0.44 ms per token,
-        # +71,680 B per bank). Not adopted: with a persistent output ttnn skips the all-gather's start barrier
-        # (all_gather_async_default_program_factory.cpp:752: "use synchronize barrier semaphore" = barrier_semaphore &&
-        # !using_persistent_buffers), so nothing orders a remote write into a buffer after its last reader on the
-        # receiving die, and one buffer per site is reused by all 45 layers; one run per setting cannot exclude that
-        # race. Per-layer-parity ping-pong buffers were not tried. Any CCL / buffer option must pass the stacked
-        # repeatability probe (README "Stacked gate").
+        # parity on this TT_CCL. Stage 12: adopted (ON in DEFAULT_MC) with these per-layer-parity ping-pong buffers.
+        # History (stage 7): the 2026-10-17 stacked failures (reduced 0 / 3 / 4 8-slot runs not repeating, 45-layer
+        # teacher forcing 14 / 32 / 90) were the logits-pad lifetime bug, not this option; on the fixed code it passes
+        # (stage-7 review #2, b3270061cca: TF identical on 3 references, 8-slot runs repeat, -0.44 ms per token,
+        # +71,680 B per bank). Stage 7 did not adopt it: with a persistent output ttnn skips the all-gather's start
+        # barrier (all_gather_async_default_program_factory.cpp:752: "use synchronize barrier semaphore" =
+        # barrier_semaphore && !using_persistent_buffers), so nothing orders a remote write into a buffer after its
+        # last reader on the receiving die, and then one buffer per site was reused by all 45 layers. The parity
+        # buffers below remove that race. Any CCL / buffer option must pass the stacked repeatability probe (README
+        # "Stacked gate").
         self._bufs = tt_ccl.__dict__.setdefault("_glm53_ag_bufs", {}) if tt_ccl is not None else {}
         # layer parity of the owning decoder: layers L and L+1 use different buffers, so a buffer read at layer L is
         # next written at layer L+2, and every die issues the layer-(L+1) collectives (after its layer-L reads, in

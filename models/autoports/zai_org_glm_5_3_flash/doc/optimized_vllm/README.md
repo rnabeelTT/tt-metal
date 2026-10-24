@@ -18,7 +18,9 @@ The slot-aware trace-region fit (044dbeaa3fd) picks the same bucket lists for p3
 
 The after values below were measured with the multi-slot DSA decode buckets on. The shipped code turns them off at
 S >= 2 for served batch invariance (see "Batch invariance of the DSA width buckets"). The p300x2 TPOT is estimated to
-rise by about 4 to 5 ms (not measured); the final scorecard run measures it.
+rise by about 4 to 5 ms (not measured); the final scorecard run measures it. Stage 12 (ad427402ba2) turns DSA
+buckets on again at S >= 2 in a per-row, batch-invariant form (`GLM53_DSA_ROW_BUCKETS=1`, default); see
+`../decode_perf_stage12/README.md`.
 
 Settings that changed between before and after:
 - Async decode is on (stage 9, 4678d8fccf4; the before runs had it off). It moves the TTFT, see "Async decode and
