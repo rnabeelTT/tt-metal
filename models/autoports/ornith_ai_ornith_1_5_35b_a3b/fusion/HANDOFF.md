@@ -688,6 +688,18 @@ writes + 16 increments) and the local copies; v2 (CBs on the shards, face-0 exch
 7.3 us (exchange 2.0, add + squares + partial sum 1.5, r 0.7, output 0.5); HiFi2 / LoFi measured no faster and lose
 accuracy. Lesson: a runtime-arg layout change must move every index (v2 first hung: the NOC-coordinate loop still
 started at the old index, so the semaphore increments went to the wrong cores).
+Served hang (fixed, 6a9aa912d91 / 499e9a539e5): the first Ornith server with the op hung on its first real decode
+(layer tests, the 2-layer generator tests and the op test all passed). Bisect with `runs/smoke.sh` (boot + one
+request, 180 s timeout): addnorm off ok, on hang. Cause: a core can start the next program while other cores still run
+the previous one; the writer's partial-sum tile went into the other cores' slot CB as soon as its own compute was done,
+i.e. possibly into L1 a slower core's previous program (the all-reduce) was still using. Semaphores are set up before
+any core of a program starts, CB memory is not; tt-metal's own sharded LayerNorm has its receivers signal ready before
+data lands in their CBs. Fix: each writer increments a ready semaphore on all 16 cores at kernel start and writes its
+tile only once its own ready count reaches 16 (the signal overlaps the 1.5 us partial-sum compute). Rule for every
+generic op here: never write into another core's CB without a handshake from that core in the same program. (Watcher
+can't be used on the full model: the bigger kernels overflow the kernel-config buffer; tt-triage needs ttexalens, not
+in the image.) test_generator's long-prompt check fails with addnorm on at T=2381 on a near-tie (prefill top-4 logits
+10.562 / 10.5 / 10.438 / 10.438; the decode picks the third, the test allows the top 2); T=4097 (margin 0.44) matches.
 GDN head (same step): the compute's unpack thread waited ~5 us for the gated-norm weight (the reader sent it after
 zeroing + three params-tile DRAM reads) before the first gates; now the weight is waited for before the first gated norm
 only and sent after the first unit's state, k is zeroed before the q / k gather and v after: head b1 31.1 -> 27.8 us, b8
@@ -695,8 +707,9 @@ only and sent after the first unit's state, k is zeroed before the q / k gather 
 gates were waiting, not computing; at B=32 a warm unit's gates take 0.9 us).
 Ornith layer profile (p300x2, GDN + attention ops on), step 5 -> step 6: GDN layer b1 153.4 -> 145.5 us (mixer 71.1 ->
 66.5, boundary + MoE 82.3 -> 79.0), b8 278.5 -> 268.8; attention layer b1 148.1 -> 144.6, b8 269.9 -> 270.7. Layer tests
-34 / 34. Applied to ornith_fusion / q122_fusion / coder_next_fusion (fbf834d99f9 / 1d436cf9402 / 1f4c6bf6f73). Served
-(`runs/step6_ms.sh`, vs attnms_f1) and ports (`runs/ports_step6.sh`) running.
+34 / 34. Applied to ornith_fusion / q122_fusion / coder_next_fusion (fbf834d99f9 / 1d436cf9402 / 1f4c6bf6f73; handshake fix
+499e9a539e5 / e4fdfe0c6ab / 20bc5889aa4). Served (`runs/step6_ms.sh`, vs attnms_f1) and ports (`runs/ports_step6.sh`)
+running. Tried and dropped: q and k split in one acquire loop (q / k norms 6.88 -> 6.82 us, noise).
 Remaining b1 GDN layer (145.5 us): boundary 50 (2 x all-reduce 9-11, 2 x addnorm 7.8, router matmul 8.3 on 9 cores
 (1 MB bf16, ~15 GB/s per core), 2 x I2S 1.3, add 1.6), mixer 66.5 (in-proj 19, conv 7.8, head ~28, out-proj 8), MoE 28.
 Next candidates: the head's q / k norms (6.9 us of hi / lo splits per unit) and splitting a unit's V columns across
