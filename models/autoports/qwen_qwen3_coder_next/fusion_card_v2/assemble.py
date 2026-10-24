@@ -43,7 +43,7 @@ def main():
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), "card_cnv2", "card_cnnew", *profiles],
         check=True, capture_output=True, text=True,
-        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "blackhole-fast"},
+        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "blackhole-fast", "NEW_LABEL": "blackhole-fast-v2"},
     ).stdout
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     src = YAML.read_text()
