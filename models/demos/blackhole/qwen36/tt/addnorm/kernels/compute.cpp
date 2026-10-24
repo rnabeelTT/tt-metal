@@ -22,6 +22,7 @@
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
 #include "api/dataflow/circular_buffer.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 void kernel_main() {
     constexpr uint32_t T = get_compile_time_arg_val(0);
@@ -37,6 +38,8 @@ void kernel_main() {
     CircularBuffer res(cb_res), h(cb_h), sq(cb_sq), p(cb_p), slots(cb_slots), r(cb_r), out(cb_out), w(cb_w),
         ones(cb_ones);
     res.wait_front(T);
+    {
+    DeviceZoneScopedN("add_sq_p");
     if constexpr (ADD) {
         CircularBuffer red(cb_red);
         red.wait_front(T);
@@ -95,8 +98,14 @@ void kernel_main() {
     tile_regs_release();
     p.push_back(1);
     sq.pop_front(T);
+    }
     // r from the NC shards' sums
+    {
+    DeviceZoneScopedN("wait_slots");
     slots.wait_front(NC);
+    }
+    {
+    DeviceZoneScopedN("r");
     r.reserve_back(1);
     pack_reconfig_data_format(cb_r);
     tile_regs_acquire();
@@ -118,22 +127,34 @@ void kernel_main() {
     tile_regs_release();
     r.push_back(1);
     slots.pop_front(NC);
+    }
     // out = h r gamma
     r.wait_front(1);
+    {
+    DeviceZoneScopedN("wait_w");
     w.wait_front(T);
+    }
+    DeviceZoneScopedN("out");
     out.reserve_back(T);
     pack_reconfig_data_format(cb_out);
-    for (uint32_t t = 0; t < T; t++) {
+    for (uint32_t t0 = 0; t0 < T; t0 += 4) {
+        const uint32_t n = T - t0 < 4 ? T - t0 : 4;
         tile_regs_acquire();
         reconfig_data_format(cb_x, cb_r);
         mul_bcast_cols_init(cb_x, cb_r);
-        mul_tiles_bcast_cols(cb_x, cb_r, t, 0, 0);
+        for (uint32_t i = 0; i < n; i++) {
+            mul_tiles_bcast_cols(cb_x, cb_r, t0 + i, 0, i);
+        }
         reconfig_data_format_srcb(cb_w);
         mul_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_w);
-        mul_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_w, t, 0);
+        for (uint32_t i = 0; i < n; i++) {
+            mul_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_w, t0 + i, i);
+        }
         tile_regs_commit();
         tile_regs_wait();
-        pack_tile(0, cb_out);
+        for (uint32_t i = 0; i < n; i++) {
+            pack_tile(i, cb_out);
+        }
         tile_regs_release();
     }
     out.push_back(T);

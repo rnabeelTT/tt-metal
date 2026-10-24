@@ -7,7 +7,8 @@
     out = h * rsqrt(mean(h^2) + eps) * gamma
 
 Each core squares its T tiles and sums them per row (matmul with an all-ones tile), sends that tile to every core
-(NC x 2 KB, then a semaphore increment each), sums the NC tiles and normalizes its shard. ``h`` comes back in the
+(NC x 1 or 2 KB: faces 0 / 2, then a semaphore increment each), sums the NC tiles and normalizes its shard. residual,
+reduced and h are CBs on their own shards (no copies). ``h`` comes back in the
 residual layout, ``out`` L1 interleaved (what the mixer / MoE matmuls read; replaces the sharded norm + the
 sharded->interleaved copy). gamma (``prepare``): [1, 1, 32, H] bf16, every row = gamma (RMSNorm.weight, unit offset
 included).
@@ -15,6 +16,7 @@ included).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import torch
@@ -63,18 +65,19 @@ class AddNorm:
                                             residual.memory_config()) if add else None)
         T, NC = self.T, self.NC
         bf, f32 = (ttnn.bfloat16, 2048), (ttnn.float32, 4096)
-        sizes = [(0, bf, T), (1, bf, T), (2, bf, T), (3, bf, 1), (4, bf, T), (5, f32, T), (6, f32, 1), (7, f32, NC),
-                 (8, f32, 1), (9, bf, T)]
-        cbs = [_cb(self.crs, i, dt, tb, n) for i, (dt, tb), n in sizes]
+        # residual / reduced / h: CBs on the tensors' own shards (no copies)
+        cbs = [ttnn.cb_descriptor_from_sharded_tensor(0, residual)]
+        cbs += [ttnn.cb_descriptor_from_sharded_tensor(1, reduced), ttnn.cb_descriptor_from_sharded_tensor(4, h)] if add else []
+        sizes = ([] if add else [(4, bf, 1)]) + [(2, bf, T), (3, bf, 1), (5, f32, T), (6, f32, 1), (7, f32, NC), (8, f32, 1), (9, bf, T)]
+        cbs += [_cb(self.crs, i, dt, tb, n) for i, (dt, tb), n in sizes]
+        faces = 1 if shape[-2] <= 16 else 2  # rows 0..15 live in face 0 (column 0 holds the row sums)
         rd_ct = [T, int(add), 0, 1, 2, 3] + ttnn.TensorAccessorArgs(gamma).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(self.ones).get_compile_time_args()
-        red_addr = reduced.buffer_address() if add else 0
-        rd_rt = [[residual.buffer_address(), red_addr, gamma.buffer_address(), self.ones.buffer_address(), i]
-                 for i in range(NC)]
-        wr_ct = [T, int(add), NC, SEM, 4, 6, 7, 9] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
-        h_addr = h.buffer_address() if add else 0
-        wr_rt = [[h_addr, out.buffer_address(), i] + self.noc for i in range(NC)]
-        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+        rd_rt = [[gamma.buffer_address(), self.ones.buffer_address(), i] for i in range(NC)]
+        wr_ct = [T, NC, SEM, 6, 7, 9, faces] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        wr_rt = [[out.buffer_address(), i] + self.noc for i in range(NC)]
+        fid = getattr(ttnn.MathFidelity, os.environ.get("QWEN35_ADDNORM_FIDELITY", "HiFi4"))
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=fid, fp32_dest_acc_en=True,
                                            math_approx_mode=False)
         kernels = [
             ttnn.KernelDescriptor(
