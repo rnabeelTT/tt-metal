@@ -732,8 +732,8 @@ Queue `runs/run_queue2.sh`: `cn_v2_chain` (Coder-Next blackhole-fast-v2: GDN + a
 HumanEval / MBPP / GSM8K / IFEval vs the release-time blackhole-fast runs card_cnnew_* / cn_new), `ornith_v2_chain`
 (tt-model-fast-v2.yaml: GDN + attention ops, MTP off on the multi-die profiles, one die unchanged; card rows vs
 card_new_*, GPQA 40 / IFEval 100 / LCB 50 on p300 vs fast_p300), `q122_v2_chain` (same for the 122B, MTP off; vs
-card_q122new_* / q122ev_new), then glm_chain, ornith_p150_chain, q122_hub_smoke, the MTP sweeps. Repos (new, private
-until checked): raahemnabeel/{qwen3-coder-next,ornith-1.5-35b-a3b,qwen3-5-122b-a10b}-blackhole-fast-v2. MTP decision:
+card_q122new_* / q122ev_new), then glm_chain, ornith_p150_chain, q122_hub_smoke, the MTP sweeps. New repos:
+raahemnabeel/{qwen3-coder-next,ornith-1.5-35b-a3b,qwen3-5-122b-a10b}-blackhole-fast-v2. MTP decision:
 off wherever the fused GDN step runs (Ornith real text 169 vs 86 tok/s, 122B 94 vs 60): the verify pass keeps the
 unfused path; a fused multi-token verify is the way back to MTP. Kernel work continues in ~/tt-metal-gdnwip only (the
 release trees are packaged from ornith_fusion / q122_fusion / coder_next_fusion as they stand).
