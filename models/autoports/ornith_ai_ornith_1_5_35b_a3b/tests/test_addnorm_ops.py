@@ -54,6 +54,28 @@ def check(dev, H, B, add, op, trials=2):
                 ttnn.deallocate(x)
 
 
+def check_live(dev, H, B, op, n=3):
+    """n residual / reduced pairs alive at once (distinct addresses) through the same cached programs."""
+    mc = residual_memory_config(H)
+    to = lambda x: ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=mc)
+    gamma = 1 + 0.3 * torch.randn(H)
+    g = op.prepare(gamma)
+    xs = [(bf(torch.randn(1, 1, B, H) * 3), bf(torch.randn(1, 1, B, H))) for _ in range(n)]
+    ts = [(to(r), to(d)) for r, d in xs]
+    for add in (True, False):
+        for i, ((r, d), (rt, dt)) in enumerate(zip(xs, ts)):
+            h, out = op(rt, dt if add else None, g)
+            hr = bf(r + d) if add else r
+            ref = hr / torch.sqrt((hr * hr).mean(-1, keepdim=True) + 1e-6) * bf(gamma)
+            p = pcc(ttnn.to_torch(out).float()[..., :B, :], ref)
+            msg = f"live H={H} B={B} add={int(add)} tensor {i} (addr {rt.buffer_address()}): out pcc {p:.6f}"
+            print(msg)
+            assert p > 0.99999, msg
+            for x in (h, out):
+                if x is not None:
+                    ttnn.deallocate(x)
+
+
 def main():
     dev = ttnn.open_device(device_id=0, l1_small_size=0, trace_region_size=0)
     try:
@@ -63,6 +85,7 @@ def main():
             for B in bs:
                 for add in (True, False):
                     check(dev, H, B, add, op)
+                check_live(dev, H, B, op)
         if "prof" in sys.argv[1:]:
             ttnn.ReadDeviceProfiler(dev)
     finally:

@@ -174,6 +174,9 @@ def test_generator_long_prompt_segments(mesh_device, T):
     print(
         f"GEN long prompt T={T}: decode after prefill {dec}/{dec2}, prefill(T+1) top-2 {i2.tolist()} margin {margin2:.3f}"
     )
+    v5, i5 = torch.topk(lg2, 5)
+    print(f"GEN long prompt T={T}: prefill(T+1) top-5 {i5.tolist()} {[round(float(v), 3) for v in v5]}, decoded token "
+          f"{dec} logit {float(lg2[dec]):.3f} rank {int((lg2 > lg2[dec]).sum())}")
     # reproducibility of the traced decode after the long prefill, up to a near tie (documented LSB non-determinism):
     # both decodes must be in the near-tie set of the prefill truth
     assert dec == dec2 or (dec in allowed2 and dec2 in allowed2), (
