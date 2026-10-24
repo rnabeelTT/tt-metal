@@ -636,7 +636,7 @@ Two generic ops around the existing QKV matmul / paged cache update / paged SDPA
 - prep: from the fused [q | k | v | gate] projection row of each user, the heads as tile rows (the layout SDPA decode
   and paged_update_cache read): q / k RMSNorm x (1 + w) + rotate-half RoPE on the first 64 dims, v copied, sigmoid gate.
   Work items (user, q / k+v / gate) over 3 B cores. q goes to DRAM (SDPA decode takes an interleaved Q from DRAM only),
-  k / v straight into the KV-update height shard (no reshard), gate L1. Persistent per-width outputs (one set per model).
+  k / v straight into the KV-update height shard (no reshard), gate L1. Outputs allocated per call (see the 122B note).
 - post: SDPA output x gate, each head row written into the user's row of the o-proj input (one item per user).
 Replaces 41 ops (b1) with 7. Bugs / lessons:
 - Blackhole DRAM reads keep the address modulo 64: a 32-byte row read into a destination at another offset modulo 64
@@ -660,6 +660,18 @@ MTP off; `runs/attnms_f*`), attention ops off -> on: 1 user 7.22 -> 6.48 ms (138
 1102 -> 1188 total); TTFT unchanged (128 121 / 119, 2K 338 / 338, 8K 1300 / 1283, 16K 2624 / 2622 ms); garble 9.43 /
 8.04 (max 15.3 / 16.2); greedy coherent (parts at chars 22 / 122, equally good wording).
 Ornith MTP off vs the published blackhole-fast (MTP on, 86.5 tok/s real text): 166.5 tok/s, 1.92x.
+Ports (`runs/ports_attn.sh`, 2026-10-24, p300x2, GDN ops on in both arms):
+- Coder-Next: attention layer tests 17 / 17 on and off. Attention layer b1 mixer 155.3 -> 67.2 us, layer 246.0 -> 156.6;
+  b8 196.4 -> 80.1 / 444.0 -> 322.1. Served (`cnattn_f*`, MTP n/a): 1 user 8.78 -> 7.88 ms (113.9 -> 126.9 tok/s); real
+  text 113.5 -> 126.1 tok/s (+11 %); 2K / 8K input 8.87 / 9.04 -> 8.03 / 8.18 ms; 8 users 15.66 -> 14.22 ms (63.9 ->
+  70.3 tok/s/u); 32 users 42.49 -> 42.35 ms (128/128) and 60.27 -> 56.47 ms (1024/256; 16.6 -> 17.7 tok/s/u); TTFT
+  unchanged (176 / 173, 480 / 489, 1845 / 1860 ms); greedy 1 / 8 identical, coherent (same answers, reworded).
+- 122B: attention layer tests 17 / 17 on and off. Attention layer b1 mixer 180.1 -> 92.3 us, layer 296.6 -> 207.8; b8
+  219.4 -> 105.4 / 644.5 -> 515.9. Served ops off (`q122attn_f0`, MTP off): 1 user 11.49 ms (87.0 tok/s), real text
+  86.8 tok/s. Ops on: the server died at prefill warmup (statically allocated CBs of a GDN prefill matmul clashed with
+  L1 buffers at 1208320 vs CB end 1226240): the persistent per-width outputs pinned L1, mostly the k / v height shards
+  (16 KB per core per width). Fix (ac88dc55d3d / 2332a6e2bd3): outputs allocated per call and freed after use; op test
+  16 / 16 again. Rerun queued (`runs/q122attn_f1.sh`).
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
