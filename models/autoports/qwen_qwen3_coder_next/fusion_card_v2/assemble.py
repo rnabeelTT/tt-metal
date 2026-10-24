@@ -1,4 +1,4 @@
-"""Writes the `card:` block of ../tt-model-fast.yaml from this directory's *.md and the card_bench.sh results.
+"""Writes the `card:` block of ../tt-model-fast-v2.yaml from this directory's *.md and the card_bench.sh results.
 
     python assemble.py p300x2 p300
 """
@@ -9,19 +9,22 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-YAML = HERE.parent / "tt-model-fast.yaml"
+YAML = HERE.parent / "tt-model-fast-v2.yaml"
 TOOLS = HERE.parents[1] / "ornith_ai_ornith_1_5_35b_a3b" / "fusion" / "tools"
 
 DESCRIPTION = (
     "Qwen3-Coder-Next (80B total / 3B active MoE: 512 experts, top-10 + shared expert, 48 layers of Gated DeltaNet + "
-    "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the published "
-    "bundle (raahemnabeel/qwen3-coder-next) plus a fused MoE decode for 1-32 concurrent users and a replicated-residual "
-    "layer boundary, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill "
-    "unchanged."
+    "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: "
+    "raahemnabeel/qwen3-coder-next-blackhole-fast (fused MoE decode for 1-32 concurrent users, replicated-residual "
+    "layer boundary) plus a fused Gated DeltaNet decode mixer (conv + gates + norms + recurrent state update + gated "
+    "norm in 2 device programs instead of ~46 ops per layer), ported from the Ornith-1.5-35B-A3B fusion. Same weights, "
+    "profiles and serving recipe; prefill unchanged."
 )
 
 RELATED = (
-    "The bundle this builds on: [raahemnabeel/qwen3-coder-next](https://huggingface.co/raahemnabeel/qwen3-coder-next). "
+    "The release this builds on: [raahemnabeel/qwen3-coder-next-blackhole-fast]"
+    "(https://huggingface.co/raahemnabeel/qwen3-coder-next-blackhole-fast); the original bundle: "
+    "[raahemnabeel/qwen3-coder-next](https://huggingface.co/raahemnabeel/qwen3-coder-next). "
     "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast]"
     "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log "
     "`models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `coder_next_fusion` branch of "
@@ -37,9 +40,9 @@ def block(key, text):
 def main():
     profiles = sys.argv[1:] or ["p300x2", "p300"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), "card_cnnew", "card_cnpub", *profiles],
+        [sys.executable, str(TOOLS / "card_tables.py"), "card_cnv2", "card_cnfast", *profiles],
         check=True, capture_output=True, text=True,
-        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
+        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "blackhole-fast"},
     ).stdout
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     src = YAML.read_text()
