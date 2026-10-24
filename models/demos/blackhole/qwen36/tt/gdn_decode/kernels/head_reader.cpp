@@ -129,18 +129,10 @@ void kernel_main() {
         const uint32_t hk = h / GQA;
 
         // a / b: the bf16 face rows holding columns h of the a / b tiles, row b
+        // the gate inputs first (the compute starts on them while the rows below are in flight)
         noc_async_read(s_proj.get_noc_addr(a_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), scr, BF_ROW);
         noc_async_read(s_proj.get_noc_addr(b_tile, row_off(b, (h & 31) >> 4, BF_FACE, BF_ROW)), scr + 64, BF_ROW);
-
-        cb_reserve_back(cb_q, Kt);
-        cb_reserve_back(cb_k, Kt);
-        cb_reserve_back(cb_v, Vt);
-        cb_reserve_back(cb_z, Vt);
         cb_reserve_back(cb_gin, 4);
-        gather_row(s_conv, get_write_ptr(cb_q), hk * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_conv, get_write_ptr(cb_k), (Nk + hk) * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
         noc_async_read_barrier();
         // scr is rewritten by the NOC for every unit and read here by the RISC: drop the cached lines (Blackhole L1
         // cache), or a unit can read an earlier unit's a / b
@@ -153,11 +145,21 @@ void kernel_main() {
         fill_col0(g + F32_TILE, dt[h]);
         fill_col0(g + 2 * F32_TILE, neg_a[h]);
         fill_col0(g + 3 * F32_TILE, b_bits);
+        cb_push_back(cb_gin, 4);
+
+        cb_reserve_back(cb_q, Kt);
+        cb_reserve_back(cb_k, Kt);
+        cb_reserve_back(cb_v, Vt);
+        cb_reserve_back(cb_z, Vt);
+        gather_row(s_conv, get_write_ptr(cb_q), hk * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
+        gather_row(s_conv, get_write_ptr(cb_k), (Nk + hk) * Kt, Kt, b, F32_FACE, F32_ROW, F32_TILE);
+        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
+        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
+        noc_async_read_barrier();
         cb_push_back(cb_q, Kt);
         cb_push_back(cb_k, Kt);
         cb_push_back(cb_v, Vt);
         cb_push_back(cb_z, Vt);
-        cb_push_back(cb_gin, 4);
         if (w == 0) {
             zero(get_write_ptr(cb_k), Kt * F32_TILE);  // the second slot (the S read barrier below covers it)
             zero(get_write_ptr(cb_v), Vt * F32_TILE);
