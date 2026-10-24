@@ -15,6 +15,7 @@ RUNS = Path(os.environ.get("RUNS", Path.home() / "ornith-fusion" / "runs"))
 SAME_DECODE = set(filter(None, os.environ.get("SAME_DECODE", "").split(",")))
 SAME_DECODE_NOTE = os.environ.get("SAME_DECODE_NOTE", "Decode code unchanged on this profile; single-user rows omitted.")
 PUB_LABEL = os.environ.get("PUB_LABEL", "published v2")  # the published bundle's name in the table captions
+NEW_LABEL = os.environ.get("NEW_LABEL", "blackhole-fast")  # the new bundle's
 REALTEXT_DESC = os.environ.get("REALTEXT_DESC", "12 chat prompts x 384 output tokens, temperature 0, MTP on")
 
 
@@ -60,7 +61,7 @@ def section(profile, new, pub):
         lines += [SAME_DECODE_NOTE]
     else:
         lines += [
-            f"Latency, batch 1 (single user): {PUB_LABEL} -> blackhole-fast",
+            f"Latency, batch 1 (single user): {PUB_LABEL} -> {NEW_LABEL}",
             "",
             "| Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |",
             "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -83,7 +84,7 @@ def section(profile, new, pub):
             continue
         lines += [
             "",
-            f"Concurrency, {isl} input / {osl} output tokens: {PUB_LABEL} -> blackhole-fast",
+            f"Concurrency, {isl} input / {osl} output tokens: {PUB_LABEL} -> {NEW_LABEL}",
             "",
             "| Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |",
             "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",

@@ -1,0 +1,311 @@
+# tt-model container (v5.1) manifest for Qwen3.5-122B-A10B "blackhole-fast-v2": blackhole-fast (tt-model-fast.yaml) plus
+# the Ornith fusion steps 4-6 (GDN decode mixer ops, attention decode ops, MTP off). blackhole-fast was: the published bundle
+# (raahemnabeel/qwen3-5-122b-a10b, this directory's tt-model.yaml, tt-metal 8fec52c4cb) plus the fused decode work
+# ported from the Ornith fusion (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md): routed + shared
+# experts in three ops that stream the expert weights in place for every decode width (1..32 rows), and the
+# replicated-residual decode boundary. Same weights, plugin build and serving recipe; a separate repo so the published
+# bundle stays as it is.
+schema: "5.1"
+
+repo: raahemnabeel/qwen3-5-122b-a10b-blackhole-fast-v2
+name: qwen3-5-122b-a10b-blackhole-fast-v2
+# weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
+weights: {repo: Qwen/Qwen3.5-122B-A10B, revision: dc4d348443bc740c68e2d77492492c11606384d5}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/tt-metal-q122   # worktree, branch q122_fusion
+  code:  # the autoport's import closure (checked with a symlinked tree of exactly these paths); the autoport ships its
+         # runtime files only (not the per-stage doc/ evidence with profiler CSVs, not tests/)
+    - models/autoports/qwen_qwen3_5_122b_a10b/__init__.py
+    - models/autoports/qwen_qwen3_5_122b_a10b/tt
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_metadata.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/context_contract.json            # read by generator_vllm at build
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/selected_precision_config.json   # the shipped precision policy
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  # the released sdist built in the image with VLLM_TARGET_DEVICE=empty, installed --no-deps on top of the lock (the
+  # wheel form resolves the wheel's own dependency set and would pull torch 2.14 over tt-metal's 2.11.0 pin)
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # the plugin build the published image shipped
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json (a copy of the autoport's vllm_metadata.json lives in
+  # vllm_bundle/qwen3_5_122b_a10b/; the checkout-based serving uses EXTRA_MODELS_DIR=models/autoports directly)
+  extra_models_dir: models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+  # resolution overrides: the torch / torchvision tt-metal pins (the ttnn extension is built against 2.11.0) and the
+  # transformers this bring-up validated; vLLM 0.26.0 would otherwise resolve torch 2.14 (a full dev-env freeze as a lock
+  # dragged unrelated conflicting pins in, so the build resolves live under these overrides and freezes the result)
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 262144
+  capabilities:
+    tool_parser: qwen3_xml
+    reasoning_parser: qwen3
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 805306368
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: Qwen/Qwen3.5-122B-A10B
+    QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
+    QWEN35_PROGRAM_GUARD: "1"
+    # the fused decode path (ported from the Ornith fusion)
+    QWEN35_MOE_FUSED_DECODE: "1"
+    QWEN35_DECODE_REPLICATED: "1"
+    # blackhole-fast-v2 (Ornith fusion steps 4-6): GDN decode mixer ops + attention decode ops; MTP off (its verify
+    # pass keeps the unfused path: plain fused decode is faster, 94 vs 60 tok/s on chat text at 1 user)
+    QWEN35_GDN_DECODE_OPS: "1"
+    QWEN35_ATTN_DECODE_OPS: "1"
+    QWEN35_MTP: "0"
+    # Vision ON: image content parts are served (the checkpoint's ViT on the mesh, bfp8, up to 4 images per request);
+    # text requests are unaffected (the tower only runs for image prompts). KV pool in this configuration (MTP head +
+    # tower resident): 22725 blocks x 64 tokens = 1.45 M tokens (the stage-13 text-only, no-MTP server had 28472 blocks).
+    # Set to "0" for a text-only server.
+    QWEN35_VISION: "1"
+    QWEN35_VISION_MAX_IMAGES: "4"
+    # Served image-resolution cap: 4 MP = 16384 patches = 4096 image tokens per image (the checkpoint's processor default
+    # is 16 MP). The tower's programs are keyed by the padded patch count; every bucket up to this cap is warmed at
+    # start-up, so no image request compiles a program after the traces are parked (2026-10-01 served image failure).
+    QWEN35_VISION_MAX_PIXELS: "4194304"
+    # Batched short-prompt prefill: OPT-IN ("1"). Final text prompts <= 512 tokens that arrive together are prefilled
+    # up to four per pass (served A/B 2026-10-02: TTFT at 32 users 6.3 -> 3.8 s, at 8 users 1.83 -> 1.27 s, decode
+    # unchanged) but the first-token numerics then differ from a single admission (batched GDN form, PCC 0.9995), and
+    # the parameter-conformance suite's seeded-reproducibility / greedy-consistency tests across batch compositions
+    # failed (12 / 73, bundle run 8). Off keeps 73 / 73; turn on for throughput-first deployments.
+    QWEN35_BATCHED_PREFILL: "0"
+  # Thinking ON by default (owner decision 2026-10-02; the model's own default): a plain chat request reasons first and
+  # answers in `content`; the reasoning arrives in the message's `reasoning` field (vLLM 0.26; `reasoning_content` in
+  # older clients). Clients turn it off per request with "chat_template_kwargs": {"enable_thinking": false}. Caveats
+  # measured on this port (doc/tti_release/thinking_default_test, RUN_NOTES run 7): in thinking mode the model
+  # deliberates at length (give it thousands of tokens of budget; `content` is empty when the budget ends inside the
+  # think block) and can repeat itself on constraint-heavy prompts under greedy decoding (also with the bf16 reference
+  # weights) - the checkpoint's generation_config (temperature 0.6, top_p 0.95, top_k 20) applies when a request sends no
+  # sampling parameters. Every release gate (TTI release, 73 / 73 and 22 / 22 conformance) ran with thinking OFF, i.e.
+  # the per-request {"enable_thinking": false} configuration.
+  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
+
+# One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
+# `tt-model serve <bundle> --profile <name>`. Numbers: doc/perf_pass/deployed_sweep.md and doc/HANDOFF.md §1.
+serve_profiles:
+  - name: p300x2
+    description: >
+      Interactive default on two p300 boards (4 dies): 32 sequences, 262144 context, text + images, MTP speculative
+      decoding at one user (about 66 tok/s on chat text), thinking on. First token 0.32 s at 1 user, 6.3 s for a 32-request burst.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p300x2-burst
+    description: >
+      Many short prompts arriving together (chat front-ends, batch jobs): batched short-prompt prefill ON - first token
+      for a 32-request burst 3.8 s instead of 6.3 s (8 users 1.27 s instead of 1.83 s), decode unchanged. Trade-off:
+      a request's first token depends slightly on what arrived with it (seeded reproducibility and greedy consistency
+      across batch compositions are not guaranteed; 12 / 73 conformance tests fail in that mode).
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_BATCHED_PREFILL: "1"}
+  - name: p300x2-longctx
+    description: >
+      Long prompts mixed with short ones: chunked prefill ON (4096-token scheduler chunks, so one image (up to 4096 tokens) fits a chunk; prefill steps shared between
+      prompts so a short prompt no longer waits for a 100K one to finish) with MTP off (the plugin cannot chunk a
+      multi-token-per-step model). Single-user decode about 57 tok/s instead of 66; running users still pause during
+      prefill steps (the plugin never mixes prefill and decode in one step).
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
+  - name: p300x2-text
+    description: >
+      Text only, largest KV pool: the vision tower is not loaded (28472 KV blocks of 64 tokens instead of 22725, i.e.
+      1.8 M pooled tokens for the 32 slots) and image requests are rejected at the front end. Otherwise the default.
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_VISION: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+  # The same four configurations on four p150 boards (the identical (1,4) mesh; kernels compile at launch). Untested on
+  # this host (p300x2 only); the p300x2 numbers are the expectation.
+  - name: p150x4
+    description: Four p150 boards, the interactive default (thinking on, MTP at one user, text + images).
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p150x4-burst
+    description: Four p150 boards, batched short-prompt prefill ON (many short prompts arriving together); see p300x2-burst.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_BATCHED_PREFILL: "1"}
+  - name: p150x4-longctx
+    description: Four p150 boards, chunked prefill ON with MTP off (long prompts mixed with short ones); see p300x2-longctx.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
+  - name: p150x4-text
+    description: Four p150 boards, text only with the largest KV pool (no vision tower); see p300x2-text.
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_VISION: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+default_profile: p300x2
+
+verify:
+  - "import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
+  - "import models.autoports.qwen_qwen3_5_122b_a10b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+
+card:
+  description: >
+    Qwen3.5-122B-A10B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on four Blackhole dies through vLLM and the Tenstorrent plugin, with a fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus a fused MoE decode for 1-32 concurrent users and a replicated-residual layer boundary, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill unchanged.
+  quickstart: |
+    ### What blackhole-fast changes
+    This is [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b) with its decode step
+    rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
+    ([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast);
+    Ornith serves through this model's code). Same checkpoint, same vLLM plugin build, same profiles and serving recipe;
+    prefill is unchanged. The changes:
+
+    1. **Router.** The decode router matmul runs as one 1D matmul, and the 1-token top-8 + softmax + shared-gate sigmoid run
+       on the RISC cores in one op instead of a 7-op chain.
+    2. **Fused MoE decode.** Routed + shared experts in three ops (route, gate|up + SwiGLU, down) that stream each selected
+       expert's weights in place from the existing DRAM layout (no duplicate copy), for every decode width from 1 to 32
+       rows, the MTP verify rows included (several users' experts as one union, each weight column read once for all rows).
+    3. **Replicated-residual decode boundary.** The decode residual stays replicated on every die: each mixer / MoE output
+       is one all-reduce + add + local RMSNorm (two collectives per layer instead of four, no gathers).
+
+    Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
+    reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads. Output quality is checked
+    below.
+
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `Qwen/Qwen3.5-122B-A10B`. Thinking is ON by default: the reasoning arrives in the message's `reasoning` field (vLLM
+    0.26; older clients know it as `reasoning_content`) and the answer in `content`. Give thinking requests a large
+    `max_tokens` (thousands): when the budget ends inside the think block, `content` is empty. Turn thinking off per
+    request with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers (the configuration the
+    release gates and the published latency numbers were measured in). Without sampling parameters a request uses the
+    checkpoint's defaults (temperature 0.6, top_p 0.95, top_k 20); for thinking on constraint-heavy prompts the model
+    card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
+    Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
+
+    ### Profiles - which one for which use case
+    `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackhole-fast --profile <name>` (p300x2 names below; the same four exist
+    as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
+    - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
+      Speculative decoding gives a single user about 66 tok/s on chat text; images and tool calls work; thinking on.
+    - `p300x2-burst` - many short prompts arriving together (chat front-ends with dozens of users, batch classification,
+      extraction jobs): up to four prompts are prefilled per pass, so a 32-request burst gets its first token in 3.8 s
+      instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
+      of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
+    - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
+      ones: prefill runs in 4096-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
+      upload. Speculative decoding is off in this profile (about 57 tok/s for a lone user), and running users still pause
+      while prefill chunks run.
+    - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled
+      tokens for 32 users) for longer conversations at high occupancy; image requests are rejected at the front end.
+  performance: |
+    ### Accuracy
+    Both bundles evaluated side by side on the same box (p300x2, thinking off, one sample per question, seed 42,
+    temperature 0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness through the served API):
+
+    | Eval | published | blackhole-fast |
+    | --- | ---: | ---: |
+    | GPQA-Diamond (all 198 questions) | 0.697 | 0.677 |
+    | IFEval prompt-level strict (100) | 0.85 | 0.87 |
+    | LiveCodeBench v6 (50) | 0.54 | 0.54 |
+
+    GPQA: 12 questions right only with blackhole-fast, 16 only with the published bundle (McNemar p 0.57); the difference
+    is within one standard error (+-0.033). A 40-question subset had shown 0.65 vs 0.775, which is why the full set ran.
+
+    Layer-level PCC against Hugging Face (real weights, 4 dies, shipped precision policy), published -> fused decode: Gated
+    DeltaNet layer 0.99967 -> 0.99965, attention layer 0.99477 -> 0.99471; 32 concurrent users, worst user 0.99717 ->
+    0.99719 / 0.99548 -> 0.99532. Prefill is unchanged (identical PCC).
+
+    ### Performance
+    Measured 2026-10-23 on one QuietBox 2 (4 Blackhole p300c dies), both bundles served exactly as shipped (`tt-model
+    serve <bundle> --profile p300x2`), one server at a time: random-token prompts of exactly the input length, output
+    pinned with ignore_eos, streamed; users are concurrent requests in a closed loop; TTFT = time to first streamed token;
+    TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. Single-user rows run MTP speculative decoding,
+    whose gain depends on how predictable the text is: random-token prompts understate it, so a real-text row (12 chat
+    prompts, 384 output tokens, temperature 0) is added. Each cell is `published -> blackhole-fast`.
+
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 4 | 289 | 444 | 52.8 | 2.69 |
+    | p300x2 | 1024 | 256 | 32 | 128 | 12,266 | 83 | 14.6 | 29.68 |
+    | p300x2-longctx | 128 | 128 | 1 | 4 | 182 | 704 | 56.9 | 2.41 |
+
+    #### p300x2
+
+    Latency, batch 1 (single user): published -> blackhole-fast
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 305 -> 289 | 420 -> 444 | 30.2 -> 18.9 | 33.1 -> **52.8** (+59 %) | 4.13 -> 2.69 |
+    | 1,024 | 256 | 502 -> 518 | 2,038 -> 1,978 | 24.6 -> 21.1 | 40.6 -> **47.4** (+17 %) | 6.76 -> 5.86 |
+    | 4,096 | 256 | 1,217 -> 1,198 | 3,365 -> 3,419 | 20.6 -> 21.2 | 48.4 -> **47.1** (-3 %) | 6.48 -> 6.61 |
+    | 16,384 | 256 | 4,568 -> 4,563 | 3,586 -> 3,590 | 25.8 -> 23.4 | 38.8 -> **42.8** (+10 %) | 11.13 -> 10.52 |
+    | 32,768 | 256 | 9,310 -> 9,305 | 3,520 -> 3,522 | 21.2 -> 20.1 | 47.2 -> **49.6** (+5 %) | 14.71 -> 14.44 |
+    | 65,536 | 256 | 19,803 -> 19,795 | 3,309 -> 3,311 | 31.6 -> 22.7 | 31.7 -> **44.0** (+39 %) | 27.85 -> 25.59 |
+    | 130,816 | 256 | 44,598 -> 44,675 | 2,933 -> 2,928 | 27.7 -> 22.2 | 36.1 -> **45.1** (+25 %) | 51.67 -> 50.33 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): 45.9 -> **65.9 tok/s** (+44 %).
+
+    Concurrency, 128 input / 128 output tokens: published -> blackhole-fast
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 522 -> 523 | 37.0 -> 22.5 | 27.0 -> 44.5 | 49.0 -> **75.9** (+55 %) | 5.22 -> 3.37 |
+    | 4 | 16 | 1,035 -> 1,028 | 44.5 -> 26.6 | 22.5 -> 37.6 | 76.5 -> **116.0** (+52 %) | 6.69 -> 4.40 |
+    | 8 | 32 | 1,785 -> 1,821 | 63.7 -> 36.7 | 15.7 -> 27.2 | 103.5 -> **159.2** (+54 %) | 9.90 -> 6.43 |
+    | 16 | 64 | 3,321 -> 3,298 | 96.9 -> 51.4 | 10.3 -> 19.4 | 131.6 -> **208.9** (+59 %) | 15.61 -> 9.81 |
+    | 32 | 128 | 6,253 -> 6,264 | 113.4 -> 66.6 | 8.8 -> 15.0 | 198.6 -> **278.6** (+40 %) | 20.62 -> 14.76 |
+
+    Concurrency, 1024 input / 256 output tokens: published -> blackhole-fast
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 891 -> 899 | 36.2 -> 21.9 | 27.6 -> 45.7 | 50.5 -> **79.1** (+57 %) | 10.13 -> 6.48 |
+    | 4 | 16 | 1,771 -> 1,777 | 44.4 -> 26.7 | 22.5 -> 37.5 | 78.2 -> **119.5** (+53 %) | 13.09 -> 8.56 |
+    | 8 | 32 | 3,281 -> 3,275 | 63.8 -> 35.8 | 15.7 -> 27.9 | 104.8 -> **164.5** (+57 %) | 19.55 -> 12.42 |
+    | 16 | 64 | 6,269 -> 6,276 | 97.6 -> 51.0 | 10.2 -> 19.6 | 131.6 -> **211.6** (+61 %) | 31.13 -> 19.26 |
+    | 32 | 128 | 12,215 -> 12,266 | 114.9 -> 68.3 | 8.7 -> 14.6 | 197.3 -> **276.4** (+40 %) | 41.54 -> 29.68 |
+
+    #### p300x2-longctx (MTP off, chunked prefill at 4096 tokens)
+
+    Latency, batch 1 (single user): published -> blackhole-fast
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 204 -> 182 | 626 -> 704 | 31.3 -> 17.6 | 31.9 -> **56.9** (+78 %) | 4.18 -> 2.41 |
+    | 2,048 | 128 | 590 -> 565 | 3,469 -> 3,624 | 31.3 -> 17.7 | 31.9 -> **56.6** (+77 %) | 4.57 -> 2.81 |
+    | 16,384 | 128 | 4,388 -> 4,408 | 3,734 -> 3,717 | 31.7 -> 18.0 | 31.6 -> **55.5** (+76 %) | 8.41 -> 6.70 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP off; median per prompt): 31.9 -> **56.8 tok/s** (+78 %).
+  limitations: |
+    - The single-user MTP pass still runs the published (unfused) rows path for its verify / commit; only its MoE uses the
+      fused kernels. Moving the whole MTP pass onto the fused path is the next step.
+    - The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
+      and `-text` profiles run the same decode code (they change prefill batching and the vision tower); the p150x4
+      profiles run the same mesh but were not run on p150 boards.
+    - The device sampler supports `top_k` up to 32.
+    - Benchmark evals ran with thinking off; IFEval and LiveCodeBench on subsets (100 / 50 questions).
+    - The published bundle's `-longctx` profiles do not start on this image (vLLM rejects a 2048-token chunk budget below
+      one image item's 4096 tokens); this bundle chunks at 4096. The published longctx numbers above were measured with
+      `--max-num-batched-tokens 4096` added.
+  related: >
+    The bundle this builds on: [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `q122_fusion` branch of github.com/rnabeelTT/tt-metal.
