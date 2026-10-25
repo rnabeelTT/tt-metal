@@ -222,10 +222,13 @@ class TPAttention:
         y = post(attn_out, gate, B)
         ttnn.deallocate(attn_out)
         ttnn.deallocate(gate)
+        # fabric boundary (one row): an L1 BF16 partial, read in place by the boundary's packers
+        fabric = partial and B == 1 and getattr(self.args, "fabric_boundary", False)
+        d = ttnn.bfloat16 if fabric else getattr(self.args, "out_proj_decode_dtype", None)
         part = ttnn.linear(
             y, self.tw["wo"], compute_kernel_config=self.compute_cfg, program_config=self.args.attn_wo_decode_1d_progcfg,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
+            memory_config=ttnn.L1_MEMORY_CONFIG if fabric else ttnn.DRAM_MEMORY_CONFIG,
+            **({"dtype": d} if d is not None else {}),
         )
         ttnn.deallocate(y)
         part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))

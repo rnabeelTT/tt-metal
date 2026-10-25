@@ -436,6 +436,8 @@ class Qwen35MoE:
         reduce-scatter reads directly (tt_all_reduce would deallocate it)."""
         rows = int(x4.shape[-2])
         part = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
+        if partial == "fabric" and rows == 1:  # the fabric boundary reads the model-wide L1 BF16 buffer itself
+            return part
         if partial:  # a copy (the fused ops' output buffer is model-wide), already in the boundary's all-reduce input layout
             from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 

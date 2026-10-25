@@ -326,6 +326,14 @@ class Qwen35MoeModel(Qwen36Model):
 
             bnd = decode_boundary(self.args, self.mesh_device)
             x = bnd.gather(x, self.tt_ccl)
+        if hook is None and x.shape[-2] == 1 and getattr(self.args, "fabric_boundary", False):
+            x = self._decode_layers_fabric(x, cos, sin, cur_pos_tensor, page_table)
+            if sharded_lm_head or self._ondev_argmax:
+                logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
+            else:
+                logits = self._lm_head(x)
+            ttnn.deallocate(x)
+            return logits
         if hook is not None:
             hook("pre", token_ids_buf, cur_pos_tensor, page_table, cos, sin)
         for layer in self.layers:
@@ -342,6 +350,28 @@ class Qwen35MoeModel(Qwen36Model):
             logits = self._lm_head(x)
         ttnn.deallocate(x)
         return logits
+
+    def _decode_layers_fabric(self, x, cos, sin, cur_pos_tensor, page_table):
+        """One-row decode through the fabric boundaries (args.fabric_boundary): x is the gathered embedding row in the
+        replicated residual layout; the entry boundary applies layer 0's input norm, every layer ends with the boundary
+        into the next layer's input norm, the last into the final norm (x in DRAM for the LM head)."""
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import fabric_boundary
+
+        fb = fabric_boundary(self.args, self.mesh_device)
+        if getattr(self, "_fb_g_final", None) is None:  # norm weights as flat pages (first, eager, call)
+            for layer in self.layers:
+                layer._fb_g_attn = fb.gamma(layer.attention_norm.norm.weight)
+                layer._fb_g_ffn = fb.gamma(layer.ffn_norm.norm.weight)
+            self._fb_g_final = fb.gamma(self.norm.norm.weight)
+        res, h = fb(x, None, self.layers[0]._fb_g_attn)
+        ttnn.deallocate(x)
+        n = len(self.layers)
+        for i, layer in enumerate(self.layers):
+            last = i == n - 1
+            g_next = self._fb_g_final if last else self.layers[i + 1]._fb_g_attn
+            res, h = layer.forward_decode_fabric(fb, res, h, g_next, cos, sin, cur_pos_tensor, page_table, last=last)
+        ttnn.deallocate(res)
+        return h
 
     def _final_norm_decode_replicated(self, x):
         """The final RMSNorm on the replicated decode residual: the same sharded norm program and output layout as the

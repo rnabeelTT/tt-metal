@@ -363,6 +363,26 @@ class Qwen36DecoderLayer:
         ttnn.deallocate(h)
         return out
 
+    def forward_decode_fabric(self, fb, res, x, g_next, cos, sin, position_tensor, page_table, last=False):
+        """One-row decode on the fabric boundary (fabric_boundary/ops.py): res is the flat residual, x the normed row
+        (this layer's input norm applied) as a [1, 1, 1, dim] L1 tile; the mixer and the MoE return L1 BF16 partial
+        sums and each boundary is all-reduce + add + the next RMSNorm (g_next: the next layer's input norm, or the
+        final norm when last: x then lands in DRAM for the LM head). Returns (res', x')."""
+        if self.is_full_attention:
+            part = self.attention.forward_decode(x, position_tensor, cos, sin, page_table=page_table, partial=True)
+        else:
+            part = self.attention.forward_decode(x, partial=True)
+        ttnn.deallocate(x)
+        h, ff_in = fb(res, part, self._fb_g_ffn, "mixer")
+        ttnn.deallocate(res)
+        ttnn.deallocate(part)
+        ff_part = self.feed_forward.forward(ff_in, mode="decode", partial="fabric")
+        ttnn.deallocate(ff_in)
+        out_mc = ttnn.DRAM_MEMORY_CONFIG if last else ttnn.L1_MEMORY_CONFIG
+        res2, x2 = fb(h, ff_part, g_next, "mlp", out_memory_config=out_mc)
+        ttnn.deallocate(h)
+        return res2, x2
+
     def _forward_decode_addnorm(self, bnd, x, cos, sin, position_tensor, page_table):
         """_forward_decode_replicated with the add + RMSNorm op (addnorm/ops.py): norm(x) -> mixer -> all-reduce ->
         (h, norm(h)) in one program -> MoE -> h + all-reduce."""
