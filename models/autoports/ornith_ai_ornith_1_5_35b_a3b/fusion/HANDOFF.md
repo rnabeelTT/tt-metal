@@ -845,6 +845,19 @@ tok/s; real text 169 -> 210); 2 users 8.19 -> 6.93; 4 users 8.63 -> 7.37; 8 user
 Dev env for these numbers: QWEN35_FABRIC_BOUNDARY=1 QWEN35_ROWS_TOPK=1 QWEN35_FB_CONSUMER=1 QWEN35_FB_ROUTER=1
 QWEN35_MOE_SPLIT_PAIR=1 QWEN35_FB_MAX_ROWS=4 on top of the v2 env (runs/fb_ms.sh EXTRA).
 
+GDN head value split (`QWEN35_GDN_VSPLIT`, default up to 4 parts per head while units x parts fit one item per core:
+1 / 2 users on 4 chips, 2 parts at 4 users): each part reads q / k whole and its slices of v / z / state / norm weight,
+runs the recurrence on its slice; the gated RMSNorm's sum of o^2 is exchanged between the parts (head_writer.cpp: ready
+handshake, slot writes + semaphore, sum in part order: the same total on every part). Head zones at B=1 before: gates
+2.8, q/k L2 norms 8.25, read state 3.2, q.k 1.1, delta 2.7, transposes 0.5, rank-1 5.2, gated norm 3.4 us (only the
+state-width phases split). Op test tp4 / tp2 B 1 / 2 / 8 / 32 unchanged accuracy; head 28.9 -> 21.6 us (B=1), 29.3 ->
+23.9 (B=2). Served (`runs/fbvs`, vs fbmr): 1 user 4.73 -> 4.56 ms (219 tok/s), real text 209.9 -> 218.0 tok/s, 2 users
+6.93 -> 6.69 ms, 4 users 7.33; 8 / 32 users 9.51 / 24.30; garble 12.04 (the gate has read 10-12 for the last four
+runs vs 6-9 before: a quality checkpoint, the scorecard subsets one request at a time, runs next: `runs/devq_chain.sh`).
+Day (1 user): 6.37 -> 4.56 ms (157 -> 219 tok/s, +40 %), real text 169 -> 218 tok/s.
+Next small levers: the LM head on DecodeLinear (`QWEN35_LM_STREAM=1`, written, to measure: 261 us at ~274 GB/s
+today), the conv folded into the fused in-proj (~0.2 ms), the sampler's all-gathers into the top-k op (~0.1 ms).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
