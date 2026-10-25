@@ -42,6 +42,8 @@ Qwen3.5-122B), ranked items 2, 6 and 7.
 | `GLM53_DSA_ROW_CONTEXTS` | `16384` | Comma list of row-mode contexts below T. Each must be a multiple of 128 and >= 2,048 (AssertionError otherwise). More widths need more trace region: see "Rejected". |
 | `GLM53_DSA_BUCKETS` | `auto` | `0` / `off`: no DSA decode buckets at any slot count. |
 | `GLM53_DSA_BUCKET_MIN_T` | `65536` | Builds with a smaller context take no DSA decode buckets. |
+| `GLM53_KDA_ACTIVE` | `1` | `0`: the KDA recurrence computes every slot (before commit 685db8afb95). See "One user on a multi-slot build". |
+| `GLM53_MOE_BUCKET_PATH` | `family` | `family`: every MoE row bucket takes the S bucket's family, except the 1-row bucket of the pairs family, which takes the T = 1 gather path (bit-identical). `pairs`: every bucket on pairs (before 685db8afb95). |
 
 ## Evidence
 
@@ -174,3 +176,50 @@ image; shipped defaults, no `GLM53_*` overrides; 1 slot x 243,712, the shape of 
 PASS (stage-8 gate: min top-1 >= 0.91, top-5 and top-100 = 1.00). The values equal the stage-8 and stage-10 runs.
 The record's `trace_verified` is false because the check expects 2 replays per step, but the decode trace replays
 in segments (DSA and MoE point traces). The replay count (2,376 for 99 steps) equals the stage-10 run.
+
+## One user on a multi-slot build (commit 685db8afb95)
+
+Problem: the default profile `p300x2` (16 slots) decoded one user at 74.8 ms per token (served), the 1-slot build
+`p300x2-long` at 49.4 ms. The decode trace runs all 16 slot rows. Stage 10 already moved the routed experts to row
+buckets. A Tracy profile of the shipped code (reduced model, layers 0, 3, 4; 1-slot build vs 16-slot build with 1
+active slot; `~/glm53-flash-bringup/artifacts/s12/tracy_s{1,16}`) showed the rest of the gap (+1.19 ms per 3 layers):
+- MoE 1-row bucket: the pairs path ran its two grouped sparse matmuls on 8 cores (141 + 104 us). The 1-slot build runs
+  the T = 1 gather path on 32 / 64 cores (86 + 40 us).
+- KDA recurrence (`kda.recurrent_decode`): 173 us at 16 slots vs 60 us at 1 slot. The op computes every (slot, head):
+  fp32 state read, step, state write.
+- KDA conv (`kda_decode_conv`): 93 us vs 40 us. The reader copied the four fp32 tap rows into every slot row with
+  scalar L1 writes, per tile.
+
+Changes (all bit-identical for the active rows):
+1. **MoE**: in the pairs family, the 1-row bucket takes the T = 1 gather path (`moe_bucket_paths`, "auto").
+   Reduced model, 1 and 2 active: 19 / 19 rows bit-identical to the pairs bucket (`one_user/moe_t1_compare.json`).
+2. **KDA recurrence**: new optional `active` input (one UINT32 flag per slot, row-major, written by the host only when
+   slots start or stop). The reader lists the active slots' heads and deals them over all cores (active head j on
+   core j % cores). It passes each core's count to the compute kernel through a CB. The writer writes the active
+   heads' state and output, and zero output rows for the inactive heads. An inactive slot's state is not read or
+   written. Switch: `GLM53_KDA_ACTIVE` (default 1; 0 = every slot computed). Op tests:
+   `tests/test_kda_recurrent_decode.py::test_kda_recurrent_decode_active*` (bit-identical active rows, inactive
+   state unchanged, flag changes under a captured trace).
+3. **KDA conv**: the reader copies the taps into the active rows only. The compute kernel already selects the
+   history and a zero output for inactive rows, so their taps are never used.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Full model token-out, 16 slots x 243,712, 1 active (`one_user/ship_vs_new.json`, `ab1cd_vs_ship.json`) | 74.6 ms | 61.6 ms |
+| Full model token-out, 16 active | 176.8 ms | 176.8 ms |
+| Served TPOT, p300x2, 128 / 128, 1 user (`one_user/sweep_kact.json`) | 74.8 ms | 61.8 ms |
+| Served TPOT, p300x2, 128 / 128, 16 users | 177.0 ms | 177.0 ms |
+| Decode trace region (served capture) | 83.9 MiB | 81.3 MiB |
+
+Correctness:
+- Full model, 16 slots, 1 and 16 active: logits bit-identical to the shipped code, 29 / 29 rows. The conv change alone
+  (stage-12 `cd` record vs `ship`): 29 / 29 bit-identical.
+- Batch invariance (standalone): a target alone vs next to a 70K filler, 1 and 2 active: identical, max |d| 0.
+- Served invariance, p300x2 (`one_user/served_inv_kact.json`): solo repeat, concurrent with a long request, and solo
+  again are equal (text and random-id prompts). PASS.
+- Release accuracy gate (1 slot x 243,712, `one_user/tf_release_record.json`): top-1 0.92 / 0.95 / 0.92 (teacher
+  forcing), 0.92 / 0.95 / 0.91 (prefill check), top-5 and top-100 1.00. PASS, equal to the shipped code.
+
+The 1-slot profiles (`p300x2-long`, `p300x2-1m`) do not get faster: their decode already runs one slot. The remaining
+gap of the 16-slot build at 1 user (61.8 vs 49.4 ms) is mostly the full-width DSA selection (the opt-in per-row
+buckets remove about 5 ms) and width-16 relayouts in every layer (about 15-25 us each).
