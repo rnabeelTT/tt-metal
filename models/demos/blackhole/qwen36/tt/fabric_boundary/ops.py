@@ -137,7 +137,8 @@ class FabricBoundary:
         """(x, y) of the cores this op uses (a consumer sharing the program must avoid them)."""
         return {(self.core.x, self.core.y)} | {(c.x, c.y) for c in self.rows_cores}
 
-    def __call__(self, residual, partial, gamma, site=None, out_memory_config=ttnn.L1_MEMORY_CONFIG, consumer=None):
+    def __call__(self, residual, partial, gamma, site=None, out_memory_config=ttnn.L1_MEMORY_CONFIG, consumer=None,
+                 keep_x=False):
         """residual: the flat residual, or (entry, partial None) a [1, 1, 32, H] BF16 TILE tensor whose row 0 is the
         residual (the gathered embedding rows); partial: this device's [1, 1, 32, H] BF16 TILE L1 partial sum (row 0),
         or None; gamma: gamma(norm weight). Returns (residual' flat, x [1, 1, 1, H] BF16 TILE in out_memory_config,
@@ -145,7 +146,8 @@ class FabricBoundary:
         consumer: the op that consumes x, run in this program (the gpt-oss consumer fusion: its weights stream while the
         boundary computes): consumer(x_flat, noc_xy, sem_id) -> (kernels, cbs, semaphores, io, notify_noc, out) with
         notify_noc the NOC coordinates of its cores waiting for program semaphore sem_id (incremented once x_flat holds
-        the normed row); no to-rows output then: returns (residual' flat, out)."""
+        the normed row); no to-rows output then: returns (residual' flat, out); keep_x: the to-rows output too (another
+        op also reads x): returns (residual' flat, x, out)."""
         entry = partial is None
         converted = None
         if not entry and (partial.dtype != ttnn.bfloat16 or partial.memory_config().buffer_type != ttnn.BufferType.L1):
@@ -162,6 +164,10 @@ class FabricBoundary:
             assert not entry, "a consumer-fused boundary all-reduces"
             c_kernels, c_cbs, c_sems, c_io, notify_noc, c_out = consumer(out_xf, self.noc_xy, 0)
             x = c_out
+            if keep_x:
+                notify_noc = list(notify_noc) + list(self.rows_noc)
+                x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                                   self.mesh_device, out_memory_config)
         else:
             notify_noc = self.rows_noc
             x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
@@ -223,7 +229,7 @@ class FabricBoundary:
             return ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_rows.cpp"), core_ranges=self.rows_set, compile_time_args=rows_ct,
                 runtime_args=rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
-                defines=([] if entry else [("FB_PACK_ROWS", "1")]) + ([("FB_PACK_ONLY", "1")] if fused else []),
+                defines=([] if entry else [("FB_PACK_ROWS", "1")]) + ([("FB_PACK_ONLY", "1")] if fused and not keep_x else []),
             )
 
         both = self.rows_set.merge(self.cores)
@@ -245,6 +251,8 @@ class FabricBoundary:
         ttnn.deallocate(out_xf)
         if converted is not None:
             ttnn.deallocate(converted)
+        if fused and keep_x:
+            return out_res, x, c_out
         return out_res, x
 
     def _add_sender(self, idx, coord, program, recv, sem_addr):

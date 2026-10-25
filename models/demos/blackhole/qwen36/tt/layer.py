@@ -383,11 +383,17 @@ class Qwen36DecoderLayer:
             else:
                 part = self.attention.forward_decode(x, partial=True)
             ttnn.deallocate(x)
-        h, ff_in = fb(res, part, self._fb_g_ffn, "mixer")
+        # QWEN35_FB_ROUTER=1: the router matmul runs inside this boundary's program (its weight streams meanwhile)
+        logits = None
+        if os.environ.get("QWEN35_FB_ROUTER", "0") == "1" and hasattr(self.feed_forward, "router_consumer"):
+            h, ff_in, logits = fb(res, part, self._fb_g_ffn, "mixer", consumer=self.feed_forward.router_consumer(fb),
+                                  keep_x=True)
+        else:
+            h, ff_in = fb(res, part, self._fb_g_ffn, "mixer")
         ttnn.deallocate(res)
         ttnn.deallocate(part)
-        ff_part = self.feed_forward.forward(ff_in, mode="decode", partial="fabric")
-        ttnn.deallocate(ff_in)
+        ff_part = self.feed_forward.forward(ff_in, mode="decode", partial="fabric", logits=logits)
+        ttnn.deallocate(ff_in)  # (the fused MoE frees the logits)
         if next_consumer is not None:
             res2, nxt = fb(h, ff_part, g_next, "mlp", consumer=next_consumer)
             ttnn.deallocate(h)

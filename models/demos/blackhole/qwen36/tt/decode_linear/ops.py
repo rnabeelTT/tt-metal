@@ -51,8 +51,8 @@ class DecodeLinear:
         self.assign = []  # (core, bank, col0 within bank, ncols)
         for b in range(self.banks):
             for r, c in enumerate(placed[b]):
-                c0 = r * self.cpc
-                self.assign.append((c, b, c0, max(0, min(self.cpc, self.C - c0))))
+                c0 = r * self.cpc  # padding columns (past n_tiles) are not streamed
+                self.assign.append((c, b, c0, max(0, min(self.cpc, self.C - c0, self.n_tiles - b * self.C - c0))))
         self.cores = _range_set([c for c, _, _, _ in self.assign])
 
     # ---- weights ------------------------------------------------------------------------------------------------------
@@ -144,16 +144,19 @@ class DecodeLinear:
         return parts
 
 
-def decode_linear_for(args, mesh_device, weight, fb, readers=6):
-    """(DecodeLinear, decode copy) for a [K, N]-per-device column-parallel ttnn weight (TP shards along N), one op per
-    shape (cached on args), its cores clear of the fabric boundary's (fb.reserved_cores())."""
+def decode_linear_for(args, mesh_device, weight, fb, readers=6, replicated=False, fidelity=ttnn.MathFidelity.HiFi2):
+    """(DecodeLinear, decode copy) for a [K, N]-per-device column-parallel ttnn weight (TP shards along N; replicated:
+    the same [K, N] on every device), one op per shape (cached on args), its cores clear of the fabric boundary's
+    (fb.reserved_cores())."""
     nd = mesh_device.get_num_devices()
     full = ttnn.to_torch(weight, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
     full = full.reshape(full.shape[-2], full.shape[-1])
     K, N = full.shape[0], full.shape[1] // nd
     cache = args.__dict__.setdefault("_qwen36_decode_linear", {})
-    key = (id(mesh_device), K, N, weight.dtype)
+    key = (id(mesh_device), K, N, weight.dtype, fidelity)
     if key not in cache:
-        cache[key] = DecodeLinear(mesh_device, K, N, weight.dtype, readers=readers, exclude=fb.reserved_cores())
+        cache[key] = DecodeLinear(mesh_device, K, N, weight.dtype, readers=readers, exclude=fb.reserved_cores(),
+                                  fidelity=fidelity)
     op = cache[key]
-    return op, op.weight([full[:, d * N:(d + 1) * N] for d in range(nd)])
+    parts = [full[:, :N]] * nd if replicated else [full[:, d * N:(d + 1) * N] for d in range(nd)]
+    return op, op.weight(parts)

@@ -378,7 +378,11 @@ class Qwen35MoE:
         logger.debug(f"Qwen35MoE layer {layer_num}: E={E} k={self.top_k} N={N} (local {Nl}) tp={tp} union~{union}")
 
     # ------------------------------------------------------------------------------------------------
-    def forward(self, x, mode=None, partial=False):
+    def router_consumer(self, fb):
+        """The fused decode MoE's router as the consumer of a fabric boundary (moe_decode/fused.py router_consumer)."""
+        return self._fused.router_consumer(fb)
+
+    def forward(self, x, mode=None, partial=False, logits=None):
         """x: [B, T, H] (single device prefill/decode) or [1, 1, T, H]. Returns the same shape. partial (TP decode):
         return this device's [1, 1, T, H] partial sum instead of the reduce-scattered output (the replicated-residual
         decode boundary all-reduces it, models/demos/blackhole/qwen36/tt/decode_boundary.py)."""
@@ -392,7 +396,7 @@ class Qwen35MoE:
         x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
         if self._fused is not None and list(x4.padded_shape)[-2] == TILE and mode != "prefill":
             if T == 1 or 2 <= T <= min(MOE_FUSED_ROWS_MAX, 32):
-                return self._forward_fused_decode(x4, orig, partial)
+                return self._forward_fused_decode(x4, orig, partial, logits)
         scores, ids = self._route(x4)
         if mode == "decode" or (mode is None and T <= self.GATHER_MAX_TOKENS):
             if T <= self.GATHER_MAX_TOKENS:
@@ -431,11 +435,15 @@ class Qwen35MoE:
             out = ttnn.reshape(out, orig)
         return out
 
-    def _forward_fused_decode(self, x4, orig, partial=False):
+    def _forward_fused_decode(self, x4, orig, partial=False, logits=None):
         """One decode token through moe_decode.FusedMoEDecode: the partial sum lands in a model-wide buffer that the
-        reduce-scatter reads directly (tt_all_reduce would deallocate it)."""
+        reduce-scatter reads directly (tt_all_reduce would deallocate it). logits: the router output computed inside
+        the fabric boundary (one row)."""
         rows = int(x4.shape[-2])
-        part = self._fused(x4, self.up_gate, self.down) if rows == 1 else self._fused.rows(x4, self.up_gate, self.down)
+        if rows == 1:
+            part = self._fused(x4, self.up_gate, self.down, logits=logits)
+        else:
+            part = self._fused.rows(x4, self.up_gate, self.down)
         if partial == "fabric" and rows == 1:  # the fabric boundary reads the model-wide L1 BF16 buffer itself
             return part
         if partial:  # a copy (the fused ops' output buffer is model-wide), already in the boundary's all-reduce input layout
