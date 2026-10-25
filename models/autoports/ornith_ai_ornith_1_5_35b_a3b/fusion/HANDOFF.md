@@ -738,6 +738,55 @@ off wherever the fused GDN step runs (Ornith real text 169 vs 86 tok/s, 122B 94 
 unfused path; a fused multi-token verify is the way back to MTP. Kernel work continues in ~/tt-metal-gdnwip only (the
 release trees are packaged from ornith_fusion / q122_fusion / coder_next_fusion as they stand).
 
+v2 queue outcome (2026-10-24): Ornith p300x2 card rows done (1 user real text 169.1 tok/s, 32 users 27.4 ms); the p300
+(2-chip) servers of Ornith v2 and Coder-Next v2 died at boot: prefill warmup TT_THROW "statically allocated circular
+buffers clash with L1 buffers" (the GDN decode ops' persistent conv_out / per-width y L1 buffers lowered every core's
+L1 ceiling; the 2-chip in-proj's CBs need almost all of it). Fixed (gdn_decode: both allocated per call; on all four
+branches): Ornith v2 p300 boots, 1 user 14.83 -> 8.70 ms (67.4 -> 114.9 tok/s), real text 75.0 -> 124.3 tok/s, 8 users
+28.22 -> 17.91 ms, 32 users 58.29 -> 40.34 ms, TTFT 188 -> 137 ms (vs blackhole-fast, MTP on). The 122B MTP sweep was
+stopped after a4 (multi-user MTP on the unfused verify loses: Ornith m3 27.5 tok/s vs 169 MTP off). User, 2026-10-25:
+no hurry to ship; keep going on the scoped levers until returns are clearly diminishing; releases after.
+
+### Step 7: where the remaining time goes, and the gpt-oss reference (2026-10-25)
+
+gpt-oss-20b on this box type (QuietBox 2, 1x4, TP 4, ~3.6 B active) decodes one user at 2.47 ms / token on main
+(#60161, models/demos/gpt_oss/tt/fused_decode): streamed matmuls per DRAM bank, the boundary (fabric all-reduce + add +
+RMSNorm) inside the next matmul's program, top-32 sampling in the LM head. Ornith (40 layers) was at 6.37 ms: far from
+that, so not at diminishing returns overall; the per-op fusions in the old layout were.
+Measurements behind the re-plan (Ornith p300x2):
+- Decode matmuls (`tools/mbench_mm.py`, traced, 1 row): ttnn 1D mcast tops out at ~350 GB/s (in-proj 6.8 MB 19.6 us,
+  qkv 16.3, out / wo 7.9-8.4, router (bf16 1.2 MB) 9.9); ttnn DRAM-sharded is 1.4-2.4x slower on every shape (1-3
+  readers / bank, 16 / 32 activation cores): the DRAM-sharded lever is only reachable as a custom per-bank stream.
+- All-reduce (`tools/mbench_ccl.py`): all_reduce_async 9.0 us for 1 row padded to 64 BFP8 tiles; packed to 2 dense BF16
+  tiles 4.0 us (8 rows 6.4, 32 rows worse: 15-17 vs 9).
+- Token breakdown (2-layer generator test, `test_generator -k greedy_sampler_paths`): sampler trace 0.551 ms per token
+  (31 ops; device 0 kernel time 483 us: ttnn.topk over all 32 rows of the [32, 62080] logits 279 us, vocab mask 28,
+  pad 26, two all-gathers ~29, ~15 tie-break ops ~3 us each, ttnn.sampling 28); LM head ~0.3 ms (~410 GB/s, near
+  bandwidth); readback + host ~0.1 ms.
+
+Fabric boundary (`QWEN35_FABRIC_BOUNDARY=1`, models/demos/blackhole/qwen36/tt/fabric_boundary, gdn_wip 0a945cb0e82):
+one-row decode boundaries as ONE op per site after gpt-oss's DecodeBoundary: the 16 to-rows cores pack row 0 of the
+producer's L1 BF16 partial (2 x 32 B per tile) into this device's receive slot, the boundary core multicasts it over
+the fabric (ring hops; the 4 chips are cabled as a ring, FABRIC_1D included), sums the slots in slot order + residual
++ RMSNorm (gpt-oss compute kernel), the to-rows cores write the normed row as [1, 1, 1, H] in the consumer's layout (L1
+interleaved; DRAM before the LM head). The residual stays flat on one core between boundaries; out-projections write
+L1 BF16 partials and the fused MoE returns its own buffer in this mode. Op test (`tests/test_fabric_boundary.py`):
+residual bit-identical on every device, eager + traced; 7.7 us per all-reduce boundary traced (single-core pack: 10.2)
+vs ~18 us for reshard + all_reduce_async + add + norm + the consumers' copies. Generator tests 9 / 10 (the 10th: T=2381,
+a 4-way BF16 near-tie, top-4 logits within 0.125; the fabric path picks rank 2, the old path rank 1). Served (`runs/fbms`,
+p300x2, MTP off, vs step6b): 1 user 6.37 -> 5.55 ms (157.0 -> 180.2 tok/s, +15 %), real text 169.0 -> 178.3 tok/s,
+2K / 8K / 16K 6.54 / 6.63 / 6.80 -> 5.69 / 5.82 / 5.96 ms; 8 / 32 users unchanged (10.67 / 27.13 ms, multi-row path);
+TTFT unchanged (121 / 337 / 1284 -> 118 / 338 / 1285 ms); greedy sequential 0 / 8 identical (diverge at chars 40-532,
+coherent), concurrent 8 / 8 identical (B > 1 path); garble 8.78 (step6b 6.06, earlier milestones 7.4-10.7).
+
+Sampler rows top-k (`QWEN35_ROWS_TOPK=1`, models/demos/blackhole/qwen36/tt/decode_sampling): the per-device
+mask + ttnn.topk replaced by a scan over the live rows only (100 cores keep a sorted top-32 per row as packed u32 keys,
+one core heap-merges them) for decode buckets of <= 8 rows; the rest of the sampler unchanged (its forward runs with
+ttnn.topk pointed at it). Op test (`tests/test_rows_topk.py`): exact top-32 incl. lower-index tie order, B 1 / 2 / 8;
+traced 94 us vs 355 for pad + ttnn.topk. The RISC scan runs ~50 cycles per logit (24 us for 640 logits per core) and
+the one-core merge 31 us: both RISCs per core + a merge tree would get it to ~25 us. The logits always carry 32 slot
+rows; the live count is the served path's sampler trace bucket (set_trace_bucket per decode width).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
@@ -760,6 +809,17 @@ multi-user MTP only if the sweep shows a large gain (MTP and chunked prefill are
 profile picks one; that choice stays).
 
 ## Plan (in order; each step ends with a measurement)
+
+Re-plan 2026-10-25 (from the step 7 measurements; 1 user 5.55 ms after the fabric boundary):
+- a. Sampler: rows top-k (done, served measurement pending), then the all-gathers + tie-break + draw into one op
+  (candidates exchanged over the fabric, merged to a sorted list on every die): ~0.45 ms per token at every width.
+- b. Fabric boundary inside the consumer's program + streamed decode matmuls per DRAM bank (gpt-oss LinearStream: the
+  boundary computes while the next projection's weights stream): hides ~7 us x 2 per layer and takes the projections
+  from ~350 toward ~450-500 GB/s: ~0.8 ms at 1 user.
+- c. Fabric boundary for 2..8 rows (gpt-oss helpers / row-tile layout): ~10 us per layer at 8 users.
+- d. MoE gate|up split-pair (8 users: gate|up 97.5 us vs ~62 us floor), GDN head V-split (1 user), router.
+- e. MTP verify on the fused path (gpt-oss DFlash: 1.7-2.1x at batch 1) once b is in.
+Earlier list (kept for the record):
 
 1. **MoE quick wins.** (DONE: fused top-k + 1D router, MoE 177 -> 137 us, TPOT 19.20 -> 17.90 ms; the gate|up / shared
    core-count knobs did not help, see above.) Settings and program configs only, in `tt/moe.py` / `tt/optimized_decoder.py`:
