@@ -27,7 +27,9 @@ once-per-step MoE sentinel (bit-identical outputs). It also adds per-row DSA dec
 default off): in the sparse regime they select other pools than the full-width selection, so the outputs differ from
 the evaluated path. With them on, served TPOT on p300x2 at short positions was 75.32 -> 69.72 ms (1 user),
 178.03 -> 172.03 ms (16 users). The shipped default (row buckets off) measured 74.80 ms (1 user) and 177.01 ms
-(16 users) in the stage 12 release scorecard. See `../decode_perf_stage12/README.md`.
+(16 users) in the stage 12 release scorecard. The stage-12 one-user changes (bit-identical) then gave 61.85 ms at
+1 user on p300x2 (r7) and 77.28 ms on p300x2-wide (r8, was 117.49 ms); full occupancy unchanged. See
+`../decode_perf_stage12/README.md`.
 
 ## Summary
 

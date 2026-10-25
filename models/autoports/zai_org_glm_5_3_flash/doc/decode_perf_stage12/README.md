@@ -3,11 +3,12 @@
 Stage 12 makes three changes to the multi-slot decode step. Changes 1 and 2 are on by default and give bit-identical
 outputs. Change 3 (per-row DSA buckets) is opt-in: the sparse-regime gate showed that it changes outputs (see
 "Sparse-regime gate"). A later addendum (commit 685db8afb95) makes one user on a multi-slot build faster, with
-bit-identical outputs (see "One user on a multi-slot build"). This page gives the
+bit-identical outputs (see "One user on a multi-slot build"); commit 613e4802772 does the same for the 32-slot wide
+profile (see "Wide profile: tight sorted-dispatch bound"). This page gives the
 defaults, the switches, the measured numbers and their scope, and the items that stage 12 rejected or did not start.
 
 Commits: d86fe3c874d (MoE sentinel, persistent all-gather), ad427402ba2 (per-row DSA decode buckets), 685db8afb95
-(one user on a multi-slot build).
+(one user on a multi-slot build), 613e4802772 (tight sorted-dispatch bound).
 Hardware: p300x2, mesh (1, 4), TP4. Analysis that chose these items: the stage-12 decode gap report (GLM vs
 Qwen3.5-122B), ranked items 2, 6 and 7.
 
@@ -45,6 +46,7 @@ Qwen3.5-122B), ranked items 2, 6 and 7.
 | `GLM53_DSA_BUCKETS` | `auto` | `0` / `off`: no DSA decode buckets at any slot count. |
 | `GLM53_DSA_BUCKET_MIN_T` | `65536` | Builds with a smaller context take no DSA decode buckets. |
 | `GLM53_KDA_ACTIVE` | `1` | `0`: the KDA recurrence computes every slot (before commit 685db8afb95). See "One user on a multi-slot build". |
+| `GLM53_MOE_TIGHT_DISPATCH` | `1` | `0`: the sorted dispatch pads for all E experts (before commit 613e4802772). See "Wide profile: tight sorted-dispatch bound". |
 | `GLM53_MOE_BUCKET_PATH` | `family` | `family`: every MoE row bucket takes the S bucket's family, except the 1-row bucket of the pairs family, which takes the T = 1 gather path (bit-identical). `pairs`: every bucket on pairs (before 685db8afb95). |
 
 ## Evidence
@@ -59,7 +61,7 @@ All paths are under `~/glm53-flash-bringup/`.
 | Served batch invariance (text and random-id prompts: solo, next to a long request, solo again) | `artifacts/s12/served/served_inv_rowbk.json` |
 | Router precision check (rejected item) | `artifacts/s12/router_bf16_check.log` |
 | top-k tie-order probes | `logs/s12/topk_probe.log`, `logs/s12/topk_chunk_probe.log` |
-| One user on a multi-slot build: A/B, invariance, served, release gate | `one_user/` in this directory (`ship_vs_new.json`, `ab1cd_vs_ship.json`, `moe_t1_compare.json`, `standalone_invariance.json`, `served_inv_kact.json`, `sweep_kact.json`, `tf_release_record.json`); raw logs `logs/s12/dec_ab3.log`, `moe_t1.log`, `served_kact.log`, `tf_release_kact.log`; Tracy `artifacts/s12/tracy{,_kact}_s{1,16}` |
+| One user on a multi-slot build: A/B, invariance, served, release gate | `one_user/` in this directory (`ship_vs_new.json`, `ab1cd_vs_ship.json`, `moe_t1_compare.json`, `standalone_invariance.json`, `served_inv_kact.json`, `sweep_kact.json`, `tf_release_record.json`, `wide_tight_dispatch.json`); packaged runs `scorecard_r7/`, `scorecard_r8/`; raw logs `logs/s12/dec_ab3.log`, `moe_t1.log`, `served_kact.log`, `tf_release_kact.log`; Tracy `artifacts/s12/tracy{,_kact}_s{1,16}` |
 
 Correctness (dense regime, positions about 300; for the sparse regime see the gate below):
 - base vs cd and base vs all: bit-identical logits, top-1 29 / 29 rows (1 and 16 active). These positions are below
@@ -235,6 +237,71 @@ Notes:
   second command queue) could make their head counts differ and stop the op.
 - Inactive slots' KDA output rows are now zeros (before: q . S of the unchanged state). Every later op works per row
   or skips inactive rows, so this does not reach active rows (full-model logits bit-identical).
+
+Release package r7 (image `9b84677f4961`, built from `685db8afb95`; `scorecard_r7/`, 2026-10-25; logs
+`~/glm53-flash-bringup/logs/s12/chain_r7.log`, `logs/11/score-*`, `logs/11/verify-staged-p300x2{,-1m}-r7.chain.log`):
+
+| Profile, row | r6 (shipped) | r7 |
+| --- | ---: | ---: |
+| p300x2, 128 / 128, 1 user, TPOT | 74.80 ms | 61.85 ms |
+| p300x2, 8,192 / 256, 1 user, TPOT | 78.56 ms | 65.60 ms |
+| p300x2, 131,072 / 256, 1 user, TPOT | 79.32 ms | 66.38 ms |
+| p300x2, 128 / 128, 16 users, TPOT | 177.01 ms | 177.01 ms |
+| p300x2, 1024 / 256, 16 users, TPOT | 178.83 ms | 178.83 ms |
+| p300x2, CI 100 / 100, 32 concurrent, mean TPOT | 177.0 ms | 176.9 ms |
+| p300x2-wide, 128 / 128, 1 user, TPOT | 124.12 ms | 117.49 ms |
+| p300x2-wide, 128 / 128, 32 users, TPOT | 165.05 ms | 165.05 ms |
+| p300x2-wide, 1024 / 256, 32 users, TPOT | 165.6 ms | 165.5 ms |
+| p300x2-long, 128 / 128, 1 user, TPOT | 49.35 ms | 49.45 ms |
+
+Checks on r7, all on the packaged bundle (`tt-model serve`):
+- Staged verify, p300x2 (fresh reset): PASS; burst 16 / 16 identical to solo greedy
+  (`scorecard_r7/verify_staged_p300x2_smoke.json`).
+- p300x2: preemption load test t2 PASS (`preempt_t2_p300x2.json`); CI burst 64 / 64 successful.
+- p300x2-wide (B = 32): smoke PASS with the 159,680-token prompt, burst 16 / 16 identical to solo greedy; served
+  batch invariance PASS (`invariance_p300x2-wide.json`).
+- p300x2-long: smoke PASS with the 344,000-token prompt (`smoke_p300x2-long.json`).
+- p300x2-1m: every row equal to the r6 run (same text). The burst row is 0 / 1, the documented block-placement
+  exception of stage 11 (`verify_staged_p300x2-1m_smoke.json`, r6: `logs/11/staged-p300x2-1m-r6-smoke.log`).
+- Op tests (`tests/test_kda_recurrent_decode.py`, `test_kda_decode_conv*.py`, incl. H = 16 at B = 2 and 32):
+  25 passed (`~/glm53-flash-bringup/logs/s12/op_tests2.log`).
+
+### Wide profile: tight sorted-dispatch bound (commit 613e4802772)
+
+Problem: after the changes above, `p300x2-wide` (32 slots) still decoded one user at 117.5 ms (served). At 32 slots
+every MoE row bucket runs the expert-sorted family (stage 10, batch invariance; see doc/optimized_vllm/README.md, "One
+routed-path family per build"). A Tracy profile (reduced model, 32-slot build, 1 active, vs the 1-slot build;
+`~/glm53-flash-bringup/artifacts/s12/tracy_kact5_s32`) gave +3.2 ms per 3 layers, nearly all in the sorted MoE path of
+the 2 MoE layers: gather rows 595 us, untilize 548 us, the two grouped sparse matmuls 527 + 391 us, elementwise ops,
+gather-add, dispatch. These ops scale with the dispatched row count. `dispatch_rows` sized the per-expert padding for
+all E = 192 experts: 6,016 rows (188 groups) for the 8 real rows of one token.
+
+Change: a call with T x k rows uses at most min(E, T x k) experts, so the bound is now
+roundup(T x k, 32) + roundup(31 x min(E, T x k), 32) + 32 (`GLM53_MOE_TIGHT_DISPATCH`, default 1; 0 = the E bound).
+The dispatch op's validation accepts this bound. The row layout does not change (experts ascending, each padded to
+whole groups, then the trailing padding group), and every row is computed alone, so the results are bit-identical.
+Dispatched rows at 1 / 2 / 4 / 8 / 16 rows: 320 / 576 / 1,056 / 2,080 / 4,128 (before about 6,000). When T x k >= E
+(the 32-row bucket, every prefill chunk) the bound does not change. Host test: `tests/test_moe_dispatch_host.py`
+(random and worst-case routings fit; unchanged bound at full width).
+
+| Full model, 32 slots x 159,744, 160 MiB trace region (`one_user/wide_tight_dispatch.json`) | Before | After |
+| --- | ---: | ---: |
+| Token-out, 1 active | 117.7 ms | 77.4 ms |
+| Token-out, 2 active | 117.9 ms | 80.5 ms |
+| Token-out, 8 active | 128.3 ms | 108.8 ms |
+| Token-out, 32 active | 157.7 ms | 157.6 ms |
+| Decode trace region | 100.8 MiB | 90.3 MiB |
+
+Correctness: logits bit-identical, 67 / 67 rows (1, 2, 8 and 32 active). The `p300x2` (16 slots, pairs family),
+`p300x2-long` and `p300x2-1m` decode paths do not use the sorted path at T x k < E, so they do not change.
+
+Release package r8 (image `cfa09cc4402d`, built from `613e4802772`; `scorecard_r8/`, 2026-10-25; logs
+`~/glm53-flash-bringup/logs/s12/chain_r8.log`, `logs/s12/scorecard-r8.chain.log`, `logs/11/verify-staged-p300x2-r8.chain.log`):
+- p300x2-wide served TPOT, 128 / 128: 1 user 117.49 -> 77.28 ms (8.5 -> 12.9 tokens/s); 32 users 165.05 -> 165.01 ms;
+  1024 / 256 at 32 users 165.5 -> 165.52 ms.
+- p300x2-wide smoke PASS (159,680-token prompt; same text as r7), burst 16 / 16 identical to solo greedy; served batch
+  invariance PASS (`scorecard_r8/invariance_p300x2-wide.json`).
+- Staged verify, p300x2 (fresh reset): PASS, burst 16 / 16 (`scorecard_r8/verify_staged_p300x2_smoke.json`).
 
 The 1-slot profiles (`p300x2-long`, `p300x2-1m`) do not get faster: their decode already runs one slot. The remaining
 gap of the 16-slot build at 1 user (61.8 vs 49.4 ms) is mostly the full-width DSA selection (the opt-in per-row

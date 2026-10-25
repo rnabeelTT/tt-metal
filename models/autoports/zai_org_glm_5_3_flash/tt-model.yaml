@@ -223,15 +223,15 @@ card:
 
     ### Performance
     Measured with this bundle (`tt-model serve`) on p300x2, vLLM 0.26, greedy, random-token prompts sent as token ids,
-    output length pinned, async decode on (stage-12 scorecard, 2026-10-24). TTFT: time to first token. TPOT: time per
+    output length pinned, async decode on (stage-12 scorecards, 2026-10-24 and 2026-10-25). TTFT: time to first token. TPOT: time per
     output token. One request, 128 input / 128 output tokens:
 
     | profile | TTFT | TPOT | decode tokens/s |
     | --- | ---: | ---: | ---: |
-    | `p300x2-long` (1 x 344,064) | 244 ms | 49.4 ms | 20.3 |
+    | `p300x2-long` (1 x 344,064) | 241 ms | 49.5 ms | 20.2 |
     | `p300x2-1m` (1 x 1,048,576) [1] | 251 ms | 71.5 ms | 14.0 |
-    | `p300x2` (default, 16 x 262,144) | 270 ms | 74.8 ms | 13.4 |
-    | `p300x2-wide` (32 x 159,744) | 272 ms | 124.1 ms | 8.1 |
+    | `p300x2` (default, 16 x 262,144) | 250 ms | 61.9 ms | 16.2 |
+    | `p300x2-wide` (32 x 159,744) | 257 ms | 77.3 ms | 12.9 |
 
     [1] From the TTI release benchmark of 2026-10-21: the release worktree server (not this bundle), the pruned E192
     checkpoint, vllm-tt-plugin 92403f3. The other rows are from this bundle.
@@ -246,7 +246,11 @@ card:
     Stage 12 (this release) turns on a once-per-step MoE sentinel and ping-pong persistent all-gathers: outputs are
     bit-identical to stage 11, decode is about 0.5 % faster, and the decode trace region is 2.6 MiB smaller. Per-row DSA
     decode buckets (about 5.6 ms faster per step) stay off by default (`GLM53_DSA_ROW_BUCKETS=1` to try them): beyond
-    2,048 positions they select other cache pools than the evaluated path. Details: doc/decode_perf_stage12/README.md.
+    2,048 positions they select other cache pools than the evaluated path. One user on a multi-slot profile no longer
+    pays for the empty slots: the KDA recurrence and conv skip inactive slots, the 1-row MoE bucket takes the gather path
+    (16 slots), and the expert-sorted dispatch pads only for the experts a few-row step can use (32 slots). One user:
+    `p300x2` 74.8 -> 61.9 ms, `p300x2-wide` 124.1 -> 77.3 ms; full occupancy unchanged; outputs bit-identical.
+    Details: doc/decode_perf_stage12/README.md.
     Overload: 16 concurrent 20,000-token prompts on `p300x2` exceed the shared KV pool; vLLM preempts and every request
     completes (a spot-check request equals its solo run).
     Accuracy evals (TTI, effort low): see Accuracy; per-profile tables: doc/tti_release/RUN_NOTES.md in the autoport.
