@@ -135,6 +135,45 @@ def _install_lockstep_sampling(sampling, mesh_device):
     )
 
 
+def _install_rows_topk(sampling, mesh_device):
+    """QWEN35_ROWS_TOPK=1: the sampler's per-device vocab mask + power-of-two pad + ttnn.topk over all 32 tile rows (333 us
+    per decode step on the (1, 4) mesh) -> decode_sampling.RowsTopK over the live rows only, for steps of <= MAX_ROWS rows
+    when every vocab column is valid (no mask needed). The rest of the sampler (all-gathers, offsets, draw) is unchanged:
+    its forward runs with ttnn.topk pointed at RowsTopK for the duration of the call."""
+    from models.demos.blackhole.qwen36.tt.decode_sampling.ops import MAX_ROWS, RowsTopK
+
+    ts = sampling.tt_sampling
+    nd = mesh_device.get_num_devices()
+    if nd < 2 or ts.padded_vocab_size != ts.vocab_size or ts.vocab_size % nd or ts.max_top_k != 32:
+        logger.info("rows top-k not installed (padded vocab or k != 32)")
+        return
+    op = RowsTopK(mesh_device, ts.vocab_size // nd, 32)
+    orig_forward = ts.forward
+
+    seen = set()
+
+    def forward(x, tt_out_tok=None):
+        # the logits always carry 32 slot rows; the live ones are the decode bucket's width (the served path traces the
+        # sampler per width, SamplingGenerator.set_trace_bucket); no bucket (eager / tests): all 32
+        B = getattr(sampling, "_active_trace_bucket", None) or int(x.shape[-2])
+        if ts.force_argmax_sampling or B > MAX_ROWS or getattr(ts, "multi_step_reduction", False):
+            return orig_forward(x, tt_out_tok=tt_out_tok)
+        if B not in seen:
+            seen.add(B)
+            logger.info(f"rows top-k: sampler step with {B} live rows (logits {tuple(x.shape)})")
+        saved = (ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2)
+        ttnn.topk = lambda xx, k, dim=-1, sub_core_grids=None, stable=False: op(xx, B)
+        ts._mask_invalid_vocab_logits = lambda xx: xx
+        ts.pad_to_power_of_2 = False
+        try:
+            return orig_forward(x, tt_out_tok=tt_out_tok)
+        finally:
+            ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2 = saved
+
+    ts.forward = forward
+    logger.info(f"sampler rows top-k installed (<= {MAX_ROWS} rows, {ts.vocab_size // nd} columns per die)")
+
+
 # module scope: a class-body generator expression cannot see class attributes
 _PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "1024" if mesh_shape_from_env() == (1, 1) else "2048"))
 
@@ -188,6 +227,8 @@ class Qwen35MoeModel(Qwen36Model):
         ):
             # every die must feed back the token the host reads (doc/text_quality/README.md root cause);
             # QWEN35_SAMPLER_LOCKSTEP=0 restores the stock sampler (A/B measurement only)
+            if os.environ.get("QWEN35_ROWS_TOPK", "0") == "1":
+                _install_rows_topk(self.sampling, mesh_device)
             _install_lockstep_sampling(self.sampling, mesh_device)
         # Device-owned decode inputs: tokens via tt_out_tok, positions via plus_one (no per-token host refresh).
         self._tt_vllm_always_refresh_decode_trace_inputs = False
