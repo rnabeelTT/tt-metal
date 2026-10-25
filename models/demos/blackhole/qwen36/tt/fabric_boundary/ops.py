@@ -37,8 +37,10 @@ import ttnn
 KERNEL_DIR = Path(__file__).parent / "kernels"
 TILE = 32
 PAGE = TILE * TILE * 2
-BOUNDARY_CORE = (0, 2)  # off the to-rows grid
-ROWS_GRID = (8, 2)  # to-rows cores
+# Off the DRAM banks' reader rows (0, 1, 3, 4, 6, 7, 9 on these chips; decode_linear / moe_decode place their streamers
+# there), so a consumer op can share the program (consumer=)
+BOUNDARY_CORE = (9, 2)
+ROWS_CORE_ROWS = (2, 5)  # to-rows / packer cores: x 0..7 on these rows
 
 
 def _f32_bits(v):
@@ -59,11 +61,11 @@ class FabricBoundary:
         self.ring_topology = ring_topology
         self.core = ttnn.CoreCoord(*BOUNDARY_CORE)
         self.cores = ttnn.CoreRangeSet([ttnn.CoreRange(self.core, self.core)])
-        self.rows_cores = [ttnn.CoreCoord(x, y) for y in range(ROWS_GRID[1]) for x in range(ROWS_GRID[0])]
+        self.rows_cores = [ttnn.CoreCoord(x, y) for y in ROWS_CORE_ROWS for x in range(8)]
         assert self.ntiles % len(self.rows_cores) == 0
         self.rows_per_core = self.ntiles // len(self.rows_cores)
         self.rows_set = ttnn.CoreRangeSet(
-            [ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(ROWS_GRID[0] - 1, ROWS_GRID[1] - 1))]
+            [ttnn.CoreRange(ttnn.CoreCoord(0, y), ttnn.CoreCoord(7, y)) for y in ROWS_CORE_ROWS]
         )
         assert not self.rows_set.contains(self.core)
         phys = mesh_device.worker_core_from_logical_core(self.core)
@@ -131,11 +133,19 @@ class FabricBoundary:
             return cb
         return ttnn.CBDescriptor(total_size=size, core_ranges=cores or self.cores, format_descriptors=fmt)
 
-    def __call__(self, residual, partial, gamma, site=None, out_memory_config=ttnn.L1_MEMORY_CONFIG):
+    def reserved_cores(self):
+        """(x, y) of the cores this op uses (a consumer sharing the program must avoid them)."""
+        return {(self.core.x, self.core.y)} | {(c.x, c.y) for c in self.rows_cores}
+
+    def __call__(self, residual, partial, gamma, site=None, out_memory_config=ttnn.L1_MEMORY_CONFIG, consumer=None):
         """residual: the flat residual, or (entry, partial None) a [1, 1, 32, H] BF16 TILE tensor whose row 0 is the
         residual (the gathered embedding rows); partial: this device's [1, 1, 32, H] BF16 TILE L1 partial sum (row 0),
         or None; gamma: gamma(norm weight). Returns (residual' flat, x [1, 1, 1, H] BF16 TILE in out_memory_config,
-        row 0 the normed residual', padding rows 1..31 zero)."""
+        row 0 the normed residual', padding rows 1..31 zero).
+        consumer: the op that consumes x, run in this program (the gpt-oss consumer fusion: its weights stream while the
+        boundary computes): consumer(x_flat, noc_xy, sem_id) -> (kernels, cbs, semaphores, io, notify_noc, out) with
+        notify_noc the NOC coordinates of its cores waiting for program semaphore sem_id (incremented once x_flat holds
+        the normed row); no to-rows output then: returns (residual' flat, out)."""
         entry = partial is None
         converted = None
         if not entry and (partial.dtype != ttnn.bfloat16 or partial.memory_config().buffer_type != ttnn.BufferType.L1):
@@ -147,8 +157,15 @@ class FabricBoundary:
         T = self.tiles
         out_res = self._empty_flat()
         out_xf = self._empty_flat()
-        x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
-                                           self.mesh_device, out_memory_config)
+        fused = consumer is not None
+        if fused:
+            assert not entry, "a consumer-fused boundary all-reduces"
+            c_kernels, c_cbs, c_sems, c_io, notify_noc, c_out = consumer(out_xf, self.noc_xy, 0)
+            x = c_out
+        else:
+            notify_noc = self.rows_noc
+            x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                               self.mesh_device, out_memory_config)
         slots = 0 if entry else self.ring
         recv, sem = (None, None) if entry else self.sites[site]
         sem_addr = 0 if entry else ttnn.get_global_semaphore_address(sem)
@@ -173,7 +190,7 @@ class FabricBoundary:
         reader_ct += ttnn.TensorAccessorArgs(res_src).get_compile_time_args()
         reader_rt = ttnn.RuntimeArgs()
         reader_rt[self.core.x][self.core.y] = [gamma.buffer_address(), sem_addr, res_src.buffer_address(),
-                                               len(self.rows_noc)] + [v for p in self.rows_noc for v in (p.x, p.y)]
+                                               len(notify_noc)] + [v for p in notify_noc for v in (p.x, p.y)]
         compute_ct = [cb_res, cb_recv, cb_gamma, cb_scaler, cb_res_out, cb_sq, cb_rs, cb_x, T, slots]
         compute_ct += [_f32_bits(1.0 / self.hidden), _f32_bits(self.eps), 1, cb_y]
         rows_ct = [cb_scr, self.rows_per_core, self.noc_xy[0], self.noc_xy[1]]
@@ -206,20 +223,24 @@ class FabricBoundary:
             return ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_rows.cpp"), core_ranges=self.rows_set, compile_time_args=rows_ct,
                 runtime_args=rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
-                defines=[] if entry else [("PACK", "1")],
+                defines=([] if entry else [("FB_PACK_ROWS", "1")]) + ([("FB_PACK_ONLY", "1")] if fused else []),
             )
 
         both = self.rows_set.merge(self.cores)
-        semaphores = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, both, 0),
+        notified = both.merge(consumer.cores) if fused else both  # consumer: a callable with .cores (its CoreRangeSet)
+        semaphores = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, notified, 0),
                       ttnn.SemaphoreDescriptor(1, ttnn.CoreType.WORKER, both, 0)]
+        if fused:
+            semaphores += list(c_sems)
+            cbs = cbs + list(c_cbs)
         mesh_program = ttnn.MeshProgramDescriptor()
         for idx, coord in enumerate(self.coords):
-            program = ttnn.ProgramDescriptor(kernels=list(base) + [rows_kernel(idx)], semaphores=list(semaphores),
-                                             cbs=list(cbs))
+            program = ttnn.ProgramDescriptor(kernels=list(base) + [rows_kernel(idx)] + (list(c_kernels) if fused else []),
+                                             semaphores=list(semaphores), cbs=list(cbs))
             if not entry:
                 self._add_sender(idx, coord, program, recv, sem_addr)
             mesh_program[ttnn.MeshCoordinateRange(coord, coord)] = program
-        io = [residual, out_res, out_xf, x, gamma] + ([] if entry else [partial, recv])
+        io = [residual, out_res, out_xf, x, gamma] + ([] if entry else [partial, recv]) + (list(c_io) if fused else [])
         ttnn.generic_op(io, mesh_program)
         ttnn.deallocate(out_xf)
         if converted is not None:

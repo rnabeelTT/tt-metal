@@ -194,13 +194,29 @@ class TPAttention:
         self._attn_ops = cache[key]
         self._attn_const = self._attn_ops[0].prepare(self.tw["q_norm"], self.tw["k_norm"])
 
+    def inproj_consumer(self, fb):
+        """The QKV projection of one row as the consumer of a fabric boundary (fabric_boundary/ops.py consumer=; the
+        stream decode copy of wqkv_fused, decode_linear/ops.py, built on first use: before trace capture)."""
+        if getattr(self, "_dl_w", None) is None:
+            from models.demos.blackhole.qwen36.tt.decode_linear.ops import decode_linear_for
+
+            self._dl_op, self._dl_w = decode_linear_for(self.args, self.mesh, self.tw["wqkv_fused"], fb)
+        return self._dl_op.consumer(self._dl_w, ttnn.DRAM_MEMORY_CONFIG)
+
+    def forward_decode_proj(self, qkv, cur_pos_tt, cos_tt, sin_tt, page_table=None, partial=True):
+        """_forward_decode_ops from the QKV projection's [1, 1, B, N] output (the boundary-fused QKV)."""
+        return self._forward_decode_ops_from(qkv, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
+
     def _forward_decode_ops(self, x, cur_pos_tt, cos_tt, sin_tt, page_table, partial):
-        prep, post = self._attn_ops
-        B = x.shape[-2]
         qkv = tpc.matmul_1d_decode(
             x, self.tw["wqkv_fused"], self.args.attn_qkv_decode_1d_progcfg, self.compute_cfg,
             out_memory_config=ttnn.DRAM_MEMORY_CONFIG,  # L1 measured slower for the prep's row reads (bank contention)
         )
+        return self._forward_decode_ops_from(qkv, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
+
+    def _forward_decode_ops_from(self, qkv, cur_pos_tt, cos_tt, sin_tt, page_table, partial):
+        prep, post = self._attn_ops
+        B = qkv.shape[-2]
         # k / v written straight into the paged_update_cache height shard
         q, k, v, gate = prep(qkv, cos_tt, sin_tt, self._attn_const, B, self._kv_shard_cfg(B))
         ttnn.deallocate(qkv)

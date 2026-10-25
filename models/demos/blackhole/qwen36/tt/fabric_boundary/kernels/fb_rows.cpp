@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Decode layer boundary, pack + to rows (fabric_boundary/ops.py: FabricBoundary).
-// PACK: first packs row 0 of output tiles tile0 .. tile0 + tiles - 1 of this device's partial sum (any TensorAccessor
+// FB_PACK_ROWS: first packs row 0 of output tiles tile0 .. tile0 + tiles - 1 of this device's partial sum (any TensorAccessor
 // layout, BF16) flat into this device's slot of the site's receive buffer on the boundary core (2 x 32 B per tile) and
 // increments program semaphore 1 there (the sender publishes the slot once every to-rows core did).
 // Then, once the boundary core has the normed
@@ -10,7 +10,7 @@
 // output, row 0 = values 32 t .. 32 t + 31 of the flat vector on the boundary core, rows 1..31 zero, and writes them
 // to output pages tile0 .. tile0 + tiles - 1 (any TensorAccessor layout). After gpt-oss's boundary_to_rows.cpp.
 //
-// runtime args: [x_flat_addr, out_addr, tile0, (PACK) partial_addr, slot_addr]
+// runtime args: [x_flat_addr, out_addr, tile0, (FB_PACK_ROWS) partial_addr, slot_addr]
 
 #include <stdint.h>
 
@@ -26,7 +26,7 @@ void kernel_main() {
     constexpr uint32_t x_noc_x = get_compile_time_arg_val(2);
     constexpr uint32_t x_noc_y = get_compile_time_arg_val(3);
     constexpr auto out_args = TensorAccessorArgs<4>();
-#ifdef PACK
+#ifdef FB_PACK_ROWS
     constexpr auto part_args = TensorAccessorArgs<out_args.next_compile_time_args_offset()>();
     constexpr uint32_t cb_pk = get_compile_time_arg_val(part_args.next_compile_time_args_offset());
 #endif
@@ -35,7 +35,7 @@ void kernel_main() {
     constexpr uint32_t face_bytes = 512;
     constexpr uint32_t half_row = 32;
 
-#ifdef PACK
+#ifdef FB_PACK_ROWS
     {
         const auto s_part = TensorAccessor(part_args, get_arg_val<uint32_t>(3), tile_bytes);
         const uint32_t pk = get_write_ptr(cb_pk);
@@ -50,6 +50,10 @@ void kernel_main() {
         noc_async_write_barrier();
         noc_semaphore_inc(get_noc_addr(x_noc_x, x_noc_y, get_semaphore(1)), 1);
     }
+#ifdef FB_PACK_ONLY  // a consumer op in the program reads the normed row from the boundary core itself
+    noc_async_atomic_barrier();
+    return;
+#endif
 #endif
     // the zero parts of the tiles while the boundary computes
     const uint32_t dst0 = get_write_ptr(cb_scr);

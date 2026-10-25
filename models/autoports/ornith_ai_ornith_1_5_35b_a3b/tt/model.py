@@ -412,10 +412,16 @@ class Qwen35MoeModel(Qwen36Model):
         res, h = fb(x, None, self.layers[0]._fb_g_attn)
         ttnn.deallocate(x)
         n = len(self.layers)
+        # QWEN35_FB_CONSUMER=1: each layer's last boundary runs the next layer's in-projection in its program (the
+        # projection's weights stream while the boundary computes; decode_linear/ops.py)
+        consumer = os.environ.get("QWEN35_FB_CONSUMER", "0") == "1"
+        proj = None
         for i, layer in enumerate(self.layers):
             last = i == n - 1
             g_next = self._fb_g_final if last else self.layers[i + 1]._fb_g_attn
-            res, h = layer.forward_decode_fabric(fb, res, h, g_next, cos, sin, cur_pos_tensor, page_table, last=last)
+            nxt = self.layers[i + 1].attention.inproj_consumer(fb) if consumer and not last else None
+            res, h, proj = layer.forward_decode_fabric(fb, res, h, g_next, cos, sin, cur_pos_tensor, page_table,
+                                                       last=last, proj=proj, next_consumer=nxt)
         ttnn.deallocate(res)
         return h
 
