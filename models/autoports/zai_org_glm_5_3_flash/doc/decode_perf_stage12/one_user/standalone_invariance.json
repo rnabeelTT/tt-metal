@@ -1,0 +1,33 @@
+{
+ "source": "~/glm53-flash-bringup/logs/s12/dec_ab3.log (variant new: GLM53_KDA_ACTIVE=1, 16 slots x 243,712, target 4,000 tokens next to a 70,000-token filler)",
+ "rows": [
+  {
+   "A": 1,
+   "filler_seed": 0,
+   "moe_bucket": 0,
+   "dsa_buckets": [],
+   "identical": true,
+   "max_abs_d": 0.0,
+   "tokens_equal": true
+  },
+  {
+   "A": 2,
+   "filler_seed": 0,
+   "moe_bucket": 1,
+   "dsa_buckets": [],
+   "identical": true,
+   "max_abs_d": 0.0,
+   "tokens_equal": true
+  },
+  {
+   "A": 2,
+   "filler_seed": 1,
+   "moe_bucket": 1,
+   "dsa_buckets": [],
+   "identical": true,
+   "max_abs_d": 0.0,
+   "tokens_equal": true
+  }
+ ],
+ "all_identical": true
+}

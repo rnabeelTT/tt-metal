@@ -2,10 +2,12 @@
 
 Stage 12 makes three changes to the multi-slot decode step. Changes 1 and 2 are on by default and give bit-identical
 outputs. Change 3 (per-row DSA buckets) is opt-in: the sparse-regime gate showed that it changes outputs (see
-"Sparse-regime gate"). This page gives the
+"Sparse-regime gate"). A later addendum (commit 685db8afb95) makes one user on a multi-slot build faster, with
+bit-identical outputs (see "One user on a multi-slot build"). This page gives the
 defaults, the switches, the measured numbers and their scope, and the items that stage 12 rejected or did not start.
 
-Commits: d86fe3c874d (MoE sentinel, persistent all-gather), ad427402ba2 (per-row DSA decode buckets).
+Commits: d86fe3c874d (MoE sentinel, persistent all-gather), ad427402ba2 (per-row DSA decode buckets), 685db8afb95
+(one user on a multi-slot build).
 Hardware: p300x2, mesh (1, 4), TP4. Analysis that chose these items: the stage-12 decode gap report (GLM vs
 Qwen3.5-122B), ranked items 2, 6 and 7.
 
@@ -57,6 +59,7 @@ All paths are under `~/glm53-flash-bringup/`.
 | Served batch invariance (text and random-id prompts: solo, next to a long request, solo again) | `artifacts/s12/served/served_inv_rowbk.json` |
 | Router precision check (rejected item) | `artifacts/s12/router_bf16_check.log` |
 | top-k tie-order probes | `logs/s12/topk_probe.log`, `logs/s12/topk_chunk_probe.log` |
+| One user on a multi-slot build: A/B, invariance, served, release gate | `one_user/` in this directory (`ship_vs_new.json`, `ab1cd_vs_ship.json`, `moe_t1_compare.json`, `standalone_invariance.json`, `served_inv_kact.json`, `sweep_kact.json`, `tf_release_record.json`); raw logs `logs/s12/dec_ab3.log`, `moe_t1.log`, `served_kact.log`, `tf_release_kact.log`; Tracy `artifacts/s12/tracy{,_kact}_s{1,16}` |
 
 Correctness (dense regime, positions about 300; for the sparse regime see the gate below):
 - base vs cd and base vs all: bit-identical logits, top-1 29 / 29 rows (1 and 16 active). These positions are below
@@ -214,11 +217,24 @@ Changes (all bit-identical for the active rows):
 Correctness:
 - Full model, 16 slots, 1 and 16 active: logits bit-identical to the shipped code, 29 / 29 rows. The conv change alone
   (stage-12 `cd` record vs `ship`): 29 / 29 bit-identical.
-- Batch invariance (standalone): a target alone vs next to a 70K filler, 1 and 2 active: identical, max |d| 0.
+- Batch invariance (standalone, `one_user/standalone_invariance.json`): a target alone vs next to a 70K filler, 1 and
+  2 active: identical, max |d| 0.
 - Served invariance, p300x2 (`one_user/served_inv_kact.json`): solo repeat, concurrent with a long request, and solo
   again are equal (text and random-id prompts). PASS.
 - Release accuracy gate (1 slot x 243,712, `one_user/tf_release_record.json`): top-1 0.92 / 0.95 / 0.92 (teacher
   forcing), 0.92 / 0.95 / 0.91 (prefill check), top-5 and top-100 1.00. PASS, equal to the shipped code.
+
+Notes:
+- `GLM53_MOE_BUCKET_PATH` with a per-bucket list (for example `8:sorted`) gives unnamed buckets the family, so the
+  1-row bucket goes back to pairs. Both paths are bit-identical; only the speed changes.
+- `tt/moe.py` has an inherited Qwen3.5 comment: the width-1 gather path was intermittently non-deterministic on the
+  Qwen 48-layer model. It does not apply here: the 1-slot GLM profiles ship on this path, and on p300x2 the served
+  solo repeats and the concurrent runs are equal (`one_user/served_inv_kact.json`).
+- The recurrence op's reader and writer each read the slot flags. They agree because the host writes the flags only
+  between programs on the one command queue. A flag write that overlaps a running program (for example from a
+  second command queue) could make their head counts differ and stop the op.
+- Inactive slots' KDA output rows are now zeros (before: q . S of the unchanged state). Every later op works per row
+  or skips inactive rows, so this does not reach active rows (full-model logits bit-identical).
 
 The 1-slot profiles (`p300x2-long`, `p300x2-1m`) do not get faster: their decode already runs one slot. The remaining
 gap of the 16-slot build at 1 user (61.8 vs 49.4 ms) is mostly the full-width DSA selection (the opt-in per-row

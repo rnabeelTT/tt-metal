@@ -33,10 +33,10 @@ def _ref_step(S, qkv, decay, beta, B, q_scale):
     return o.reshape(B * H, V), S2
 
 
-def _inputs(B, R, gen):
-    qkv = torch.randn(R, 2 * H * K + H * V, generator=gen)
-    decay = torch.exp(-5 * torch.sigmoid(torch.randn(R, H * K, generator=gen)))  # GLM bounded gate range
-    beta = torch.sigmoid(torch.randn(R, H, generator=gen))
+def _inputs(B, R, gen, h=H):
+    qkv = torch.randn(R, 2 * h * K + h * V, generator=gen)
+    decay = torch.exp(-5 * torch.sigmoid(torch.randn(R, h * K, generator=gen)))  # GLM bounded gate range
+    beta = torch.sigmoid(torch.randn(R, h, generator=gen))
     return qkv, decay, beta
 
 
@@ -154,15 +154,30 @@ def _flags_host(B, live):
     return ttnn.from_torch(f, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT)
 
 
-@pytest.mark.parametrize("live", [(5,), (0, 15), (3, 4, 9), tuple(range(16)), ()])
-def test_kda_recurrent_decode_active(device, live):
+@pytest.mark.parametrize(
+    "B,h,live",
+    [
+        (16, H, (5,)),
+        (16, H, (0, 15)),
+        (16, H, (3, 4, 9)),
+        (16, H, tuple(range(16))),
+        (16, H, ()),
+        # the model's per-die head count (TP4: 16 heads): the 1-slot build (B = 2, one dummy slot) and p300x2-wide
+        (2, 16, (0,)),
+        (32, 16, (31,)),
+        (32, 16, (0, 7, 8, 30)),
+        (32, 16, tuple(range(32))),
+    ],
+)
+def test_kda_recurrent_decode_active(device, B, h, live):
     """Stage 12 `active` slot flags: active rows bit-identical to the op without flags (same per-head math on another
     core), inactive slots' state untouched (bit-identical to before the step) and their output rows zero."""
-    B, R = 16, 32
-    gen = torch.Generator().manual_seed(11 + len(live))
+    R = 32
+    H = h  # noqa: N806 (shadows the module head count for this case)
+    gen = torch.Generator().manual_seed(11 + len(live) + B)
     q_scale = K**-0.5
     S0 = torch.randn(B, H, K, V, generator=gen) * 0.05
-    qkv, decay, beta = _inputs(B, R, gen)
+    qkv, decay, beta = _inputs(B, R, gen, H)
     ins = [_dev(qkv, device), _dev(decay, device), _dev(beta, device)]
     S_a = ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
     o_a = ttnn.to_torch(ttnn.experimental.kda.recurrent_decode(S_a, *ins, q_scale))[0, 0]
