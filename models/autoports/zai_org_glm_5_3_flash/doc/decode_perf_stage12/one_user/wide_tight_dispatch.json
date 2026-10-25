@@ -1,0 +1,84 @@
+{
+ "a": "/home/raahem/glm53-flash-bringup/artifacts/s12/wide_ab/t0.pt",
+ "b": "/home/raahem/glm53-flash-bringup/artifacts/s12/wide_ab/t1.pt",
+ "bit_identical": true,
+ "top1_agree": "67/67",
+ "mismatches": [],
+ "decode_times_a": {
+  "1": {
+   "tokenout_ms": 117.67346889246255,
+   "enqueue_ms": 12.806571449618787,
+   "bucket": 0
+  },
+  "2": {
+   "tokenout_ms": 117.9206853499636,
+   "enqueue_ms": 12.82216674881056,
+   "bucket": 1
+  },
+  "8": {
+   "tokenout_ms": 128.32416029414162,
+   "enqueue_ms": 13.878757297061384,
+   "bucket": 3
+  },
+  "32": {
+   "tokenout_ms": 157.6710052555427,
+   "enqueue_ms": 16.822312853764743,
+   "bucket": 5
+  }
+ },
+ "decode_times_b": {
+  "1": {
+   "tokenout_ms": 77.3818421526812,
+   "enqueue_ms": 8.480802353005856,
+   "bucket": 0
+  },
+  "2": {
+   "tokenout_ms": 80.47500889515504,
+   "enqueue_ms": 8.743479999247938,
+   "bucket": 1
+  },
+  "8": {
+   "tokenout_ms": 108.78417540807277,
+   "enqueue_ms": 11.711493704933673,
+   "bucket": 3
+  },
+  "32": {
+   "tokenout_ms": 157.60580624919385,
+   "enqueue_ms": 16.810167592484504,
+   "bucket": 5
+  }
+ },
+ "buckets_b": {
+  "tbs": [
+   1,
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "paths": {
+   "1": "sorted",
+   "2": "sorted",
+   "4": "sorted",
+   "8": "sorted",
+   "16": "sorted",
+   "32": "sorted"
+  },
+  "widths": null
+ },
+ "programs": [
+  [
+   1237,
+   1237
+  ],
+  [
+   1263,
+   1263
+  ]
+ ],
+ "trace_bytes": [
+  105709568,
+  94699520
+ ]
+}

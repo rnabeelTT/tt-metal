@@ -33,13 +33,21 @@ MAX_DISPATCH_ROWS = 65536
 CONST_CACHE_ENTRIES = 8
 
 
+# GLM53_MOE_TIGHT_DISPATCH (stage 12, default 1): size the per-expert padding for the experts a call can use, min(E, T*k),
+# not for all E. Same row layout (experts ascending, trailing padding group), so every real row and its result are
+# bit-identical; a few-row call (the 32-slot build's 1 / 2 / 4 / 8 / 16-row decode buckets on the sorted path) then
+# runs its swiglu / multiply / gather-add over ~10-130 groups instead of ~190. 0 = the E-based bound (before stage 12).
+TIGHT_DISPATCH = os.environ.get("GLM53_MOE_TIGHT_DISPATCH", "1") == "1"
+
+
 def dispatch_rows(T: int, k: int, E: int, group: int = TILE) -> int:
     """Static number of dispatched rows: padded pairs + worst-case per-expert padding + one all-padding group.
     ``group`` = rows per expert block (multiple of 32): larger blocks read each expert's weights fewer times but pad more.
     """
     R = T * k
     Rp = -(-R // TILE) * TILE
-    return Rp + (-(-(group - 1) * E // group)) * group + group
+    used = min(E, R) if TIGHT_DISPATCH else E
+    return Rp + (-(-(group - 1) * used // group)) * group + group
 
 
 # How SortedDispatch.build orders the dispatched rows by expert (QWEN35_DISPATCH_MODE):

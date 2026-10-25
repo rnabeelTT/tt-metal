@@ -4,6 +4,8 @@
 
 #include "moe_sorted_dispatch_device_operation.hpp"
 
+#include <algorithm>
+
 #include "ttnn/device_operation.hpp"
 #include "ttnn/tensor/tensor_utils.hpp"
 
@@ -49,10 +51,12 @@ void MoeSortedDispatchDeviceOperation::validate_on_program_cache_miss(
     TT_FATAL(a.group % 32 == 0 && a.group > 0, "moe_sorted_dispatch: group must be a positive multiple of 32");
     TT_FATAL(
         a.num_groups * a.group == a.dispatched_rows, "moe_sorted_dispatch: dispatched_rows must be num_groups * group");
-    // worst case: every expert's last group padded + the trailing padding group must fit the static bound
-    const uint32_t worst = R + ((a.group - 1) * a.num_experts + a.group - 1) / a.group * a.group + a.group;
+    // worst case: the last group of every used expert padded + the trailing padding group must fit the static bound.
+    // At most min(E, R) experts are used, so a few-row call (decode) can pass a much smaller bound than E groups.
+    const uint32_t used = std::min<uint32_t>(a.num_experts, R);
+    const uint32_t worst = R + ((a.group - 1) * used + a.group - 1) / a.group * a.group + a.group;
     TT_FATAL(
-        a.dispatched_rows >= worst || a.dispatched_rows >= R + a.num_experts * a.group,
+        a.dispatched_rows >= worst || a.dispatched_rows >= R + used * a.group,
         "moe_sorted_dispatch: dispatched_rows {} below the worst-case padded size {}",
         a.dispatched_rows,
         worst);
