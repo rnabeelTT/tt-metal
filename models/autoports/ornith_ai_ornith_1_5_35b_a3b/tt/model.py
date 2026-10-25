@@ -376,6 +376,17 @@ class Qwen35MoeModel(Qwen36Model):
             self.args, "fabric_boundary", False
         ):
             x = self._decode_layers_fabric(x, cos, sin, cur_pos_tensor, page_table)
+            if os.environ.get("QWEN35_LM_STREAM", "0") == "1" and (sharded_lm_head or self._ondev_argmax):
+                # the LM head streamed per DRAM bank (decode_linear/ops.py; its decode copy built on the first, eager,
+                # call): 261 us at ~274 GB/s with ttnn.linear (bfp4, 71.5 MB per device)
+                if getattr(self, "_lm_stream", None) is None:
+                    from models.demos.blackhole.qwen36.tt.decode_linear.ops import decode_linear_for
+
+                    self._lm_stream = decode_linear_for(self.args, self.mesh_device, self.lm_head_weight, readers=6)
+                op, w = self._lm_stream
+                logits = op(x, w, int(x.shape[-2]), out_memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                ttnn.deallocate(x)
+                return logits
             if sharded_lm_head or self._ondev_argmax:
                 logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
             else:

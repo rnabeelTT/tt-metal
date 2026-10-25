@@ -11,7 +11,7 @@ PORT=${PORT:-20000}
 "$T/serve.sh" $C $IMG $P "$@" > /dev/null
 t0=$(date +%s)
 until curl -sf localhost:$PORT/v1/models >/dev/null; do
-  if ! docker ps --format '{{.Names}}' | grep -qx $C; then echo "$L: server died"; docker logs $C 2>&1 | grep -v DEBUG | tail -n 30 > $RUNS/$L/boot_fail.log; exit 1; fi
+  if ! docker ps --format '{{.Names}}' | grep -qx $C; then echo "$L: server died"; docker logs $C 2>&1 | grep -v DEBUG | grep -v riscv | tail -n 300 > $RUNS/$L/boot_fail.log; exit 1; fi
   sleep 10
 done
 echo "$L: up after $(( $(date +%s) - t0 )) s"

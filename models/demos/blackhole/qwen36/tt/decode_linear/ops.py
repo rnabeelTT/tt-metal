@@ -77,7 +77,7 @@ class DecodeLinear:
 
     def weight(self, per_device, cache_file_name=None):
         """per_device: one [K, N] torch weight per device of the mesh (TP shards, mesh order) -> the decode copy."""
-        t = torch.stack([self.layout(w.float()) for w in per_device])  # [ndev, C K, banks 32]
+        t = torch.stack([self.layout(w) for w in per_device])  # [ndev, C K, banks 32] (the weights' torch dtype)
         nd = len(per_device)
         mapper = ttnn.ShardTensorToMesh(self.mesh_device, dim=0) if nd > 1 else None
         return ttnn.as_tensor(t if nd > 1 else t[0], dtype=self.weight_dtype, layout=ttnn.TILE_LAYOUT,
@@ -162,19 +162,20 @@ class DecodeLinear:
         return parts
 
 
-def decode_linear_for(args, mesh_device, weight, fb, readers=6, replicated=False, fidelity=ttnn.MathFidelity.HiFi2):
+def decode_linear_for(args, mesh_device, weight, fb=None, readers=6, replicated=False, fidelity=ttnn.MathFidelity.HiFi2):
     """(DecodeLinear, decode copy) for a [K, N]-per-device column-parallel ttnn weight (TP shards along N; replicated:
     the same [K, N] on every device), one op per shape (cached on args), its cores clear of the fabric boundary's
     (fb.reserved_cores())."""
     nd = mesh_device.get_num_devices()
-    full = ttnn.to_torch(weight, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).float()
+    # bf16 on the host: exact for bfp8 / bfp4 weights, half the memory of FP32 (the LM head: 4 x 2048 x 62080 values)
+    full = ttnn.to_torch(weight, mesh_composer=ttnn.ConcatMeshToTensor(mesh_device, dim=-1)).to(torch.bfloat16)
     full = full.reshape(full.shape[-2], full.shape[-1])
     K, N = full.shape[0], full.shape[1] // nd
     cache = args.__dict__.setdefault("_qwen36_decode_linear", {})
     key = (id(mesh_device), K, N, weight.dtype, fidelity)
     if key not in cache:
-        cache[key] = DecodeLinear(mesh_device, K, N, weight.dtype, readers=readers, exclude=fb.reserved_cores(),
-                                  fidelity=fidelity)
+        cache[key] = DecodeLinear(mesh_device, K, N, weight.dtype, readers=readers,
+                                  exclude=fb.reserved_cores() if fb is not None else (), fidelity=fidelity)
     op = cache[key]
     parts = [full[:, :N]] * nd if replicated else [full[:, d * N:(d + 1) * N] for d in range(nd)]
     return op, op.weight(parts)
