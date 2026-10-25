@@ -155,9 +155,10 @@ capacity.
 - One user, fastest decode: p300x2-long.
 - One user, the full 1M context: p300x2-1m.
 - Up to 16 users: p300x2 (the default).
-- 32 users, or the best per-user decode at 16 users: p300x2-wide. Its single-user decode is slower (121 ms): at 32
-  slots every MoE row bucket runs the expert-sorted path (stage-10 fix), which keeps the greedy output independent of
-  the number of active requests.
+- 32 users, or the best per-user decode at 16 users: p300x2-wide. At 32 slots every MoE row bucket runs the
+  expert-sorted path (stage-10 fix), which keeps the greedy output independent of the number of active requests.
+- Stage 12 one-user changes (shipped defaults, after this table): 1 user 61.85 ms on p300x2 and 77.28 ms on
+  p300x2-wide (was 121 ms); 16 / 32 users unchanged (`../decode_perf_stage12/README.md`).
 
 Single-user TPOT grew slowly with the filled context on the bucketed build [DSA buckets on]: p300x2 69.9 ms at 128
 tokens, 73.9 ms at 16K, 79.3 ms at 239,360. Without the multi-slot DSA buckets the indexer selects over the full

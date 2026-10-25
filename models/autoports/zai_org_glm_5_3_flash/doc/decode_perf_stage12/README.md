@@ -216,6 +216,11 @@ Changes (all bit-identical for the active rows):
 | Served TPOT, p300x2, 128 / 128, 16 users | 177.0 ms | 177.0 ms |
 | Decode trace region (served capture) | 83.9 MiB | 81.3 MiB |
 
+Before / after: "before" 74.6 ms is the shipped code (`ab1` record, 2026-10-23). The `ship` variant in
+`one_user/ship_vs_new.json` (72.69 ms) already has the conv change (3): that change has no runtime switch, and its
+kernel source changed before that run. So 74.6 -> 72.7 ms is the conv change, 72.7 -> 61.6 ms the MoE and KDA
+recurrence changes. To roll back the conv change, revert its reader kernel (bit-identical either way).
+
 Correctness:
 - Full model, 16 slots, 1 and 16 active: logits bit-identical to the shipped code, 29 / 29 rows. The conv change alone
   (stage-12 `cd` record vs `ship`): 29 / 29 bit-identical.
@@ -293,7 +298,14 @@ Dispatched rows at 1 / 2 / 4 / 8 / 16 rows: 320 / 576 / 1,056 / 2,080 / 4,128 (b
 | Decode trace region | 100.8 MiB | 90.3 MiB |
 
 Correctness: logits bit-identical, 67 / 67 rows (1, 2, 8 and 32 active). The `p300x2` (16 slots, pairs family),
-`p300x2-long` and `p300x2-1m` decode paths do not use the sorted path at T x k < E, so they do not change.
+`p300x2-long` and `p300x2-1m` decode paths do not use the sorted path at T x k < E, so they do not change. The 4-row bucket has no full-model equality run
+(same layout by construction; host test at T = 4).
+
+Remaining wide gap at 1 user (77.3 vs 49.5 ms on `p300x2-long`): the sorted path at one row still costs more than the
+gather path (dispatch, gather and gather-add ops), plus the width-32 relayouts and the full-width DSA selection. The
+gather path is not used at 32 slots because it is not shown to be bit-identical to the sorted path (the sorted path
+applies the routing weight before the down projection); without that, the output of a request would depend on the
+number of active slots.
 
 Release package r8 (image `cfa09cc4402d`, built from `613e4802772`; `scorecard_r8/`, 2026-10-25; logs
 `~/glm53-flash-bringup/logs/s12/chain_r8.log`, `logs/s12/scorecard-r8.chain.log`, `logs/11/verify-staged-p300x2-r8.chain.log`):
