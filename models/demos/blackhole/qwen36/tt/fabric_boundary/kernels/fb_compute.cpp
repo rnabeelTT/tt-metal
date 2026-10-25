@@ -69,134 +69,174 @@ void kernel_main() {
     constexpr uint32_t eps = get_compile_time_arg_val(11);    // float bits
     constexpr uint32_t do_norm = get_compile_time_arg_val(12);
     constexpr uint32_t cb_y = get_compile_time_arg_val(13);
-    static_assert(tiles <= 3, "phase 2 / 3 hold the tiles plus one operand in the 4 FP32 DST tiles");
+    constexpr uint32_t rows = get_compile_time_arg_val(14);  // decode rows: row r's vector at pages r * tiles ..
+    constexpr uint32_t all = rows * tiles;
+    static_assert(tiles <= 4 && 4 % tiles == 0, "rows of whole tiles in the 4 FP32 DST tiles");
 
     // 1. residual' = ((slot 0 + slot 1) + ...) + residual: the partial sums first (rounded at their own magnitude
-    //    when DST feeds SrcA), the residual last (FPU, FP32 DST).
+    //    when DST feeds SrcA), the residual last (FPU, FP32 DST); 4 tiles per DST acquire.
     compute_kernel_hw_startup(slots > 0 ? cb_recv : cb_res, cb_res, cb_res_out);
-    cb_wait_front(cb_res, tiles);
+    cb_wait_front(cb_res, all);
     if constexpr (slots > 0) {
-        cb_wait_front(cb_recv, slots * tiles);
+        cb_wait_front(cb_recv, slots * all);
     }
-    cb_reserve_back(cb_res_out, tiles);
-    for (uint32_t t = 0; t < tiles; ++t) {
+    cb_reserve_back(cb_res_out, all);
+    {
         DeviceZoneScopedN("BND_C1_SUM");
-        tile_regs_acquire();
-        if constexpr (slots > 1) {
-            add_init(cb_recv, cb_recv);
-            add_tiles(cb_recv, cb_recv, t, tiles + t, 0);
-            add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_recv);
-            for (uint32_t s = 2; s < slots; ++s) {
-                add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_recv, s * tiles + t, 0);
+        for (uint32_t t0 = 0; t0 < all; t0 += 4) {
+            const uint32_t n = all - t0 < 4 ? all - t0 : 4;
+            tile_regs_acquire();
+            for (uint32_t j = 0; j < n; ++j) {
+                const uint32_t t = t0 + j;
+                if constexpr (slots > 1) {
+                    add_init(cb_recv, cb_recv);
+                    add_tiles(cb_recv, cb_recv, t, all + t, j);
+                    add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_recv);
+                    for (uint32_t s = 2; s < slots; ++s) {
+                        add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_recv, s * all + t, j);
+                    }
+                    add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_res);
+                    add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_res, t, j);
+                } else if constexpr (slots == 1) {
+                    add_init(cb_recv, cb_res);
+                    add_tiles(cb_recv, cb_res, t, t, j);
+                } else {
+                    copy_init(cb_res);
+                    copy_tile(cb_res, t, j);
+                }
             }
-            add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_res);
-            add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_res, t, 0);
-        } else if constexpr (slots == 1) {
-            add_init(cb_recv, cb_res);
-            add_tiles(cb_recv, cb_res, t, t, 0);
-        } else {
-            copy_init(cb_res);
-            copy_tile(cb_res, t, 0);
+            tile_regs_commit();
+            tile_regs_wait();
+            for (uint32_t j = 0; j < n; ++j) {
+                pack_tile(j, cb_res_out);
+            }
+            tile_regs_release();
         }
-        tile_regs_commit();
-        tile_regs_wait();
-        pack_tile(0, cb_res_out);
-        tile_regs_release();
     }
-    cb_push_back(cb_res_out, tiles);
-    cb_pop_front(cb_res, tiles);
+    cb_push_back(cb_res_out, all);
+    cb_pop_front(cb_res, all);
     if constexpr (slots > 0) {
-        cb_pop_front(cb_recv, slots * tiles);
+        cb_pop_front(cb_recv, slots * all);
     }
     if constexpr (!do_norm) {
         return;
     }
 
-    // 2. y = residual' * gamma (FPU, FP32, packed to cb_y) and the per-position sum over the tiles of residual'^2
-    //    (FPU squares of the BF16-rounded residual, summed in DST by the SFPU, packed to cb_sq).
-    cb_wait_front(cb_res_out, tiles);
+    // 2. per row: y = residual' * gamma (FP32, packed to cb_y) and the per-position sum of residual'^2 over the row's
+    //    tiles (packed to cb_sq, one tile per row); RG = 4 / tiles rows per DST acquire.
+    constexpr uint32_t RG = 4 / tiles;
+    cb_wait_front(cb_res_out, all);
     cb_wait_front(cb_gamma, tiles);
+    cb_wait_front(cb_scaler, 1);
+    compute_kernel_hw_startup(cb_res_out, cb_gamma, cb_y);
+    pack_reconfig_data_format(cb_y);
     {
         DeviceZoneScopedN("BND_C2_SQ");
-        tile_regs_acquire();
-        mul_init(cb_res_out, cb_gamma);
-        for (uint32_t t = 0; t < tiles; ++t) {
-            mul_tiles(cb_res_out, cb_gamma, t, t, t);
-        }
-        tile_regs_commit();
-        cb_reserve_back(cb_y, tiles);
-        tile_regs_wait();
-        pack_reconfig_data_format(cb_y);
-        for (uint32_t t = 0; t < tiles; ++t) {
-            pack_tile(t, cb_y);
-        }
-        tile_regs_release();
-        cb_push_back(cb_y, tiles);
+        for (uint32_t r0 = 0; r0 < rows; r0 += RG) {
+            const uint32_t nr = rows - r0 < RG ? rows - r0 : RG;
+            tile_regs_acquire();
+            mul_init(cb_res_out, cb_gamma);
+            for (uint32_t r = 0; r < nr; ++r) {
+                for (uint32_t t = 0; t < tiles; ++t) {
+                    mul_tiles(cb_res_out, cb_gamma, (r0 + r) * tiles + t, t, r * tiles + t);
+                }
+            }
+            tile_regs_commit();
+            cb_reserve_back(cb_y, nr * tiles);
+            tile_regs_wait();
+            for (uint32_t i = 0; i < nr * tiles; ++i) {
+                pack_tile(i, cb_y);
+            }
+            tile_regs_release();
+            cb_push_back(cb_y, nr * tiles);
 
-        tile_regs_acquire();
-        mul_init(cb_res_out, cb_res_out);
-        for (uint32_t t = 0; t < tiles; ++t) {
-            mul_tiles(cb_res_out, cb_res_out, t, t, t);
+            tile_regs_acquire();
+            mul_init(cb_res_out, cb_res_out);
+            for (uint32_t r = 0; r < nr; ++r) {
+                for (uint32_t t = 0; t < tiles; ++t) {
+                    const uint32_t i = (r0 + r) * tiles + t;
+                    mul_tiles(cb_res_out, cb_res_out, i, i, r * tiles + t);
+                }
+            }
+            add_binary_tile_init();
+            for (uint32_t r = 0; r < nr; ++r) {
+                for (uint32_t t = 1; t < tiles; ++t) {
+                    add_binary_tile(r * tiles, r * tiles + t, r * tiles);
+                }
+            }
+            tile_regs_commit();
+            cb_reserve_back(cb_sq, nr);
+            tile_regs_wait();
+            for (uint32_t r = 0; r < nr; ++r) {
+                pack_tile(r * tiles, cb_sq);
+            }
+            tile_regs_release();
+            cb_push_back(cb_sq, nr);
         }
-        add_binary_tile_init();
-        for (uint32_t t = 1; t < tiles; ++t) {
-            add_binary_tile(0, t, 0);
-        }
-        tile_regs_commit();
-        cb_reserve_back(cb_sq, 1);
-        tile_regs_wait();
-        pack_tile(0, cb_sq);
-        tile_regs_release();
-        cb_push_back(cb_sq, 1);
     }
-    cb_pop_front(cb_gamma, tiles);
 
-    // 3. rs = rsqrt(sum / hidden + eps): FPU scalar reduce, SFPU scalar ops.
-    cb_wait_front(cb_sq, 1);
-    cb_wait_front(cb_scaler, 1);
+    // 3. rs = rsqrt(sum / hidden + eps) per row: FPU scalar reduce, SFPU scalar ops; 4 rows per acquire.
+    cb_wait_front(cb_sq, rows);
+    compute_kernel_hw_startup(cb_sq, cb_scaler, cb_rs);
     {
         DeviceZoneScopedN("BND_C3_RS");
-        compute_kernel_hw_startup(cb_sq, cb_scaler, cb_rs);
-        tile_regs_acquire();
-        reduce_init<PoolType::SUM, ReduceDim::REDUCE_SCALAR>(cb_sq, cb_scaler, cb_rs);
-        reduce_tile<PoolType::SUM, ReduceDim::REDUCE_SCALAR>(cb_sq, cb_scaler, 0, 0, 0);
-        reduce_uninit(cb_sq);
-        binop_with_scalar_tile_init();
-        scalar_op<MUL_UNARY>(0, inv_n);
-        scalar_op<ADD_UNARY>(0, eps);
-        rsqrt_tile_init();
-        rsqrt_scalar(0);
-        tile_regs_commit();
-        cb_reserve_back(cb_rs, 1);
-        tile_regs_wait();
-        pack_tile(0, cb_rs);
-        tile_regs_release();
-        cb_push_back(cb_rs, 1);
+        for (uint32_t r0 = 0; r0 < rows; r0 += 4) {
+            const uint32_t nr = rows - r0 < 4 ? rows - r0 : 4;
+            tile_regs_acquire();
+            reduce_init<PoolType::SUM, ReduceDim::REDUCE_SCALAR>(cb_sq, cb_scaler, cb_rs);
+            for (uint32_t r = 0; r < nr; ++r) {
+                reduce_tile<PoolType::SUM, ReduceDim::REDUCE_SCALAR>(cb_sq, cb_scaler, r0 + r, 0, r);
+            }
+            reduce_uninit(cb_sq);
+            binop_with_scalar_tile_init();
+            for (uint32_t r = 0; r < nr; ++r) {
+                scalar_op<MUL_UNARY>(r, inv_n);
+                scalar_op<ADD_UNARY>(r, eps);
+            }
+            rsqrt_tile_init();
+            for (uint32_t r = 0; r < nr; ++r) {
+                rsqrt_scalar(r);
+            }
+            tile_regs_commit();
+            cb_reserve_back(cb_rs, nr);
+            tile_regs_wait();
+            for (uint32_t r = 0; r < nr; ++r) {
+                pack_tile(r, cb_rs);
+            }
+            tile_regs_release();
+            cb_push_back(cb_rs, nr);
+        }
     }
-    cb_pop_front(cb_sq, 1);
-    cb_pop_front(cb_scaler, 1);
+    cb_pop_front(cb_sq, rows);
 
-    // 4. x = y * rs (FPU scalar broadcast).
-    cb_wait_front(cb_rs, 1);
-    cb_wait_front(cb_y, tiles);
-    cb_reserve_back(cb_x, tiles);
+    // 4. x = y * rs per row (FPU scalar broadcast); RG rows per acquire.
+    cb_wait_front(cb_rs, rows);
+    cb_wait_front(cb_y, all);
+    cb_reserve_back(cb_x, all);
+    compute_kernel_hw_startup(cb_y, cb_rs, cb_x);
+    pack_reconfig_data_format(cb_x);
     {
         DeviceZoneScopedN("BND_C4_X");
-        compute_kernel_hw_startup(cb_y, cb_rs, cb_x);
-        tile_regs_acquire();
         mul_bcast_scalar_init(cb_y, cb_rs);
-        for (uint32_t t = 0; t < tiles; ++t) {
-            mul_tiles_bcast_scalar(cb_y, cb_rs, t, 0, t);
+        for (uint32_t r0 = 0; r0 < rows; r0 += RG) {
+            const uint32_t nr = rows - r0 < RG ? rows - r0 : RG;
+            tile_regs_acquire();
+            for (uint32_t r = 0; r < nr; ++r) {
+                for (uint32_t t = 0; t < tiles; ++t) {
+                    mul_tiles_bcast_scalar(cb_y, cb_rs, (r0 + r) * tiles + t, r0 + r, r * tiles + t);
+                }
+            }
+            tile_regs_commit();
+            tile_regs_wait();
+            for (uint32_t i = 0; i < nr * tiles; ++i) {
+                pack_tile(i, cb_x);
+            }
+            tile_regs_release();
         }
-        tile_regs_commit();
-        tile_regs_wait();
-        pack_reconfig_data_format(cb_x);
-        for (uint32_t t = 0; t < tiles; ++t) {
-            pack_tile(t, cb_x);
-        }
-        tile_regs_release();
     }
-    cb_push_back(cb_x, tiles);
-    cb_pop_front(cb_y, tiles);
-    cb_pop_front(cb_rs, 1);
+    cb_push_back(cb_x, all);
+    cb_pop_front(cb_y, all);
+    cb_pop_front(cb_rs, rows);
+    cb_pop_front(cb_gamma, tiles);
+    cb_pop_front(cb_scaler, 1);
 }

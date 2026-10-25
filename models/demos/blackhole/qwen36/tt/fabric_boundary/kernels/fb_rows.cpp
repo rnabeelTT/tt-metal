@@ -37,16 +37,23 @@ void kernel_main() {
 
 #ifdef FB_PACK_ROWS
     {
+        // rows 0 .. FB_ROWS-1 of each of my tiles: row r's 64 bytes of tile t at pk + r * 64 * tiles + 64 t, then one write
+        // per row into the slot (row r's vector at byte r * slot_row_bytes)
         const auto s_part = TensorAccessor(part_args, get_arg_val<uint32_t>(3), tile_bytes);
         const uint32_t pk = get_write_ptr(cb_pk);
         for (uint32_t t = 0; t < tiles; ++t) {
             const uint64_t src = s_part.get_noc_addr(tile0 + t);
-            noc_async_read(src, pk + 64 * t, half_row);
-            noc_async_read(src + face_bytes, pk + 64 * t + half_row, half_row);
+            for (uint32_t r = 0; r < FB_ROWS; ++r) {
+                const uint32_t roff = (r / 16) * 1024 + (r % 16) * 32;
+                noc_async_read(src + roff, pk + r * 64 * tiles + 64 * t, half_row);
+                noc_async_read(src + roff + face_bytes, pk + r * 64 * tiles + 64 * t + half_row, half_row);
+            }
         }
         noc_async_read_barrier();
-        const uint64_t slot = get_noc_addr(x_noc_x, x_noc_y, get_arg_val<uint32_t>(4) + 64 * tile0);
-        noc_async_write(pk, slot, 64 * tiles);
+        for (uint32_t r = 0; r < FB_ROWS; ++r) {
+            const uint64_t slot = get_noc_addr(x_noc_x, x_noc_y, get_arg_val<uint32_t>(4) + r * FB_ROW_BYTES + 64 * tile0);
+            noc_async_write(pk + r * 64 * tiles, slot, 64 * tiles);
+        }
         noc_async_write_barrier();
         noc_semaphore_inc(get_noc_addr(x_noc_x, x_noc_y, get_semaphore(1)), 1);
     }
@@ -60,18 +67,33 @@ void kernel_main() {
     const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
     for (uint32_t t = 0; t < tiles; ++t) {
         const uint32_t base = dst0 + t * tile_bytes;
-        noc_async_read(zeros, base + half_row, face_bytes - half_row);
-        for (uint32_t z = face_bytes + half_row; z < tile_bytes; z += MEM_ZEROS_SIZE) {
+        for (uint32_t z = 0; z < tile_bytes; z += MEM_ZEROS_SIZE) {
             const uint32_t n = tile_bytes - z < MEM_ZEROS_SIZE ? tile_bytes - z : MEM_ZEROS_SIZE;
             noc_async_read(zeros, base + z, n);
         }
     }
+    noc_async_read_barrier();  // the zeros land before the rows (both are NOC reads into the same tiles)
     noc_semaphore_wait_min(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(0)), 1);
+#ifdef FB_PACK_ROWS
+    // one read per row of this core's 64 * tiles bytes (16 cores x many 32-byte reads of the boundary core's L1
+    // serialize on its NOC endpoint), then local copies into the tiles; cb_pk is free again after the pack
+    const uint32_t gx = get_write_ptr(cb_pk);
+#else
+    const uint32_t gx = get_write_ptr(cb_scr) + tiles * tile_bytes;
+#endif
+    for (uint32_t r = 0; r < FB_ROWS; ++r) {
+        noc_async_read(get_noc_addr(x_noc_x, x_noc_y, x_addr + r * FB_ROW_BYTES + tile0 * 2 * half_row),
+                       gx + r * 64 * tiles, 64 * tiles);
+    }
+    noc_async_read_barrier();
     for (uint32_t t = 0; t < tiles; ++t) {
         const uint32_t base = dst0 + t * tile_bytes;
-        const uint64_t src = get_noc_addr(x_noc_x, x_noc_y, x_addr + (tile0 + t) * 2 * half_row);
-        noc_async_read(src, base, half_row);
-        noc_async_read(src + half_row, base + face_bytes, half_row);
+        for (uint32_t r = 0; r < FB_ROWS; ++r) {
+            const uint32_t roff = (r / 16) * 1024 + (r % 16) * 32;
+            const uint64_t src = get_noc_addr(gx + r * 64 * tiles + 64 * t);
+            noc_async_read(src, base + roff, half_row);
+            noc_async_read(src + half_row, base + roff + face_bytes, half_row);
+        }
     }
     noc_async_read_barrier();
     const auto s_out = TensorAccessor(out_args, out_addr, tile_bytes);

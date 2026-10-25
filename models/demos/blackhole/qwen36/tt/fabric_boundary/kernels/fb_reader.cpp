@@ -40,24 +40,28 @@ void kernel_main() {
     constexpr auto res_args = TensorAccessorArgs<gamma_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t page = 2048;
+    constexpr uint32_t all = tiles * FB_ROWS;  // FB_ROWS decode rows: row r's vector at pages r * tiles ..
 
     const auto s_gamma = TensorAccessor(gamma_args, gamma_addr, tiles * page);
     cb_reserve_back(cb_gamma, tiles);
     noc_async_read(s_gamma.get_noc_addr(0), get_write_ptr(cb_gamma), tiles * page);
 
-    cb_reserve_back(cb_res, tiles);
+    cb_reserve_back(cb_res, all);
     if constexpr (res_mode == 2) {
         const auto s_res = TensorAccessor(res_args, res_src_addr, page);
-        const uint32_t dst = get_write_ptr(cb_res);
-        for (uint32_t t = 0; t < ntiles; ++t) {
-            const uint64_t src = s_res.get_noc_addr(t);
-            noc_async_read(src, dst + 64 * t, 32);
-            noc_async_read(src + 512, dst + 64 * t + 32, 32);
-        }
         const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
-        for (uint32_t z = 64 * ntiles; z < tiles * page; z += MEM_ZEROS_SIZE) {
-            const uint32_t n = tiles * page - z < MEM_ZEROS_SIZE ? tiles * page - z : MEM_ZEROS_SIZE;
-            noc_async_read(zeros, dst + z, n);
+        for (uint32_t r = 0; r < FB_ROWS; ++r) {
+            const uint32_t dst = get_write_ptr(cb_res) + r * tiles * page;
+            const uint32_t roff = (r / 16) * 1024 + (r % 16) * 32;  // row r of a 32x32 tile, face 0
+            for (uint32_t t = 0; t < ntiles; ++t) {
+                const uint64_t src = s_res.get_noc_addr(t);
+                noc_async_read(src + roff, dst + 64 * t, 32);
+                noc_async_read(src + roff + 512, dst + 64 * t + 32, 32);
+            }
+            for (uint32_t z = 64 * ntiles; z < tiles * page; z += MEM_ZEROS_SIZE) {
+                const uint32_t n = tiles * page - z < MEM_ZEROS_SIZE ? tiles * page - z : MEM_ZEROS_SIZE;
+                noc_async_read(zeros, dst + z, n);
+            }
         }
     }
 
@@ -75,7 +79,7 @@ void kernel_main() {
     cb_push_back(cb_scaler, 1);
 
     noc_async_read_barrier();
-    cb_push_back(cb_res, tiles);
+    cb_push_back(cb_res, all);
     cb_push_back(cb_gamma, tiles);
 
     if constexpr (slots > 0) {
@@ -85,15 +89,15 @@ void kernel_main() {
             noc_semaphore_wait_min(sem, expected);
             noc_semaphore_set(sem, 0);
         }
-        cb_reserve_back(cb_recv, slots * tiles);
-        cb_push_back(cb_recv, slots * tiles);
+        cb_reserve_back(cb_recv, slots * all);
+        cb_push_back(cb_recv, slots * all);
     }
 
-    cb_wait_front(cb_x, tiles);
+    cb_wait_front(cb_x, all);
     const uint32_t sem0 = get_semaphore(0);
     for (uint32_t i = 0; i < n_rows_cores; ++i) {
         noc_semaphore_inc(get_noc_addr(get_arg_val<uint32_t>(4 + 2 * i), get_arg_val<uint32_t>(5 + 2 * i), sem0), 1);
     }
     noc_async_atomic_barrier();
-    cb_pop_front(cb_x, tiles);
+    cb_pop_front(cb_x, all);
 }

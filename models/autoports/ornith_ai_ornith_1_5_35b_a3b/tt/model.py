@@ -372,7 +372,9 @@ class Qwen35MoeModel(Qwen36Model):
 
             bnd = decode_boundary(self.args, self.mesh_device)
             x = bnd.gather(x, self.tt_ccl)
-        if hook is None and x.shape[-2] == 1 and getattr(self.args, "fabric_boundary", False):
+        if hook is None and x.shape[-2] <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(
+            self.args, "fabric_boundary", False
+        ):
             x = self._decode_layers_fabric(x, cos, sin, cur_pos_tensor, page_table)
             if sharded_lm_head or self._ondev_argmax:
                 logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
@@ -409,12 +411,13 @@ class Qwen35MoeModel(Qwen36Model):
                 layer._fb_g_attn = fb.gamma(layer.attention_norm.norm.weight)
                 layer._fb_g_ffn = fb.gamma(layer.ffn_norm.norm.weight)
             self._fb_g_final = fb.gamma(self.norm.norm.weight)
+        rows = int(x.shape[-2])
         res, h = fb(x, None, self.layers[0]._fb_g_attn)
         ttnn.deallocate(x)
         n = len(self.layers)
         # QWEN35_FB_CONSUMER=1: each layer's last boundary runs the next layer's in-projection in its program (the
         # projection's weights stream while the boundary computes; decode_linear/ops.py)
-        consumer = os.environ.get("QWEN35_FB_CONSUMER", "0") == "1"
+        consumer = os.environ.get("QWEN35_FB_CONSUMER", "0") == "1" and rows == 1
         proj = None
         for i, layer in enumerate(self.layers):
             last = i == n - 1

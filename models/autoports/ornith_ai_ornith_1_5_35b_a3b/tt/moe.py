@@ -442,6 +442,10 @@ class Qwen35MoE:
         rows = int(x4.shape[-2])
         if rows == 1:
             part = self._fused(x4, self.up_gate, self.down, logits=logits)
+        elif partial == "fabric":  # a per-call L1 partial the fabric boundary packs in place (the caller frees it)
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, int(x4.shape[-1])]), ttnn.bfloat16,
+                                                 ttnn.TILE_LAYOUT, self.device, ttnn.L1_MEMORY_CONFIG)
+            return self._fused.rows(x4, self.up_gate, self.down, out=out)
         else:
             part = self._fused.rows(x4, self.up_gate, self.down)
         if partial == "fabric" and rows == 1:  # the fabric boundary reads the model-wide L1 BF16 buffer itself

@@ -41,6 +41,7 @@ PAGE = TILE * TILE * 2
 # there), so a consumer op can share the program (consumer=)
 BOUNDARY_CORE = (9, 2)
 ROWS_CORE_ROWS = (2, 5)  # to-rows / packer cores: x 0..7 on these rows
+MAX_ROWS = 8  # decode rows per boundary (row r's vector at pages r * tiles ..)
 
 
 def _f32_bits(v):
@@ -48,10 +49,11 @@ def _f32_bits(v):
 
 
 class FabricBoundary:
-    def __init__(self, mesh_device, hidden, eps, ring_topology=None):
+    def __init__(self, mesh_device, hidden, eps, ring_topology=None, max_rows=MAX_ROWS):
         assert hidden % 1024 == 0, "whole flat pages"
         self.mesh_device = mesh_device
         self.hidden, self.eps = hidden, eps
+        self.max_rows = max_rows
         self.tiles = hidden // 1024
         self.ntiles = hidden // TILE  # 32x32 tiles of a [1, 1, 32, H] tensor
         self.ring = mesh_device.shape[1]
@@ -72,16 +74,15 @@ class FabricBoundary:
         self.noc_xy = (phys.x, phys.y)
         self.rows_noc = [mesh_device.worker_core_from_logical_core(c) for c in self.rows_cores]
         self.payload = self.tiles * PAGE
-        max_payload = int(ttnn.get_tt_fabric_max_payload_size_bytes())
-        self.chunk = min(self.payload, max_payload // PAGE * PAGE)
+        self.max_payload = int(ttnn.get_tt_fabric_max_payload_size_bytes())
         self.coords = [ttnn.MeshCoordinate(0, c) for c in range(self.ring)]
         self._warned = set()
         grid = mesh_device.compute_with_storage_grid_size()
         all_cores = ttnn.CoreRangeSet([ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(grid.x - 1, grid.y - 1))])
         self.sites = {
             name: (
-                ttnn.empty(self._flat_shape(self.ring * self.tiles), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh_device,
-                           self._flat_config(self.ring * self.tiles)),
+                ttnn.empty(self._flat_shape(self.ring * self.tiles * max_rows), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                           mesh_device, self._flat_config(self.ring * self.tiles * max_rows)),
                 ttnn.create_global_semaphore(mesh_device, all_cores, 0),
             )
             for name in ("mixer", "mlp")
@@ -98,9 +99,9 @@ class FabricBoundary:
     def _flat_shape(pages):
         return [1, 1, TILE, pages * TILE]
 
-    def _empty_flat(self):
-        return ttnn.empty(self._flat_shape(self.tiles), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh_device,
-                          self._flat_config(self.tiles))
+    def _empty_flat(self, rows=1):
+        return ttnn.empty(self._flat_shape(rows * self.tiles), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh_device,
+                          self._flat_config(rows * self.tiles))
 
     def gamma(self, weight):
         """An RMSNorm weight (the norm's device tensor, +1 offset applied, any shape of H values) -> the flat BF16
@@ -156,10 +157,15 @@ class FabricBoundary:
                 logger.warning(f"fabric boundary {site}: {partial.dtype} {partial.memory_config().buffer_type} partial "
                                f"copied to L1 BF16")
             partial = converted = ttnn.to_memory_config(partial, ttnn.L1_MEMORY_CONFIG, dtype=ttnn.bfloat16)
+        rows = int((residual if entry else partial).shape[-2])
+        assert 1 <= rows <= self.max_rows, rows
         T = self.tiles
-        out_res = self._empty_flat()
-        out_xf = self._empty_flat()
+        A = rows * T  # pages of the flat buffers
+        payload = rows * self.payload
+        out_res = self._empty_flat(rows)
+        out_xf = self._empty_flat(rows)
         fused = consumer is not None
+        assert not fused or rows == 1, "consumer fusion: one row"
         if fused:
             assert not entry, "a consumer-fused boundary all-reduces"
             c_kernels, c_cbs, c_sems, c_io, notify_noc, c_out = consumer(out_xf, self.noc_xy, 0)
@@ -170,7 +176,7 @@ class FabricBoundary:
                                                    self.mesh_device, out_memory_config)
         else:
             notify_noc = self.rows_noc
-            x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+            x = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.hidden]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                                                self.mesh_device, out_memory_config)
         slots = 0 if entry else self.ring
         recv, sem = (None, None) if entry else self.sites[site]
@@ -178,18 +184,22 @@ class FabricBoundary:
         cb_res, cb_recv, cb_gamma, cb_scaler, cb_res_out, cb_sq, cb_rs, cb_x, cb_y = 8, 9, 10, 11, 24, 25, 26, 27, 28
         cb_pk, cb_scr = 12, 13
         cbs = [
-            self._cb(cb_res, T * PAGE, tensor=None if entry else residual),
-            self._cb(cb_res_out, T * PAGE, tensor=out_res),
+            self._cb(cb_res, A * PAGE, tensor=None if entry else residual),
+            self._cb(cb_res_out, A * PAGE, tensor=out_res),
             self._cb(cb_gamma, T * PAGE),
             self._cb(cb_scaler, PAGE),
-            self._cb(cb_sq, 4096, ttnn.float32),
-            self._cb(cb_rs, 4096, ttnn.float32),
-            self._cb(cb_x, T * PAGE, tensor=out_xf),
-            self._cb(cb_y, T * 4096, ttnn.float32),
-            self._cb(cb_scr, self.rows_per_core * PAGE, cores=self.rows_set),
+            self._cb(cb_sq, rows * 4096, ttnn.float32),
+            self._cb(cb_rs, rows * 4096, ttnn.float32),
+            self._cb(cb_x, A * PAGE, tensor=out_xf),
+            self._cb(cb_y, A * 4096, ttnn.float32),
+            # the tiles + (entry) the gathered rows of the normed output (fb_rows.cpp)
+            self._cb(cb_scr, self.rows_per_core * PAGE + (max(PAGE, rows * 64 * self.rows_per_core) if entry else 0),
+                     cores=self.rows_set),
         ]
         if not entry:
-            cbs += [self._cb(cb_recv, slots * T * PAGE, tensor=recv), self._cb(cb_pk, PAGE, cores=self.rows_set)]
+            cbs += [self._cb(cb_recv, slots * A * PAGE, tensor=recv),
+                    self._cb(cb_pk, max(PAGE, rows * 64 * self.rows_per_core), cores=self.rows_set)]
+        row_defines = [("FB_ROWS", str(rows)), ("FB_ROW_BYTES", str(T * PAGE))]
         res_src = residual
         reader_ct = [cb_res, cb_recv, cb_gamma, cb_scaler, T, slots, self.ring, 0 if not entry else 2, cb_x, self.ntiles]
         reader_ct += ttnn.TensorAccessorArgs(gamma).get_compile_time_args()
@@ -198,7 +208,7 @@ class FabricBoundary:
         reader_rt[self.core.x][self.core.y] = [gamma.buffer_address(), sem_addr, res_src.buffer_address(),
                                                len(notify_noc)] + [v for p in notify_noc for v in (p.x, p.y)]
         compute_ct = [cb_res, cb_recv, cb_gamma, cb_scaler, cb_res_out, cb_sq, cb_rs, cb_x, T, slots]
-        compute_ct += [_f32_bits(1.0 / self.hidden), _f32_bits(self.eps), 1, cb_y]
+        compute_ct += [_f32_bits(1.0 / self.hidden), _f32_bits(self.eps), 1, cb_y, rows]
         rows_ct = [cb_scr, self.rows_per_core, self.noc_xy[0], self.noc_xy[1]]
         rows_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args()
         if not entry:
@@ -206,13 +216,14 @@ class FabricBoundary:
         rows_rt = {(c.x, c.y): [out_xf.buffer_address(), x.buffer_address(), i * self.rows_per_core]
                    for i, c in enumerate(self.rows_cores)}
         rows_rt_dev = None if entry else [  # per device: + (partial, this device's slot)
-            (partial.buffer_address(), recv.buffer_address() + idx * self.payload) for idx in range(self.ring)
+            (partial.buffer_address(), recv.buffer_address() + idx * payload) for idx in range(self.ring)
         ]
         dm = ttnn.DataMovementConfigDescriptor
         base = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_reader.cpp"), core_ranges=self.cores, compile_time_args=reader_ct,
                 runtime_args=reader_rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1),
+                defines=row_defines,
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_compute.cpp"), core_ranges=self.cores, compile_time_args=compute_ct,
@@ -229,7 +240,8 @@ class FabricBoundary:
             return ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_rows.cpp"), core_ranges=self.rows_set, compile_time_args=rows_ct,
                 runtime_args=rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
-                defines=([] if entry else [("FB_PACK_ROWS", "1")]) + ([("FB_PACK_ONLY", "1")] if fused and not keep_x else []),
+                defines=row_defines + ([] if entry else [("FB_PACK_ROWS", "1")])
+                + ([("FB_PACK_ONLY", "1")] if fused and not keep_x else []),
             )
 
         both = self.rows_set.merge(self.cores)
@@ -244,7 +256,7 @@ class FabricBoundary:
             program = ttnn.ProgramDescriptor(kernels=list(base) + [rows_kernel(idx)] + (list(c_kernels) if fused else []),
                                              semaphores=list(semaphores), cbs=list(cbs))
             if not entry:
-                self._add_sender(idx, coord, program, recv, sem_addr)
+                self._add_sender(idx, coord, program, recv, sem_addr, payload)
             mesh_program[ttnn.MeshCoordinateRange(coord, coord)] = program
         io = [residual, out_res, out_xf, x, gamma] + ([] if entry else [partial, recv]) + (list(c_io) if fused else [])
         ttnn.generic_op(io, mesh_program)
@@ -255,12 +267,13 @@ class FabricBoundary:
             return out_res, x, c_out
         return out_res, x
 
-    def _add_sender(self, idx, coord, program, recv, sem_addr):
+    def _add_sender(self, idx, coord, program, recv, sem_addr, payload):
         fwd, bwd = self._hops(idx)
         rt = ttnn.RuntimeArgs()
-        rt[self.core.x][self.core.y] = [0, recv.buffer_address() + idx * self.payload, self.noc_xy[0], self.noc_xy[1],
+        rt[self.core.x][self.core.y] = [0, recv.buffer_address() + idx * payload, self.noc_xy[0], self.noc_xy[1],
                                         sem_addr]
-        ct = [self.payload, self.chunk, fwd, bwd, len(self.rows_cores)]
+        chunk = min(payload, self.max_payload // PAGE * PAGE)
+        ct = [payload, chunk, fwd, bwd, len(self.rows_cores)]
         sender = ttnn.KernelDescriptor(
             kernel_source=str(KERNEL_DIR / "fb_sender.cpp"), core_ranges=self.cores, compile_time_args=ct,
             runtime_args=rt,
@@ -284,6 +297,7 @@ def fabric_boundary(args, mesh_device):
     """The model-wide FabricBoundary (one per args object), built before any trace capture."""
     b = args.__dict__.get("_fabric_boundary")
     if b is None:
-        b = FabricBoundary(mesh_device, args.dim, args.norm_eps)
+        b = FabricBoundary(mesh_device, args.dim, args.norm_eps,
+                           max_rows=min(MAX_ROWS, int(getattr(args, "fabric_boundary_rows", 1))))
         args._fabric_boundary = b
     return b

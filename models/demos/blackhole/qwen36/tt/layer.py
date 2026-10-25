@@ -42,6 +42,12 @@ class Qwen36DecoderLayer:
             from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 
             decode_boundary(args, mesh_device)
+            if getattr(args, "fabric_boundary", False):
+                # the fabric boundary's persistent receive buffers too: allocated lazily (first decode, between the
+                # prefill warmup and its trace capture) they shifted the prefill MoE's L1 programs out of the cache
+                from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import fabric_boundary
+
+                fabric_boundary(args, mesh_device)
 
         prefix = f"layers.{layer_num}"
 
@@ -385,7 +391,8 @@ class Qwen36DecoderLayer:
             ttnn.deallocate(x)
         # QWEN35_FB_ROUTER=1: the router matmul runs inside this boundary's program (its weight streams meanwhile)
         logits = None
-        if os.environ.get("QWEN35_FB_ROUTER", "0") == "1" and hasattr(self.feed_forward, "router_consumer"):
+        rows = int(part.shape[-2])
+        if os.environ.get("QWEN35_FB_ROUTER", "0") == "1" and rows == 1 and hasattr(self.feed_forward, "router_consumer"):
             h, ff_in, logits = fb(res, part, self._fb_g_ffn, "mixer", consumer=self.feed_forward.router_consumer(fb),
                                   keep_x=True)
         else:
@@ -401,6 +408,8 @@ class Qwen36DecoderLayer:
         out_mc = ttnn.DRAM_MEMORY_CONFIG if last else ttnn.L1_MEMORY_CONFIG
         res2, x2 = fb(h, ff_part, g_next, "mlp", out_memory_config=out_mc)
         ttnn.deallocate(h)
+        if rows > 1:  # the multi-row MoE partial is allocated per call (moe.py partial="fabric")
+            ttnn.deallocate(ff_part)
         return res2, x2, None
 
     def _forward_decode_addnorm(self, bnd, x, cos, sin, position_tensor, page_table):

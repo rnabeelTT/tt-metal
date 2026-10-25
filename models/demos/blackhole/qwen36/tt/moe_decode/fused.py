@@ -162,8 +162,10 @@ class FusedMoEDecode:
         """Routed-only: the routed tensors stand in for the shared ones (their addresses are passed, never read)."""
         return (self.shared_up_gate, self.shared_down) if self.shared else (up_gate, down)
 
-    def rows(self, x, up_gate, down):
-        """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer."""
+    def rows(self, x, up_gate, down, out=None):
+        """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer, or
+        `out` (a [1, 1, M, H] BF16 TILE tensor, e.g. allocated per call in L1 for the fabric boundary: rows >= Mp of its
+        tiles are left as they were)."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
         logits = self._logits(x)
@@ -173,9 +175,10 @@ class FusedMoEDecode:
         sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
         gu(x, b.table, b.identity, up_gate, sug, act, ep_offset=self.ep_offset)
-        dn(act, b.table, down, sdn, b.out, ep_offset=self.ep_offset)
+        dst = b.out if out is None else out
+        dn(act, b.table, down, sdn, dst, ep_offset=self.ep_offset)
         ttnn.deallocate(act)
-        return b.out
+        return dst
 
     def router_consumer(self, fb):
         """The router matmul of one row as the consumer of a fabric boundary (fabric_boundary/ops.py consumer=; a

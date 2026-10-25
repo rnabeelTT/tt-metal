@@ -239,7 +239,7 @@ class TPAttention:
         ttnn.deallocate(attn_out)
         ttnn.deallocate(gate)
         # fabric boundary (one row): an L1 BF16 partial, read in place by the boundary's packers
-        fabric = partial and B == 1 and getattr(self.args, "fabric_boundary", False)
+        fabric = partial and B <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(self.args, "fabric_boundary", False)
         d = ttnn.bfloat16 if fabric else getattr(self.args, "out_proj_decode_dtype", None)
         part = ttnn.linear(
             y, self.tw["wo"], compute_kernel_config=self.compute_cfg, program_config=self.args.attn_wo_decode_1d_progcfg,

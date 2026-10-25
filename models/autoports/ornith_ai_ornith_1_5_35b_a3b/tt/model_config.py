@@ -60,6 +60,9 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
         # op (fabric all-reduce of the packed partial + residual add + RMSNorm, the residual flat on one core;
         # models/demos/blackhole/qwen36/tt/fabric_boundary/ops.py); wider steps keep the replicated path.
         self.fabric_boundary = self.decode_replicated and os.environ.get("QWEN35_FABRIC_BOUNDARY", "0") == "1"
+        # decode steps of up to this many rows take the fabric boundary (2 rows 9.4 us vs ~18 for the replicated path;
+        # 8 rows ~19 vs ~20-24: no gain there)
+        self.fabric_boundary_rows = int(os.environ.get("QWEN35_FB_MAX_ROWS", "4"))
         text_config = self.hf_config.get_text_config()
         self.num_experts = int(text_config.num_experts)
         self.num_experts_per_tok = int(text_config.num_experts_per_tok)

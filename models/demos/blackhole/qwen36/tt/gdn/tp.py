@@ -1555,7 +1555,7 @@ class TPGatedDeltaNet:
         # call the out-proj directly (matmul_1d_decode frees its input's L1 "copy", which for an L1-interleaved input is
         # the input itself); y is freed after it
         # fabric boundary (one row): an L1 BF16 partial, read in place by the boundary's packers
-        fabric = partial and B == 1 and getattr(self.args, "fabric_boundary", False)
+        fabric = partial and B <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(self.args, "fabric_boundary", False)
         d = ttnn.bfloat16 if fabric else getattr(self.args, "out_proj_decode_dtype", None)
         part = ttnn.linear(
             y,
