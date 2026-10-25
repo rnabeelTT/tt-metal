@@ -151,24 +151,29 @@ def _install_rows_topk(sampling, mesh_device):
     orig_forward = ts.forward
 
     seen = set()
+    force_rows = int(os.environ.get("QWEN35_ROWS_TOPK_ROWS", "0"))  # tests without decode buckets: the live row count
 
     def forward(x, tt_out_tok=None):
         # the logits always carry 32 slot rows; the live ones are the decode bucket's width (the served path traces the
         # sampler per width, SamplingGenerator.set_trace_bucket); no bucket (eager / tests): all 32
-        B = getattr(sampling, "_active_trace_bucket", None) or int(x.shape[-2])
+        B = getattr(sampling, "_active_trace_bucket", None) or force_rows or int(x.shape[-2])
         if ts.force_argmax_sampling or B > MAX_ROWS or getattr(ts, "multi_step_reduction", False):
             return orig_forward(x, tt_out_tok=tt_out_tok)
         if B not in seen:
             seen.add(B)
             logger.info(f"rows top-k: sampler step with {B} live rows (logits {tuple(x.shape)})")
-        saved = (ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2)
+        # RowsTopK emits tied maxima in ascending local index and the gathered blocks are in device order, so candidate
+        # position and global id agree and ttnn.sampling's first-position tie-break already picks the lowest id: the
+        # sampler's tie-break pass (the #33492 workaround for ttnn.topk, ~15 ops) is skipped
+        saved = (ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2, ts._adjust_values_for_tiebreak)
         ttnn.topk = lambda xx, k, dim=-1, sub_core_grids=None, stable=False: op(xx, B)
         ts._mask_invalid_vocab_logits = lambda xx: xx
         ts.pad_to_power_of_2 = False
+        ts._adjust_values_for_tiebreak = lambda values, indices: ttnn.clone(values)
         try:
             return orig_forward(x, tt_out_tok=tt_out_tok)
         finally:
-            ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2 = saved
+            ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2, ts._adjust_values_for_tiebreak = saved
 
     ts.forward = forward
     logger.info(f"sampler rows top-k installed (<= {MAX_ROWS} rows, {ts.vocab_size // nd} columns per die)")
