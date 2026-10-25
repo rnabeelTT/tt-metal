@@ -135,6 +135,50 @@ def _install_lockstep_sampling(sampling, mesh_device):
     )
 
 
+def _install_rows_topk(sampling, mesh_device):
+    """QWEN35_ROWS_TOPK=1: the sampler's per-device vocab mask + power-of-two pad + ttnn.topk over all 32 tile rows (333 us
+    per decode step on the (1, 4) mesh) -> decode_sampling.RowsTopK over the live rows only, for steps of <= MAX_ROWS rows
+    when every vocab column is valid (no mask needed). The rest of the sampler (all-gathers, offsets, draw) is unchanged:
+    its forward runs with ttnn.topk pointed at RowsTopK for the duration of the call."""
+    from models.demos.blackhole.qwen36.tt.decode_sampling.ops import MAX_ROWS, RowsTopK
+
+    ts = sampling.tt_sampling
+    nd = mesh_device.get_num_devices()
+    if nd < 2 or ts.padded_vocab_size != ts.vocab_size or ts.vocab_size % nd or ts.max_top_k != 32:
+        logger.info("rows top-k not installed (padded vocab or k != 32)")
+        return
+    op = RowsTopK(mesh_device, ts.vocab_size // nd, 32)
+    orig_forward = ts.forward
+
+    seen = set()
+    force_rows = int(os.environ.get("QWEN35_ROWS_TOPK_ROWS", "0"))  # tests without decode buckets: the live row count
+
+    def forward(x, tt_out_tok=None):
+        # the logits always carry 32 slot rows; the live ones are the decode bucket's width (the served path traces the
+        # sampler per width, SamplingGenerator.set_trace_bucket); no bucket (eager / tests): all 32
+        B = getattr(sampling, "_active_trace_bucket", None) or force_rows or int(x.shape[-2])
+        if ts.force_argmax_sampling or B > MAX_ROWS or getattr(ts, "multi_step_reduction", False):
+            return orig_forward(x, tt_out_tok=tt_out_tok)
+        if B not in seen:
+            seen.add(B)
+            logger.info(f"rows top-k: sampler step with {B} live rows (logits {tuple(x.shape)})")
+        # RowsTopK emits tied maxima in ascending local index and the gathered blocks are in device order, so candidate
+        # position and global id agree and ttnn.sampling's first-position tie-break already picks the lowest id: the
+        # sampler's tie-break pass (the #33492 workaround for ttnn.topk, ~15 ops) is skipped
+        saved = (ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2, ts._adjust_values_for_tiebreak)
+        ttnn.topk = lambda xx, k, dim=-1, sub_core_grids=None, stable=False: op(xx, B)
+        ts._mask_invalid_vocab_logits = lambda xx: xx
+        ts.pad_to_power_of_2 = False
+        ts._adjust_values_for_tiebreak = lambda values, indices: ttnn.clone(values)
+        try:
+            return orig_forward(x, tt_out_tok=tt_out_tok)
+        finally:
+            ttnn.topk, ts._mask_invalid_vocab_logits, ts.pad_to_power_of_2, ts._adjust_values_for_tiebreak = saved
+
+    ts.forward = forward
+    logger.info(f"sampler rows top-k installed (<= {MAX_ROWS} rows, {ts.vocab_size // nd} columns per die)")
+
+
 # module scope: a class-body generator expression cannot see class attributes
 _PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "1024" if mesh_shape_from_env() == (1, 1) else "2048"))
 
@@ -188,6 +232,8 @@ class Qwen35MoeModel(Qwen36Model):
         ):
             # every die must feed back the token the host reads (doc/text_quality/README.md root cause);
             # QWEN35_SAMPLER_LOCKSTEP=0 restores the stock sampler (A/B measurement only)
+            if os.environ.get("QWEN35_ROWS_TOPK", "0") == "1":
+                _install_rows_topk(self.sampling, mesh_device)
             _install_lockstep_sampling(self.sampling, mesh_device)
         # Device-owned decode inputs: tokens via tt_out_tok, positions via plus_one (no per-token host refresh).
         self._tt_vllm_always_refresh_decode_trace_inputs = False
@@ -326,6 +372,27 @@ class Qwen35MoeModel(Qwen36Model):
 
             bnd = decode_boundary(self.args, self.mesh_device)
             x = bnd.gather(x, self.tt_ccl)
+        if hook is None and x.shape[-2] <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(
+            self.args, "fabric_boundary", False
+        ):
+            x = self._decode_layers_fabric(x, cos, sin, cur_pos_tensor, page_table)
+            if os.environ.get("QWEN35_LM_STREAM", "0") == "1" and (sharded_lm_head or self._ondev_argmax):
+                # the LM head streamed per DRAM bank (decode_linear/ops.py; its decode copy built on the first, eager,
+                # call): 261 us at ~274 GB/s with ttnn.linear (bfp4, 71.5 MB per device)
+                if getattr(self, "_lm_stream", None) is None:
+                    from models.demos.blackhole.qwen36.tt.decode_linear.ops import decode_linear_for
+
+                    self._lm_stream = decode_linear_for(self.args, self.mesh_device, self.lm_head_weight, readers=6)
+                op, w = self._lm_stream
+                logits = op(x, w, int(x.shape[-2]), out_memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                ttnn.deallocate(x)
+                return logits
+            if sharded_lm_head or self._ondev_argmax:
+                logits = ttnn.linear(x, self.lm_head_weight, compute_kernel_config=self._lm_head_ckc())
+            else:
+                logits = self._lm_head(x)
+            ttnn.deallocate(x)
+            return logits
         if hook is not None:
             hook("pre", token_ids_buf, cur_pos_tensor, page_table, cos, sin)
         for layer in self.layers:
@@ -342,6 +409,35 @@ class Qwen35MoeModel(Qwen36Model):
             logits = self._lm_head(x)
         ttnn.deallocate(x)
         return logits
+
+    def _decode_layers_fabric(self, x, cos, sin, cur_pos_tensor, page_table):
+        """One-row decode through the fabric boundaries (args.fabric_boundary): x is the gathered embedding row in the
+        replicated residual layout; the entry boundary applies layer 0's input norm, every layer ends with the boundary
+        into the next layer's input norm, the last into the final norm (x in DRAM for the LM head)."""
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import fabric_boundary
+
+        fb = fabric_boundary(self.args, self.mesh_device)
+        if getattr(self, "_fb_g_final", None) is None:  # norm weights as flat pages (first, eager, call)
+            for layer in self.layers:
+                layer._fb_g_attn = fb.gamma(layer.attention_norm.norm.weight)
+                layer._fb_g_ffn = fb.gamma(layer.ffn_norm.norm.weight)
+            self._fb_g_final = fb.gamma(self.norm.norm.weight)
+        rows = int(x.shape[-2])
+        res, h = fb(x, None, self.layers[0]._fb_g_attn)
+        ttnn.deallocate(x)
+        n = len(self.layers)
+        # QWEN35_FB_CONSUMER=1: each layer's last boundary runs the next layer's in-projection in its program (the
+        # projection's weights stream while the boundary computes; decode_linear/ops.py)
+        consumer = os.environ.get("QWEN35_FB_CONSUMER", "0") == "1" and rows == 1
+        proj = None
+        for i, layer in enumerate(self.layers):
+            last = i == n - 1
+            g_next = self._fb_g_final if last else self.layers[i + 1]._fb_g_attn
+            nxt = self.layers[i + 1].attention.inproj_consumer(fb) if consumer and not last else None
+            res, h, proj = layer.forward_decode_fabric(fb, res, h, g_next, cos, sin, cur_pos_tensor, page_table,
+                                                       last=last, proj=proj, next_consumer=nxt)
+        ttnn.deallocate(res)
+        return h
 
     def _final_norm_decode_replicated(self, x):
         """The final RMSNorm on the replicated decode residual: the same sharded norm program and output layout as the

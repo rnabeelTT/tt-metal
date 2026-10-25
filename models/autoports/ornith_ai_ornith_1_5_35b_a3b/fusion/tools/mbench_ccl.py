@@ -91,6 +91,38 @@ def main():
                         print(f"  all_reduce_async {cores} cores {dt}: {str(e).splitlines()[0][:150]}")
                     ttnn.deallocate(xs)
                     ttnn.deallocate(scratch)
+            # packed payload (gpt-oss boundary): the rows' values as dense BF16 tiles on one core (rows x 2048 values =
+            # 2 rows-pages) instead of 64 tiles with only `rows` rows used
+            pages = -(-rows * H // 1024)
+            for ncore in (1, 2):
+                if pages % ncore:
+                    continue
+                pk = ttnn.create_sharded_memory_config(
+                    shape=(32, 32 * pages // ncore), core_grid=ttnn.CoreGrid(x=ncore, y=1), strategy=ttnn.ShardStrategy.WIDTH,
+                    orientation=ttnn.ShardOrientation.ROW_MAJOR, use_height_and_width_as_shard_shape=True,
+                )
+                pk_s = ttnn.create_sharded_memory_config(
+                    shape=(32, 32 * pages * nd // ncore), core_grid=ttnn.CoreGrid(x=ncore, y=1),
+                    strategy=ttnn.ShardStrategy.WIDTH, orientation=ttnn.ShardOrientation.ROW_MAJOR,
+                    use_height_and_width_as_shard_shape=True,
+                )
+                xp = ttnn.from_torch(torch.randn(1, 1, 32, 32 * pages), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                     device=mesh, memory_config=pk, mesh_mapper=rep)
+                scr = ttnn.empty([1, 1, 32, 32 * pages * nd], ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, pk_s)
+                for topo in (ttnn.Topology.Ring, ttnn.Topology.Linear):
+                    sem = ttnn.create_global_semaphore(mesh, sem_cores, 0)
+                    try:
+                        def arp():
+                            ttnn.deallocate(ttnn.experimental.all_reduce_async(
+                                xp, scr, cluster_axis=1, mesh_device=mesh, multi_device_global_semaphore=sem,
+                                memory_config=pk, dtype=ttnn.bfloat16, topology=topo, num_links=1,
+                            ))
+
+                        bench(mesh, f"all_reduce_async packed {pages} pages {ncore} core(s) {topo}", arp)
+                    except Exception as e:  # noqa: BLE001 - probe
+                        print(f"  packed {pages} {ncore} {topo}: {str(e).splitlines()[0][:150]}")
+                ttnn.deallocate(xp)
+                ttnn.deallocate(scr)
             ttnn.deallocate(x)
     finally:
         ttnn.close_mesh_device(mesh)

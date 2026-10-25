@@ -8,6 +8,9 @@
 //                                                              FP32 accumulation; column pairs as gu_layout.hpp)
 //   w = the slot's [M, 32] weight tile . I                   (custom_mm with the identity tile: loads it into DST)
 //   act = w * silu(g) * u, rounded to 7 significant bits (the down projection's srcB width), one [M, 32] tile per pair.
+// SPLIT_PAIR (m = 1, banks q / q + banks / 2 hold the up / gate column of pair q): each core streams one bank;
+// ROLE_GATE cores pack g' = w * silu(g) (their writer sends it to the paired up core's cb_sc), the up cores load g'
+// through the identity matmul like the weight tile and pack act = u * g', rounded.
 // The per-row weight load through an identity matmul follows the gpt-oss union kernels
 // (models/demos/gpt_oss/tt/fused_decode/kernels/stream_gate_up_union_compute.cpp).
 
@@ -69,9 +72,18 @@ void kernel_main() {
     constexpr uint32_t groups = get_compile_time_arg_val(6);  // row groups of ROWS rows
     constexpr uint32_t m = get_compile_time_arg_val(7);       // up|gate columns per bank and expert
     constexpr uint32_t banks = get_compile_time_arg_val(8);
+#ifdef SPLIT_PAIR
+    // split-pair (m = 1): one column per core; DST 0 = x . W[:, col], DST 1 = the [trows, 32] tile in cb_sc (the gate
+    // core: the rows' routing weights; the up core: its partner's silu(g) * w)
+    static_assert(m == 1, "split-pair: one column per bank");
+    constexpr uint32_t nb = 1;
+    constexpr uint32_t np = 1;
+    constexpr uint32_t wdst = 1;
+#else
     constexpr uint32_t nb = gu_layout::blocks<m>();
     constexpr uint32_t np = gu_layout::pairs<m>();
     constexpr uint32_t wdst = gu_layout::tiles<m>();  // the per-row weight tile, after the matmul results
+#endif
 
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
@@ -98,6 +110,26 @@ void kernel_main() {
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
+#ifdef SPLIT_PAIR
+#ifdef ROLE_GATE
+            silu_tile_init();
+            silu_rows(0);  // g' = silu(g) * w, sent to the up core
+            mul_binary_tile_init();
+            mul_rows(0, wdst, 0);
+#else
+            mul_binary_tile_init();
+            mul_rows(0, wdst, 0);  // act = u * g'
+            round_rows(0);
+#endif
+            tile_regs_commit();
+            cb_reserve_back(cb_act, 1);
+            tile_regs_wait();
+            pack_tile(0, cb_act);
+            tile_regs_release();
+            cb_push_back(cb_act, 1);
+            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+            continue;
+#endif
             silu_tile_init();
             gu_layout::static_for<np>([&](auto p) {
                 constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);

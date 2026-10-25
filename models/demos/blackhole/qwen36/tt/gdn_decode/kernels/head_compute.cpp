@@ -16,6 +16,8 @@
 // (the rank-1 update k^T (x) u sums over all rows of its operands);
 // per-unit scalars (d, beta, the norms, qn . kn) are packed once and read back by value (read_tile_value) instead of
 // being broadcast from a column tile.
+// VSPLIT = P: the head's Dv columns are split over P cores (Vt here is the slice); the gated RMSNorm's sum of o^2 is
+// exchanged between them (head_writer.cpp).
 
 #include <cstdint>
 
@@ -105,6 +107,8 @@ ALWI void row_silu(uint32_t idst) {
 constexpr uint32_t cb_q = 0, cb_k = 1, cb_v = 2, cb_gin = 3, cb_S = 5, cb_z = 29, cb_w = 30;
 // Outputs to the writer
 constexpr uint32_t cb_state = 7, cb_y = 31;
+// VSPLIT: this core's partial sum of o^2 (to the writer) and the head's total (from the writer, FP32 unpack)
+constexpr uint32_t cb_nx = 32, cb_nt = 33;
 // FP32 intermediates (UnpackToDestFp32)
 constexpr uint32_t cb_vread = 10, cb_dcol = 13, cb_nrm = 16, cb_qsd = 25, cb_qk = 26;
 // matmul operands (Default unpack)
@@ -450,12 +454,37 @@ void norm_gate(uint32_t eps_bits, uint32_t inv_dv_bits) {
     CircularBuffer co(cb_o), cz(cb_z), cn(cb_qk), cy(cb_y);
     co.wait_front(Vt);
     cz.wait_front(Vt);
+#ifdef VSPLIT
+    // the head's value columns are split over VSPLIT cores: this core's sum of o^2 goes out, the head's total comes
+    // back (head_writer.cpp sums the parts in part order: the same total on every part)
+    {
+        CircularBuffer cx(cb_nx), ct(cb_nt);
+        cx.reserve_back(1);
+        tile_regs_acquire();
+        mm_begin(cb_o, cb_o, 1);
+        for (uint32_t j = 0; j < Vt; j++) {
+            matmul_tiles(cb_o, cb_o, j, j, 0);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile(0, cb_nx);
+        tile_regs_release();
+        cx.push_back(1);
+        ct.wait_front(1);
+        cn.reserve_back(1);
+        tile_regs_acquire();
+        copy_from(cb_nt);
+        copy_tile(cb_nt, 0, 0);
+        ct.pop_front(1);
+    }
+#else
     cn.reserve_back(1);
     tile_regs_acquire();
     mm_begin(cb_o, cb_o, 1);
     for (uint32_t j = 0; j < Vt; j++) {
         matmul_tiles(cb_o, cb_o, j, j, 0);
     }
+#endif
     binop_with_scalar_tile_init();
     row_scale(0, inv_dv_bits);
     row_add_scalar(0, eps_bits);

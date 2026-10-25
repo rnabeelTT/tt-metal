@@ -71,6 +71,7 @@ class FusedMoEDecode:
         self.mesh_device = mesh_device
         self.tp = tp
         self.router_ckc = router_ckc
+        self.args_ref = args
         self.router, self.router_logits = router, router_logits
         self.shared = shared_up_proj is not None
         self.ep_experts = ep_experts
@@ -161,8 +162,10 @@ class FusedMoEDecode:
         """Routed-only: the routed tensors stand in for the shared ones (their addresses are passed, never read)."""
         return (self.shared_up_gate, self.shared_down) if self.shared else (up_gate, down)
 
-    def rows(self, x, up_gate, down):
-        """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer."""
+    def rows(self, x, up_gate, down, out=None):
+        """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer, or
+        `out` (a [1, 1, M, H] BF16 TILE tensor, e.g. allocated per call in L1 for the fabric boundary: rows >= Mp of its
+        tiles are left as they were)."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
         logits = self._logits(x)
@@ -172,14 +175,29 @@ class FusedMoEDecode:
         sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
         gu(x, b.table, b.identity, up_gate, sug, act, ep_offset=self.ep_offset)
-        dn(act, b.table, down, sdn, b.out, ep_offset=self.ep_offset)
+        dst = b.out if out is None else out
+        dn(act, b.table, down, sdn, dst, ep_offset=self.ep_offset)
         ttnn.deallocate(act)
-        return b.out
+        return dst
 
-    def __call__(self, x, up_gate, down):
+    def router_consumer(self, fb):
+        """The router matmul of one row as the consumer of a fabric boundary (fabric_boundary/ops.py consumer=; a
+        DecodeLinear stream copy of the replicated BF16 router weight at its fidelity, built on first use)."""
+        if getattr(self, "_dl_router", None) is None:
+            from models.demos.blackhole.qwen36.tt.decode_linear.ops import decode_linear_for
+
+            fid = getattr(self.router_ckc, "math_fidelity", ttnn.MathFidelity.HiFi4)
+            self._dl_router = decode_linear_for(self.args_ref, self._mesh, self.router_w, fb, replicated=True,
+                                                fidelity=fid)
+        op, w = self._dl_router
+        return op.consumer(w, ttnn.L1_MEMORY_CONFIG)
+
+    def __call__(self, x, up_gate, down, logits=None):
         """x: the normed hidden [1, 1, 1, H] BF16 TILE (interleaved). Returns this device's partial sum (routed +
-        shared) in the model-wide [1, 1, 1, H] buffer: consume it (the layer reduce) before the next layer's MoE."""
-        logits = self._logits(x)
+        shared) in the model-wide [1, 1, 1, H] buffer: consume it (the layer reduce) before the next layer's MoE.
+        logits: the router output when the boundary computed it (router_consumer)."""
+        if logits is None:
+            logits = self._logits(x)
         b = self.buf
         sug, sdn = self._shared_tensors(up_gate, down)
         self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset)

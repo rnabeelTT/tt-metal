@@ -9,7 +9,8 @@ docker run --rm --name ornith-prof-$L --user $(id -u):$(id -g) --device /dev/ten
   --volume $HOME/.cache/huggingface:/hf --env HF_HOME=/hf --env HF_HUB_OFFLINE=1 \
   --volume $HOME/.cache/tt-model/${CACHE_NAME:-ornith-1.5-35b-a3b-v2}/cache-gdnpoc:/cache --env TT_METAL_CACHE=/cache \
   --volume $HOME/.cache/tt-model/${CACHE_NAME:-ornith-1.5-35b-a3b-v2}/tensors:/tensor-cache --env TT_CACHE_PATH=/tensor-cache \
-  --volume $METAL/models:/opt/tt-metal/models \
+  --volume $METAL/models:/opt/tt-metal/models --volume $METAL/tests:/opt/tt-metal/tests:ro \
+  --volume $METAL/conftest.py:/opt/tt-metal/conftest.py:ro --volume $METAL/pytest.ini:/opt/tt-metal/pytest.ini:ro \
   --volume ${RUNS:-$HOME/ornith-fusion/runs}/prof/$L:/opt/tt-metal/generated \
   ${PROF_ENV:-} --env ARCH_NAME=blackhole --env HF_MODEL=${MODEL_ID:-ornith-ai/Ornith-1.5-35B-A3B} --env MESH_DEVICE=${MESH:-P300x2} ${DEVS:+--env TT_VISIBLE_DEVICES=$DEVS} \
   --env TT_METAL_PROFILER_MID_RUN_DUMP=1 --env PYTHONPATH=/opt/tt-metal \

@@ -1523,26 +1523,47 @@ class TPGatedDeltaNet:
             self.tw["conv_taps"], self.tw["neg_exp_A"], self.tw["dt_bias"], self.tw["norm_w"]
         )
 
+    def inproj_consumer(self, fb):
+        """The in-projection of one row as the consumer of a fabric boundary (fabric_boundary/ops.py consumer=; the
+        stream decode copy of the fused qkvz weight, decode_linear/ops.py, built on first use: before trace capture)."""
+        if getattr(self, "_dl_w", None) is None:
+            from models.demos.blackhole.qwen36.tt.decode_linear.ops import decode_linear_for
+
+            self._dl_op, self._dl_w = decode_linear_for(self.args, self.mesh, self.tw["qkvz"], fb)
+        return self._dl_op.consumer(self._dl_w, ttnn.L1_MEMORY_CONFIG)
+
+    def forward_decode_proj(self, proj, partial=True):
+        """_forward_decode_ops from the in-projection's [1, 1, B, P] output (the boundary-fused in-proj)."""
+        if self.conv_states is None:
+            self.reset_state()
+        return self._forward_decode_ops_from(ttnn.reshape(proj, (1, proj.shape[-2], proj.shape[-1])), partial)
+
     def _forward_decode_ops(self, x, partial=False):
         if self.conv_states is None:
             self.reset_state()
         if len(x.shape) == 4:
             x = ttnn.reshape(x, (1, x.shape[-2], x.shape[-1]))
-        B = x.shape[-2]
         proj = tpc.matmul_1d_decode(
             x, self.tw["qkvz"], self.args.gdn_qkvz_decode_1d_progcfg, self.cfg, out_memory_config=ttnn.L1_MEMORY_CONFIG
         )
+        return self._forward_decode_ops_from(proj, partial)
+
+    def _forward_decode_ops_from(self, proj, partial):
+        B = proj.shape[-2]
         y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B)
         ttnn.deallocate(proj)
         # call the out-proj directly (matmul_1d_decode frees its input's L1 "copy", which for an L1-interleaved input is
         # the input itself); y is freed after it
+        # fabric boundary (one row): an L1 BF16 partial, read in place by the boundary's packers
+        fabric = partial and B <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(self.args, "fabric_boundary", False)
+        d = ttnn.bfloat16 if fabric else getattr(self.args, "out_proj_decode_dtype", None)
         part = ttnn.linear(
             y,
             self.tw["out"],
             compute_kernel_config=self.cfg,
             program_config=self.args.gdn_out_decode_1d_progcfg,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            **({"dtype": d} if (d := getattr(self.args, "out_proj_decode_dtype", None)) is not None else {}),
+            memory_config=ttnn.L1_MEMORY_CONFIG if fabric else ttnn.DRAM_MEMORY_CONFIG,
+            **({"dtype": d} if d is not None else {}),
         )
         ttnn.deallocate(y)
         part = ttnn.reshape(part, (1, 1, B, part.shape[-1]))
