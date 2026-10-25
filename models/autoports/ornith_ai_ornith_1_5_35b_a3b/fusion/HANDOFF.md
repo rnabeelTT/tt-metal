@@ -787,6 +787,28 @@ traced 94 us vs 355 for pad + ttnn.topk. The RISC scan runs ~50 cycles per logit
 the one-core merge 31 us: both RISCs per core + a merge tree would get it to ~25 us. The logits always carry 32 slot
 rows; the live count is the served path's sampler trace bucket (set_trace_bucket per decode width).
 
+Served rows top-k (`runs/fbtk`, vs fbms): 1 user 5.55 -> 5.30 ms (188.7 tok/s), real text 178.3 -> 187.0, 8 users
+10.67 -> 10.42 ms, TTFT unchanged; the log shows the 1 / 2 / 4 / 8-row buckets on it; greedy identical (same top-32
+set). Then the sampler's tie-break pass (~15 ops, the #33492 ttnn.topk workaround) is skipped on this path: RowsTopK
+orders ties by index and ttnn.sampling takes the first position (test_tiebreak_input_adjust documents that): 2-layer
+sampler trace 0.549 -> 0.228 ms.
+
+Consumer fusion (`QWEN35_FB_CONSUMER=1`, models/demos/blackhole/qwen36/tt/decode_linear, gdn_wip 7a0b85951da):
+- DecodeLinear: decode-only per-bank column-major weight copy (+0.33 GB per device for Ornith's in-proj + QKV; built
+  from the loaded weights on the first decode, ~15 s of boot), HiFi2 matmul_tiles, x rows only, output a normal tile
+  tensor. Standalone it barely beats ttnn (in-proj 18.1 vs 19.8 us, QKV 14.7 vs 16.7, out-proj worse): ~3.5 us of
+  ramp + tail per op caps 6.8 MB near 380 GB/s; the matmul itself is 4.9 us (not compute-bound; LoFi no faster).
+- Fused: the layer's MoE->mixer boundary runs the next layer's in-proj / QKV in its program (gpt-oss consumer_parts):
+  the weights stream while the boundary computes; the projection cores read the normed row in ONE 4 KB read each once
+  the boundary notifies (40 cores x 128 x 32 B reads of the boundary core serialized on its NOC endpoint: +25-40 us),
+  then build their tiles locally. Boundary packers moved to rows 2 / 5 and the boundary core to (9, 2), off the
+  banks' reader rows (0, 1, 3, 4, 6, 7, 9). Op test (`tests/test_fused_consumer.py`, 4 chips): y PCC 0.99995; traced
+  in-proj 28.3 -> 21.2 us, QKV 27.8 -> 22.2 us vs boundary + ttnn (the first trace of a session reads 47 us: warmup).
+- Served (`runs/fbcons`, vs fbtk; includes the tie-break skip): 1 user 5.30 -> 4.83 ms (188.7 -> 207.0 tok/s), real
+  text 187.0 -> 205.1 tok/s, 2K / 8K / 16K 4.97 / 5.11 / 5.23 ms; 8 users 10.72 (10.42, to re-check), 32 users 26.84;
+  TTFT unchanged (119 / 338 / 1285 ms); greedy sequential 0 / 8 identical, coherent; garble 8.99.
+Day total (1 user, p300x2, MTP off): 6.37 -> 4.83 ms (157 -> 207 tok/s, +32 %), real text 169 -> 205 tok/s.
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
@@ -811,11 +833,10 @@ profile picks one; that choice stays).
 ## Plan (in order; each step ends with a measurement)
 
 Re-plan 2026-10-25 (from the step 7 measurements; 1 user 5.55 ms after the fabric boundary):
-- a. Sampler: rows top-k (done, served measurement pending), then the all-gathers + tie-break + draw into one op
-  (candidates exchanged over the fabric, merged to a sorted list on every die): ~0.45 ms per token at every width.
-- b. Fabric boundary inside the consumer's program + streamed decode matmuls per DRAM bank (gpt-oss LinearStream: the
-  boundary computes while the next projection's weights stream): hides ~7 us x 2 per layer and takes the projections
-  from ~350 toward ~450-500 GB/s: ~0.8 ms at 1 user.
+- a. Sampler: rows top-k + tie-break skip (done, -0.32 ms per step); left: the two all-gathers + draw into the op
+  (~0.1 ms) and a faster scan (both RISCs + merge tree, ~0.05 ms).
+- b. Consumer fusion (done for the MoE->mixer boundary: -0.3 ms); the mixer->MoE boundary into the router (bf16 1.2 MB:
+  less to hide) is next on this line.
 - c. Fabric boundary for 2..8 rows (gpt-oss helpers / row-tile layout): ~10 us per layer at 8 users.
 - d. MoE gate|up split-pair (8 users: gate|up 97.5 us vs ~62 us floor), GDN head V-split (1 user), router.
 - e. MTP verify on the fused path (gpt-oss DFlash: 1.7-2.1x at batch 1) once b is in.
