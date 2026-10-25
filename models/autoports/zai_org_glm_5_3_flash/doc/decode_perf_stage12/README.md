@@ -318,3 +318,11 @@ Release package r8 (image `cfa09cc4402d`, built from `613e4802772`; `scorecard_r
 The 1-slot profiles (`p300x2-long`, `p300x2-1m`) do not get faster: their decode already runs one slot. The remaining
 gap of the 16-slot build at 1 user (61.8 vs 49.4 ms) is mostly the full-width DSA selection (the opt-in per-row
 buckets remove about 5 ms) and width-16 relayouts in every layer (about 15-25 us each).
+
+## Publish of the one-user changes (2026-10-25)
+
+The r8 bundle (image `cfa09cc4402d`, built from `613e4802772`; the card and staged README carry the r7 / r8 numbers)
+is on the Hub: `raahemnabeel/glm-5.3-flash-e192-blackhole` revision `0300e310aadf` (public, catalog; 876 files, no
+missing files or LFS mismatches; `~/glm53-flash-bringup/logs/s12/publish-r8.log`). Hub verify on a fresh reset
+(`~/glm53-flash-bringup/logs/11/verify-hub-p300x2-r8.chain.log`): healthy after 230 s, burst 16 / 16 identical to solo
+greedy, the 262,080-token prompt answers, PASS. Stage review of the addendum: clean pass (round 2).
