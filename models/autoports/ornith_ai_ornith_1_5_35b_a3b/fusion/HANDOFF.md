@@ -809,6 +809,24 @@ Consumer fusion (`QWEN35_FB_CONSUMER=1`, models/demos/blackhole/qwen36/tt/decode
   TTFT unchanged (119 / 338 / 1285 ms); greedy sequential 0 / 8 identical, coherent; garble 8.99.
 Day total (1 user, p300x2, MTP off): 6.37 -> 4.83 ms (157 -> 207 tok/s, +32 %), real text 169 -> 205 tok/s.
 
+Router inside the mixer->MoE boundary (`QWEN35_FB_ROUTER=1`; the boundary also keeps its normed-row tiles for the
+gate|up op; DecodeLinear on the replicated BF16 router at HiFi4, bank-padding columns not streamed): device boundary +
+router 18.0 -> 12.8 us (GDN layer) / 16.6 -> 14.3 (attention); served (`runs/fbrt`): 1 user 4.83 -> 4.76 ms, real text
+205.1 -> 209.3 tok/s; garble 12.11 (re-measured 9.51 in the next run: noise of a few points).
+
+MoE split-pair + off-row readers (`QWEN35_MOE_SPLIT_PAIR=1`, multi-row ops, m = 1): one bank per core (4 per bank), the
+gate cores send w * silu(g) to their up partners (credit-controlled ring in the up core's cb_sc), up cores load it via
+the identity matmul (down op unchanged). Alone it was slower (8 rows 74.6 -> 91 us at E = 64): the per-core profile
+showed the median core at the bank-bandwidth floor either way and the tail on banks 0 / 4, whose optimal readers share
+NOC row 9. Fix: the second bank on a shared row gets its readers on the next row inward reading on NOC1 (Y first:
+its responses stay off row 9's links) (`experts.place_banks_offrow`). E = 256 op test gate|up rows 1 / 2 / 4 / 8:
+18.4 / 31.5 / 56.1 / 94.3 -> 16.9 / 23.4 / 40.1 / 65.9 us. (The op test's default TEST_E = 64 shrinks the 8-row union
+to ~42 slots vs ~58 in the model: that was the 74.6 vs 97.5 "gap".) Served (`runs/fbsp`, vs fbrt / the v2 card):
+2 / 4 / 8 / 16 / 32 users 7.69 / 7.96 / 9.61 / 13.36 / 24.37 ms (card 8.19 / 8.63 / 10.60 / 14.59 / 27.44; 8 users
+104.1 tok/s/u, 833 total; 32 users 41.0 tok/s/u, 1313 total), 1 user 4.72 ms (unchanged path), real text 210.7 tok/s;
+greedy concurrent 0 / 8 identical (runs), garble 9.51. The same off-row placement on DecodeLinear: neutral (its cap
+is per-op ramp, not row 9).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
