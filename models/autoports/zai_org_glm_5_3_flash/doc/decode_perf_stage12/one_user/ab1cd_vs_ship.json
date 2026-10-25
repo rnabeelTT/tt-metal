@@ -1,0 +1,62 @@
+{
+ "a": "/home/raahem/glm53-flash-bringup/artifacts/s12/ab1/cd.pt",
+ "b": "/home/raahem/glm53-flash-bringup/artifacts/s12/ab3/ship.pt",
+ "bit_identical": true,
+ "top1_agree": "29/29",
+ "mismatches": [],
+ "decode_times_a": {
+  "1": {
+   "tokenout_ms": 74.60671605076641,
+   "enqueue_ms": 8.201429597102106,
+   "bucket": 0
+  },
+  "16": {
+   "tokenout_ms": 176.80759419454262,
+   "enqueue_ms": 19.21827660407871,
+   "bucket": 4
+  }
+ },
+ "decode_times_b": {
+  "1": {
+   "tokenout_ms": 72.68663075519726,
+   "enqueue_ms": 7.993554207496345,
+   "bucket": 0
+  },
+  "16": {
+   "tokenout_ms": 176.82282739551738,
+   "enqueue_ms": 19.174668344203383,
+   "bucket": 4
+  }
+ },
+ "buckets_b": {
+  "tbs": [
+   1,
+   2,
+   4,
+   8,
+   16
+  ],
+  "paths": {
+   "1": "pairs",
+   "2": "pairs",
+   "4": "pairs",
+   "8": "pairs",
+   "16": "pairs"
+  },
+  "widths": null
+ },
+ "programs": [
+  [
+   1126,
+   1126
+  ],
+  [
+   1126,
+   1126
+  ]
+ ],
+ "trace_bytes": [
+  88014848,
+  88014848
+ ]
+}

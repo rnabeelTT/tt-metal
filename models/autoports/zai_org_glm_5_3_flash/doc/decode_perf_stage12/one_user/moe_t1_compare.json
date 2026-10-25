@@ -1,0 +1,62 @@
+{
+ "a": "/home/raahem/glm53-flash-bringup/artifacts/s12/moe_t1/pairs.pt",
+ "b": "/home/raahem/glm53-flash-bringup/artifacts/s12/moe_t1/auto1.pt",
+ "bit_identical": true,
+ "top1_agree": "19/19",
+ "mismatches": [],
+ "decode_times_a": {
+  "1": {
+   "tokenout_ms": 5.394850252196193,
+   "enqueue_ms": 0.014836795162409544,
+   "bucket": 0
+  },
+  "2": {
+   "tokenout_ms": 5.604294256772846,
+   "enqueue_ms": 0.011756399180740118,
+   "bucket": 1
+  }
+ },
+ "decode_times_b": {
+  "1": {
+   "tokenout_ms": 5.052816297393292,
+   "enqueue_ms": 0.01789653906598687,
+   "bucket": 0
+  },
+  "2": {
+   "tokenout_ms": 5.607685295399278,
+   "enqueue_ms": 0.015848700422793627,
+   "bucket": 1
+  }
+ },
+ "buckets_b": {
+  "tbs": [
+   1,
+   2,
+   4,
+   8,
+   16
+  ],
+  "paths": {
+   "1": "auto",
+   "2": "pairs",
+   "4": "pairs",
+   "8": "pairs",
+   "16": "pairs"
+  },
+  "widths": null
+ },
+ "programs": [
+  [
+   1084,
+   1084
+  ],
+  [
+   1083,
+   1083
+  ]
+ ],
+ "trace_bytes": [
+  5767168,
+  5636096
+ ]
+}
