@@ -827,6 +827,24 @@ to ~42 slots vs ~58 in the model: that was the 74.6 vs 97.5 "gap".) Served (`run
 greedy concurrent 0 / 8 identical (runs), garble 9.51. The same off-row placement on DecodeLinear: neutral (its cap
 is per-op ramp, not row 9).
 
+Fabric boundary for 2..4 rows (`QWEN35_FB_MAX_ROWS`, default 4): row r's flat vector at pages r * tiles; packers and
+to-rows cores move every row (to-rows: one read per row of the boundary core's output then local copies: 16 x 64
+small reads of one core serialized on its endpoint), the compute sums all slots 4 tiles per acquire and runs the
+RMSNorm per row batched (2 rows per acquire, one hw startup per phase); the multi-row MoE writes its partial into a
+per-call L1 buffer in this mode. Traced 1 / 2 / 8 rows 7.6 / 9.4 / 28.3 us per boundary (8 rows ~19 us of device
+time vs ~20-24 for the replicated path: no gain, hence the limit of 4). Served (`runs/fbmr`, vs fbsp): 2 users 7.69
+-> 6.93 ms, 4 users 7.96 -> 7.37 ms; 1 / 8 / 16 / 32 users 4.73 / 9.60 / 13.45 / 23.90 ms (unchanged paths); garble
+10.61. Lesson: a model-wide object with persistent L1 buffers must be built at layer construction (before any
+warmup): the boundary built at the first decode landed between the prefill warmup and the prefill trace capture,
+shifted L1 addresses, and the prefill MoE dispatch missed the program cache in the capture (TT_FATAL "cannot load new
+binaries during trace capture", then a hung teardown; found with a script that prints the traceback and os._exit()s).
+
+Day 2026-10-25 (p300x2, MTP off, 128/128 TPOT; vs the v2 release card rows): 1 user 6.37 -> 4.73 ms (157 -> 211
+tok/s; real text 169 -> 210); 2 users 8.19 -> 6.93; 4 users 8.63 -> 7.37; 8 users 10.60 -> 9.60 (94 -> 104 tok/s/u);
+16 users 14.59 -> 13.45; 32 users 27.44 -> 23.90 (36.4 -> 41.8 tok/s/u, 1339 total).
+Dev env for these numbers: QWEN35_FABRIC_BOUNDARY=1 QWEN35_ROWS_TOPK=1 QWEN35_FB_CONSUMER=1 QWEN35_FB_ROUTER=1
+QWEN35_MOE_SPLIT_PAIR=1 QWEN35_FB_MAX_ROWS=4 on top of the v2 env (runs/fb_ms.sh EXTRA).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
