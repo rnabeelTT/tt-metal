@@ -241,7 +241,34 @@ class ExpertGateUpRows:
         self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
         assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
         if self.split:
-            placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+            # banks whose optimal reader shares a row with an earlier bank's (banks 0 / 4 on row 9 here): readers on the
+            # next row inward, reading on NOC1 (QWEN35_MOE_SPLIT_OFFROW=1)
+            workers = bank_workers(mesh_device)
+            self.noc1_banks = set()
+            if os.environ.get("QWEN35_MOE_SPLIT_OFFROW", "1") == "1":
+                seen = set()
+                for b, w in enumerate(workers):
+                    if w.y in seen:
+                        self.noc1_banks.add(b)
+                    seen.add(w.y)
+            grid = mesh_device.compute_with_storage_grid_size()
+            used = set()
+            placed = {}
+            for b in range(self.banks):
+                if b in self.noc1_banks:
+                    w = workers[b]
+                    y = w.y - 1 if w.y > 0 else w.y + 1
+                    cand = [(w.x + dx, y) for d in range(grid.x) for dx in ((d, -d) if d else (0,))]
+                    cores = []
+                    for x, yy in cand:
+                        if len(cores) == readers:
+                            break
+                        if 0 <= x < grid.x and (x, yy) not in used:
+                            used.add((x, yy))
+                            cores.append(ttnn.CoreCoord(x, yy))
+                    placed[b] = cores
+            placed.update(place_along_rows(mesh_device, {b: readers for b in range(self.banks) if b not in self.noc1_banks},
+                                           used=used))
             self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
             half = self.banks // 2
             self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)}
@@ -290,8 +317,10 @@ class ExpertGateUpRows:
         if self.split:
             half = self.banks // 2
             kernels = []
-            for gate in (False, True):
-                sel = [(c, b, r) for c, b, r in self.assign if (b >= half) == gate]
+            for gate, noc1 in ((False, False), (True, False), (False, True), (True, True)):
+                sel = [(c, b, r) for c, b, r in self.assign if (b >= half) == gate and (b in self.noc1_banks) == noc1]
+                if not sel:
+                    continue
                 keys = {(c.x, c.y) for c, _, _ in sel}
                 rd_g = {k: v for k, v in rd_rt.items() if k in keys}
                 wr_g = {}
@@ -304,7 +333,8 @@ class ExpertGateUpRows:
                     rd_g[(c.x, c.y)][4] = b  # the reader's bank
                 cores = _range_set([c for c, _, _ in sel])
                 d = defines + [("SPLIT_PAIR", "1"), ("SPLIT_RING", str(self.ring))] + ([("ROLE_GATE", "1")] if gate else [])
-                kernels += _kernels(cores, "gur", (rd_ct, rd_g), (wr_ct, wr_g), (cp_ct, None), d, dst_full=self.dst_full)
+                kernels += _kernels(cores, "gur", (rd_ct, rd_g), (wr_ct, wr_g), (cp_ct, None), d, dst_full=self.dst_full,
+                                    reader_noc=ttnn.NOC.NOC_1 if noc1 else None)
             semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
         else:
             kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)

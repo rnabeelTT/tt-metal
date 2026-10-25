@@ -20,7 +20,7 @@ import torch
 
 import ttnn
 
-from ..moe_decode.experts import _range_set, bank_workers, place_along_rows
+from ..moe_decode.experts import _range_set, bank_workers, place_banks_offrow
 
 KERNEL_DIR = Path(__file__).parent / "kernels"
 TILE = 32
@@ -47,13 +47,16 @@ class DecodeLinear:
         self.weight_dtype, self.fidelity, self.buffers = weight_dtype, fidelity, buffers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.page_bytes = _packet(self.kt, self.tile_bytes)
-        placed = place_along_rows(mesh_device, {b: self.readers for b in range(self.banks)}, used=set(exclude))
+        placed, self.noc1_banks = place_banks_offrow(mesh_device, {b: self.readers for b in range(self.banks)},
+                                                     used=set(exclude))
         self.assign = []  # (core, bank, col0 within bank, ncols)
         for b in range(self.banks):
             for r, c in enumerate(placed[b]):
                 c0 = r * self.cpc  # padding columns (past n_tiles) are not streamed
                 self.assign.append((c, b, c0, max(0, min(self.cpc, self.C - c0, self.n_tiles - b * self.C - c0))))
         self.cores = _range_set([c for c, _, _, _ in self.assign])
+        self.noc1_cores = _range_set([c for c, b, _, _ in self.assign if b in self.noc1_banks]) if self.noc1_banks else None
+        self.noc0_cores = _range_set([c for c, b, _, _ in self.assign if b not in self.noc1_banks])
 
     # ---- weights ------------------------------------------------------------------------------------------------------
     def layout(self, w):
@@ -96,11 +99,18 @@ class DecodeLinear:
         wr_ct = [cb_x, cb_out, self.kt, rows, self.n_tiles]
         wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args() + ttnn.TensorAccessorArgs(out).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_out, self.kt]
-        rd_rt, wr_rt, cp_rt = ttnn.RuntimeArgs(), ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
+        cp_rt = ttnn.RuntimeArgs()
+        rd_args, wr_args = {}, {}
         for c, b, c0, nc in self.assign:
-            rd_rt[c.x][c.y] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3]
-            wr_rt[c.x][c.y] = [x.buffer_address(), out.buffer_address(), b * self.C + c0, nc]
+            rd_args[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3]
+            wr_args[(c.x, c.y)] = [x.buffer_address(), out.buffer_address(), b * self.C + c0, nc]
             cp_rt[c.x][c.y] = [nc]
+
+        def rt_for(args, cores):
+            rt = ttnn.RuntimeArgs()
+            for c in ttnn.corerange_to_cores(cores, row_wise=True):
+                rt[c.x][c.y] = args[(c.x, c.y)]
+            return rt
         defines = []
         if flat is not None:
             (fx, fy), sem = flat
@@ -109,13 +119,21 @@ class DecodeLinear:
             defines = [("X_FROM_FLAT", "1"), ("X_NOC_X", str(fx)), ("X_NOC_Y", str(fy)), ("X_SEM", str(sem)),
                        ("CB_XF", str(cb_xf))]
         dm = ttnn.DataMovementConfigDescriptor
-        kernels = [
-            ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_reader.cpp"), core_ranges=self.cores,
-                                  compile_time_args=rd_ct, runtime_args=rd_rt,
-                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
-            ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_writer.cpp"), core_ranges=self.cores,
-                                  compile_time_args=wr_ct, runtime_args=wr_rt, defines=defines,
-                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
+        kernels = []
+        # readers of a bank sharing its row with another bank's: on the next row, NOC1 (place_banks_offrow)
+        for cores, rnoc, wnoc in ((self.noc0_cores, ttnn.NOC.NOC_0, ttnn.NOC.NOC_1),
+                                  (self.noc1_cores, ttnn.NOC.NOC_1, ttnn.NOC.NOC_0)):
+            if cores is None:
+                continue
+            kernels += [
+                ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_reader.cpp"), core_ranges=cores,
+                                      compile_time_args=rd_ct, runtime_args=rt_for(rd_args, cores),
+                                      config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
+                ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_writer.cpp"), core_ranges=cores,
+                                      compile_time_args=wr_ct, runtime_args=rt_for(wr_args, cores), defines=defines,
+                                      config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
+            ]
+        kernels += [
             ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_compute.cpp"), core_ranges=self.cores,
                                   compile_time_args=cp_ct, runtime_args=cp_rt,
                                   config=ttnn.ComputeConfigDescriptor(math_fidelity=self.fidelity, fp32_dest_acc_en=True,

@@ -60,8 +60,7 @@ def main():
                 t1 = bench(dev, lambda: ttnn.linear(x, w_il, compute_kernel_config=ckc, program_config=pc,
                                                     memory_config=ttnn.L1_MEMORY_CONFIG))
                 line = f"{name} rows {rows}: ttnn 1D {t1:5.1f} us ({mb / t1 * 1e3:4.0f} GB/s, pcc {p1:.6f})"
-                for readers, fid in ((4, ttnn.MathFidelity.HiFi2), (6, ttnn.MathFidelity.HiFi2), (8, ttnn.MathFidelity.HiFi2),
-                                     (6, ttnn.MathFidelity.LoFi)):
+                for readers, fid in ((4, ttnn.MathFidelity.HiFi2), (6, ttnn.MathFidelity.HiFi2), (8, ttnn.MathFidelity.HiFi2)):
                     op = DecodeLinear(dev, K, N, ttnn.bfloat8_b, readers=readers, fidelity=fid)
                     wd = op.weight([w])
                     y = op(x, wd, rows)

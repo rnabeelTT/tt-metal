@@ -163,6 +163,35 @@ def place_along_rows(mesh_device, per_bank, used=None):
     return out
 
 
+def place_banks_offrow(mesh_device, per_bank, used=None):
+    """place_along_rows, except a bank whose optimal reader shares its row with an earlier bank's (banks 0 / 4 on row 9 of
+    these chips) gets its cores on the next row inward. Returns ({bank: [CoreCoord]}, {banks read on NOC1}): those
+    cores should read on NOC1 (Y first), so their bank's responses stay off the shared row's links."""
+    workers = bank_workers(mesh_device)
+    grid = mesh_device.compute_with_storage_grid_size()
+    used = set() if used is None else used
+    noc1, seen = set(), set()
+    for b, w in enumerate(workers):
+        if b in per_bank and w.y in seen:
+            noc1.add(b)
+        seen.add(w.y)
+    placed = {}
+    for b in sorted(noc1):
+        w = workers[b]
+        y = w.y - 1 if w.y > 0 else w.y + 1
+        cores = []
+        for d in range(grid.x):
+            for dx in ((d, -d) if d else (0,)):
+                x = w.x + dx
+                if len(cores) < per_bank[b] and 0 <= x < grid.x and (x, y) not in used:
+                    used.add((x, y))
+                    cores.append(ttnn.CoreCoord(x, y))
+        assert len(cores) == per_bank[b], f"no room for {per_bank[b]} cores near bank {b}"
+        placed[b] = cores
+    placed.update(place_along_rows(mesh_device, {b: n for b, n in per_bank.items() if b not in noc1}, used=used))
+    return placed, noc1
+
+
 def _range_set(cores):
     rs = ttnn.CoreRangeSet([ttnn.CoreRange(cores[0], cores[0])])
     for c in cores[1:]:
@@ -187,14 +216,18 @@ def _rt(args, cores=None):
     return rt
 
 
-def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False):
-    """reader / writer / compute: (compile args, {(x, y): runtime args})."""
+def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, reader_noc=None):
+    """reader / writer / compute: (compile args, {(x, y): runtime args}). reader_noc: ttnn.NOC.NOC_1 swaps the reader /
+    writer NOCs (readers off their bank's row: NOC1 routes Y first, keeping the responses off the bank row's links)."""
     dm = ttnn.DataMovementConfigDescriptor
     rd_ct, rd_args = reader
     wr_ct, wr_args = writer
     cp_ct, cp_args = compute
     cp_rt = _rt(cp_args) if cp_args is not None else None
-    groups = [(list(rd_args), ttnn.NOC.NOC_0, ttnn.NOC.NOC_1)]
+    if reader_noc == ttnn.NOC.NOC_1:
+        groups = [(list(rd_args), ttnn.NOC.NOC_1, ttnn.NOC.NOC_0)]
+    else:
+        groups = [(list(rd_args), ttnn.NOC.NOC_0, ttnn.NOC.NOC_1)]
     dms = []
     for grp, rd_noc, wr_noc in groups:
         cr = _range_set([ttnn.CoreCoord(x, y) for x, y in grp])
