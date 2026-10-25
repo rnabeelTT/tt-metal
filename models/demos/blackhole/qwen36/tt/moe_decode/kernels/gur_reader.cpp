@@ -12,6 +12,7 @@
 //    interleaved ttnn tensor (see gu_reader.cpp), transaction-id pipelined.
 //
 // EP_EXPERTS: only this die's window of the union (local ids).
+// SPLIT_PAIR (m = 1): runtime arg `group` is this core's bank; it streams that bank's block only.
 //
 // runtime args: [table_addr, w_addr, ws_addr, id_addr, group q, slot0, vc, (EP_EXPERTS) ep_offset_addr]
 
@@ -47,7 +48,11 @@ void kernel_main() {
     constexpr auto id_args = TensorAccessorArgs<table_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t m = n_tiles / banks;
+#ifdef SPLIT_PAIR
+    constexpr uint32_t nb = 1;  // split-pair: this core streams only its own bank's block (`pair` is the bank)
+#else
     constexpr uint32_t nb = gu_layout::blocks<m>();
+#endif
     constexpr uint32_t blk_tiles = kt * m;  // one bank's [kt, m] run
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
@@ -92,7 +97,11 @@ void kernel_main() {
         const uint32_t e = s == 0 ? 0 : uni[s - 1];
         for (uint32_t h = 0; h < nb; ++h) {
             uint32_t src = e * blk_tiles * tile_bytes;
+#ifdef SPLIT_PAIR
+            const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(pair, base);
+#else
             const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(pair + h * (banks / 2), base);
+#endif
             noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
             noc_async_read_set_trid(trid);
             for (uint32_t p = 0; p < pages_per_col; ++p) {

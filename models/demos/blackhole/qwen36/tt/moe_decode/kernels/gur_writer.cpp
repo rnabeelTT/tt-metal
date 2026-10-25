@@ -19,6 +19,13 @@
 //
 // EP_EXPERTS: only this die's window of the union (local ids); other dies' experts get no weight.
 //
+// SPLIT_PAIR (m = 1; runtime args + [partner noc x, y]): gate and up columns on different cores, paired on the same slot
+// sequence. ROLE_GATE writers fill cb_sc with the weight tiles (as above) and send each slot's g' = w * silu(g) tiles
+// into the paired up core's cb_sc ring (same slot positions: the CBs sit at the same address on every core), after a
+// credit (program semaphore 0 here, granted by the up writer once the ring slot is free and zeroed), then increment
+// the partner's semaphore 1. ROLE_UP writers zero their cb_sc ring, grant credits, publish each slot once its data
+// arrived (semaphore 1), and write the activation buffer (pair q) as above.
+//
 // runtime args: [x_addr, act_addr, table_addr, group q, slot0, (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
@@ -119,6 +126,58 @@ void kernel_main() {
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, mine);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, mine);
 
+#ifdef SPLIT_PAIR
+    constexpr uint32_t ring = SPLIT_RING;  // cb_sc holds `ring` slots of 2 * groups tiles
+    constexpr uint32_t slot_bytes = 2 * groups * tb;
+#ifdef EP_EXPERTS
+    constexpr uint32_t partner_arg = 6;
+#else
+    constexpr uint32_t partner_arg = 5;
+#endif
+    const uint32_t px = get_arg_val<uint32_t>(partner_arg);
+    const uint32_t py = get_arg_val<uint32_t>(partner_arg + 1);
+#endif
+#if defined(SPLIT_PAIR) && !defined(ROLE_GATE)
+    // up core: the partner writes g' tiles into this cb_sc ring; zero it, grant `ring` credits, then per slot publish
+    // once the data is in (and grant the slot two ahead when it is free again)
+    {
+        cb_reserve_back(cb_sc, ring * 2 * groups);
+        zero_l1(get_write_ptr(cb_sc), ring * slot_bytes);
+        noc_async_read_barrier();
+        noc_semaphore_inc(get_noc_addr(px, py, get_semaphore(0)), ring);
+        volatile tt_l1_ptr uint32_t* got = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(1));
+        auto drain_up = [&](uint32_t s) {
+            for (uint32_t g = 0; g < groups; ++g) {
+                cb_wait_front(cb_act, 1);
+                noc_async_write(get_read_ptr(cb_act), s_act.get_noc_addr((s * pairs + pair) * groups + g), tb);
+                noc_async_writes_flushed();
+                cb_pop_front(cb_act, 1);
+            }
+        };
+        uint32_t i = 0;
+        for (uint32_t s = slot0; s < U + 1; s += step, ++i) {
+            if (i >= ring) {
+                cb_reserve_back(cb_sc, 2 * groups);  // slot i - ring consumed
+                zero_l1(get_write_ptr(cb_sc), slot_bytes);
+                noc_async_read_barrier();
+                noc_semaphore_inc(get_noc_addr(px, py, get_semaphore(0)), 1);
+            }
+            noc_semaphore_wait_min(got, i + 1);
+            cb_push_back(cb_sc, 2 * groups);
+            if (s != slot0) {
+                drain_up(s - step);
+            }
+        }
+        if (mine) {
+            drain_up(slot0 + (mine - 1) * step);
+        }
+        noc_async_write_barrier();
+        noc_async_atomic_barrier();
+        cb_pop_front(cb_tab, 1);
+        return;
+    }
+#endif
+
     // this core's [mine, rows] weight table (BF16 bits, rounded to 7 significant bits), one pass over the records
     cb_reserve_back(cb_wt, 1);
     volatile tt_l1_ptr uint16_t* wt = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_write_ptr(cb_wt));
@@ -153,6 +212,25 @@ void kernel_main() {
         }
     }
 
+#if defined(SPLIT_PAIR) && defined(ROLE_GATE)
+    const uint32_t ring_base = get_write_ptr(cb_sc);  // cb_sc's start: the partner's ring sits at the same address
+    volatile tt_l1_ptr uint32_t* credit = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(0));
+    uint32_t sent = 0;
+    auto drain = [&](uint32_t s) {
+        (void)s;
+        noc_semaphore_wait_min(credit, sent + 1);
+        const uint32_t dst = ring_base + (sent % ring) * slot_bytes;
+        for (uint32_t g = 0; g < groups; ++g) {
+            cb_wait_front(cb_act, 1);
+            noc_async_write(get_read_ptr(cb_act), get_noc_addr(px, py, dst + 2 * g * tb), tb);
+            noc_async_writes_flushed();
+            cb_pop_front(cb_act, 1);
+        }
+        noc_async_write_barrier();
+        noc_semaphore_inc(get_noc_addr(px, py, get_semaphore(1)), 1);
+        ++sent;
+    };
+#else
     auto drain = [&](uint32_t s) {
         for (uint32_t g = 0; g < groups; ++g) {
             cb_wait_front(cb_act, np);
@@ -164,6 +242,7 @@ void kernel_main() {
             cb_pop_front(cb_act, np);
         }
     };
+#endif
     uint32_t i = 0;
     for (uint32_t s = slot0; s < U + 1; s += step, ++i) {
         cb_reserve_back(cb_sc, 2 * groups);
@@ -193,6 +272,7 @@ void kernel_main() {
         drain(slot0 + (mine - 1) * step);
     }
     noc_async_write_barrier();
+    noc_async_atomic_barrier();
     cb_pop_front(cb_wt, 1);
     cb_pop_front(cb_tab, 1);
 }

@@ -17,6 +17,8 @@ activations / weights rounded to 7 for the srcB operand).
 
 from __future__ import annotations
 
+import os
+
 import torch
 
 import ttnn
@@ -223,8 +225,13 @@ class ExpertGateUpRows:
         self.shared, self.ep_experts, self.gate_first = shared, ep_experts, gate_first
         self.trows, self.groups = tile_rows(rows), row_groups(rows)
         self.max_slots = min(num_experts, rows * k) + 1
+        # split-pair (QWEN35_MOE_SPLIT_PAIR=1, m = 1: a pair's up / gate columns in banks q / q + banks / 2): one bank per
+        # core, `readers` cores per bank on its row; the gate cores send w * silu(g) to their up partners (gur_writer.cpp)
+        self.split = (os.environ.get("QWEN35_MOE_SPLIT_PAIR", "0") == "1" and self.m == 1
+                      and gu_layout(self.n_tiles, self.banks)[1] == 2 and not gate_first)
+        self.ring = int(os.environ.get("QWEN35_MOE_SPLIT_RING", "8"))
         if readers is None:
-            readers = 4
+            readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else 4
         self.readers = readers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
@@ -233,8 +240,15 @@ class ExpertGateUpRows:
         self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
         self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
         assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
-        placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
-        self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
+        if self.split:
+            placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+            self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
+            half = self.banks // 2
+            self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)}
+            self.mesh = mesh_device
+        else:
+            placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
+            self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None):
@@ -249,7 +263,8 @@ class ExpertGateUpRows:
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),  # + the EP offset (64-byte aligned)
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
-            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * 2 * g, tiny=True, rows=self.trows),  # two slots' weight tiles
+            # two slots' weight tiles (split-pair: SPLIT_RING slots, the up cores' ring for their partners' g')
+            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * g * (self.ring if self.split else 2), tiny=True, rows=self.trows),
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
@@ -271,8 +286,29 @@ class ExpertGateUpRows:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
-        kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        semaphores = []
+        if self.split:
+            half = self.banks // 2
+            kernels = []
+            for gate in (False, True):
+                sel = [(c, b, r) for c, b, r in self.assign if (b >= half) == gate]
+                keys = {(c.x, c.y) for c, _, _ in sel}
+                rd_g = {k: v for k, v in rd_rt.items() if k in keys}
+                wr_g = {}
+                for c, b, r in sel:
+                    pc = self.mesh.worker_core_from_logical_core(self.partner[(b, r)])
+                    args = list(wr_rt[(c.x, c.y)])
+                    args[3] = b % half  # the pair (up column) index
+                    wr_g[(c.x, c.y)] = args + [pc.x, pc.y]
+                for c, b, r in sel:
+                    rd_g[(c.x, c.y)][4] = b  # the reader's bank
+                cores = _range_set([c for c, _, _ in sel])
+                d = defines + [("SPLIT_PAIR", "1"), ("SPLIT_RING", str(self.ring))] + ([("ROLE_GATE", "1")] if gate else [])
+                kernels += _kernels(cores, "gur", (rd_ct, rd_g), (wr_ct, wr_g), (cp_ct, None), d, dst_full=self.dst_full)
+            semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
+        else:
+            kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
         return ttnn.generic_op(io, program)
 
