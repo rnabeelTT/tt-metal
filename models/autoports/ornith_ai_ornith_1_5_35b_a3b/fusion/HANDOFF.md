@@ -858,6 +858,12 @@ Day (1 user): 6.37 -> 4.56 ms (157 -> 219 tok/s, +40 %), real text 169 -> 218 to
 Next small levers: the LM head on DecodeLinear (`QWEN35_LM_STREAM=1`, written, to measure: 261 us at ~274 GB/s
 today), the conv folded into the fused in-proj (~0.2 ms), the sampler's all-gathers into the top-k op (~0.1 ms).
 
+Quality checkpoint (`runs/devq_p300x2`, the day's dev config, p300x2, scorecard subsets one request at a time: the
+1-row path): GPQA-D (40) 0.75 +-0.07 (blackhole-fast measured the same way 0.85, published 0.775), IFEval prompt
+strict / loose (100) 0.77 / 0.86 (0.77 / 0.82), LiveCodeBench v6 (50) 0.46 (0.40); garble 10.79. All within one
+stderr: no quality loss shown. The p300 (2-chip) server of the dev config died at boot (`runs/devq_p300`, the log was
+cut at 30 lines: tools fixed; root cause next).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
