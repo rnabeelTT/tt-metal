@@ -34,6 +34,9 @@ void bind_recurrent_decode(nb::module_& mod) {
 
         Keyword Args:
             eps (float): L2-norm epsilon. Defaults to ``1e-6``.
+            active (ttnn.Tensor, optional): one row of >= B UINT32 ROW_MAJOR slot flags in DRAM (non-zero = active).
+                Only the active slots' heads are computed, spread over all cores; an inactive slot's state is neither
+                read nor written and its output rows are zeros. Defaults to ``None`` (every slot computed).
 
         Returns:
             ttnn.Tensor: o ``[1, 1, B*H, V]`` FLOAT32 TILE, row ``b*H + h``.
@@ -45,7 +48,8 @@ void bind_recurrent_decode(nb::module_& mod) {
         nb::arg("beta").noconvert(),
         nb::arg("q_scale"),
         nb::kw_only(),
-        nb::arg("eps") = 1e-6f);
+        nb::arg("eps") = 1e-6f,
+        nb::arg("active") = nb::none());
 }
 
 }  // namespace ttnn::operations::experimental::kda::recurrent_decode::detail

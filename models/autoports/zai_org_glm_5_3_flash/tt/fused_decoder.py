@@ -300,7 +300,9 @@ class FusedGlmKDA(GlmKDA):
         ttnn.deallocate(proj)
 
         # ---- L2 norms + recurrence, state in place: o [1,1,B*H,V] fp32 (row b*H + h)
-        o = ttnn.experimental.kda.recurrent_decode(dstate.recurrent, qkv, eg, beta, K**-0.5)
+        o = ttnn.experimental.kda.recurrent_decode(
+            dstate.recurrent, qkv, eg, beta, K**-0.5, active=inputs.get("active_u32")
+        )
         for t in (qkv, eg, beta):
             ttnn.deallocate(t)
 

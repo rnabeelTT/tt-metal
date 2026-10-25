@@ -19,6 +19,7 @@ folded decay projection, conv taps, o_norm, o_proj).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import torch
@@ -34,6 +35,11 @@ from .weight_cache import load_kda_weights_cached
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 KDA_CHUNK = 32
 GATE_LOWER_BOUND = -5.0
+# stage 12 (1-user decode): the fused recurrence (ttnn.experimental.kda.recurrent_decode) computes only the active slots'
+# heads, dealt over all cores (bit-identical active rows; inactive rows: state untouched, output zeros). Default on;
+# GLM53_KDA_ACTIVE=0 restores the all-slot op. Full model, 16 slots, 1 active: with the 1-row MoE gather and the
+# active-row tap copy of kda_decode_conv, token-out 74.6 -> 61.6 ms, bit-identical (artifacts/s12/ab3)
+KDA_ACTIVE_OP = os.environ.get("GLM53_KDA_ACTIVE", "1").strip() == "1"
 
 
 def _EXACT_DECAY_CKC(mesh_device):
@@ -264,10 +270,17 @@ class GlmKDA(LightweightModule):
     def _decode_host_inputs(self, positions):
         """Per-step decode inputs: positions[s] = position of slot s's token, -1 = inactive (state left unchanged)."""
         active = torch.tensor([p >= 0 for p in positions]).float().reshape(1, 1, len(positions), 1)
-        return {
+        d = {
             "active": (active, ttnn.float32, ttnn.TILE_LAYOUT),
             "active_bf": (active, ttnn.bfloat16, ttnn.TILE_LAYOUT),
         }
+        if KDA_ACTIVE_OP:
+            # stage 12: the recurrence op's slot flags (uint32 row, padded to 16 = one 64-byte DRAM word)
+            n = -(-len(positions) // 16) * 16
+            flags = torch.zeros(1, n, dtype=torch.int32)
+            flags[0, : len(positions)] = active.reshape(-1).to(torch.int32)
+            d["active_u32"] = (flags, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        return d
 
     def decode_inputs(self, positions):
         rep = ttnn.ReplicateTensorToMesh(self.mesh)

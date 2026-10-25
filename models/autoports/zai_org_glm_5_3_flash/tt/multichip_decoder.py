@@ -1209,7 +1209,8 @@ class MultichipKDA(FusedGlmKDA):
             return super().decode_forward(x, dstate, inputs=inputs)
         pad = lambda t: t if int(t.shape[-2]) == Bp else _pad_rows(t, Bp)  # padded slots: zero rows (inactive)
         xp = pad(x)
-        ip = {k: pad(v) for k, v in inputs.items()}
+        # active_u32 (the recurrence op's slot-flag row) already covers the padded slots
+        ip = {k: v if k == "active_u32" else pad(v) for k, v in inputs.items()}
         y = super().decode_forward(xp, dstate, inputs=ip)
         # no deallocate of xp / ip: a pad inside the tile padding is a view of the caller's buffer (freeing it freed
         # the decode input buffers: segfault at the next host copy, 2026-10-17 05:07)

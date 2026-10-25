@@ -10,6 +10,9 @@
 
 namespace ttnn::experimental::prim {
 
+// the reader / writer keep the active slot list on the stack
+inline constexpr uint32_t KDA_RECURRENT_DECODE_MAX_ACTIVE_BATCH = 256;
+
 struct KdaRecurrentDecodeDeviceOperation {
     using operation_attributes_t = KdaRecurrentDecodeParams;
     using tensor_args_t = KdaRecurrentDecodeTensorArgs;
@@ -26,5 +29,11 @@ struct KdaRecurrentDecodeDeviceOperation {
 
 namespace ttnn::prim {
 Tensor kda_recurrent_decode(
-    const Tensor& state, const Tensor& qkv, const Tensor& decay, const Tensor& beta, float q_scale, float eps);
+    const Tensor& state,
+    const Tensor& qkv,
+    const Tensor& decay,
+    const Tensor& beta,
+    float q_scale,
+    float eps,
+    const std::optional<Tensor>& active = std::nullopt);
 }  // namespace ttnn::prim

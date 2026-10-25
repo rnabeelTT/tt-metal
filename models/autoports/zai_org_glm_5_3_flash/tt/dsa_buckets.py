@@ -236,14 +236,18 @@ def moe_bucket_paths(tbs, family: str = "pairs"):
     """Routed path of every row bucket, the S bucket (tbs[-1]) included. GLM53_MOE_BUCKET_PATH:
       "family" (default): every bucket takes the family of the S bucket's own path (moe_family): a request's routed
                           math is then the same whatever the number of active slots (batch invariance; the pairs and
-                          sorted paths are each row-exact but differ from each other in the last bits);
+                          sorted paths are each row-exact but differ from each other in the last bits). Stage 12: in
+                          the pairs family the 1-row bucket takes "auto" (the 1-slot build's T = 1 gather path, 64
+                          cores instead of the 8 pair groups' cores): bit-identical to pairs (artifacts/s12/moe_t1,
+                          19 / 19 rows) and -0.17 ms per MoE layer at 1 active;
       one name ("pairs" / "sorted" / "auto"): every bucket, the S bucket included;
       "1:pairs,8:sorted,32:pairs": per bucket; an unnamed bucket takes the family.
     The S bucket's value "build" runs the build's own path (the code before stage 10)."""
     env = os.environ.get("GLM53_MOE_BUCKET_PATH", "family").strip().lower()
+    if env == "family":
+        return {t: "auto" if t == 1 and family == "pairs" else family for t in tbs}
     if ":" not in env:
-        v = family if env == "family" else env
-        return {t: v for t in tbs}
+        return {t: env for t in tbs}
     named = {}
     for kv in env.split(","):
         k, v = kv.split(":")

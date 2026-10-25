@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include "api/compute/common.h"
+#include "api/compute/cb_api.h"
 #include "api/compute/matmul.h"
 #include "api/compute/eltwise_binary_sfpu.h"
 #include "api/compute/tile_move_copy.h"
@@ -358,7 +359,19 @@ void kernel_main() {
     constexpr uint32_t eps_bits = get_compile_time_arg_val(2);
     constexpr uint32_t q_scale_bits = get_compile_time_arg_val(3);
     constexpr uint32_t kv = Kt * Vt;
+#ifdef KDA_ACTIVE_MODE
+    // this core's share of the active heads, from the reader (the runtime arg is the static split)
+    uint32_t count = 0;
+    {
+        constexpr uint32_t cb_cnt = 29;
+        CircularBuffer cnt(cb_cnt);
+        cnt.wait_front(1);
+        count = read_tile_value(cb_cnt, 0, 0);
+        cnt.pop_front(1);
+    }
+#else
     const uint32_t count = get_arg_val<uint32_t>(0);
+#endif
 
     // every CB is fp32; the UnpackToDestFp32 / Default split is reconfigured per op group
     compute_kernel_hw_startup(cb_xh, cb_xh, cb_out);

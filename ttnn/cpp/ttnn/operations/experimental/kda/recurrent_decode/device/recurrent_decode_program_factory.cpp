@@ -7,6 +7,10 @@
 // out of the packed [1,1,R,C] projections) and beta (one element), plus the head's fp32 state [K,V]; the compute kernel
 // runs the step (derived from ttnn.transformer.fused_recurrent_gated_delta_rule, with a per-key-channel decay and the
 // q / k L2 norms in-kernel); the writer writes the state back in place and the output row into [1,1,B*H,V].
+// With the optional `active` slot flags, the heads of the active slots only are dealt to the cores in turn (core i
+// takes active heads i, i + num_cores, ...): one live slot of a 16-slot build runs its 16 heads on 16 cores instead of
+// the contiguous runs of a 256-head split. The reader passes each core's count to the compute kernel (CB_CNT); the
+// writer zeroes the output rows of the inactive heads, whose state stays untouched.
 
 #include "recurrent_decode_program_factory.hpp"
 #include "recurrent_decode_device_operation_types.hpp"
@@ -58,6 +62,9 @@ constexpr uint32_t CB_QSD = tt::CBIndex::c_25;      // X [1,V] qn . sd
 constexpr uint32_t CB_QK = tt::CBIndex::c_26;       // X [0,0] = qn . kn
 constexpr uint32_t CB_KN1H = tt::CBIndex::c_27;     // [1,K] kn split for the matmul-in1 role, hi
 constexpr uint32_t CB_KN1L = tt::CBIndex::c_28;     // ... lo
+constexpr uint32_t CB_CNT = tt::CBIndex::c_29;      // active mode: [0] = this core's head count (reader -> compute)
+constexpr uint32_t CB_ACT = tt::CBIndex::c_30;      // active mode: the slot flags (reader; the writer reads its own)
+constexpr uint32_t CB_ZERO = tt::CBIndex::c_31;     // active mode: zero tile, the source of the inactive output rows
 constexpr uint32_t UNPACK_TO_DEST_CBS[] = {
     CB_Q, CB_K, CB_V, CB_DECAY, CB_BETA, CB_S, CB_VREAD, CB_DCOL, CB_NRM, CB_SDX, CB_QSD, CB_QK};
 
@@ -125,6 +132,13 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
     add_cb(desc, all_cores, CB_XL, Kt, ts);
     add_cb(desc, all_cores, CB_NRM, 1, ts);
     add_cb(desc, all_cores, CB_SCRATCH, 1, ts);
+    const bool active_mode = t.active.has_value();
+    if (active_mode) {
+        add_cb(desc, all_cores, CB_CNT, 1, ts);
+        add_cb(desc, all_cores, CB_ACT, 2, ts);  // reader page + writer page (B <= 256 flags: 1 KiB each)
+        add_cb(desc, all_cores, CB_ZERO, 1, ts);
+    }
+    auto* act_buf = active_mode ? t.active->buffer() : nullptr;
 
     const std::string kdir = "ttnn/cpp/ttnn/operations/experimental/kda/recurrent_decode/device/kernels/";
     auto* state_buf = t.state.buffer();
@@ -138,6 +152,9 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
     TensorAccessorArgs(qkv_buf).append_to(reader_ct);
     TensorAccessorArgs(decay_buf).append_to(reader_ct);
     TensorAccessorArgs(beta_buf).append_to(reader_ct);
+    if (active_mode) {
+        TensorAccessorArgs(act_buf).append_to(reader_ct);
+    }
     KernelDescriptor reader;
     reader.kernel_source = kdir + "dataflow/reader_recurrent_decode.cpp";
     reader.source_type = KernelDescriptor::SourceType::FILE_PATH;
@@ -148,6 +165,10 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
     std::vector<uint32_t> writer_ct = {Kt, Vt};
     TensorAccessorArgs(state_buf).append_to(writer_ct);
     TensorAccessorArgs(out_buf).append_to(writer_ct);
+    if (active_mode) {
+        writer_ct.push_back(H);
+        TensorAccessorArgs(act_buf).append_to(writer_ct);
+    }
     KernelDescriptor writer;
     writer.kernel_source = kdir + "dataflow/writer_recurrent_decode.cpp";
     writer.source_type = KernelDescriptor::SourceType::FILE_PATH;
@@ -171,26 +192,46 @@ ProgramDescriptor KdaRecurrentDecodeProgramFactory::create_descriptor(
         .unpack_to_dest_mode = std::move(unpack_to_dest),
         .math_approx_mode = false,
     };
+    if (active_mode) {
+        // the flags row: B uint32 rounded up to the 32-byte NoC read granule
+        const uint32_t act_bytes = ((a.batch * 4 + 31) / 32) * 32;
+        const std::vector<std::pair<std::string, std::string>> defs = {
+            {"KDA_ACTIVE_MODE", "1"},
+            {"KDA_BATCH", std::to_string(a.batch)},
+            {"KDA_ACT_BYTES", std::to_string(act_bytes)}};
+        reader.defines = defs;
+        writer.defines = defs;
+        compute.defines = defs;
+    }
 
     for (uint32_t i = 0, start = 0; i < num_cores; ++i) {
         CoreCoord core = {i / num_cores_y, i % num_cores_y};
         const uint32_t heads = core_group_1.contains(core) ? heads_1 : heads_2;
+        // active mode: (start, heads) become (core index, core count); the kernels deal the active heads themselves
+        const uint32_t arg_start = active_mode ? i : start;
+        const uint32_t arg_count = active_mode ? num_cores : heads;
         {
             KernelDescriptor::RTArgList rt;
             rt.push_back(state_buf);
             rt.push_back(qkv_buf);
             rt.push_back(decay_buf);
             rt.push_back(beta_buf);
-            rt.push_back(start);
-            rt.push_back(heads);
+            rt.push_back(arg_start);
+            rt.push_back(arg_count);
+            if (active_mode) {
+                rt.push_back(act_buf);
+            }
             reader.emplace_runtime_args(core, rt);
         }
         {
             KernelDescriptor::RTArgList rt;
             rt.push_back(state_buf);
             rt.push_back(out_buf);
-            rt.push_back(start);
-            rt.push_back(heads);
+            rt.push_back(arg_start);
+            rt.push_back(arg_count);
+            if (active_mode) {
+                rt.push_back(act_buf);
+            }
             writer.emplace_runtime_args(core, rt);
         }
         {

@@ -58,6 +58,26 @@ void KdaRecurrentDecodeDeviceOperation::validate_on_program_cache_miss(
     TT_FATAL(
         t.qkv.device() == dev && t.decay.device() == dev && t.beta.device() == dev,
         "kda.recurrent_decode: all inputs must be on the same device");
+    if (t.active.has_value()) {
+        const auto& act = *t.active;
+        TT_FATAL(
+            act.storage_type() == StorageType::DEVICE && act.is_allocated() && act.device() == dev,
+            "kda.recurrent_decode: active must be on the state's device");
+        TT_FATAL(act.dtype() == DataType::UINT32, "kda.recurrent_decode: active must be UINT32, got {}", act.dtype());
+        TT_FATAL(act.layout() == Layout::ROW_MAJOR, "kda.recurrent_decode: active must be ROW_MAJOR");
+        TT_FATAL(
+            !act.is_sharded() && act.buffer()->buffer_type() == tt::tt_metal::BufferType::DRAM,
+            "kda.recurrent_decode: active must be interleaved in DRAM");
+        const auto& as = act.logical_shape();
+        TT_FATAL(
+            act.logical_volume() == as[-1] && as[-1] >= a.batch,
+            "kda.recurrent_decode: active must be one row of >= batch ({}) flags",
+            a.batch);
+        TT_FATAL(
+            a.batch <= KDA_RECURRENT_DECODE_MAX_ACTIVE_BATCH,
+            "kda.recurrent_decode: active supports batch <= {}",
+            KDA_RECURRENT_DECODE_MAX_ACTIVE_BATCH);
+    }
 }
 
 KdaRecurrentDecodeDeviceOperation::spec_return_value_t KdaRecurrentDecodeDeviceOperation::compute_output_specs(
@@ -80,7 +100,13 @@ KdaRecurrentDecodeDeviceOperation::tensor_return_value_t KdaRecurrentDecodeDevic
 namespace ttnn::prim {
 
 Tensor kda_recurrent_decode(
-    const Tensor& state, const Tensor& qkv, const Tensor& decay, const Tensor& beta, float q_scale, float eps) {
+    const Tensor& state,
+    const Tensor& qkv,
+    const Tensor& decay,
+    const Tensor& beta,
+    float q_scale,
+    float eps,
+    const std::optional<Tensor>& active) {
     using OperationType = ttnn::experimental::prim::KdaRecurrentDecodeDeviceOperation;
     const auto& s = state.logical_shape();
     TT_FATAL(s.rank() == 4, "kda.recurrent_decode: state must be [B, H, K, V]");
@@ -91,7 +117,7 @@ Tensor kda_recurrent_decode(
         static_cast<uint32_t>(s[3]),
         q_scale,
         eps};
-    auto args = OperationType::tensor_args_t{state, qkv, decay, beta};
+    auto args = OperationType::tensor_args_t{state, qkv, decay, beta, active};
     return ttnn::device_operation::launch<OperationType>(attrs, args);
 }
 

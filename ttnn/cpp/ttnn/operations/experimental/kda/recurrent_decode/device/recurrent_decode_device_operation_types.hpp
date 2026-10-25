@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "ttnn/tensor/tensor.hpp"
 
 namespace ttnn::experimental::prim {
@@ -22,6 +24,9 @@ struct KdaRecurrentDecodeTensorArgs {
     const Tensor& qkv;
     const Tensor& decay;
     const Tensor& beta;
+    // optional [.., B] UINT32 ROW_MAJOR slot flags (non-zero = active): only the active slots' heads are computed
+    // (spread over the cores); an inactive slot's state is not read or written and its output rows are zeros
+    std::optional<Tensor> active;
 };
 
 }  // namespace ttnn::experimental::prim

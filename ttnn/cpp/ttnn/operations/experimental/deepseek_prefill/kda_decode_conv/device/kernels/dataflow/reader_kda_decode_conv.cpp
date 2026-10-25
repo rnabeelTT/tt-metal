@@ -11,8 +11,10 @@
 constexpr uint32_t elem(uint32_t r, uint32_t c) { return ((r >> 4) * 2 + (c >> 4)) * 256 + (r & 15) * 16 + (c & 15); }
 
 // Reads, per tile column c of this core: the current row tile (proj page c), the three history tiles and the four fp32
-// tap tiles (row 0 copied down to rows 1 .. rows-1, so the compute kernel multiplies element-wise); once: the slot mask
-// tile with column 0 copied across every column.
+// tap tiles (row 0 copied down to the ACTIVE rows among 1 .. rows-1, so the compute kernel multiplies element-wise; an
+// inactive row's taps are never used: its qkv and history go through the compute kernel's where-selects); once: the
+// slot mask tile with column 0 copied across every column. Copying only the active rows keeps a 16-slot build with one
+// live slot at the 1-slot cost (stage 12: the tap copies were most of the op's time at 16 rows).
 void kernel_main() {
     const uint32_t proj_addr = get_arg_val<uint32_t>(0);
     const uint32_t h0_addr = get_arg_val<uint32_t>(1);
@@ -70,6 +72,17 @@ void kernel_main() {
             }
         }
     }
+    // active rows below `rows` (row 0 already holds the taps)
+    uint8_t live[32];
+    uint32_t n_live = 0;
+    {
+        volatile tt_l1_ptr uint32_t* p = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cba.get_write_ptr());
+        for (uint32_t r = 1; r < rows && r < 32; ++r) {
+            if (p[elem(r, 0)] != 0) {
+                live[n_live++] = r;
+            }
+        }
+    }
     cba.push_back(1);
 
     for (uint32_t i = 0; i < n; ++i) {
@@ -90,7 +103,8 @@ void kernel_main() {
         volatile tt_l1_ptr uint32_t* tp = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cbt.get_write_ptr());
         for (uint32_t k = 0; k < 4; ++k) {
             volatile tt_l1_ptr uint32_t* p = tp + k * (fp_page / 4);
-            for (uint32_t r = 1; r < rows; ++r) {
+            for (uint32_t j = 0; j < n_live; ++j) {
+                const uint32_t r = live[j];
                 for (uint32_t col = 0; col < 32; ++col) {
                     p[elem(r, col)] = p[elem(0, col)];
                 }

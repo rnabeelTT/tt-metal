@@ -138,3 +138,73 @@ def test_kda_recurrent_decode_long_chain(device, decay_lo):
         ttnn.deallocate(o)
     # fp32 state / decay must not be read at TF32 (a per-step bias compounds): no drift in scale
     assert worst > 0.99999 and worst_r < 1e-4, (worst, worst_r)
+
+
+def _flags(device, B, live):
+    n = -(-B // 16) * 16
+    f = torch.zeros(1, n, dtype=torch.int32)
+    f[0, list(live)] = 1
+    return ttnn.from_torch(f, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, device=device)
+
+
+def _flags_host(B, live):
+    n = -(-B // 16) * 16
+    f = torch.zeros(1, n, dtype=torch.int32)
+    f[0, list(live)] = 1
+    return ttnn.from_torch(f, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT)
+
+
+@pytest.mark.parametrize("live", [(5,), (0, 15), (3, 4, 9), tuple(range(16)), ()])
+def test_kda_recurrent_decode_active(device, live):
+    """Stage 12 `active` slot flags: active rows bit-identical to the op without flags (same per-head math on another
+    core), inactive slots' state untouched (bit-identical to before the step) and their output rows zero."""
+    B, R = 16, 32
+    gen = torch.Generator().manual_seed(11 + len(live))
+    q_scale = K**-0.5
+    S0 = torch.randn(B, H, K, V, generator=gen) * 0.05
+    qkv, decay, beta = _inputs(B, R, gen)
+    ins = [_dev(qkv, device), _dev(decay, device), _dev(beta, device)]
+    S_a = ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+    o_a = ttnn.to_torch(ttnn.experimental.kda.recurrent_decode(S_a, *ins, q_scale))[0, 0]
+    S_b = ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+    o_b = ttnn.to_torch(ttnn.experimental.kda.recurrent_decode(S_b, *ins, q_scale, active=_flags(device, B, live)))[
+        0, 0
+    ]
+    Sa, Sb = ttnn.to_torch(S_a), ttnn.to_torch(S_b)
+    for b in range(B):
+        rows = slice(b * H, (b + 1) * H)
+        if b in live:
+            assert torch.equal(o_b[rows], o_a[rows]), f"slot {b}: output differs"
+            assert torch.equal(Sb[b], Sa[b]), f"slot {b}: state differs"
+        else:
+            assert torch.equal(Sb[b], S0[b]), f"slot {b}: idle state changed"
+            assert not o_b[rows].any(), f"slot {b}: idle output not zero"
+
+
+def test_kda_recurrent_decode_active_traced(device_params_trace):
+    """One capture, then replays with different flags written into the captured flags buffer (the active set changes
+    without a recapture): each replay matches an eager step with the same flags."""
+    device = device_params_trace
+    B, R = 16, 32
+    gen = torch.Generator().manual_seed(23)
+    q_scale = K**-0.5
+    S0 = torch.randn(B, H, K, V, generator=gen) * 0.05
+    qkv, decay, beta = _inputs(B, R, gen)
+    ins = [_dev(qkv, device), _dev(decay, device), _dev(beta, device)]
+    flags = _flags(device, B, range(B))
+    S_t = ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+    ttnn.deallocate(ttnn.experimental.kda.recurrent_decode(S_t, *ins, q_scale, active=flags))  # compile
+    tid = ttnn.begin_trace_capture(device, cq_id=0)
+    o = ttnn.experimental.kda.recurrent_decode(S_t, *ins, q_scale, active=flags)
+    ttnn.end_trace_capture(device, tid, cq_id=0)
+    try:
+        for live in [(7,), (1, 2, 14), tuple(range(16)), (0,)]:
+            ttnn.copy_host_to_device_tensor(ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT), S_t)
+            ttnn.copy_host_to_device_tensor(_flags_host(B, live), flags)
+            ttnn.execute_trace(device, tid, cq_id=0, blocking=True)
+            S_e = ttnn.from_torch(S0, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device)
+            o_e = ttnn.experimental.kda.recurrent_decode(S_e, *ins, q_scale, active=_flags(device, B, live))
+            assert torch.equal(ttnn.to_torch(o), ttnn.to_torch(o_e)), f"live {live}: traced output differs"
+            assert torch.equal(ttnn.to_torch(S_t), ttnn.to_torch(S_e)), f"live {live}: traced state differs"
+    finally:
+        ttnn.release_trace(device, tid)

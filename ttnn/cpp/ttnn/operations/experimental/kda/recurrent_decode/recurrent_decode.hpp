@@ -31,6 +31,7 @@ ttnn::Tensor recurrent_decode(
     const ttnn::Tensor& decay,
     const ttnn::Tensor& beta,
     float q_scale,
-    float eps = 1e-6f);
+    float eps = 1e-6f,
+    const std::optional<ttnn::Tensor>& active = std::nullopt);
 
 }  // namespace ttnn::experimental::kda

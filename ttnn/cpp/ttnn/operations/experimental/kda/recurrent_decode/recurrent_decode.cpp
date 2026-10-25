@@ -14,8 +14,9 @@ ttnn::Tensor recurrent_decode(
     const ttnn::Tensor& decay,
     const ttnn::Tensor& beta,
     float q_scale,
-    float eps) {
-    return ttnn::prim::kda_recurrent_decode(state, qkv, decay, beta, q_scale, eps);
+    float eps,
+    const std::optional<ttnn::Tensor>& active) {
+    return ttnn::prim::kda_recurrent_decode(state, qkv, decay, beta, q_scale, eps, active);
 }
 
 }  // namespace ttnn::experimental::kda
