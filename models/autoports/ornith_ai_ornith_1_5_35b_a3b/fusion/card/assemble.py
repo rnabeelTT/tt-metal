@@ -15,13 +15,13 @@ TOOLS = HERE.parent / "tools"
 DESCRIPTION = (
     "Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet + "
     "gated attention, vision tower, MTP head) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode "
-    "step: the v2 bundle (raahemnabeel/ornith-1.5-35b-a3b) plus a fused MoE decode for 1-32 concurrent users and a "
-    "replicated-residual layer boundary. Same weights, profiles and serving recipe; 34-83 % more concurrent output and "
-    "up to 44 % faster single-user decode on four dies, prefill unchanged."
+    "step: the original bundle (raahemnabeel/ornith-1.5-35b-a3b) plus fused MoE, Gated DeltaNet, attention, layer-boundary "
+    "and sampler decode ops for 1-32 concurrent users. Same weights, profiles and serving recipe; on four dies single-user "
+    "decode 45 -> 220 tok/s and 32-user output 346 -> 591 tok/s, prefill unchanged or faster."
 )
 
 TEACHER = """
-Teacher forcing against the Hugging Face bf16 model (v2 numbers; 100 greedy tokens, top-1 / top-5 / top-100):
+Teacher forcing against the Hugging Face bf16 model (original bundle; 100 greedy tokens, top-1 / top-5 / top-100):
 
 | profile | code chat prompt | 2048-token book prompt |
 | --- | --- | --- |
@@ -31,17 +31,17 @@ Teacher forcing against the Hugging Face bf16 model (v2 numbers; 100 greedy toke
 """
 
 RELATED = (
-    "The v2 bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b). "
+    "The original bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b). "
     "Engineering log with every measurement: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the "
     "`ornith_fusion` branch of github.com/rnabeelTT/tt-metal."
 )
 
 P150_NOTE = (
-    "One die keeps the v2 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or "
-    "more dies, and the replicated boundary needs a mesh): p150 decode is the v2 MoE plus the fused router top-k on "
-    "1-row steps, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not "
-    "repeat on one die (the v2 build measured 15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs); the v2 card's p150 "
-    "latency rows still describe this bundle."
+    "One die keeps the original decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two "
+    "or more dies, and the replicated boundary needs a mesh): p150 decode is the original MoE plus the fused router top-k "
+    "on 1-row steps, MTP on, and the tables below show parity. The single-user random-token latency table is left out: "
+    "with adaptive MTP on random tokens it does not repeat on one die (15.9, 52.4 and 27.0 ms TPOT at 128/128 in three "
+    "runs of the original); the original card's p150 latency rows still describe this bundle."
 )
 
 
@@ -53,8 +53,9 @@ def block(key, text):
 def main():
     profiles = sys.argv[1:] or ["p300x2", "p300", "p150"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), "card_new", "card_pub", *profiles],
-        check=True, capture_output=True, text=True, env={**os.environ, "SAME_DECODE": "p150", "SAME_DECODE_NOTE": P150_NOTE},
+        [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_fast"), os.environ.get("PUB", "card_pub"), *profiles],
+        check=True, capture_output=True, text=True, env={"PUB_LABEL": "original", "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", **os.environ,
+             "SAME_DECODE": "p150", "SAME_DECODE_NOTE": P150_NOTE},
     ).stdout
     perf = (HERE / "performance_head.md").read_text().replace("### Performance", TEACHER.strip() + "\n\n### Performance")
     perf += "\n" + tables

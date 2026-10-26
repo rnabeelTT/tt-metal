@@ -864,6 +864,30 @@ strict / loose (100) 0.77 / 0.86 (0.77 / 0.82), LiveCodeBench v6 (50) 0.46 (0.40
 stderr: no quality loss shown. The p300 (2-chip) server of the dev config died at boot (`runs/devq_p300`, the log was
 cut at 30 lines: tools fixed; root cause next).
 
+### Release: one fast repo per model (user, 2026-10-26)
+
+No -v2 / -v3 repos: each model has its original repo plus ONE fast repo, `raahemnabeel/<model>-blackhole-fast`, and
+the new build is pushed into that existing repo as its next revision (user's explicit override of the no-push rule for
+the -blackhole-fast repos only; the originals are never touched). Ornith: `tt-model-fast.yaml` now carries steps 1-7
+(tt-model-fast-v2 / -v3 manifests removed); the card compares original -> blackhole-fast (`fusion/card/assemble.py`,
+NEW=card_fast_<profile> = runs/card_ov3_p300x2 / card_ov3_p300 (the step-7 build served as shipped) and card_new_p150
+(one die unchanged since the first fast build), PUB=card_pub_*).
+Card rows (vs original): p300x2 1 user 22.4 -> 4.55 ms (44.5 -> 220 tok/s), real text 58.5 -> 217.9 tok/s, 32 users
+62.0 -> 24.0 ms (346 -> 591 tok/s total); p300 1 user 23.3 -> 7.9 ms (42.9 -> 126 tok/s), 32 users 84.8 -> 41.5 ms;
+TTFT equal or lower on every row (130K: 30.1 -> 28.8 s on p300x2).
+Evals (p300, scorecard subsets, `runs/ov3_p300`): IFEval strict / loose 0.82 / 0.87, GPQA-D (40) 0.675 +-0.075 (vs
+0.85 for the first fast build, 0.775 original): GPQA trend 0.85 / 0.75 / 0.675 over the last three builds is inside
+noise at n = 40 but checked on the full 198 (`runs/ov3_p300_full`) before publishing; LCB pending.
+Ports: the 122B and Coder-Next trees take ornith_fusion's `models/demos/blackhole/qwen36` wholesale (they lacked the
+GLM-era moe_decode generalization and step 7) plus the model-level hooks (`_install_rows_topk`, `_decode_layers_fabric`,
+`fabric_boundary*` args, MoE `router_consumer` / `partial="fabric"`); served p300x2 milestones with the step-7 env
+(`runs/ports_step7.sh`, vs card_cnv2_p300x2 / card_q122v2_p300x2: Coder-Next 1 user 7.75 ms, 122B 10.45 ms).
+Then their tt-model-fast.yaml the same way, card rows + evals, publish all three.
+After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
+2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
+Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
+`systemd-run --user --unit=<name> ...` (see runs/*.sh).
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
