@@ -140,12 +140,15 @@ def _install_rows_topk(sampling, mesh_device):
     per decode step on the (1, 4) mesh) -> decode_sampling.RowsTopK over the live rows only, for steps of <= MAX_ROWS rows
     when every vocab column is valid (no mask needed). The rest of the sampler (all-gathers, offsets, draw) is unchanged:
     its forward runs with ttnn.topk pointed at RowsTopK for the duration of the call."""
-    from models.demos.blackhole.qwen36.tt.decode_sampling.ops import MAX_ROWS, RowsTopK
+    from models.demos.blackhole.qwen36.tt.decode_sampling.ops import MAX_ROWS, MAX_WIDTH, RowsTopK
 
     ts = sampling.tt_sampling
     nd = mesh_device.get_num_devices()
     if nd < 2 or ts.padded_vocab_size != ts.vocab_size or ts.vocab_size % nd or ts.max_top_k != 32:
         logger.info("rows top-k not installed (padded vocab or k != 32)")
+        return
+    if ts.vocab_size // nd > MAX_WIDTH:  # 16-bit indices: Ornith / 122B on 2 dies (124160 columns) keep ttnn.topk
+        logger.info(f"rows top-k not installed ({ts.vocab_size // nd} columns per device > {MAX_WIDTH})")
         return
     op = RowsTopK(mesh_device, ts.vocab_size // nd, 32)
     orig_forward = ts.forward

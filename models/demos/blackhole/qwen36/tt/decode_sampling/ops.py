@@ -20,11 +20,14 @@ KERNEL_DIR = Path(__file__).parent / "kernels"
 GRID = (10, 10)  # scan cores
 MERGE_CORE = (10, 0)
 MAX_ROWS = 8
+MAX_WIDTH = 0xFFFF + 1  # columns per device
 
 
 class RowsTopK:
     def __init__(self, mesh_device, width, k=32):
         assert width % 32 == 0 and k == 32
+        # the scan's sort keys and the output indices carry the column in 16 bits (2 dies x 124160 columns wrapped)
+        assert width <= MAX_WIDTH, f"{width} columns per device do not fit 16-bit indices"
         self.mesh_device = mesh_device
         self.tiles = width // 32
         self.k = k
