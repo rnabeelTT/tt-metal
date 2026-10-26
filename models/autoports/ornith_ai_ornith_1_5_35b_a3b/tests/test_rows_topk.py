@@ -4,9 +4,10 @@
 0 .. B-1 of [32, 62080] BF16 logits, K = 32, sorted by value then lower index; rows >= B copy row 0; traced timing vs
 the sampler's ttnn.pad + ttnn.topk.
 
-    python test_rows_topk.py
+    python test_rows_topk.py                 (RTK_ND=2 RTK_W=124160: the 2-die width, UINT32 indices)
 """
 
+import os
 import time
 
 import torch
@@ -14,7 +15,7 @@ import torch
 import ttnn
 from models.demos.blackhole.qwen36.tt.decode_sampling.ops import RowsTopK
 
-W, K, ND = 62080, 32, 4
+W, K, ND = int(os.environ.get("RTK_W", 62080)), 32, int(os.environ.get("RTK_ND", 4))
 
 
 def main():
@@ -25,11 +26,12 @@ def main():
         for B in (1, 2, 8):
             lg = (torch.randn(ND, 1, 32, W) * 3).bfloat16()
             lg[0, 0, 0, 1000] = lg[0, 0, 0, 2000] = 50.0  # an exact tie at the top: lower index first
+            lg[1, 0, 0, 3] = lg[1, 0, 0, W - 7] = 45.0  # a tie across scan cores (first and last core)
             x = ttnn.from_torch(lg, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
                                 memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=0))
             v, i = op(x, B)
             gv = ttnn.to_torch(v, mesh_composer=comp).float()
-            gi = ttnn.to_torch(i, mesh_composer=comp).long()
+            gi = ttnn.to_torch(i, mesh_composer=comp).long() & 0xFFFFFFFF
             for d in range(ND):
                 for r in range(32):
                     src = min(r, 0) if r >= B else r
@@ -54,7 +56,8 @@ def main():
             ttnn.deallocate(i)
 
         def stock():
-            xp = ttnn.pad(x, [(0, 0), (0, 0), (0, 0), (0, 65536 - W)], value=-3.0e38)
+            P = 1 << (W - 1).bit_length()  # the sampler pads to a power of two
+            xp = ttnn.pad(x, [(0, 0), (0, 0), (0, 0), (0, P - W)], value=-3.0e38)
             v, i = ttnn.topk(xp, k=K, dim=-1, stable=False)
             for t in (xp, v, i):
                 ttnn.deallocate(t)
