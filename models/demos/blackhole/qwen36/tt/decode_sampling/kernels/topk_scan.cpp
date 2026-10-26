@@ -3,8 +3,8 @@
 
 // Rows top-k, scan core (decode_sampling/ops.py RowsTopK): reads rows 0 .. B-1 of its `nt` logits tiles (BF16 32x32,
 // any TensorAccessor layout; B <= 16: faces 0 / 1 rows 0 .. B-1 only, 64-byte aligned), keeps each row's K best as a
-// sorted list of packed keys (orderable BF16 << 16 | (0xFFFF - index): one u32 compare orders by value, then lower
-// index first), writes the lists into its slot of the merge buffer on the merge core and increments its semaphore.
+// sorted list of packed keys (orderable BF16 << 16 | (0xFFFF - local column): one u32 compare orders by value, then lower
+// column first; the local column counts from this core's first tile, so any vocab width fits), writes the lists into its slot of the merge buffer on the merge core and increments its semaphore.
 //
 // runtime args: [logits_addr, t0, nt, merge_buf_addr, slot]
 
@@ -67,7 +67,7 @@ void kernel_main() {
                 thresh = top[K - 1];
             };
             for (uint32_t t = 0; t < nt; ++t) {
-                const uint32_t col0 = 0xFFFF - (t0 + t) * 32;  // inverted column of value 0 of the tile
+                const uint32_t col0 = 0xFFFF - t * 32;  // inverted local column of value 0 of the tile
                 for (uint32_t f = 0; f < 2; ++f) {
                     const uint32_t* row = reinterpret_cast<const uint32_t*>(buf + t * stride + f * rows_bytes + b * 32);
                     const uint32_t c0 = col0 - f * 16;

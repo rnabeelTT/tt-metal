@@ -147,7 +147,7 @@ def _install_rows_topk(sampling, mesh_device):
     if nd < 2 or ts.padded_vocab_size != ts.vocab_size or ts.vocab_size % nd or ts.max_top_k != 32:
         logger.info("rows top-k not installed (padded vocab or k != 32)")
         return
-    if ts.vocab_size // nd > MAX_WIDTH:  # 16-bit indices: Ornith / 122B on 2 dies (124160 columns) keep ttnn.topk
+    if ts.vocab_size // nd > MAX_WIDTH:
         logger.info(f"rows top-k not installed ({ts.vocab_size // nd} columns per device > {MAX_WIDTH})")
         return
     op = RowsTopK(mesh_device, ts.vocab_size // nd, 32)
