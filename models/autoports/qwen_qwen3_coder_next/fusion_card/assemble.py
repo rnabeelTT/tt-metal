@@ -15,9 +15,9 @@ TOOLS = HERE.parents[1] / "ornith_ai_ornith_1_5_35b_a3b" / "fusion" / "tools"
 DESCRIPTION = (
     "Qwen3-Coder-Next (80B total / 3B active MoE: 512 experts, top-10 + shared expert, 48 layers of Gated DeltaNet + "
     "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the published "
-    "bundle (raahemnabeel/qwen3-coder-next) plus a fused MoE decode for 1-32 concurrent users and a replicated-residual "
-    "layer boundary, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill "
-    "unchanged."
+    "bundle (raahemnabeel/qwen3-coder-next) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode "
+    "ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving "
+    "recipe; prefill unchanged."
 )
 
 RELATED = (
@@ -37,7 +37,7 @@ def block(key, text):
 def main():
     profiles = sys.argv[1:] or ["p300x2", "p300"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), "card_cnnew", "card_cnpub", *profiles],
+        [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_cnfast"), os.environ.get("PUB", "card_cnpub"), *profiles],
         check=True, capture_output=True, text=True,
         env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
     ).stdout

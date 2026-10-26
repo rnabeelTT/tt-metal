@@ -2,7 +2,8 @@
 This is [raahemnabeel/qwen3-coder-next](https://huggingface.co/raahemnabeel/qwen3-coder-next) with its decode step
 rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
 ([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast)).
-Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is unchanged. The changes:
+Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is unchanged (TTFT equal or
+lower). The changes:
 
 1. **Router.** The decode router matmul runs as one 1D matmul, and the 1-token top-10 + softmax + shared-gate sigmoid
    run on the RISC cores in one op instead of the top-k route -> slice -> softmax -> untilize chain.
@@ -11,10 +12,18 @@ Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefi
    rows (several users' experts as one union over the 512 experts, each weight column read once for all rows).
 3. **Replicated-residual decode boundary.** The decode residual stays replicated on every die: each mixer / MoE output
    is one all-reduce + add + local RMSNorm (two collectives per layer instead of four, no gathers).
+4. **Gated DeltaNet decode mixer** as two programs (short conv; gates + norms + recurrent state update + gated norm),
+   each head's value dimension split across up to four cores.
+5. **Attention decode ops** around the QKV matmul, cache update and SDPA decode (q / k norm + RoPE + gate in one prep op,
+   output gating in one post op).
+6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm as one op over the fabric,
+   with the next layer's input projection (or the MoE router) inside the same program; the MoE gate|up columns split
+   across core pairs with readers off the congested NOC rows.
+7. **Sampler top-k over the live rows only** (four dies, 1-8 users), instead of all 32 slot rows.
 
 Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
-reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads. Output quality is checked
-below.
+reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and DeltaNet ops
+sum in a different order than the op chain they replace. Output quality is checked below.
 
 ### Use with your client
 Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model

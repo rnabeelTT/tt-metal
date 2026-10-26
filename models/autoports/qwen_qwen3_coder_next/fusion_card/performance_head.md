@@ -20,7 +20,8 @@ unrecorded configuration; compare the two columns above. Greedy outputs of the p
 were checked against the published bundle's.
 
 ### Performance
-Measured 2026-10-23 on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them), both bundles served exactly
+Measured on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them; published 2026-10-23, blackhole-fast
+2026-10-26), both bundles served exactly
 as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of exactly the input
 length, output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop; TTFT = time to first
 streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. A real-text single-user row (12 chat
