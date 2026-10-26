@@ -1,16 +1,17 @@
 ### Accuracy
-Both bundles evaluated side by side on the same box, p300x2, through the served chat API with lm-evaluation-harness
+Both bundles evaluated on the same box (published 2026-10-23, blackhole-fast 2026-10-26), p300x2, through the served chat API with lm-evaluation-harness
 0.4.9 at temperature 0 (full sets, 8 requests in flight, seed 42):
 
 | Eval | published | blackhole-fast |
 | --- | ---: | ---: |
-| HumanEval pass@1 (164) | 0.939 | 0.945 |
-| MBPP pass@1 (500) | 0.826 | 0.820 |
-| GSM8K exact match, strict (1319) | 0.954 | 0.955 |
-| IFEval prompt-level strict (541) | 0.799 | 0.782 |
-| IFEval prompt-level loose (541) | 0.841 | 0.826 |
+| HumanEval pass@1 (164) | 0.939 | 0.933 |
+| MBPP pass@1 (500) | 0.826 | 0.824 |
+| GSM8K exact match, strict (1319) | 0.954 | 0.954 |
+| IFEval prompt-level strict (541) | 0.799 | 0.791 |
+| IFEval prompt-level loose (541) | 0.841 | 0.824 |
 
-All differences are within one standard error (IFEval +-0.018, MBPP +-0.017, GSM8K +-0.006): no measurable quality change. The
+All differences are within one standard error (HumanEval +-0.020, IFEval +-0.018, MBPP +-0.017, GSM8K +-0.006): no
+measurable quality change. The
 harness's stock chat variants do not work through a chat API (`humaneval_instruct` and `mbpp_instruct` pre-fill the
 assistant turn, which the API does not continue: both score 0), so HumanEval uses a chat prompt that asks for the whole
 function in one code block, and MBPP answers are scored from their first code block; `gsm8k_cot_llama` is the stock
