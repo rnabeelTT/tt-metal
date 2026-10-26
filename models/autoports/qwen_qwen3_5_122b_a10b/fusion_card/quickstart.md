@@ -21,7 +21,7 @@ prefill is unchanged (TTFT equal or lower). The changes:
 7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
 
 MTP speculative decoding is off: its verify pass runs the unfused path, and the fused plain decode step is faster
-(1 user on chat text: {SPEED_P300X2} tok/s vs about 66 with MTP on the original).
+(1 user on chat text: {SPEED_P300X2} tok/s, vs 45.9 for the original with MTP).
 
 Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
 reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and
