@@ -883,6 +883,22 @@ GLM-era moe_decode generalization and step 7) plus the model-level hooks (`_inst
 `fabric_boundary*` args, MoE `router_consumer` / `partial="fabric"`); served p300x2 milestones with the step-7 env
 (`runs/ports_step7.sh`, vs card_cnv2_p300x2 / card_q122v2_p300x2: Coder-Next 1 user 7.75 ms, 122B 10.45 ms).
 Then their tt-model-fast.yaml the same way, card rows + evals, publish all three.
+**Bug found at packaging (2026-10-26): rows top-k on 2 dies.** The v3 p300 garble rows were pure punctuation (token ids
+0-19) and scored 0.0 (no words to count); devq_p300c had the same. RowsTopK packs the column into 16 bits (sort key
+`0xFFFF - idx`, uint16 output); Ornith / 122B on 2 dies have 124160 columns per die. Op check
+(`~/ornith-fusion/diag/rtk_wide.py`, guard lifted): W=62080 exact, W=124160 indices [0, 1, 2, 3] with NaN values.
+Greedy runs never use it (force-argmax path), and the 2-die evals sampled clean (host-side sampling for seeded
+requests is the likely reason; not confirmed). Fix (9afa272327b): `_install_rows_topk` skips widths > 65536, RowsTopK
+asserts it. p300 after the fix (`runs/ofix_p300`, `runs/card_fast2_p300`): garble 8.77 (clean text), 1 user 8.55 ms
+(117 tok/s; 7.9 with the broken op), 8 users 18.5 ms (13.0 with it): a 32-bit-index rows top-k (per-core local
+index + core offset in the merge, uint32 output) would win ~5 ms at 8 users on 2 dies: not done, for the user to decide.
+Coder-Next on 2 dies (75968 columns) is guarded the same way.
+Evals final (p300, `runs/ov3_p300`, `runs/ov3_p300_full`): GPQA-D 40 0.675 / 198 0.707 +-0.032 (first 40 of the full
+run: 0.75), IFEval 0.82 / 0.87, LCB 0.40.
+Coder-Next step 7 (`runs/cns7` vs card_cnv2_p300x2, committed 21c2aa864e2): 1 user 7.75 -> 5.60 ms (129 -> 179 tok/s),
+real text 128 -> 178, 2 / 4 / 8 users 10.18 / 11.04 / 14.40 -> 8.38 / 9.13 / 12.73, 32 users 41.73 -> 35.79 ms; TTFT
+unchanged; greedy coherent (diverges by synonyms). 122B step 7 (`runs/q122s7`): server died at boot, the kept log was
+only the API traceback; rerun with the full log + a no-fabric-boundary fallback (`runs/q122_s7b.sh`).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
