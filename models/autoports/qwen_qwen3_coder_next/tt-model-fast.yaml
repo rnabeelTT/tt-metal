@@ -1,8 +1,14 @@
 # tt-model container (v5.1) manifest for Qwen3-Coder-Next "blackhole-fast": the published bundle
-# (raahemnabeel/qwen3-coder-next, this directory's tt-model.yaml) plus the fused decode work ported from the Ornith
-# fusion (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md): routed + shared experts in three ops that
-# stream the expert weights in place for every decode width (1..32 rows), and the replicated-residual decode boundary.
-# Same weights, plugin build and serving recipe; a separate repo so the published bundle stays as it is.
+# (raahemnabeel/qwen3-coder-next, this directory's tt-model.yaml) plus the fused decode work of the Ornith fusion
+# (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md):
+# - steps 1-3: routed + shared experts in three ops that stream the expert weights in place for every decode width
+#   (1..32 rows), and the replicated-residual decode boundary;
+# - steps 4-5: the Gated DeltaNet decode mixer (short conv; gates + norms + recurrent state update + gated norm) and the
+#   attention decode prep / post ops, as generic_op programs for 1-32 rows;
+# - step 7: the fabric layer boundary (all-reduce + residual + RMSNorm as one op, 1-4 rows; four dies) with the next
+#   projection / router in its program, the sampler's live-rows top-k (16-bit indices: four dies only), the MoE
+#   split-pair gate|up with off-row readers, the GDN head value split.
+# Same weights, plugin build and serving recipe; the one fast repo (its earlier revisions stay in the Hub history).
 schema: "5.1"
 
 repo: raahemnabeel/qwen3-coder-next-blackhole-fast
@@ -79,6 +85,9 @@ serve:
     # the fused decode path (ported from the Ornith fusion)
     QWEN35_MOE_FUSED_DECODE: "1"
     QWEN35_DECODE_REPLICATED: "1"
+    QWEN35_GDN_DECODE_OPS: "1"      # fused GDN decode mixer (gdn/tp.py checks its preconditions and keeps the op chain otherwise)
+    QWEN35_ATTN_DECODE_OPS: "1"     # attention decode prep / post ops (attention/tp.py checks its preconditions likewise)
+    QWEN35_ROWS_TOPK: "1"           # sampler top-k over the live rows (<= 8 rows; not installed where a die's vocab slice exceeds 16 bits)
   # The checkpoint's own generation config is served (temperature 1.0 / top_p 0.95 / top_k 40). The
   # greedy override of 2026-10-05 is gone: the long-context word corruption it worked around was the
   # dies of the mesh drawing different tokens from the device sampler (doc/text_quality/README.md),
@@ -93,10 +102,12 @@ serve_profiles:
       Two p300 boards (4 dies, TP4): 32 sequences, 262144 context, routed experts in the 4-die precision policy.
     hardware: p300x2
     mesh_device: P300x2
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
     description: Four p150 boards (4 dies, TP4), same configuration as p300x2. Untested on hardware (built for the identical (1,4) mesh).
     hardware: p150x4
     mesh_device: P150x4
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
     description: >
       One p300 board (2 dies, TP2): 32 sequences, 262144 context, bfp4 routed experts (the 4-die policy's experts do not

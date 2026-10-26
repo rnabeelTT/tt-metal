@@ -12,11 +12,16 @@
 // reader (cb_part), then wait until every gate|up core has written its activations (program semaphore MOE_SEM counts
 // MOE_NOTIFIERS increments) before reading them.
 //
+// NO_SHARED: routed experts only (activation rows 1 .. k; num_slots = k). EP_EXPERTS: the live count is the route
+// record's (route[15], read here; runtime arg 4 = the route address), sent to the compute threads; 0 -> zeros out.
+//
 // runtime args: [act_addr, out_addr, bank, c0(, logits_addr)]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "ckernel.h"
+#include "ckernel_defs.h"
 #ifdef MOE_FUSED
 #include "router_topk.hpp"
 #endif
@@ -39,6 +44,11 @@ void kernel_main() {
     constexpr auto act_args = TensorAccessorArgs<9>();
     constexpr auto out_args = TensorAccessorArgs<act_args.next_compile_time_args_offset()>();
 
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
     constexpr uint32_t kin = num_slots * act_row_bytes / 64;
 
     const auto s_act = TensorAccessor(act_args, act_addr, act_row_bytes);
@@ -65,13 +75,42 @@ void kernel_main() {
     }
     noc_semaphore_wait(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(MOE_SEM)), MOE_NOTIFIERS);
 #endif
+#ifdef EP_EXPERTS
+    constexpr auto route_args = TensorAccessorArgs<out_args.next_compile_time_args_offset()>();
+    const auto s_route = TensorAccessor(route_args, get_arg_val<uint32_t>(4), 64);
+    uint32_t live = 0;
+    {
+        cb_reserve_back(cb_in0, kin);  // the route record lands in the (still unused) activation buffer
+        const uint32_t rec = get_write_ptr(cb_in0);
+        noc_async_read(s_route.get_noc_addr(0), rec, 64);
+        noc_async_read_barrier();
+        invalidate_l1_cache();
+        live = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec)[15];
+    }
+    ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, live);
+    ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, live);
+    ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, live);
+    if (live == 0) {  // none of the top-k on this die: its partial sum is zero
+        const uint32_t zeros = MEM_ZEROS_BASE;
+        for (uint32_t c = 0; c < cols; ++c) {
+            const uint32_t n = bank + banks * (c0 + c);
+            noc_async_write(zeros, s_out.get_noc_addr(n, 0), 32);
+            noc_async_write(zeros, s_out.get_noc_addr(n, 512), 32);
+        }
+        noc_async_write_barrier();
+        return;
+    }
+    const uint32_t n_slots = live;
+#else
+    constexpr uint32_t n_slots = num_slots;
+#endif
     cb_reserve_back(cb_in0, kin);
     const uint32_t in0 = get_write_ptr(cb_in0);
-    for (uint32_t s = 0; s < num_slots; ++s) {
-        noc_async_read(s_act.get_noc_addr(s), in0 + s * act_row_bytes, act_row_bytes);
+    for (uint32_t s = 0; s < n_slots; ++s) {
+        noc_async_read(s_act.get_noc_addr(S0 + s), in0 + s * act_row_bytes, act_row_bytes);
     }
     noc_async_read_barrier();
-    cb_push_back(cb_in0, kin);
+    cb_push_back(cb_in0, n_slots * act_row_bytes / 64);
 
     cb_wait_front(cb_out, cols);
     const uint32_t src = get_read_ptr(cb_out);

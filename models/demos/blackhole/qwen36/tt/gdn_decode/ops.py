@@ -19,6 +19,7 @@ per head, row 1: dt_bias, row 2: the gated-norm weight).
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -33,7 +34,7 @@ NUM_CBS = 64
 # head program CB ids (kernels/head_compute.cpp)
 CB = dict(q=0, k=1, v=2, gin=3, beta=4, S=5, o=6, state=7, sdh=8, sdl=9, vread=10, uh=11, kcol=12, dcol=13, qnh=14,
           knh=15, nrm=16, scr=17, xh=18, xl=19, qnl=20, knl=21, kcoll=22, ul=23, sdx=24, qsd=25, qk=26, kn1h=27,
-          kn1l=28, z=29, w=30, y=31)
+          kn1l=28, z=29, w=30, y=31, nx=32, nt=33, xs=34)
 UNPACK_FP32 = ("q", "k", "v", "gin", "vread", "dcol", "nrm", "qsd", "qk", "w")
 
 
@@ -77,10 +78,10 @@ def _rt(cores, args):
     return rt
 
 
-def _dm(source, cores, ct, rt, riscv, noc):
+def _dm(source, cores, ct, rt, riscv, noc, defines=()):
     return ttnn.KernelDescriptor(
         kernel_source=str(KERNEL_DIR / source), core_ranges=_range_set(cores), compile_time_args=ct,
-        runtime_args=_rt(cores, rt),
+        runtime_args=_rt(cores, rt), defines=list(defines),
         config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc),
     )
 
@@ -181,16 +182,27 @@ class GdnDecode:
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         return ttnn.generic_op([proj, st1, st2, st3, taps, conv_out], program)
 
+    def _vsplit(self, units):
+        """Value-column parts per head (QWEN35_GDN_VSPLIT, default up to 4): one work item per core when the units x
+        parts fit the grid (1 user: 8 heads x 4 = 32 cores, 2 users 64, 4 users 2 parts), else 1."""
+        grid = self.mesh.compute_with_storage_grid_size()
+        for p in (4, 2):
+            if p <= int(os.environ.get("QWEN35_GDN_VSPLIT", "4")) and self.Vt % p == 0 and units * p <= grid.x * grid.y:
+                return p
+        return 1
+
     def head(self, conv_out, proj, params, state, B):
         assert state.dtype == ttnn.bfloat16, "bf16 recurrent state"
         y = self.output(B)
         units = B * self.Nv
+        P = self._vsplit(units)
         grid = self.mesh.compute_with_storage_grid_size()
-        ncores = min(units, grid.x * grid.y)
+        items = units * P
+        ncores = min(items, grid.x * grid.y)
         cores = _cores(self.mesh, ncores)
-        work = _split(units, ncores)
+        work = _split(items, ncores)
         cr = _range_set(cores)
-        Kt, Vt = self.Kt, self.Vt
+        Kt, Vt = self.Kt, self.Vt // P
         kv = Kt * Vt
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
         sizes = dict(q=(f32, 2 * Kt), k=(f32, 2 * Kt), v=(f32, 2 * Vt), gin=(f32, 8), S=(bf, kv), o=(f32, Vt),
@@ -198,7 +210,11 @@ class GdnDecode:
                      knh=(f32, Kt), nrm=(f32, 2), scr=(f32, 5), xh=(f32, 2 * Kt), xl=(f32, 2 * Kt), qnl=(f32, Kt),
                      knl=(f32, Kt), kcoll=(f32, Kt), ul=(f32, Vt), qsd=(f32, Vt), qk=(f32, 1), kn1h=(f32, Kt),
                      kn1l=(f32, Kt), z=(bf, 2 * Vt), w=(f32, Vt), y=(bf, 2 * Vt))
+        if P > 1:
+            sizes.update(nx=(f32, 1), nt=(f32, 1))
         cbs = [_cb(cr, CB[k], dt, tb, n) for k, ((dt, tb), n) in sizes.items()]
+        if P > 1:  # the exchange slots (16 bytes per part + the send word), written by the unit's other parts
+            cbs.append(_cb(cr, CB["xs"], ttnn.float32, 16 * (P + 1), 1))
         rd_ct = [Kt, Vt, self.Nv, self.Nk, self.qkv // TILE, self.proj_dim // TILE, self.z_tile, self.a_tile,
                  self.b_tile, CB["q"], CB["k"], CB["v"], CB["gin"], CB["S"], CB["z"], CB["w"], CB["scr"]]
         for t in (conv_out, proj, params, state):
@@ -207,25 +223,34 @@ class GdnDecode:
         for t in (state, y):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         rd_rt = [[conv_out.buffer_address(), proj.buffer_address(), params.buffer_address(),
-                  state.buffer_address(), s, c] for s, c in work]
+                  state.buffer_address(), s, c] + ([units] if P > 1 else []) for s, c in work]
         wr_rt = [[state.buffer_address(), y.buffer_address(), s, c] for s, c in work]
+        if P > 1:
+            assert all(c == 1 for _, c in work), "value split: one work item per core"
+            noc = [self.mesh.worker_core_from_logical_core(c) for c in cores]
+            for i, (s, _) in enumerate(work):
+                u = s % units
+                peers = [noc[q * units + u] for q in range(P)]  # item q * U + u runs on core q * U + u
+                wr_rt[i] = wr_rt[i] + [units] + [v for pc in peers for v in (pc.x, pc.y)]
         cp_ct = [Kt, Vt, _bits(self.eps), _bits(self.scale), _bits(self.norm_eps), _bits(1.0 / self.Dv),
                  _bits(1.0), _bits(1.0), _bits(20.0)]
         utd = [ttnn.UnpackToDestMode.Default] * NUM_CBS
-        for k in UNPACK_FP32:
+        for k in UNPACK_FP32 + (("nt",) if P > 1 else ()):
             utd[CB[k]] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            math_approx_mode=False)
         cfg.unpack_to_dest_mode = utd
+        defines = [("VSPLIT", str(P)), ("VT_FULL", str(self.Vt))] if P > 1 else []
         kernels = [
-            _dm("head_reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
-            _dm("head_writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
+            _dm("head_reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0, defines),
+            _dm("head_writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1, defines),
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "head_compute.cpp"), core_ranges=cr, compile_time_args=cp_ct,
-                runtime_args=_rt(cores, [[c] for _, c in work]), config=cfg,
+                runtime_args=_rt(cores, [[c] for _, c in work]), config=cfg, defines=defines,
             ),
         ]
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, cr, 0) for i in (0, 1)] if P > 1 else []
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         return ttnn.generic_op([conv_out, proj, params, state, y], program)
 
     def __call__(self, proj, conv_states, taps, params, state, B):

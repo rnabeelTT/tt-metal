@@ -11,7 +11,11 @@
 // 3. Writes each [trows, 32] output tile (group g, column n = bank + banks * (c0 + c)) into rows g * trows .. of tile
 //    n of the [32, H] BF16 TILE output (row r at byte (r / 16) * 1024 + (r % 16) * 32; + 512 for face 1).
 //
-// runtime args: [act_addr, out_addr, table_addr, bank, c0]
+// NO_SHARED: routed experts only (union slots 1 .. U).
+//
+// EP_EXPERTS: only this die's window of the union (local ids; 0 slots -> zero output rows).
+//
+// runtime args: [act_addr, out_addr, table_addr, bank, c0, (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
 
@@ -58,10 +62,37 @@ void kernel_main() {
     noc_async_read_barrier();
     invalidate_l1_cache();
     uint16_t uni[rows * topk];
-    const uint32_t slots = 1 + moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni);
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
+#ifdef EP_EXPERTS
+    const uint32_t slots = 1 - S0 + moe_topk::window_union(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni),
+        moe_topk::read_ep_offset(get_arg_val<uint32_t>(5), tab + 64 * rows), EP_EXPERTS);
+#else
+    const uint32_t slots = 1 - S0 + moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni);
+#endif
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, slots);
+#ifdef EP_EXPERTS
+    if (slots == 0) {  // none of the union on this die: zero partial rows
+        for (uint32_t g = 0; g < groups; ++g) {
+            const uint32_t r0 = g * trows;
+            const uint32_t roff = (r0 / 16) * 1024 + (r0 % 16) * 32;
+            for (uint32_t c = 0; c < cols; ++c) {
+                const uint32_t n = bank + banks * (c0 + c);
+                noc_async_write(MEM_ZEROS_BASE, s_out.get_noc_addr(n, roff), half);
+                noc_async_write(MEM_ZEROS_BASE, s_out.get_noc_addr(n, roff + 512), half);
+            }
+        }
+        noc_async_write_barrier();
+        cb_pop_front(cb_tab, 1);
+        return;
+    }
+#endif
 
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
@@ -71,7 +102,7 @@ void kernel_main() {
             for (uint32_t s = s0; s < s0 + cs; ++s) {
                 for (uint32_t k = 0; k < kt; ++k) {
                     noc_async_read(
-                        s_act.get_noc_addr((s * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);
+                        s_act.get_noc_addr(((S0 + s) * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);
                 }
             }
         }
