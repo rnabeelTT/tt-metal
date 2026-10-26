@@ -899,6 +899,18 @@ Coder-Next step 7 (`runs/cns7` vs card_cnv2_p300x2, committed 21c2aa864e2): 1 us
 real text 128 -> 178, 2 / 4 / 8 users 10.18 / 11.04 / 14.40 -> 8.38 / 9.13 / 12.73, 32 users 41.73 -> 35.79 ms; TTFT
 unchanged; greedy coherent (diverges by synonyms). 122B step 7 (`runs/q122s7`): server died at boot, the kept log was
 only the API traceback; rerun with the full log + a no-fabric-boundary fallback (`runs/q122_s7b.sh`).
+**Ornith published** (2026-10-26 18:13) into raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast (image
+tt-model/ornith-1.5-35b-a3b-blackhole-fast:801c00a07a4c; card original -> fast with the re-measured p300 rows).
+122B: the q122s7 boot failure was fb_compute's `4 % tiles == 0` static assert (hidden 3072 = 3 flat tiles; the loops
+already take RG = 4 / tiles): relaxed to `tiles <= 4`. Served (`runs/q122s7cfull` vs card_q122v2): 1 user 10.45 -> 7.55
+ms (96 -> 132 tok/s), real text 95.3 -> 131.8, 2 / 4 / 8 users 12.53 / 16.44 / 24.82 ms, 32 users 44.78, TTFT unchanged,
+garble 7.49 (flagged words all real: hardcoding, piecewise, ...). Without the boundary (`q122s7nofb`): 1 user 9.96 ms.
+Image naming (user, 2026-10-26): package `name` = the plain model name (image tt-model/qwen3-coder-next,
+tt-model/qwen3-5-122b-a10b; repos keep -blackhole-fast); tt-model always tags the image with the digest prefix (its
+`retag_to_digest`), so the `:<hash>` tag stays unless tt-model changes. Release chains: `runs/cn_fast_chain.sh`,
+`runs/q122_fast_chain.sh` (systemd units cn-fast, q122-fast).
+Queued after the releases (user): rows top-k with UINT32 indices for any width (written in gdn_wip 32687bad143, op test
+`RTK_ND=2 RTK_W=124160 python test_rows_topk.py`), then the MTP decision.
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
