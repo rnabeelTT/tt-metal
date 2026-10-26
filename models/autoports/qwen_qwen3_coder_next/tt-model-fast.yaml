@@ -12,7 +12,7 @@
 schema: "5.1"
 
 repo: raahemnabeel/qwen3-coder-next-blackhole-fast
-name: qwen3-coder-next-blackhole-fast
+name: qwen3-coder-next   # image tt-model/qwen3-coder-next (user, 2026-10-26: no variant suffix on the image)
 # weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
 weights: {repo: Qwen/Qwen3-Coder-Next, revision: a7fbcb5c0e12d62a448eaa0e260346bf5dcc0feb}
 kind: vllm-plugin
