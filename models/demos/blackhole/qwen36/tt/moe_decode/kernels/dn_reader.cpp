@@ -14,6 +14,9 @@
 // [0, E / 2) here and [E / 2, E) on the writer (cb_part), so the weights stream while the gate|up cores run;
 // otherwise from the route buffer the gate|up op wrote.
 //
+// NO_SHARED: routed experts only (slots 1 .. k). EP_EXPERTS (with NO_SHARED): the route record's local ids, its count
+// (route[15]) of them.
+//
 // runtime args: [w_addr, ws_addr, route_or_logits_addr, bank, c0, vc]
 
 #include <stdint.h>
@@ -43,7 +46,12 @@ void kernel_main() {
     constexpr uint32_t cb_part = get_compile_time_arg_val(8);
     constexpr auto src_args = TensorAccessorArgs<9>();
 
-    constexpr uint32_t num_slots = topk + 1;
+#ifdef NO_SHARED
+    constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
+#else
+    constexpr uint32_t S0 = 0;
+#endif
+    constexpr uint32_t num_slots = topk + 1 - S0;
     constexpr uint32_t row_bytes = cols * tile_bytes;
     constexpr uint32_t slot_tiles = kt * cols;
 
@@ -74,14 +82,25 @@ void kernel_main() {
         ids[j] = route[j];
     }
 #endif
+#ifdef EP_EXPERTS
+    static_assert(S0 == 1, "expert parallelism: routed experts only");
+    const uint32_t n_live = route[15];
+#else
+    constexpr uint32_t n_live = topk;
+#endif
 
     const uint64_t routed_noc = get_noc_addr_from_bank_id<true>(bank, w_addr);
     const uint64_t shared_noc = get_noc_addr_from_bank_id<true>(bank, ws_addr);
     // every slot's rows in flight at once (the compute needs the whole stack), one barrier
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
-    cb_reserve_back(cb_w, num_slots * slot_tiles);
+    const uint32_t live_slots = num_slots - (topk - n_live);
+    if (live_slots == 0) {  // EP: none of the top-k on this die (the writer writes zeros)
+        restore_read_cmd_buf();
+        return;
+    }
+    cb_reserve_back(cb_w, live_slots * slot_tiles);
     uint32_t l1 = get_write_ptr(cb_w);
-    for (uint32_t s = 0; s < num_slots; ++s) {
+    for (uint32_t s = S0; s < n_live + 1; ++s) {
         const uint64_t bank_noc = s == 0 ? shared_noc : routed_noc;
         const uint32_t e = s == 0 ? 0 : ids[s - 1];
         noc_async_read_one_packet_set_state<true>(bank_noc, row_bytes, vc);
@@ -94,6 +113,6 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier_with_trid(1);
-    cb_push_back(cb_w, num_slots * slot_tiles);
+    cb_push_back(cb_w, live_slots * slot_tiles);
     restore_read_cmd_buf();
 }

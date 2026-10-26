@@ -11,16 +11,24 @@
 //    to the writer through cb_route (slot 0 = the shared expert, slots 1..k = the routed experts in top-k order).
 // 4. Streams this core's remaining columns straight from the ttnn expert tensors (no decode copy): a [1, E, K, N]
 //    TILE tensor interleaved over the DRAM banks keeps page p in bank p % banks, so when N tiles is a multiple of the
-//    bank count, output column n of expert e is a run of K tiles in bank n % banks (K * N / banks tiles per expert and
-//    bank, row-major over (k, local column)). This core owns column pair j: up column j and gate column j + N / 2 of
-//    each of its slots (runtime list). Each column is one cb_w block of kt tiles, read in page_bytes packets,
-//    transaction-id pipelined (num_buffers - 2 columns in flight ahead of compute).
+//    bank count, each expert's columns in bank b are one [kt, m] run (gu_layout.hpp). This core's group q owns the
+//    column pairs in bank q (m even) or banks q and q + banks / 2 (m odd): per slot (runtime list) one cb_w block of
+//    kt * m tiles per bank, read in page_bytes packets, transaction-id pipelined (num_buffers - 2 blocks in flight
+//    ahead of compute).
 //
-// runtime args: [logits_addr, w_addr, ws_addr, pair j, vc, num_slots, slot...]
+// ROUTER_SIGB (GLM-4.5-Air): FP32 logits [32, E], sigmoid + selection-bias top-k, normalized weights, shared weight 1
+// (router_topk.hpp); the bias (Q23 int32 [E], one DRAM page in bank 0) follows the slot list in the runtime args.
+//
+// EP_EXPERTS (expert parallelism, router_topk.hpp): this die keeps its window of the global top-k, compacted; the
+// route record carries the local ids / weights and their count (route[15]); slot positions beyond it are skipped.
+//
+// runtime args: [logits_addr, w_addr, ws_addr, group q, vc, num_slots, slot..., (ROUTER_SIGB) bias_addr,
+//                (EP_EXPERTS) ep_offset_addr]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "gu_layout.hpp"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
 #include "tools/profiler/kernel_profiler.hpp"
@@ -49,25 +57,38 @@ void kernel_main() {
 
     static_assert(n_tiles % banks == 0, "the column-in-one-bank layout needs N tiles to be a multiple of the banks");
     constexpr uint32_t m = n_tiles / banks;  // local columns per bank and expert
-    static_assert(m == 1 || m == 2, "up|gate column pairs: in two banks (m = 1) or one bank (m = 2)");
-    // a block: m == 1: one column (kt tiles; up and gate in banks j and j + banks / 2); m == 2: the pair's [kt, 2]
-    // run in bank j (up = local column 0, gate = local column 1, row-major), read whole
-    constexpr uint32_t blk_tiles = kt * m;
+    constexpr uint32_t nb = gu_layout::blocks<m>();  // bank blocks per slot
+    constexpr uint32_t blk_tiles = kt * m;            // one bank's [kt, m] run, read whole
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
-    constexpr uint32_t lg_tiles = num_experts / 32 + 1;
+    constexpr uint32_t lg_tiles = moe_topk::lg_tiles(num_experts);
 
-    // ---- logits row ----
+    // ---- logits row (+ the selection bias) ----
     cb_reserve_back(cb_scr, 1);
     const uint32_t lg = get_write_ptr(cb_scr);
-    const auto s_lg = TensorAccessor(logits_args, logits_addr, 2048);
+    const auto s_lg = TensorAccessor(logits_args, logits_addr, moe_topk::LG_PAGE);
     for (uint32_t t = 0; t < lg_tiles; ++t) {
-        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * 64, 32);
-        noc_async_read(s_lg.get_noc_addr(t, 512), lg + t * 64 + 32, 32);
+        noc_async_read(s_lg.get_noc_addr(t, 0), lg + t * moe_topk::LG_TILE_L1, moe_topk::LG_HALF);
+        noc_async_read(
+            s_lg.get_noc_addr(t, moe_topk::LG_FACE1), lg + t * moe_topk::LG_TILE_L1 + moe_topk::LG_HALF, moe_topk::LG_HALF);
     }
+    const int32_t* bias = nullptr;
+#ifdef ROUTER_SIGB
+    const uint32_t bias_l1 = moe_topk::align64(lg + lg_tiles * moe_topk::LG_TILE_L1);
+    noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(6 + num_slots)), bias_l1, 4 * num_experts);
+    bias = reinterpret_cast<const int32_t*>(bias_l1);
+#endif
     noc_async_read_barrier();
     invalidate_l1_cache();
+#ifdef EP_EXPERTS
+#ifdef ROUTER_SIGB
+    constexpr uint32_t a_ep = 7, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1 + 4 * num_experts + 64;
+#else
+    constexpr uint32_t a_ep = 6, ep_l1_off = lg_tiles * moe_topk::LG_TILE_L1;
+#endif
+    const uint32_t ep_off = moe_topk::read_ep_offset(get_arg_val<uint32_t>(a_ep + num_slots), lg + ep_l1_off);
+#endif
 
     // ---- column stream: per slot, up column j then gate column j + n_tiles / 2 ----
     constexpr uint32_t extra_in_flight = num_buffers - 2;
@@ -79,10 +100,10 @@ void kernel_main() {
     uint32_t free_blocks = num_buffers;
     uint32_t trid = 1;
     uint32_t trid_to_wait = 1;
-    auto stream_block = [&](uint32_t base, uint32_t e, uint32_t n) {
+    auto stream_block = [&](uint32_t base, uint32_t e, uint32_t bank) {
         // page (e, k, n) = (e * kt + k) * n_tiles + n -> bank n % banks, bank-local page (e * kt + k) * m + n / banks
-        uint32_t src = (e * kt * m + n / banks) * tile_bytes;
-        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(n % banks, base);
+        uint32_t src = e * blk_tiles * tile_bytes;
+        const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(bank, base);
         noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
         noc_async_read_set_trid(trid);
         for (uint32_t p = 0; p < pages_per_col; ++p) {
@@ -104,9 +125,8 @@ void kernel_main() {
         }
     };
     auto stream_slot = [&](uint32_t base, uint32_t e) {
-        stream_block(base, e, pair);
-        if constexpr (m == 1) {
-            stream_block(base, e, pair + n_tiles / 2);
+        for (uint32_t h = 0; h < nb; ++h) {
+            stream_block(base, e, pair + h * (banks / 2));
         }
     };
 
@@ -117,31 +137,38 @@ void kernel_main() {
     }
 
     uint32_t keys[topk], ids[topk];
+    uint32_t n_live = topk;  // the routed experts this die streams (EP_EXPERTS: its window of the top-k)
     {
         DeviceZoneScopedN("tail");
     // ---- router tail: top-k of [0, E / 2) here, of [E / 2, E) on the writer, merged ----
-    const uint32_t* words = reinterpret_cast<const uint32_t*>(lg);
-    moe_topk::select_range<topk>(words, 0, num_experts / 4, keys, ids);
+    moe_topk::route_select<topk>(lg, bias, 0, num_experts / 2, keys, ids);
     cb_wait_front(cb_part, 1);
     invalidate_l1_cache();
     const uint32_t* part = reinterpret_cast<const uint32_t*>(get_read_ptr(cb_part));
     moe_topk::merge<topk>(keys, ids, part, part + topk);
     cb_pop_front(cb_part, 1);
     uint16_t w[topk];
-    moe_topk::softmax_selected<topk>(words, ids, w);
+    const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
+#ifdef EP_EXPERTS
+    n_live = moe_topk::local_window<topk>(ids, w, ep_off, EP_EXPERTS);  // local ids, compacted
+#endif
     cb_reserve_back(cb_route, 1);
     volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_write_ptr(cb_route));
     for (uint32_t j = 0; j < topk; ++j) {
-        route[j] = static_cast<uint16_t>(ids[j]);
-        route[16 + 1 + j] = w[j];
+        route[j] = static_cast<uint16_t>(j < n_live ? ids[j] : 0);
+        route[16 + 1 + j] = j < n_live ? w[j] : 0;
     }
-    route[16] = moe_topk::sigmoid_bf16(reinterpret_cast<const uint16_t*>(lg)[num_experts]);
+    route[15] = static_cast<uint16_t>(n_live);
+    route[16] = w_shared;
     cb_push_back(cb_route, 1);
     }
 
     for (uint32_t i = first; i < num_slots; ++i) {
-        const uint32_t e = ids[get_arg_val<uint32_t>(6 + i) - 1];
-        stream_slot(w_addr, e);
+        const uint32_t s = get_arg_val<uint32_t>(6 + i);
+        if (s > n_live) {  // EP: this die holds fewer of the top-k (positions ascend per core)
+            break;
+        }
+        stream_slot(w_addr, ids[s - 1]);
     }
     if (num_slots > 0) {
         for (uint32_t i = 0; i < num_buffers - free_blocks; ++i) {  // the columns still in flight

@@ -23,13 +23,27 @@ void kernel_main() {
     constexpr bool dense_packing = false;
     custom_mm_block_init<transpose, split_acc, dense_packing>(cb_in0, cb_w, cb_out, cols);
 
-    cb_wait_front(cb_in0, kt);
-    cb_wait_front(cb_w, kt * cols);
+#ifdef EP_EXPERTS
+    // this die's window of the top-k: live slots from BRISC (the down kernels' K is slots x K per slot); 0 -> no output
+    uint32_t live = 0;
+    UNPACK(live = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+    MATH(live = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+    PACK(live = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+    if (live == 0) {
+        custom_mm_block_uninit<dense_packing>();
+        return;
+    }
+    const uint32_t k_tiles = live * (kt / get_compile_time_arg_val(5));  // kt = slots x K per slot
+#else
+    constexpr uint32_t k_tiles = kt;
+#endif
+    cb_wait_front(cb_in0, k_tiles);
+    cb_wait_front(cb_w, k_tiles * cols);
     tile_regs_acquire();
-    custom_mm_block<true>(cb_in0, cb_w, 0, 0, 0, kt, cols);
+    custom_mm_block<true>(cb_in0, cb_w, 0, 0, 0, k_tiles, cols);
     tile_regs_commit();
-    cb_pop_front(cb_w, kt * cols);
-    cb_pop_front(cb_in0, kt);
+    cb_pop_front(cb_w, k_tiles * cols);
+    cb_pop_front(cb_in0, k_tiles);
 
     cb_reserve_back(cb_out, cols);
     tile_regs_wait();

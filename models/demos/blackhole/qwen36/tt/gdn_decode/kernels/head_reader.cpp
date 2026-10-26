@@ -10,6 +10,8 @@
 //   * the head's Kt x Vt state tiles ([Bmax, Nv, Dk, Dv] TILE, DRAM).
 // Once per launch (after the first unit's state): the gated-norm weight row (params row 2) into Vt FP32 tiles, persistent
 // (the compute pops it after the last unit).
+// VSPLIT = P (one work item per core): item n = p * U + u (U = B * Nv units, runtime arg 6): unit u's value columns
+// [p Vt, (p + 1) Vt) of its VT_FULL (Vt here is the slice): v / z / state / norm-weight slices; q, k and the gates whole.
 
 #include <stdint.h>
 
@@ -90,6 +92,16 @@ void kernel_main() {
     if (count == 0) {
         return;
     }
+#ifdef VSPLIT
+    constexpr uint32_t VTF = VT_FULL;  // the head's value tiles; this core holds Vt of them
+    const uint32_t U = get_arg_val<uint32_t>(6);
+    auto unit_of = [&](uint32_t n) { return n % U; };
+    auto part_of = [&](uint32_t n) { return n / U; };
+#else
+    constexpr uint32_t VTF = Vt;
+    auto unit_of = [&](uint32_t n) { return n; };
+    auto part_of = [&](uint32_t n) { return 0 * n; };
+#endif
 
     const auto s_conv = TensorAccessor(conv_args, conv_addr, F32_TILE);
     const auto s_proj = TensorAccessor(proj_args, proj_addr, BF_TILE);
@@ -125,7 +137,7 @@ void kernel_main() {
     {
         DeviceZoneScopedN("rd_gates0");
         noc_async_read(s_par.get_noc_addr(0), scr, F32_TILE);
-        push_gates(start / Nv, start % Nv);
+        push_gates(unit_of(start) / Nv, unit_of(start) % Nv);
     }
     // k and v must be zero outside row 0 (the rank-1 update k^T (x) u sums over all rows; 0 * garbage could be NaN). The
     // other gathered tiles only reach rows / elements the compute never reads back. Zero the first slot of the two
@@ -135,7 +147,8 @@ void kernel_main() {
     bool v_zeroed = false;
 
     for (uint32_t w = 0; w < count; ++w) {
-        const uint32_t n = start + w;
+        const uint32_t n = unit_of(start + w);  // the unit (user, value head)
+        const uint32_t p = part_of(start + w);  // its value-column slice
         const uint32_t b = n / Nv;
         const uint32_t h = n - b * Nv;
         const uint32_t hk = h / GQA;
@@ -157,8 +170,8 @@ void kernel_main() {
         cb_push_back(cb_k, Kt);
         cb_reserve_back(cb_v, Vt);
         cb_reserve_back(cb_z, Vt);
-        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
-        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
+        gather_row(s_conv, get_write_ptr(cb_v), 2 * Nk * Kt + h * VTF + p * Vt, Vt, b, F32_FACE, F32_ROW, F32_TILE);
+        gather_row(s_proj, get_write_ptr(cb_z), z_tile + h * VTF + p * Vt, Vt, b, BF_FACE, BF_ROW, BF_TILE);
         noc_async_read_barrier();
         cb_push_back(cb_v, Vt);
         cb_push_back(cb_z, Vt);
@@ -170,8 +183,11 @@ void kernel_main() {
 
         cb_reserve_back(cb_S, kv);
         const uint32_t s = get_write_ptr(cb_S);
-        for (uint32_t i = 0; i < kv; ++i) {
-            noc_async_read(s_state.get_noc_addr(n * kv + i), s + i * BF_TILE, BF_TILE);
+        for (uint32_t ki = 0; ki < Kt; ++ki) {
+            for (uint32_t j = 0; j < Vt; ++j) {
+                const uint32_t src = n * (Kt * VTF) + ki * VTF + p * Vt + j;
+                noc_async_read(s_state.get_noc_addr(src), s + (ki * Vt + j) * BF_TILE, BF_TILE);
+            }
         }
         if (w == 0) {
             // the gated-norm weight (params row 2), read once: the compute needs it last
@@ -187,7 +203,7 @@ void kernel_main() {
             volatile tt_l1_ptr uint32_t* wt = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_w));
             for (uint32_t j = 0; j < Vt; ++j) {
                 for (uint32_t col = 0; col < 32; ++col) {
-                    wt[j * 1024 + f32_idx(0, col)] = par[j * 1024 + f32_idx(2, col)];
+                    wt[j * 1024 + f32_idx(0, col)] = par[(p * Vt + j) * 1024 + f32_idx(2, col)];
                 }
             }
             cb_push_back(cb_w, Vt);

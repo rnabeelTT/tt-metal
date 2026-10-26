@@ -1,13 +1,18 @@
 # tt-model container (v5.1) manifest for Qwen3.5-122B-A10B "blackhole-fast": the published bundle
-# (raahemnabeel/qwen3-5-122b-a10b, this directory's tt-model.yaml, tt-metal 8fec52c4cb) plus the fused decode work
-# ported from the Ornith fusion (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md): routed + shared
-# experts in three ops that stream the expert weights in place for every decode width (1..32 rows), and the
-# replicated-residual decode boundary. Same weights, plugin build and serving recipe; a separate repo so the published
-# bundle stays as it is.
+# (raahemnabeel/qwen3-5-122b-a10b, this directory's tt-model.yaml) plus the fused decode work ported from the Ornith
+# fusion (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md):
+# - steps 1-3: routed + shared experts in three ops that stream the expert weights in place for every decode width
+#   (1..32 rows), and the replicated-residual decode boundary;
+# - steps 4-5: the Gated DeltaNet decode mixer and the attention decode prep / post ops, for 1-32 rows; MTP off (its
+#   verify pass keeps the unfused path: plain fused decode is faster);
+# - step 7: the fabric layer boundary (all-reduce + residual + RMSNorm as one op, 1-4 rows) with the next projection /
+#   router in its program, the sampler's live-rows top-k, the GDN head value split.
+# Same weights, plugin build and serving recipe; the one fast repo (its earlier revisions stay in the Hub history).
+# Package name = the plain model name (image tt-model/qwen3-5-122b-a10b; user, 2026-10-26).
 schema: "5.1"
 
 repo: raahemnabeel/qwen3-5-122b-a10b-blackhole-fast
-name: qwen3-5-122b-a10b-blackhole-fast
+name: qwen3-5-122b-a10b
 # weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
 weights: {repo: Qwen/Qwen3.5-122B-A10B, revision: dc4d348443bc740c68e2d77492492c11606384d5}
 kind: vllm-plugin
@@ -70,6 +75,18 @@ serve:
     # the fused decode path (ported from the Ornith fusion)
     QWEN35_MOE_FUSED_DECODE: "1"
     QWEN35_DECODE_REPLICATED: "1"
+    # Ornith fusion steps 4-5: GDN decode mixer ops + attention decode ops; MTP off (its verify pass keeps the unfused
+    # path: plain fused decode is faster, 94 vs 60 tok/s on chat text at 1 user)
+    QWEN35_GDN_DECODE_OPS: "1"
+    QWEN35_ATTN_DECODE_OPS: "1"
+    QWEN35_MTP: "0"
+    # step 7 (every profile is 4 dies): fabric layer boundary for 1-4 rows with the next projection / router in its
+    # program, sampler top-k over the live rows (62080 columns per die)
+    QWEN35_FABRIC_BOUNDARY: "1"
+    QWEN35_FB_MAX_ROWS: "4"
+    QWEN35_FB_CONSUMER: "1"
+    QWEN35_FB_ROUTER: "1"
+    QWEN35_ROWS_TOPK: "1"
     # Vision ON: image content parts are served (the checkpoint's ViT on the mesh, bfp8, up to 4 images per request);
     # text requests are unaffected (the tower only runs for image prompts). KV pool in this configuration (MTP head +
     # tower resident): 22725 blocks x 64 tokens = 1.45 M tokens (the stage-13 text-only, no-MTP server had 28472 blocks).
