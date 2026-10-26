@@ -1,8 +1,14 @@
 # tt-model container (v5.1) manifest for Ornith-1.5-35B-A3B "blackhole-fast" on Blackhole: the v2 bundle
-# (raahemnabeel/ornith-1.5-35b-a3b, this directory's tt-model.yaml) plus the fused decode work of
-# fusion/HANDOFF.md: the routed + shared experts in three ops streaming the expert weights in place for every decode
-# width (1..32 rows, MTP verify included), and the replicated-residual decode boundary (one all-reduce per mixer / MoE).
-# Same weights, same plugin build, same serving recipe; a separate repo so the v2 bundle stays as published.
+# (raahemnabeel/ornith-1.5-35b-a3b, this directory's tt-model.yaml) plus the fused decode work of fusion/HANDOFF.md:
+# - steps 1-3: the routed + shared experts in three ops streaming the expert weights in place for every decode width
+#   (1..32 rows), and the replicated-residual decode boundary (one all-reduce per mixer / MoE);
+# - steps 4-6: the Gated DeltaNet decode mixer as two generic_op programs (conv; gates + norms + recurrent state update
+#   + gated norm), the attention decode prep / post ops around the QKV matmul, cache update and SDPA decode, 1-32 rows;
+# - step 7: the fabric layer boundary (all-reduce + residual + RMSNorm as one op, 1-4 rows), the next projection /
+#   router inside the boundary's program, the sampler's rows top-k, the MoE split-pair gate|up with off-row readers,
+#   the GDN head value split.
+# MTP off on the multi-die profiles (the MTP verify pass keeps the unfused path: plain fused decode is ~2x faster on
+# real text). Same weights, same plugin build; the one fast repo (its earlier revisions stay in the Hub history).
 # Authoring interface of `tt-model package --container models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt-model-fast.yaml`.
 schema: "5.1"
 
@@ -74,9 +80,16 @@ serve:
     # the fused decode path (fusion/HANDOFF.md steps 1-3)
     QWEN35_MOE_FUSED_DECODE: "1"
     QWEN35_DECODE_REPLICATED: "1"
+    # steps 4-6: GDN decode mixer ops, attention decode ops (each checks its preconditions, keeps the op chain otherwise)
+    QWEN35_GDN_DECODE_OPS: "1"
+    QWEN35_ATTN_DECODE_OPS: "1"
+    # MTP off: its verify pass runs the unfused rows path; with the fused step plain decode is ~2x faster on real text
+    # (4 dies: 169 vs 86 tok/s)
+    QWEN35_MTP: "0"
+    # step 7: the sampler's per-device top-k over the live rows (decode buckets <= 8 rows; the tie-break pass skipped)
+    QWEN35_ROWS_TOPK: "1"
   # Thinking ON by default (the model's own default); turn it off per request with
-  # "chat_template_kwargs": {"enable_thinking": false}. MTP speculative decoding (the checkpoint's own mtp.* head) runs
-  # when exactly one request is live, plain decode otherwise.
+  # "chat_template_kwargs": {"enable_thinking": false}.
   args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). The mesh size
@@ -86,10 +99,12 @@ serve_profiles:
     description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 262144 context, bfp8 routed experts.
     hardware: p300x2
     mesh_device: P300x2
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
     description: Four p150 boards (4 dies), same configuration as p300x2. Not run on hardware (the identical (1,4) mesh).
     hardware: p150x4
     mesh_device: P150x4
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
     description: One p300 board (2 dies, tensor parallel 2), 32 sequences, 262144 context, bfp8 routed experts.
     hardware: p300
@@ -105,14 +120,15 @@ serve_profiles:
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
-    env: {QWEN35_VISION: "0"}   # one die keeps its DRAM for the KV pool
+    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
     args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
     description: "One p100 (1 die, 7 DRAM banks): the p150 profile unchanged - 32 sequences, bfp4 routed experts, text only, no fabric. Like p150 it keeps the v2 MoE (7 DRAM banks, 4 columns per bank)."
     hardware: p100
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
-    env: {QWEN35_VISION: "0"}
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
     args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
 # Default = the best balance of hardware and performance: two chips keep the 4-chip accuracy (bfp8 routed experts;
 # teacher forcing 0.96 / 0.91 top-1 vs 0.97 / 0.89) and vision, at ~80 % of the 4-chip throughput (peak 275 vs 351 tok/s,
