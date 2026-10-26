@@ -8,6 +8,8 @@ one live row at batch 1. RowsTopK reads only the live rows: `ncores` scan cores 
 per row (kernels/topk_scan.cpp), one merge core merges the sorted lists (kernels/topk_merge.cpp) and writes what
 ttnn.topk returns (values BF16 [1, 1, 32, K] TILE, local indices UINT16 [1, 1, 32, K] TILE, sorted descending, ties to
 the lower index; rows >= B copies of row 0). The sampler's all-gathers, index offsets and draw are unchanged.
+Widths above 65536 columns (Ornith / 122B on 2 dies: 124160) return UINT32 indices, as ttnn.topk's large-index route
+does: the scan cores key on their own column range (always < 65536), the merge adds each core's first column.
 """
 
 from __future__ import annotations
@@ -20,14 +22,14 @@ KERNEL_DIR = Path(__file__).parent / "kernels"
 GRID = (10, 10)  # scan cores
 MERGE_CORE = (10, 0)
 MAX_ROWS = 8
-MAX_WIDTH = 0xFFFF + 1  # columns per device
+MAX_WIDTH = 1 << 20  # columns per device (indices UINT32 above 65536)
 
 
 class RowsTopK:
     def __init__(self, mesh_device, width, k=32):
         assert width % 32 == 0 and k == 32
-        # the scan's sort keys and the output indices carry the column in 16 bits (2 dies x 124160 columns wrapped)
-        assert width <= MAX_WIDTH, f"{width} columns per device do not fit 16-bit indices"
+        assert width <= MAX_WIDTH, width
+        self.wide = width > 0xFFFF + 1  # UINT32 indices
         self.mesh_device = mesh_device
         self.tiles = width // 32
         self.k = k
@@ -54,7 +56,7 @@ class RowsTopK:
         assert 1 <= B <= MAX_ROWS
         mk = lambda dt: ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, K]), dt, ttnn.TILE_LAYOUT, self.mesh_device,
                                                        ttnn.L1_MEMORY_CONFIG)
-        values, indices = mk(ttnn.bfloat16), mk(ttnn.uint16)
+        values, indices = mk(ttnn.bfloat16), mk(ttnn.uint32 if self.wide else ttnn.uint16)
         mbytes = nc * B * K * 4
         pages = -(-mbytes // 2048)
         merge_buf = ttnn.allocate_tensor_on_device(
@@ -68,18 +70,18 @@ class RowsTopK:
             total_size=size, core_ranges=cores,
             format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=ttnn.bfloat16, page_size=size)])
         cbs = [fmt(cb_buf, self.per * 2 * rows_bytes, self.scan_set), fmt(cb_list, B * K * 4, self.scan_set),
-               fmt(cb_out, 4096, self.merge_set)]
+               fmt(cb_out, 2048 + (4096 if self.wide else 2048), self.merge_set)]
         scan_ct = [B, K, cb_buf, cb_list, self.merge_xy[0], self.merge_xy[1]]
         scan_ct += ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         scan_rt = ttnn.RuntimeArgs()
         for i, (c, t0, n) in enumerate(self.work):
             scan_rt[c.x][c.y] = [logits.buffer_address(), t0, n, merge_buf.buffer_address(), i]
-        merge_ct = [B, K, nc, cb_out]
+        merge_ct = [B, K, nc, cb_out, int(self.wide)]
         merge_ct += ttnn.TensorAccessorArgs(values).get_compile_time_args()
         merge_ct += ttnn.TensorAccessorArgs(indices).get_compile_time_args()
         merge_rt = ttnn.RuntimeArgs()
         merge_rt[self.merge.x][self.merge.y] = [merge_buf.buffer_address(), values.buffer_address(),
-                                                indices.buffer_address()]
+                                                indices.buffer_address()] + [t0 * 32 for _, t0, _ in self.work]
         dm = ttnn.DataMovementConfigDescriptor
         kernels = [
             ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "topk_scan.cpp"), core_ranges=self.scan_set,
