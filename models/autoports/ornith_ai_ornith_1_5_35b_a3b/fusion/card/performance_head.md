@@ -4,11 +4,15 @@ top_p 0.95 / top_k 20, lm-evaluation-harness), the same settings and box as the 
 
 | Eval | original | blackhole-fast |
 | --- | ---: | ---: |
-| GPQA-Diamond (40 questions) | 0.775 | @GPQA40@ |
-| IFEval prompt-level strict (100) | 0.76 | @IFEVAL@ |
-| LiveCodeBench v6 (50) | 0.36 | @LCB@ |
+| GPQA-Diamond (40 questions) | 0.775 | 0.675 |
+| IFEval prompt-level strict (100) | 0.76 | 0.82 |
+| LiveCodeBench v6 (50) | 0.36 | 0.40 |
 
-@ACC_NOTE@
+All within the error bars of these subset sizes (GPQA +-0.07, IFEval +-0.04, LiveCodeBench +-0.07): no measurable
+quality change. The whole GPQA-Diamond set (198 questions, same settings) scores 0.707 +-0.032 on blackhole-fast; the
+same build scored 0.75 on the first 40 questions in that run (0.675 in the subset run above), the spread one sample
+per question gives at n = 40. Layer-level PCC against Hugging Face (real weights): decode >= 0.9999 at 1 user,
+per-user minimum >= 0.9999 at 32 users.
 
 ### Performance
 Measured 2026-10-25 on one QuietBox 2 (4 Blackhole p300c dies; p300 and p150 rows on a subset of it), both bundles
