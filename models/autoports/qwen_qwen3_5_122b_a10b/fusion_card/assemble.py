@@ -15,9 +15,9 @@ TOOLS = HERE.parents[1] / "ornith_ai_ornith_1_5_35b_a3b" / "fusion" / "tools"
 DESCRIPTION = (
     "Qwen3.5-122B-A10B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + "
     "gated attention, vision tower, MTP head) on four Blackhole dies through vLLM and the Tenstorrent plugin, with a "
-    "fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus a fused MoE decode for 1-32 "
-    "concurrent users and a replicated-residual layer boundary, ported from the Ornith-1.5-35B-A3B fusion. Same weights, "
-    "profiles and serving recipe; prefill unchanged."
+    "fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus fused MoE, Gated DeltaNet, "
+    "attention, layer-boundary and sampler decode ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B "
+    "fusion. Same weights, profiles and serving recipe; prefill unchanged."
 )
 
 RELATED = (
@@ -37,7 +37,7 @@ def block(key, text):
 def main():
     profiles = sys.argv[1:] or ["p300x2"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), "card_q122new", "card_q122pub", *profiles],
+        [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_q122fast"), os.environ.get("PUB", "card_q122pub"), *profiles],
         check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "published"},
     ).stdout
     head, sep, lc = tables.partition("#### longctx")

@@ -1,5 +1,5 @@
-- The single-user MTP pass still runs the published (unfused) rows path for its verify / commit; only its MoE uses the
-  fused kernels. Moving the whole MTP pass onto the fused path is the next step.
+- MTP speculative decoding is off: the MTP verify pass still runs the unfused rows path, which is slower than the fused
+  plain step. A fused multi-token verify is the way back to MTP.
 - The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
   and `-text` profiles run the same decode code (they change prefill batching and the vision tower); the p150x4
   profiles run the same mesh but were not run on p150 boards.

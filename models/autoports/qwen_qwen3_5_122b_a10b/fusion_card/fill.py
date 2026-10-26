@@ -40,9 +40,9 @@ def decode_tok_s(label, isl=128, osl=128):
 
 
 def main():
-    new, pub = evals("q122ev_new"), evals("q122ev_pub")
-    # GPQA from the full 198-question runs (runs/q122_gpqa.sh); the 40-question subset was too small to compare
-    for vals, label in ((new, "q122gp_new"), (pub, "q122gp_pub")):
+    new, pub = evals("q122ev_fast"), evals("q122ev_pub")
+    # GPQA from the full 198-question runs (the original: runs/q122_gpqa.sh; blackhole-fast: GPQA_LIMIT=198 in q122ev_fast)
+    for vals, label in ((new, "q122ev_fast"), (pub, "q122gp_pub")):
         full = evals(label)
         assert "GPQA" in full, f"no full GPQA run in {label}"
         vals["GPQA"] = full["GPQA"]
@@ -53,8 +53,8 @@ def main():
                 head = head.replace("{%s_%s}" % (key, side), f"{vals[key]:.3g}")
     (HERE / "performance_head.md").write_text(head)
     qs = (HERE / "quickstart.md").read_text()
-    qs = qs.replace("{SPEED_MTP}", f"{round(realtext_median('card_q122new_p300x2'))}")
-    qs = qs.replace("{SPEED_LONGCTX}", f"{round(decode_tok_s('card_q122new_longctx'))}")
+    qs = qs.replace("{SPEED_P300X2}", f"{round(realtext_median('card_q122fast_p300x2'))}")
+    qs = qs.replace("{SPEED_LONGCTX}", f"{round(decode_tok_s('card_q122fast_longctx'))}")
     (HERE / "quickstart.md").write_text(qs)
     left = re.findall(r"\{[A-Z_]+\}", head + qs)
     print("filled", {"new": new, "pub": pub}, "unfilled:", left)
