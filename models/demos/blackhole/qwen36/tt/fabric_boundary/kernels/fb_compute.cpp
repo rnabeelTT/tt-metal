@@ -71,7 +71,7 @@ void kernel_main() {
     constexpr uint32_t cb_y = get_compile_time_arg_val(13);
     constexpr uint32_t rows = get_compile_time_arg_val(14);  // decode rows: row r's vector at pages r * tiles ..
     constexpr uint32_t all = rows * tiles;
-    static_assert(tiles <= 4 && 4 % tiles == 0, "rows of whole tiles in the 4 FP32 DST tiles");
+    static_assert(tiles <= 4, "one row of tiles in the 4 FP32 DST tiles (RG = 4 / tiles rows per acquire)");
 
     // 1. residual' = ((slot 0 + slot 1) + ...) + residual: the partial sums first (rounded at their own magnitude
     //    when DST feeds SrcA), the residual last (FPU, FP32 DST); 4 tiles per DST acquire.
