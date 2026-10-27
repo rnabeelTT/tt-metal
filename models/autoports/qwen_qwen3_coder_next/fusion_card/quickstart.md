@@ -1,7 +1,7 @@
-### What blackhole-fast changes
-This is [raahemnabeel/qwen3-coder-next](https://huggingface.co/raahemnabeel/qwen3-coder-next) with its decode step
+### What changed since v1
+This is the v1 bundle ([raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1)) with its decode step
 rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
-([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast)).
+([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)).
 Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is unchanged (TTFT equal or
 lower). The changes:
 
@@ -32,7 +32,7 @@ Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-m
 (temperature 1.0, top_p 0.95, top_k 40).
 
 ### Profiles
-`tt-model serve raahemnabeel/qwen3-coder-next-blackhole-fast --profile <name>`:
+`tt-model serve raahemnabeel/qwen3-coder-next --profile <name>`:
 - `p300x2` (default) / `p150x4` - four dies: the faster profile.
 - `p300` / `p150x2` - two dies: the same features on half the hardware, with bfp4 routed experts.
 

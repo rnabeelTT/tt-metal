@@ -14,16 +14,16 @@ TOOLS = HERE.parents[1] / "ornith_ai_ornith_1_5_35b_a3b" / "fusion" / "tools"
 
 DESCRIPTION = (
     "Qwen3-Coder-Next (80B total / 3B active MoE: 512 experts, top-10 + shared expert, 48 layers of Gated DeltaNet + "
-    "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the published "
-    "bundle (raahemnabeel/qwen3-coder-next) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode "
+    "gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the v1 "
+    "bundle (raahemnabeel/qwen3-coder-next-v1) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode "
     "ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving "
     "recipe; prefill unchanged."
 )
 
 RELATED = (
-    "The bundle this builds on: [raahemnabeel/qwen3-coder-next](https://huggingface.co/raahemnabeel/qwen3-coder-next). "
-    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast]"
-    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log "
+    "The v1 bundle this builds on: [raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1). "
+    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b]"
+    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log "
     "`models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `coder_next_fusion` branch of "
     "github.com/rnabeelTT/tt-metal."
 )
@@ -45,7 +45,7 @@ def main():
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_cnfast4"), os.environ.get("PUB", "card_cnpub"), *profiles],
         check=True, capture_output=True, text=True,
-        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
+        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "v1", "NEW_LABEL": "current"},
     ).stdout
     tables = tables.replace("#### p300x2\n", "#### p300x2\n\n" + P300X2_NOTE + "\n", 1)
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
