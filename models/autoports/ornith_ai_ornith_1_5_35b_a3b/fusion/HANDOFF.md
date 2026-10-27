@@ -986,6 +986,28 @@ raahemnabeel/ornith-1.5-35b-a3b-v1; the fast repo was moved (`hf repos move`) to
 card says v1 -> current; runtime code = the a7e5b6904100 build + the MTP_STAGES log line). Pushed + catalog listed; fresh
 pull + serve p300x2 (`runs/fin_smoke_orn2`): greedy 8/8 identical to card_fast3_p300x2, real text 216.1 tok/s (median
 217.6). First boot under the new name 661 s (new local cache).
+**All fast builds are now the models' main repos (user, 2026-10-27):**
+- Coder-Next: the user renamed the repos (original -> raahemnabeel/qwen3-coder-next-v1, fast -> raahemnabeel/qwen3-coder-next);
+  repackaged with the v1 -> current card (image tt-model/qwen3-coder-next:aa810bf93c41); fresh-pull smoke 8/8 identical,
+  real text 177.4 tok/s.
+- 122B: the official repo keeps its likes. Original copied server-side (`hf repos duplicate`) to
+  raahemnabeel/qwen3-5-122b-a10b-v1 (byte-identical, 721 files), the fast build pushed into raahemnabeel/qwen3-5-122b-a10b
+  (image 06618b453b9a; no stale files: every original path is in the fast bundle), smoke 8/8 identical, real text 131.5
+  tok/s; then raahemnabeel/qwen3-5-122b-a10b-blackhole-fast deleted (user's go-ahead, gated on the smoke).
+- Coder-30B: an older private raahemnabeel/qwen3-coder-30b-a3b-v1 (2026-09-09) held the name; deleted at the user's
+  request, original moved to -v1, fast moved to the plain name, repackaged as qwen3-coder-30b-a3b (image f5b81747febf),
+  smoke 8/8 identical, real text 95.5 tok/s.
+**tt-transformers contribution (local, for the user's review):** ~/tt-transformers branch `rnabeelTT/blackhole-decode-ops`
+(bac870c ops, faea519 tests): `tt_transformers.ops.blackhole_decode` = decode_sampling / moe_decode / fabric_boundary /
+decode_linear / gdn_decode / attn_decode, kernels byte-identical to this branch (52807d09a02), env knobs -> constructor
+args, `args` caches -> model-owned dicts; package-data globs; host contract tests (20) + device tests vs torch. On the
+stock ttnn==0.79.0 wheel (container image ttx-ttnn079: py3.12 + ttnn 0.79.0 + SFPI 7.78.0, `runs/ttx_dev.sh <MESH> <pytest
+args>`): host suite 2912 passed (main 2892), device 6 + 33 + 24 (P150) + 3 (P150x4) passed. SFPI 7.78 deleted
+sfpi::reinterpret: moe_decode gu/gur compute now use sfpi::as (also in 7.71; 52807d09a02). PR text draft in the session
+scratchpad (tt-transformers-PR-draft.md); upstream PR #41 (ezietlowTT, Qwen3.8 GDN ops) set the ops/<family>/kernels
+pattern. Box incident: after the first 0.79.0-wheel device open the chips needed `tt-smi -r` (ethernet core 29-25 on
+device 0 not running; our runtime failed the same way); after the reset both runtimes open the mesh and every test ran
+cleanly.
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
