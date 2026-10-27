@@ -44,6 +44,12 @@ P150_NOTE = (
     "runs of the original); the original card's p150 latency rows still describe this bundle."
 )
 
+P300X2_NOTE = (
+    "Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 "
+    "bits, for two dies). This revision, same setup: 1 user 4.57 ms TPOT, real text 217.4 tok/s, 8 users 9.71 ms, "
+    "32 users 1024/256 24.2 ms."
+)
+
 
 def block(key, text):
     body = "\n".join(("    " + l) if l.strip() else "" for l in text.strip("\n").splitlines())
@@ -58,6 +64,7 @@ def main():
              "SAME_DECODE": "p150", "SAME_DECODE_NOTE": P150_NOTE},
     ).stdout
     perf = (HERE / "performance_head.md").read_text().replace("### Performance", TEACHER.strip() + "\n\n### Performance")
+    tables = tables.replace("#### p300x2\n", "#### p300x2\n\n" + P300X2_NOTE + "\n", 1)
     perf += "\n" + tables
     src = YAML.read_text()
     head = src[: src.index("\ncard:\n") + 1]

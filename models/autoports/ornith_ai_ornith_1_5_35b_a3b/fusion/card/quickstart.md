@@ -18,7 +18,7 @@ original's (TTFT equal or lower). The changes, in the order they were made (each
 6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm run as one op over the
    fabric, and the next layer's input projection (or the MoE router) runs inside the same program, streaming its weights
    while the boundary computes.
-7. **Sampler top-k over the live rows only** (four dies, 1-8 users), instead of all 32 slot rows.
+7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
 
 MTP speculative decoding is off on the multi-die profiles: its verify pass runs the unfused path, and the fused plain
 decode step is faster on real text (four dies: 218 vs 86 tok/s).

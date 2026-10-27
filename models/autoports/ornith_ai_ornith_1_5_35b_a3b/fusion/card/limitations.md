@@ -3,8 +3,6 @@
   multi-token verify is the way back to MTP.
 - Two dies (`p300`, `p150x2`) run without the fabric layer boundary: its persistent receive buffers do not fit next to
   the two-die prefill's circular buffers.
-- Two dies also keep the stock sampler top-k: the live-rows top-k carries vocabulary indices in 16 bits, and a die's
-  slice of the 248320-token vocabulary is 124160 columns on two dies (62080 on four).
 - One die (`p150`, `p100`) keeps the original MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
   expert, one die holds 4 (and p100 has 7 banks).
 - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
