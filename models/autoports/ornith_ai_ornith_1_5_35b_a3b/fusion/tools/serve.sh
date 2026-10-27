@@ -17,6 +17,10 @@ case $PROFILE in
   p150)   MESH=P150;   VIS="--env TT_VISIBLE_DEVICES=${DEVS:-0} --env TT_MESH_GRAPH_DESC_PATH=/opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto";   FAB=DISABLED;  QV=0; MM='{"image": 0, "video": 0}';;
 esac
 case $MODEL_ID in  # each bundle's serving recipe (its tt-model.yaml)
+  ornith-ai/Ornith-1.5-122B) MENV="--env QWEN35_BATCHED_PREFILL=0 --env QWEN35_VISION=1 --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304"
+    MENV+=" --env EXTRA_MODELS_DIR=/opt/tt-metal/models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle"  # Qwen3.5-122B-A10B code
+    MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning_parser qwen3
+           --default-chat-template-kwargs '{"enable_thinking": false}' --limit-mm-per-prompt '{"image": 4, "video": 0}');;
   ornith-ai/*) MENV="--env QWEN35_BATCHED_PREFILL=0 --env QWEN35_VISION=$QV --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304"
     MARGS=(--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning_parser qwen3
            --default-chat-template-kwargs '{"enable_thinking": false}' --limit-mm-per-prompt "$MM");;
