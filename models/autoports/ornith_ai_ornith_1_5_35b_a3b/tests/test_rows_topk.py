@@ -4,7 +4,8 @@
 0 .. B-1 of [32, 62080] BF16 logits, K = 32, sorted by value then lower index; rows >= B copy row 0; traced timing vs
 the sampler's ttnn.pad + ttnn.topk.
 
-    python test_rows_topk.py                 (RTK_ND=2 RTK_W=124160: the 2-die width, UINT32 indices)
+    python test_rows_topk.py                 (RTK_ND=2 RTK_W=124160: the 2-die width, UINT32 indices;
+                                              RTK_TB=1,2,4,8: the row counts timed)
 """
 
 import os
@@ -50,10 +51,13 @@ def main():
         x = ttnn.from_torch(torch.randn(1, 1, 32, W).bfloat16(), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                             device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
-        def ours():
-            v, i = op(x, 1)
-            ttnn.deallocate(v)
-            ttnn.deallocate(i)
+        def rows(b):
+            def ours():
+                v, i = op(x, b)
+                ttnn.deallocate(v)
+                ttnn.deallocate(i)
+
+            return ours
 
         def stock():
             P = 1 << (W - 1).bit_length()  # the sampler pads to a power of two
@@ -62,7 +66,8 @@ def main():
             for t in (xp, v, i):
                 ttnn.deallocate(t)
 
-        for label, fn in (("rows top-k B=1", ours), ("pad + ttnn.topk", stock)):
+        timed = [(f"rows top-k B={b}", rows(b)) for b in map(int, os.environ.get("RTK_TB", "1").split(","))]
+        for label, fn in timed + [("pad + ttnn.topk", stock)]:
             fn()
             tid = ttnn.begin_trace_capture(mesh, cq_id=0)
             for _ in range(10):
