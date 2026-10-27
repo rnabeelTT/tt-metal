@@ -13,7 +13,7 @@
 schema: "5.1"
 
 repo: raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast
-name: ornith-1.5-35b-a3b-blackhole-fast
+name: ornith-1.5-35b-a3b
 # weights stay a pointer: the exact HF snapshot every check of this port ran against
 weights: {repo: ornith-ai/Ornith-1.5-35B-A3B, revision: 10fbf86fed7ecee4a061f8b499a618f46001cac1}
 kind: vllm-plugin
