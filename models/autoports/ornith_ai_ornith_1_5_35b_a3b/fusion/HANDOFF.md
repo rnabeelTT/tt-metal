@@ -980,7 +980,12 @@ Decision (the >= 15 % bar, confirmed by the second look): MTP stays off in the f
 held older installs and card_bench serves with --no-update-check: pull first), served on p300x2, greedy vs its card
 run: Ornith (a7e5b6904100) 8/8 identical, real text 217.3 tok/s; Coder-Next (e92083dded8f) 8/8, 177.3; 122B
 (4973b43968a8) 8/8, 131.7; Coder-30B (8b91e57afdd3) 8/8, 95.5.
-Open: Ornith's plain package name at its next repackage (not urgent).
+**Ornith renamed to the model's main repo (user, 2026-10-27):** the user renamed the original to
+raahemnabeel/ornith-1.5-35b-a3b-v1; the fast repo was moved (`hf repos move`) to raahemnabeel/ornith-1.5-35b-a3b (the old
+-blackhole-fast URL redirects) and repackaged as `name: ornith-1.5-35b-a3b` (image tt-model/ornith-1.5-35b-a3b:fe0482ed6aa2;
+card says v1 -> current; runtime code = the a7e5b6904100 build + the MTP_STAGES log line). Pushed + catalog listed; fresh
+pull + serve p300x2 (`runs/fin_smoke_orn2`): greedy 8/8 identical to card_fast3_p300x2, real text 216.1 tok/s (median
+217.6). First boot under the new name 661 s (new local cache).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
