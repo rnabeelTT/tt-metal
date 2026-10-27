@@ -28,6 +28,9 @@ RELATED = (
     "github.com/rnabeelTT/tt-metal."
 )
 
+# the published p300x2 profile decodes with MTP (one user), blackhole-fast without; p300x2-longctx is MTP off in both
+REALTEXT_P300X2 = "12 chat prompts x 384 output tokens, temperature 0, published with MTP, blackhole-fast without"
+
 
 def block(key, text):
     body = "\n".join(("    " + l) if l.strip() else "" for l in text.strip("\n").splitlines())
@@ -38,10 +41,10 @@ def main():
     profiles = sys.argv[1:] or ["p300x2"]
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_q122fast"), os.environ.get("PUB", "card_q122pub"), *profiles],
-        check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "published"},
+        check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "published", "REALTEXT_DESC": REALTEXT_P300X2},
     ).stdout
     head, sep, lc = tables.partition("#### longctx")
-    lc = lc.replace("temperature 0, MTP on;", "temperature 0, MTP off;")
+    lc = lc.replace(REALTEXT_P300X2, "12 chat prompts x 384 output tokens, temperature 0, MTP off in both")
     tables = head + sep.replace("#### longctx", "#### p300x2-longctx (MTP off, chunked prefill at 4096 tokens)") + lc
     tables = tables.replace("| longctx |", "| p300x2-longctx |")
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables

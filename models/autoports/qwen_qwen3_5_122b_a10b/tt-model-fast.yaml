@@ -181,14 +181,14 @@ verify:
 
 card:
   description: >
-    Qwen3.5-122B-A10B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on four Blackhole dies through vLLM and the Tenstorrent plugin, with a fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus a fused MoE decode for 1-32 concurrent users and a replicated-residual layer boundary, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill unchanged.
+    Qwen3.5-122B-A10B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on four Blackhole dies through vLLM and the Tenstorrent plugin, with a fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill unchanged.
   quickstart: |
     ### What blackhole-fast changes
     This is [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b) with its decode step
     rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
     ([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast);
     Ornith serves through this model's code). Same checkpoint, same vLLM plugin build, same profiles and serving recipe;
-    prefill is unchanged. The changes:
+    prefill is unchanged (TTFT equal or lower). The changes:
 
     1. **Router.** The decode router matmul runs as one 1D matmul, and the 1-token top-8 + softmax + shared-gate sigmoid run
        on the RISC cores in one op instead of a 7-op chain.
@@ -197,10 +197,20 @@ card:
        rows, the MTP verify rows included (several users' experts as one union, each weight column read once for all rows).
     3. **Replicated-residual decode boundary.** The decode residual stays replicated on every die: each mixer / MoE output
        is one all-reduce + add + local RMSNorm (two collectives per layer instead of four, no gathers).
+    4. **Gated DeltaNet decode mixer** as two programs (causal conv; gates + norms + recurrent state update + gated norm),
+       each head's value dimension split across up to four cores.
+    5. **Attention decode ops** around the QKV matmul, cache update and SDPA decode (q / k norm + RoPE + gate in one prep op,
+       output gating in one post op).
+    6. **Fabric layer boundary** (1-4 users): the all-reduce, residual add and RMSNorm as one op over the fabric, with the
+       next layer's input projection (or the MoE router) inside the same program.
+    7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
+
+    MTP speculative decoding is off: its verify pass runs the unfused path, and the fused plain decode step is faster
+    (1 user on chat text: 132 tok/s, vs 45.9 for the original with MTP).
 
     Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
-    reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads. Output quality is checked
-    below.
+    reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and
+    DeltaNet ops sum in a different order than the op chain they replace. Output quality is checked below.
 
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -217,15 +227,14 @@ card:
     `tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackhole-fast --profile <name>` (p300x2 names below; the same four exist
     as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
     - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
-      Speculative decoding gives a single user about 66 tok/s on chat text; images and tool calls work; thinking on.
+      A single user gets about 132 tok/s on chat text; images and tool calls work; thinking on.
     - `p300x2-burst` - many short prompts arriving together (chat front-ends with dozens of users, batch classification,
       extraction jobs): up to four prompts are prefilled per pass, so a 32-request burst gets its first token in 3.8 s
       instead of 6.3 s with the same decode speed. Choose it when throughput matters more than bit-exact reproducibility
       of a request's first token across different batch compositions (seeded runs may differ by what arrived together).
     - `p300x2-longctx` - document and codebase work where very long prompts (tens of thousands of tokens) mix with short
       ones: prefill runs in 4096-token chunks shared between prompts, so a short question is not stuck behind a 100K-token
-      upload. Speculative decoding is off in this profile (about 57 tok/s for a lone user), and running users still pause
-      while prefill chunks run.
+      upload (about 132 tok/s for a lone user); running users still pause while prefill chunks run.
     - `p300x2-text` - text-only deployments: the vision tower is not loaded, giving a 25 % larger KV pool (1.8 M pooled
       tokens for 32 users) for longer conversations at high occupancy; image requests are rejected at the front end.
   performance: |
@@ -235,30 +244,30 @@ card:
 
     | Eval | published | blackhole-fast |
     | --- | ---: | ---: |
-    | GPQA-Diamond (all 198 questions) | 0.697 | 0.677 |
-    | IFEval prompt-level strict (100) | 0.85 | 0.87 |
+    | GPQA-Diamond (all 198 questions) | 0.697 | 0.697 |
+    | IFEval prompt-level strict (100) | 0.85 | 0.88 |
     | LiveCodeBench v6 (50) | 0.54 | 0.54 |
 
-    GPQA: 12 questions right only with blackhole-fast, 16 only with the published bundle (McNemar p 0.57); the difference
-    is within one standard error (+-0.033). A 40-question subset had shown 0.65 vs 0.775, which is why the full set ran.
+    GPQA-Diamond is identical (138 of 198 both), and the IFEval and LiveCodeBench differences are within one standard
+    error (±0.033 over 100 prompts, ±0.071 over 50 problems).
 
     Layer-level PCC against Hugging Face (real weights, 4 dies, shipped precision policy), published -> fused decode: Gated
     DeltaNet layer 0.99967 -> 0.99965, attention layer 0.99477 -> 0.99471; 32 concurrent users, worst user 0.99717 ->
     0.99719 / 0.99548 -> 0.99532. Prefill is unchanged (identical PCC).
 
     ### Performance
-    Measured 2026-10-23 on one QuietBox 2 (4 Blackhole p300c dies), both bundles served exactly as shipped (`tt-model
-    serve <bundle> --profile p300x2`), one server at a time: random-token prompts of exactly the input length, output
+    Measured on one QuietBox 2 (4 Blackhole p300c dies; published 2026-10-23, blackhole-fast 2026-10-26), both bundles
+    served exactly as shipped (`tt-model serve <bundle> --profile p300x2`), one server at a time: random-token prompts of exactly the input length, output
     pinned with ignore_eos, streamed; users are concurrent requests in a closed loop; TTFT = time to first streamed token;
-    TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. Single-user rows run MTP speculative decoding,
-    whose gain depends on how predictable the text is: random-token prompts understate it, so a real-text row (12 chat
-    prompts, 384 output tokens, temperature 0) is added. Each cell is `published -> blackhole-fast`.
+    TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. The published bundle's single-user rows run MTP
+    speculative decoding, whose gain depends on how predictable the text is (random-token prompts understate it), so a
+    real-text row (12 chat prompts, 384 output tokens, temperature 0) is added; blackhole-fast decodes without MTP. Each cell is `published -> blackhole-fast`.
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | 128 | 128 | 1 | 4 | 289 | 444 | 52.8 | 2.69 |
-    | p300x2 | 1024 | 256 | 32 | 128 | 12,266 | 83 | 14.6 | 29.68 |
-    | p300x2-longctx | 128 | 128 | 1 | 4 | 182 | 704 | 56.9 | 2.41 |
+    | p300x2 | 128 | 128 | 1 | 4 | 216 | 592 | 130.9 | 1.19 |
+    | p300x2 | 1024 | 256 | 32 | 128 | 11,953 | 86 | 21.4 | 23.85 |
+    | p300x2-longctx | 128 | 128 | 1 | 4 | 212 | 604 | 132.5 | 1.17 |
 
     #### p300x2
 
@@ -266,35 +275,35 @@ card:
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 305 -> 289 | 420 -> 444 | 30.2 -> 18.9 | 33.1 -> **52.8** (+59 %) | 4.13 -> 2.69 |
-    | 1,024 | 256 | 502 -> 518 | 2,038 -> 1,978 | 24.6 -> 21.1 | 40.6 -> **47.4** (+17 %) | 6.76 -> 5.86 |
-    | 4,096 | 256 | 1,217 -> 1,198 | 3,365 -> 3,419 | 20.6 -> 21.2 | 48.4 -> **47.1** (-3 %) | 6.48 -> 6.61 |
-    | 16,384 | 256 | 4,568 -> 4,563 | 3,586 -> 3,590 | 25.8 -> 23.4 | 38.8 -> **42.8** (+10 %) | 11.13 -> 10.52 |
-    | 32,768 | 256 | 9,310 -> 9,305 | 3,520 -> 3,522 | 21.2 -> 20.1 | 47.2 -> **49.6** (+5 %) | 14.71 -> 14.44 |
-    | 65,536 | 256 | 19,803 -> 19,795 | 3,309 -> 3,311 | 31.6 -> 22.7 | 31.7 -> **44.0** (+39 %) | 27.85 -> 25.59 |
-    | 130,816 | 256 | 44,598 -> 44,675 | 2,933 -> 2,928 | 27.7 -> 22.2 | 36.1 -> **45.1** (+25 %) | 51.67 -> 50.33 |
+    | 128 | 128 | 305 -> 216 | 420 -> 592 | 30.2 -> 7.6 | 33.1 -> **130.9** (+295 %) | 4.13 -> 1.19 |
+    | 1,024 | 256 | 502 -> 418 | 2,038 -> 2,450 | 24.6 -> 7.7 | 40.6 -> **129.9** (+220 %) | 6.76 -> 2.38 |
+    | 4,096 | 256 | 1,217 -> 1,096 | 3,365 -> 3,737 | 20.6 -> 7.9 | 48.4 -> **126.9** (+162 %) | 6.48 -> 3.13 |
+    | 16,384 | 256 | 4,568 -> 4,400 | 3,586 -> 3,723 | 25.8 -> 8.1 | 38.8 -> **123.5** (+218 %) | 11.13 -> 6.47 |
+    | 32,768 | 256 | 9,310 -> 9,039 | 3,520 -> 3,625 | 21.2 -> 8.4 | 47.2 -> **118.5** (+151 %) | 14.71 -> 11.19 |
+    | 65,536 | 256 | 19,803 -> 19,142 | 3,309 -> 3,424 | 31.6 -> 9.0 | 31.7 -> **110.8** (+250 %) | 27.85 -> 21.44 |
+    | 130,816 | 256 | 44,598 -> 42,978 | 2,933 -> 3,044 | 27.7 -> 10.2 | 36.1 -> **98.4** (+173 %) | 51.67 -> 45.57 |
 
-    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP on; median per prompt): 45.9 -> **65.9 tok/s** (+44 %).
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, published with MTP, blackhole-fast without; median per prompt): 45.9 -> **131.8 tok/s** (+187 %).
 
     Concurrency, 128 input / 128 output tokens: published -> blackhole-fast
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 2 | 8 | 522 -> 523 | 37.0 -> 22.5 | 27.0 -> 44.5 | 49.0 -> **75.9** (+55 %) | 5.22 -> 3.37 |
-    | 4 | 16 | 1,035 -> 1,028 | 44.5 -> 26.6 | 22.5 -> 37.6 | 76.5 -> **116.0** (+52 %) | 6.69 -> 4.40 |
-    | 8 | 32 | 1,785 -> 1,821 | 63.7 -> 36.7 | 15.7 -> 27.2 | 103.5 -> **159.2** (+54 %) | 9.90 -> 6.43 |
-    | 16 | 64 | 3,321 -> 3,298 | 96.9 -> 51.4 | 10.3 -> 19.4 | 131.6 -> **208.9** (+59 %) | 15.61 -> 9.81 |
-    | 32 | 128 | 6,253 -> 6,264 | 113.4 -> 66.6 | 8.8 -> 15.0 | 198.6 -> **278.6** (+40 %) | 20.62 -> 14.76 |
+    | 2 | 8 | 522 -> 496 | 37.0 -> 12.7 | 27.0 -> 78.7 | 49.0 -> **121.2** (+147 %) | 5.22 -> 2.11 |
+    | 4 | 16 | 1,035 -> 977 | 44.5 -> 16.6 | 22.5 -> 60.3 | 76.5 -> **166.9** (+118 %) | 6.69 -> 3.09 |
+    | 8 | 32 | 1,785 -> 1,701 | 63.7 -> 25.5 | 15.7 -> 39.2 | 103.5 -> **208.6** (+102 %) | 9.90 -> 4.92 |
+    | 16 | 64 | 3,321 -> 3,215 | 96.9 -> 35.2 | 10.3 -> 28.4 | 131.6 -> **265.4** (+102 %) | 15.61 -> 7.70 |
+    | 32 | 128 | 6,253 -> 6,028 | 113.4 -> 45.1 | 8.8 -> 22.2 | 198.6 -> **347.1** (+75 %) | 20.62 -> 11.79 |
 
     Concurrency, 1024 input / 256 output tokens: published -> blackhole-fast
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 2 | 8 | 891 -> 899 | 36.2 -> 21.9 | 27.6 -> 45.7 | 50.5 -> **79.1** (+57 %) | 10.13 -> 6.48 |
-    | 4 | 16 | 1,771 -> 1,777 | 44.4 -> 26.7 | 22.5 -> 37.5 | 78.2 -> **119.5** (+53 %) | 13.09 -> 8.56 |
-    | 8 | 32 | 3,281 -> 3,275 | 63.8 -> 35.8 | 15.7 -> 27.9 | 104.8 -> **164.5** (+57 %) | 19.55 -> 12.42 |
-    | 16 | 64 | 6,269 -> 6,276 | 97.6 -> 51.0 | 10.2 -> 19.6 | 131.6 -> **211.6** (+61 %) | 31.13 -> 19.26 |
-    | 32 | 128 | 12,215 -> 12,266 | 114.9 -> 68.3 | 8.7 -> 14.6 | 197.3 -> **276.4** (+40 %) | 41.54 -> 29.68 |
+    | 2 | 8 | 891 -> 861 | 36.2 -> 12.0 | 27.6 -> 83.2 | 50.5 -> **129.8** (+157 %) | 10.13 -> 3.95 |
+    | 4 | 16 | 1,771 -> 1,737 | 44.4 -> 16.8 | 22.5 -> 59.4 | 78.2 -> **171.2** (+119 %) | 13.09 -> 6.01 |
+    | 8 | 32 | 3,281 -> 3,175 | 63.8 -> 25.2 | 15.7 -> 39.6 | 104.8 -> **214.2** (+104 %) | 19.55 -> 9.56 |
+    | 16 | 64 | 6,269 -> 6,134 | 97.6 -> 36.4 | 10.2 -> 27.4 | 131.6 -> **267.7** (+103 %) | 31.13 -> 15.34 |
+    | 32 | 128 | 12,215 -> 11,953 | 114.9 -> 46.8 | 8.7 -> 21.4 | 197.3 -> **344.2** (+74 %) | 41.54 -> 23.85 |
 
     #### p300x2-longctx (MTP off, chunked prefill at 4096 tokens)
 
@@ -302,14 +311,13 @@ card:
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 204 -> 182 | 626 -> 704 | 31.3 -> 17.6 | 31.9 -> **56.9** (+78 %) | 4.18 -> 2.41 |
-    | 2,048 | 128 | 590 -> 565 | 3,469 -> 3,624 | 31.3 -> 17.7 | 31.9 -> **56.6** (+77 %) | 4.57 -> 2.81 |
-    | 16,384 | 128 | 4,388 -> 4,408 | 3,734 -> 3,717 | 31.7 -> 18.0 | 31.6 -> **55.5** (+76 %) | 8.41 -> 6.70 |
+    | 128 | 128 | 204 -> 212 | 626 -> 604 | 31.3 -> 7.5 | 31.9 -> **132.5** (+315 %) | 4.18 -> 1.17 |
+    | 2,048 | 128 | 590 -> 592 | 3,469 -> 3,458 | 31.3 -> 7.7 | 31.9 -> **129.7** (+307 %) | 4.57 -> 1.57 |
 
-    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP off; median per prompt): 31.9 -> **56.8 tok/s** (+78 %).
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP off in both; median per prompt): 31.9 -> **131.9 tok/s** (+313 %).
   limitations: |
-    - The single-user MTP pass still runs the published (unfused) rows path for its verify / commit; only its MoE uses the
-      fused kernels. Moving the whole MTP pass onto the fused path is the next step.
+    - MTP speculative decoding is off: the MTP verify pass still runs the unfused rows path, which is slower than the fused
+      plain step. A fused multi-token verify is the way back to MTP.
     - The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
       and `-text` profiles run the same decode code (they change prefill batching and the vision tower); the p150x4
       profiles run the same mesh but were not run on p150 boards.

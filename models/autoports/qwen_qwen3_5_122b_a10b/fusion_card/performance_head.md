@@ -4,11 +4,12 @@ temperature 0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness through the serve
 
 | Eval | published | blackhole-fast |
 | --- | ---: | ---: |
-| GPQA-Diamond (all 198 questions) | {GPQA_PUB} | {GPQA_NEW} |
-| IFEval prompt-level strict (100) | {IFE_PUB} | {IFE_NEW} |
-| LiveCodeBench v6 (50) | {LCB_PUB} | {LCB_NEW} |
+| GPQA-Diamond (all 198 questions) | 0.697 | 0.697 |
+| IFEval prompt-level strict (100) | 0.85 | 0.88 |
+| LiveCodeBench v6 (50) | 0.54 | 0.54 |
 
-{ACC_NOTE}
+GPQA-Diamond is identical (138 of 198 both), and the IFEval and LiveCodeBench differences are within one standard
+error (±0.033 over 100 prompts, ±0.071 over 50 problems).
 
 Layer-level PCC against Hugging Face (real weights, 4 dies, shipped precision policy), published -> fused decode: Gated
 DeltaNet layer 0.99967 -> 0.99965, attention layer 0.99477 -> 0.99471; 32 concurrent users, worst user 0.99717 ->
