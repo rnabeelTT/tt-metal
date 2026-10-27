@@ -59,9 +59,9 @@ template <int ITERATIONS>
 inline void round_sig7() {
     for (int d = 0; d < ITERATIONS; d++) {
         const sfpi::vFloat x = sfpi::dst_reg[0];
-        sfpi::vInt v = sfpi::reinterpret<sfpi::vInt>(x);
+        sfpi::vInt v = sfpi::as<sfpi::vInt>(x);
         v = (v + 0x10000) & sfpi::vInt(0xFFFE0000);
-        sfpi::dst_reg[0] = sfpi::reinterpret<sfpi::vFloat>(v);
+        sfpi::dst_reg[0] = sfpi::as<sfpi::vFloat>(v);
         sfpi::dst_reg++;
     }
 }
