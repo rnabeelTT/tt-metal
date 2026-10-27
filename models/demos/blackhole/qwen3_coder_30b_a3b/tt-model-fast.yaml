@@ -1,4 +1,5 @@
-# blackhole-fast: the published raahemnabeel/qwen3-coder-30b-a3b manifest + the fused expert-parallel MoE decode.
+# The current bundle (the fused-decode "blackhole-fast" build; user, 2026-10-27: the model's main repo, the original is
+# raahemnabeel/qwen3-coder-30b-a3b-v1): the v1 manifest + the fused expert-parallel MoE decode.
 # tt-model container package (v5.1) — qwen3-coder-30b-a3b on QB2 (2x P300, 4 chips).
 #
 # This one file is the whole authoring interface:
@@ -8,8 +9,8 @@
 # in the same PR as the code it serves.
 schema: "5.1"
 
-repo: raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast
-name: qwen3-coder-30b-a3b-blackhole-fast
+repo: raahemnabeel/qwen3-coder-30b-a3b
+name: qwen3-coder-30b-a3b
 weights: {repo: Qwen/Qwen3-Coder-30B-A3B-Instruct, revision: b2cff646eb4bb1d68355c01b18ae02e7cf42d120}   # a POINTER (57 GB), never baked into the image
 kind: vllm-plugin                            # stock vLLM + the standalone tenstorrent/vllm-tt-plugin
 arch: blackhole
@@ -265,12 +266,12 @@ verify:
 
 card:
   description: >
-    Qwen3-Coder-30B-A3B-Instruct (30B total / 3B active MoE: 128 experts, top-8, 48 layers) for agentic coding with tool calling on Blackhole through vLLM, with a fused MoE decode: the published bundle (raahemnabeel/qwen3-coder-30b-a3b, v2) plus the Ornith-1.5-35B-A3B fused MoE decode kernels in expert-parallel form for 1-32 concurrent users. Same weights, profiles and serving recipe; prefill unchanged.
+    Qwen3-Coder-30B-A3B-Instruct (30B total / 3B active MoE: 128 experts, top-8, 48 layers) for agentic coding with tool calling on Blackhole through vLLM, with a fused MoE decode: the v1 bundle (raahemnabeel/qwen3-coder-30b-a3b-v1) plus the Ornith-1.5-35B-A3B fused MoE decode kernels in expert-parallel form for 1-32 concurrent users. Same weights, profiles and serving recipe; prefill unchanged.
   quickstart: |
-    ### What blackhole-fast changes
-    This is [raahemnabeel/qwen3-coder-30b-a3b](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b) (bundle v2) with
+    ### What changed since v1
+    This is the v1 bundle ([raahemnabeel/qwen3-coder-30b-a3b-v1](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b-v1)) with
     its MoE decode replaced by the fused kernels of the Ornith-1.5-35B-A3B fusion
-    ([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast)),
+    ([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)),
     in expert-parallel form. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill (the
     expert-sorted MoE) is unchanged. Per decode layer and die, three ops replace the replicated router chain, the two
     dynamic sparse matmuls, SwiGLU, the routing weights and the expert sum (and the expert-sorted path at 4+ rows):
@@ -283,7 +284,7 @@ card:
        users' experts form one union per die, so each weight column is read once for all rows. A die whose window holds no
        selected expert writes a zero partial; the existing all-reduce sums the dies.
 
-    Numerics: the same bfp4 expert weights and FP32 router logits as the published bundle. The fused route op accumulates
+    Numerics: the same bfp4 expert weights and FP32 router logits as v1. The fused route op accumulates
     the logits in a different order and its expert matmuls accumulate in FP32, so a near-tied 8th expert can be picked
     differently and the last bits of an expert's output can differ. Output quality is checked below.
 
@@ -293,7 +294,7 @@ card:
     is greedy (temperature 0); per-request sampling parameters apply.
 
     ### Profiles
-    `tt-model serve raahemnabeel/qwen3-coder-30b-a3b-blackhole-fast --profile <name>`:
+    `tt-model serve raahemnabeel/qwen3-coder-30b-a3b --profile <name>`:
     - `p300` (default) / `p150x2` - two dies (64 experts per die), 256000-token context.
     - `p300x2` / `p150x4` - four dies (32 experts per die), 256000-token context: the fastest profile.
     - `p150` - one die (all 128 experts), 98304-token context (the bf16 KV cache is 96 KiB per token on one die).
@@ -304,7 +305,7 @@ card:
     Both bundles evaluated side by side on the same box, p300x2, through the served chat API with lm-evaluation-harness
     0.4.9 at temperature 0 (full sets, 8 requests in flight, seed 42):
 
-    | Eval | published | blackhole-fast |
+    | Eval | v1 | current |
     | --- | ---: | ---: |
     | HumanEval pass@1 (164) | 0.939 | 0.933 |
     | MBPP pass@1 (500) | 0.802 | 0.786 |
@@ -316,7 +317,7 @@ card:
     pre-fill the assistant turn, which the API does not continue), so HumanEval uses a chat prompt that asks for the whole
     function in one code block, and MBPP answers are scored from their first code block; `gsm8k_cot_llama` is the stock
     8-shot task with the dataset's current id. The task files are in `fusion/tools/lm_tasks` on the source branch. Greedy
-    outputs on every profile were checked against the published bundle's: they stay coherent and part after 17 to 1074
+    outputs on every profile were checked against the v1 bundle's: they stay coherent and part after 17 to 1074
     characters (the fused MoE decode rounds differently).
 
     ### Performance
@@ -324,7 +325,7 @@ card:
     served exactly as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of
     exactly the input length, output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop;
     TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. A real-text
-    single-user row (12 chat prompts, 384 output tokens, temperature 0) is added. Each cell is `published -> blackhole-fast`.
+    single-user row (12 chat prompts, 384 output tokens, temperature 0) is added. Each cell is `v1 -> current`.
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -336,7 +337,7 @@ card:
 
     #### p300x2
 
-    Latency, batch 1 (single user): published -> blackhole-fast
+    Latency, batch 1 (single user): v1 -> current
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -350,7 +351,7 @@ card:
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 49.5 -> **95.5 tok/s** (+93 %).
 
-    Concurrency, 128 input / 128 output tokens: published -> blackhole-fast
+    Concurrency, 128 input / 128 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -360,7 +361,7 @@ card:
     | 16 | 64 | 1,055 -> 979 | 35.0 -> 16.2 | 28.6 -> 61.7 | 359.1 -> **646.1** (+80 %) | 5.53 -> 3.07 |
     | 32 | 128 | 1,919 -> 1,853 | 36.8 -> 24.0 | 27.2 -> 41.7 | 598.2 -> **812.7** (+36 %) | 6.62 -> 4.91 |
 
-    Concurrency, 1024 input / 256 output tokens: published -> blackhole-fast
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -372,7 +373,7 @@ card:
 
     #### p300
 
-    Latency, batch 1 (single user): published -> blackhole-fast
+    Latency, batch 1 (single user): v1 -> current
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -386,7 +387,7 @@ card:
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 38.0 -> **86.3 tok/s** (+127 %).
 
-    Concurrency, 128 input / 128 output tokens: published -> blackhole-fast
+    Concurrency, 128 input / 128 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -396,7 +397,7 @@ card:
     | 16 | 64 | 1,266 -> 1,203 | 47.5 -> 21.6 | 21.0 -> 46.3 | 276.5 -> **517.1** (+87 %) | 7.38 -> 3.96 |
     | 32 | 128 | 2,389 -> 2,332 | 51.1 -> 32.8 | 19.6 -> 30.5 | 455.6 -> **626.7** (+38 %) | 8.88 -> 6.57 |
 
-    Concurrency, 1024 input / 256 output tokens: published -> blackhole-fast
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -408,7 +409,7 @@ card:
 
     #### p150
 
-    Latency, batch 1 (single user): published -> blackhole-fast
+    Latency, batch 1 (single user): v1 -> current
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -419,8 +420,8 @@ card:
   limitations: |
     - p150x4 and p150x2 run the same meshes as p300x2 / p300 but were not run on p150 boards; the p150 profile ran on one
       p300c die (single-user rows only).
-    - Every newly admitted request re-captures the decode traces (as in the published bundle), which shows up as TTFT under
+    - Every newly admitted request re-captures the decode traces (as in v1), which shows up as TTFT under
       concurrent load.
     - The evals ran on the p300x2 profile only. Agentic benchmarks (SWE-Bench Verified, LiveCodeBench) were not run.
   related: >
-    The bundle this builds on: [raahemnabeel/qwen3-coder-30b-a3b](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `c30_fusion` branch of github.com/rnabeelTT/tt-metal.
+    The v1 bundle this builds on: [raahemnabeel/qwen3-coder-30b-a3b-v1](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b-v1). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `c30_fusion` branch of github.com/rnabeelTT/tt-metal.

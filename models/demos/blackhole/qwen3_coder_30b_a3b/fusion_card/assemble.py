@@ -14,15 +14,15 @@ TOOLS = HERE.parents[4] / "models" / "autoports" / "ornith_ai_ornith_1_5_35b_a3b
 
 DESCRIPTION = (
     "Qwen3-Coder-30B-A3B-Instruct (30B total / 3B active MoE: 128 experts, top-8, 48 layers) for agentic coding with "
-    "tool calling on Blackhole through vLLM, with a fused MoE decode: the published bundle "
-    "(raahemnabeel/qwen3-coder-30b-a3b, v2) plus the Ornith-1.5-35B-A3B fused MoE decode kernels in expert-parallel "
+    "tool calling on Blackhole through vLLM, with a fused MoE decode: the v1 bundle "
+    "(raahemnabeel/qwen3-coder-30b-a3b-v1) plus the Ornith-1.5-35B-A3B fused MoE decode kernels in expert-parallel "
     "form for 1-32 concurrent users. Same weights, profiles and serving recipe; prefill unchanged."
 )
 
 RELATED = (
-    "The bundle this builds on: [raahemnabeel/qwen3-coder-30b-a3b](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b). "
-    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast]"
-    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log "
+    "The v1 bundle this builds on: [raahemnabeel/qwen3-coder-30b-a3b-v1](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b-v1). "
+    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b]"
+    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log "
     "`models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `c30_fusion` branch of "
     "github.com/rnabeelTT/tt-metal."
 )
@@ -38,7 +38,7 @@ def main():
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), "card_c30new", "card_c30pub", *profiles],
         check=True, capture_output=True, text=True,
-        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
+        env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "v1", "NEW_LABEL": "current"},
     ).stdout
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     assert "{" not in perf.split("### Performance")[0], "fill the eval placeholders"
