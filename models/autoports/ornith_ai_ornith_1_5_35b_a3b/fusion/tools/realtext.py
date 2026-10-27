@@ -27,9 +27,17 @@ EXTRA = [
 URL = os.environ.get("URL", "http://localhost:20000")
 
 
+def served_model():
+    """MODEL_ID, else the one model the server lists."""
+    if os.environ.get("MODEL_ID"):
+        return os.environ["MODEL_ID"]
+    with urllib.request.urlopen(URL + "/v1/models", timeout=30) as r:
+        return json.load(r)["data"][0]["id"]
+
+
 def run(prompt, max_tokens):
     body = {
-        "model": os.environ.get("MODEL_ID", "ornith-ai/Ornith-1.5-35B-A3B"),
+        "model": served_model(),
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0,
