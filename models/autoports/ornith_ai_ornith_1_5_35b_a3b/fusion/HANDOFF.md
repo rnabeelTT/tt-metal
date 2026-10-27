@@ -926,7 +926,20 @@ the op). Note: compare greedy only between runs with the same thinking setting (
 off; card_bench.sh = the shipped default, thinking on for Ornith / 122B). Chain `runs/tk32_ports.sh`: Coder-Next 2-die
 op test + p300 check, then Ornith (package name now ornith-1.5-35b-a3b) and Coder-Next repackaged, p300 card rows
 re-measured + p300x2 spot rows; then cards, push into the fast repos. The 122B has no 2-die profile (unaffected).
-Next: present the fused MTP verify plan to the user. Hub smoke tests of all fast repos at the very end (user).
+Results (2026-10-27): Coder-Next 2-die op test exact (75968 columns, 96 vs 667 us); served p300 (`runs/card_cnfast3_p300`
+vs card_cnfast_p300, as shipped) 1 user 9.15 -> 8.51 ms, 8 users 17.97 -> 17.30, real text 109.0 -> 117.1 tok/s, garble
+9.61 (`runs/cntk_p300`), greedy 8/8 + 8/8 identical; p300x2 spot rows unchanged (5.60 / 12.66 / 52.7 ms). Ornith p300
+(`runs/card_fast3_p300`) 1 user 7.91 ms, 2 / 4 / 8 users 10.39 / 12.62 / 17.35 ms, real text 125.6, 16-32 users and
+TTFT unchanged; p300x2 spot 4.57 ms / real text 217.4 / 8 users 9.71 (9.44 before) / 32 users 24.2. Op time by rows on
+4 dies (`runs/rtk_time.sh`, 16-bit vs 32-bit kernels): 95 / 100 / 161 / 281 vs 98 / 105 / 170 / 318 us at 1 / 2 / 4 / 8
+rows; +38 us at 8 rows (0.4 % of the step) - not worth keeping a 16-bit path. Published 2026-10-27 into the existing
+fast repos: Ornith tt-model/ornith-1.5-35b-a3b-blackhole-fast:a7e5b6904100 (name kept: the user wants the plain name
+only at a later repackage), Coder-Next tt-model/qwen3-coder-next:e92083dded8f; 122B tt-model/qwen3-5-122b-a10b:4973b43968a8
+(2026-10-27 01:05). Cards keep the four-die rows of the previous revision with a note giving this revision's spot rows.
+Tool note: bench.sh / greedy.py default MODEL_ID to Ornith: export MODEL_ID for other models (realtext.py now asks the
+server).
+Next: present the fused MTP verify plan to the user (`runs/mtp_stages.sh`: per-stage MTP pass times on the fused
+build, logged as MTP_STAGES). Hub smoke tests of all fast repos at the very end (user).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
