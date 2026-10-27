@@ -909,8 +909,24 @@ Image naming (user, 2026-10-26): package `name` = the plain model name (image tt
 tt-model/qwen3-5-122b-a10b; repos keep -blackhole-fast); tt-model always tags the image with the digest prefix (its
 `retag_to_digest`), so the `:<hash>` tag stays unless tt-model changes. Release chains: `runs/cn_fast_chain.sh`,
 `runs/q122_fast_chain.sh` (systemd units cn-fast, q122-fast).
-Queued after the releases (user): rows top-k with UINT32 indices for any width (written in gdn_wip 32687bad143, op test
-`RTK_ND=2 RTK_W=124160 python test_rows_topk.py`), then the MTP decision.
+**Coder-Next published** (2026-10-26 21:05) into raahemnabeel/qwen3-coder-next-blackhole-fast (image
+tt-model/qwen3-coder-next:5190768f7a5a). **122B release** (`runs/q122_fast_chain.sh`, image
+tt-model/qwen3-5-122b-a10b:629859374c71): p300x2 1 user 30.2 (MTP) -> 7.6 ms, real text 45.9 (MTP) -> 131.8 tok/s,
+32 users 113.4 -> 45.1 ms (199 -> 347 tok/s total); p300x2-longctx real text 31.9 -> 131.9; TTFT equal or lower;
+evals (p300x2, `runs/q122ev_fast` vs q122ev_pub / q122gp_pub): GPQA-D 198 0.697 = 0.697, IFEval strict 0.85 -> 0.88,
+LCB 50 0.54 = 0.54; garble 3.3. Card committed 6a49acb93ca (q122_fusion), pushed by `runs/q122_publish.sh`.
+**32-bit rows top-k** (gdn_wip 32687bad143, cherry-picked to ornith_fusion c1f25770879 and coder_next_fusion
+bbc206b412e): scan keys carry the core-local column (16 bits suffice inside a core), the merge orders by value then
+device column (core first column + local) and writes UINT32 indices above 65536 columns. On device (`runs/topk32.sh`):
+op test exact at 2 dies x 124160 and 4 dies x 62080 (cross-core tie included), traced 108 us vs 674 us for pad +
+ttnn.topk on 2 dies (98 vs 355 on 4). Ornith p300 served (`runs/tk32_p300` vs ofix_p300, the 16-bit guard): 1 user
+8.55 -> 7.92 ms (117 -> 126 tok/s), 8 users 18.5 -> 17.6 ms, real text 116.4 -> 125.6 tok/s, garble 8.77 -> 4.48;
+p300x2 1 user 4.57 ms (4.55 before), garble 8.84 (devq 10.79); greedy 8/8 + 8/8 identical on both (greedy never uses
+the op). Note: compare greedy only between runs with the same thinking setting (milestone.sh / serve.sh = thinking
+off; card_bench.sh = the shipped default, thinking on for Ornith / 122B). Chain `runs/tk32_ports.sh`: Coder-Next 2-die
+op test + p300 check, then Ornith (package name now ornith-1.5-35b-a3b) and Coder-Next repackaged, p300 card rows
+re-measured + p300x2 spot rows; then cards, push into the fast repos. The 122B has no 2-die profile (unaffected).
+Next: present the fused MTP verify plan to the user. Hub smoke tests of all fast repos at the very end (user).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
