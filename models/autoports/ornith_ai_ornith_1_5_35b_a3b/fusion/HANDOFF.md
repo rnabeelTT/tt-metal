@@ -938,8 +938,17 @@ only at a later repackage), Coder-Next tt-model/qwen3-coder-next:e92083dded8f; 1
 (2026-10-27 01:05). Cards keep the four-die rows of the previous revision with a note giving this revision's spot rows.
 Tool note: bench.sh / greedy.py default MODEL_ID to Ornith: export MODEL_ID for other models (realtext.py now asks the
 server).
-Next: present the fused MTP verify plan to the user (`runs/mtp_stages.sh`: per-stage MTP pass times on the fused
-build, logged as MTP_STAGES). Hub smoke tests of all fast repos at the very end (user).
+**MTP pass on the fused build** (`runs/mtpst_k3`: Ornith p300x2, step-7 env + QWEN35_MTP=3, real text 1 user, greedy):
+real text 80.8 tok/s (plain fused 217.9); 3.06 tokens per pass (hist a = 0..3: 10 / 20 / 20 / 46 of 96), 32.7 ms per pass
+(device steps). Stage medians: verify pass (4 rows, unfused GDN prefill-form rows path) 21.2 ms; commit (re-runs the
+GDN rows for a + 1 accepted rows when a < 3, ~52 % of passes) 10.6 ms; draft 0.82 ms x 3; head rows 0.83 ms. A plain
+fused 4-user step is 7.2 ms, so the verify is ~3x what fused rows cost, and the commit exists only because the pass
+keeps no per-row GDN state. Fused verify target: 4 rows through the fused step (attention: rows as users sharing the
+page table at consecutive positions; GDN: one op looping the R tokens over the held state and writing the state after
+each row, so commit = pick a snapshot) ~ 7-9 ms + drafts 2.5 + rows 0.8 -> ~11-13 ms per 3.06 tokens = 235-280 tok/s
+vs 218 plain (+8..+28 %, greedy acceptance; sampled text accepts less). First check before any kernel: the verify
+with the fused GDN op chained once per row (upper bound on the GDN cost).
+Next: user decision on the fused MTP verify. Hub smoke tests of all fast repos at the very end (user).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
