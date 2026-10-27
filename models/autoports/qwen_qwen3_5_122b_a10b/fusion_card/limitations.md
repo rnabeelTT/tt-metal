@@ -5,6 +5,6 @@
   profiles run the same mesh but were not run on p150 boards.
 - The device sampler supports `top_k` up to 32.
 - Benchmark evals ran with thinking off; IFEval and LiveCodeBench on subsets (100 / 50 questions).
-- The published bundle's `-longctx` profiles do not start on this image (vLLM rejects a 2048-token chunk budget below
-  one image item's 4096 tokens); this bundle chunks at 4096. The published longctx numbers above were measured with
+- v1's `-longctx` profiles do not start on this image (vLLM rejects a 2048-token chunk budget below
+  one image item's 4096 tokens); this bundle chunks at 4096. The v1 longctx numbers above were measured with
   `--max-num-batched-tokens 4096` added.

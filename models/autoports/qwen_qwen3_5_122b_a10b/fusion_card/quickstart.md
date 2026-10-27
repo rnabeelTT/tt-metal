@@ -1,7 +1,7 @@
-### What blackhole-fast changes
-This is [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b) with its decode step
+### What changed since v1
+This is the v1 bundle ([raahemnabeel/qwen3-5-122b-a10b-v1](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b-v1)) with its decode step
 rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
-([raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast);
+([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b);
 Ornith serves through this model's code). Same checkpoint, same vLLM plugin build, same profiles and serving recipe;
 prefill is unchanged (TTFT equal or lower). The changes:
 
@@ -21,7 +21,7 @@ prefill is unchanged (TTFT equal or lower). The changes:
 7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
 
 MTP speculative decoding is off: its verify pass runs the unfused path, and the fused plain decode step is faster
-(1 user on chat text: 132 tok/s, vs 45.9 for the original with MTP).
+(1 user on chat text: 132 tok/s, vs 45.9 for v1 with MTP).
 
 Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
 reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and
@@ -33,13 +33,13 @@ Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-m
 0.26; older clients know it as `reasoning_content`) and the answer in `content`. Give thinking requests a large
 `max_tokens` (thousands): when the budget ends inside the think block, `content` is empty. Turn thinking off per
 request with `"chat_template_kwargs": {"enable_thinking": false}` for short, direct answers (the configuration the
-release gates and the published latency numbers were measured in). Without sampling parameters a request uses the
+release gates and the v1 latency numbers were measured in). Without sampling parameters a request uses the
 checkpoint's defaults (temperature 0.6, top_p 0.95, top_k 20); for thinking on constraint-heavy prompts the model
 card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
 Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
 
 ### Profiles - which one for which use case
-`tt-model serve raahemnabeel/qwen3-5-122b-a10b-blackhole-fast --profile <name>` (p300x2 names below; the same four exist
+`tt-model serve raahemnabeel/qwen3-5-122b-a10b --profile <name>` (p300x2 names below; the same four exist
 as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
 - `p300x2` (default) - interactive assistants and agents: one or a few users at a time who want the fastest answer.
   A single user gets about 132 tok/s on chat text; images and tool calls work; thinking on.

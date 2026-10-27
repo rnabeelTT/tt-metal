@@ -15,21 +15,21 @@ TOOLS = HERE.parents[1] / "ornith_ai_ornith_1_5_35b_a3b" / "fusion" / "tools"
 DESCRIPTION = (
     "Qwen3.5-122B-A10B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + "
     "gated attention, vision tower, MTP head) on four Blackhole dies through vLLM and the Tenstorrent plugin, with a "
-    "fused decode step: the published bundle (raahemnabeel/qwen3-5-122b-a10b) plus fused MoE, Gated DeltaNet, "
+    "fused decode step: the v1 bundle (raahemnabeel/qwen3-5-122b-a10b-v1) plus fused MoE, Gated DeltaNet, "
     "attention, layer-boundary and sampler decode ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B "
     "fusion. Same weights, profiles and serving recipe; prefill unchanged."
 )
 
 RELATED = (
-    "The bundle this builds on: [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b). "
-    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast]"
-    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast); engineering log "
+    "The v1 bundle this builds on: [raahemnabeel/qwen3-5-122b-a10b-v1](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b-v1). "
+    "The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b]"
+    "(https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log "
     "`models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `q122_fusion` branch of "
     "github.com/rnabeelTT/tt-metal."
 )
 
 # the published p300x2 profile decodes with MTP (one user), blackhole-fast without; p300x2-longctx is MTP off in both
-REALTEXT_P300X2 = "12 chat prompts x 384 output tokens, temperature 0, published with MTP, blackhole-fast without"
+REALTEXT_P300X2 = "12 chat prompts x 384 output tokens, temperature 0, v1 with MTP, current without"
 
 
 def block(key, text):
@@ -41,7 +41,7 @@ def main():
     profiles = sys.argv[1:] or ["p300x2"]
     tables = subprocess.run(
         [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_q122fast"), os.environ.get("PUB", "card_q122pub"), *profiles],
-        check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "published", "REALTEXT_DESC": REALTEXT_P300X2},
+        check=True, capture_output=True, text=True, env={**os.environ, "PUB_LABEL": "v1", "NEW_LABEL": "current", "REALTEXT_DESC": REALTEXT_P300X2},
     ).stdout
     head, sep, lc = tables.partition("#### longctx")
     lc = lc.replace(REALTEXT_P300X2, "12 chat prompts x 384 output tokens, temperature 0, MTP off in both")
