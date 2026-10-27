@@ -19,7 +19,7 @@ lower). The changes:
 6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm as one op over the fabric,
    with the next layer's input projection (or the MoE router) inside the same program; the MoE gate|up columns split
    across core pairs with readers off the congested NOC rows.
-7. **Sampler top-k over the live rows only** (four dies, 1-8 users), instead of all 32 slot rows.
+7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
 
 Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
 reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and DeltaNet ops

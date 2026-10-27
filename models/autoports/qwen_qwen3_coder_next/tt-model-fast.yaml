@@ -153,7 +153,7 @@ card:
     6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm as one op over the fabric,
        with the next layer's input projection (or the MoE router) inside the same program; the MoE gate|up columns split
        across core pairs with readers off the congested NOC rows.
-    7. **Sampler top-k over the live rows only** (four dies, 1-8 users), instead of all 32 slot rows.
+    7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
 
     Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
     reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and DeltaNet ops
@@ -207,10 +207,12 @@ card:
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
     | p300x2 | 128 | 128 | 1 | 4 | 173 | 742 | 179.3 | 0.88 |
     | p300x2 | 1024 | 256 | 32 | 128 | 6,182 | 166 | 18.9 | 19.68 |
-    | p300 | 128 | 128 | 1 | 4 | 191 | 670 | 109.2 | 1.35 |
-    | p300 | 1024 | 256 | 32 | 128 | 7,125 | 144 | 15.3 | 23.86 |
+    | p300 | 128 | 128 | 1 | 4 | 189 | 678 | 117.5 | 1.27 |
+    | p300 | 1024 | 256 | 32 | 128 | 7,126 | 144 | 15.3 | 23.89 |
 
     #### p300x2
+
+    Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 bits, for two dies). This revision, same setup: 1 user 5.60 ms TPOT, real text 177.7 tok/s, 8 users 12.66 ms, 32 users 1024/256 52.7 ms.
 
     Latency, batch 1 (single user): published -> blackhole-fast
 
@@ -252,39 +254,38 @@ card:
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 192 -> 191 | 668 -> 670 | 25.4 -> 9.2 | 39.4 -> **109.2** (+177 %) | 3.41 -> 1.35 |
-    | 1,024 | 256 | 385 -> 384 | 2,661 -> 2,670 | 25.4 -> 9.3 | 39.4 -> **107.8** (+173 %) | 6.86 -> 2.75 |
-    | 4,096 | 256 | 1,123 -> 1,122 | 3,647 -> 3,652 | 25.5 -> 9.5 | 39.2 -> **105.6** (+170 %) | 7.64 -> 3.53 |
-    | 16,384 | 256 | 4,490 -> 4,482 | 3,649 -> 3,656 | 25.8 -> 9.7 | 38.8 -> **103.0** (+166 %) | 11.07 -> 6.96 |
-    | 32,768 | 256 | 9,350 -> 9,344 | 3,505 -> 3,507 | 26.1 -> 10.0 | 38.3 -> **99.8** (+160 %) | 16.00 -> 11.90 |
-    | 65,536 | 256 | 20,185 -> 20,205 | 3,247 -> 3,244 | 26.7 -> 10.7 | 37.4 -> **93.7** (+150 %) | 27.00 -> 22.93 |
-    | 130,816 | 256 | 45,995 -> 45,943 | 2,844 -> 2,847 | 27.9 -> 11.8 | 35.8 -> **84.5** (+136 %) | 53.11 -> 48.96 |
+    | 128 | 128 | 192 -> 189 | 668 -> 678 | 25.4 -> 8.5 | 39.4 -> **117.5** (+198 %) | 3.41 -> 1.27 |
+    | 1,024 | 256 | 385 -> 383 | 2,661 -> 2,675 | 25.4 -> 8.6 | 39.4 -> **115.7** (+194 %) | 6.86 -> 2.59 |
+    | 4,096 | 256 | 1,123 -> 1,122 | 3,647 -> 3,650 | 25.5 -> 8.8 | 39.2 -> **113.3** (+189 %) | 7.64 -> 3.37 |
+    | 16,384 | 256 | 4,490 -> 4,486 | 3,649 -> 3,653 | 25.8 -> 9.1 | 38.8 -> **110.2** (+184 %) | 11.07 -> 6.80 |
+    | 32,768 | 256 | 9,350 -> 9,317 | 3,505 -> 3,517 | 26.1 -> 9.4 | 38.3 -> **106.6** (+178 %) | 16.00 -> 11.71 |
+    | 65,536 | 256 | 20,185 -> 20,173 | 3,247 -> 3,249 | 26.7 -> 10.0 | 37.4 -> **99.9** (+167 %) | 27.00 -> 22.73 |
+    | 130,816 | 256 | 45,995 -> 46,010 | 2,844 -> 2,843 | 27.9 -> 11.2 | 35.8 -> **89.5** (+150 %) | 53.11 -> 48.86 |
 
-    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 39.4 -> **109.0 tok/s** (+177 %).
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 39.4 -> **117.1 tok/s** (+197 %).
 
     Concurrency, 128 input / 128 output tokens: published -> blackhole-fast
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 2 | 8 | 374 -> 486 | 32.7 -> 11.8 | 30.6 -> 84.7 | 54.9 -> **129.2** (+135 %) | 4.74 -> 1.98 |
-    | 4 | 16 | 959 -> 974 | 41.4 -> 13.2 | 24.1 -> 75.9 | 82.3 -> **193.8** (+135 %) | 6.22 -> 2.65 |
-    | 8 | 32 | 1,693 -> 1,690 | 57.1 -> 18.0 | 17.5 -> 55.6 | 114.3 -> **258.1** (+126 %) | 8.96 -> 3.95 |
-    | 16 | 64 | 3,164 -> 3,147 | 89.4 -> 23.8 | 11.2 -> 41.9 | 141.1 -> **331.1** (+135 %) | 14.52 -> 6.18 |
-    | 32 | 128 | 6,054 -> 6,000 | 134.4 -> 47.6 | 7.4 -> 21.0 | 177.6 -> **340.8** (+92 %) | 23.08 -> 12.06 |
+    | 2 | 8 | 374 -> 482 | 32.7 -> 11.2 | 30.6 -> 89.6 | 54.9 -> **134.7** (+145 %) | 4.74 -> 1.90 |
+    | 4 | 16 | 959 -> 945 | 41.4 -> 12.8 | 24.1 -> 78.2 | 82.3 -> **199.1** (+142 %) | 6.22 -> 2.58 |
+    | 8 | 32 | 1,693 -> 1,687 | 57.1 -> 17.3 | 17.5 -> 57.8 | 114.3 -> **263.1** (+130 %) | 8.96 -> 3.89 |
+    | 16 | 64 | 3,164 -> 3,175 | 89.4 -> 23.7 | 11.2 -> 42.2 | 141.1 -> **332.9** (+136 %) | 14.52 -> 6.17 |
+    | 32 | 128 | 6,054 -> 5,943 | 134.4 -> 46.5 | 7.4 -> 21.5 | 177.6 -> **344.6** (+94 %) | 23.08 -> 11.86 |
 
     Concurrency, 1024 input / 256 output tokens: published -> blackhole-fast
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 2 | 8 | 866 -> 862 | 32.8 -> 11.3 | 30.5 -> 88.7 | 55.5 -> **137.0** (+147 %) | 9.22 -> 3.73 |
-    | 4 | 16 | 1,503 -> 1,506 | 42.1 -> 14.0 | 23.8 -> 71.4 | 83.8 -> **201.8** (+141 %) | 12.23 -> 5.09 |
-    | 8 | 32 | 2,653 -> 2,648 | 59.3 -> 19.7 | 16.9 -> 50.8 | 115.2 -> **268.8** (+133 %) | 17.79 -> 7.66 |
-    | 16 | 64 | 4,161 -> 4,168 | 97.7 -> 31.8 | 10.2 -> 31.4 | 140.9 -> **332.7** (+136 %) | 29.07 -> 12.29 |
-    | 32 | 128 | 7,135 -> 7,125 | 154.6 -> 65.5 | 6.5 -> 15.3 | 175.9 -> **342.8** (+95 %) | 46.55 -> 23.86 |
+    | 2 | 8 | 866 -> 861 | 32.8 -> 10.7 | 30.5 -> 93.6 | 55.5 -> **142.6** (+157 %) | 9.22 -> 3.59 |
+    | 4 | 16 | 1,503 -> 1,499 | 42.1 -> 13.3 | 23.8 -> 75.1 | 83.8 -> **210.3** (+151 %) | 12.23 -> 4.90 |
+    | 8 | 32 | 2,653 -> 2,631 | 59.3 -> 19.0 | 16.9 -> 52.7 | 115.2 -> **273.0** (+137 %) | 17.79 -> 7.49 |
+    | 16 | 64 | 4,161 -> 4,161 | 97.7 -> 31.0 | 10.2 -> 32.3 | 140.9 -> **338.8** (+140 %) | 29.07 -> 12.06 |
+    | 32 | 128 | 7,135 -> 7,126 | 154.6 -> 65.3 | 6.5 -> 15.3 | 175.9 -> **344.0** (+96 %) | 46.55 -> 23.89 |
   limitations: |
     - Two dies (`p300`, `p150x2`) run without the fabric layer boundary (its persistent receive buffers do not fit next to
-      the two-die prefill) and keep the stock sampler top-k (the live-rows top-k carries 16-bit vocabulary indices; a die's
-      vocabulary slice is 75968 columns on two dies).
+      the two-die prefill).
     - The device sampler supports `top_k` up to 32. This checkpoint's recommended default is `top_k 40`, which is clamped to
       32 rather than moved to host sampling.
     - Agentic benchmarks (SWE-Bench Verified, LiveCodeBench), which Qwen publishes for this checkpoint, were not run; the

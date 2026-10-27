@@ -33,14 +33,21 @@ def block(key, text):
     body = "\n".join(("    " + l) if l.strip() else "" for l in text.strip("\n").splitlines())
     return f"  {key}: |\n{body}\n"
 
+P300X2_NOTE = (
+    "Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 "
+    "bits, for two dies). This revision, same setup: 1 user 5.60 ms TPOT, real text 177.7 tok/s, 8 users 12.66 ms, "
+    "32 users 1024/256 52.7 ms."
+)
+
 
 def main():
     profiles = sys.argv[1:] or ["p300x2", "p300"]
     tables = subprocess.run(
-        [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_cnfast"), os.environ.get("PUB", "card_cnpub"), *profiles],
+        [sys.executable, str(TOOLS / "card_tables.py"), os.environ.get("NEW", "card_cnfast4"), os.environ.get("PUB", "card_cnpub"), *profiles],
         check=True, capture_output=True, text=True,
         env={**os.environ, "REALTEXT_DESC": "12 chat prompts x 384 output tokens, temperature 0", "PUB_LABEL": "published"},
     ).stdout
+    tables = tables.replace("#### p300x2\n", "#### p300x2\n\n" + P300X2_NOTE + "\n", 1)
     perf = (HERE / "performance_head.md").read_text() + "\n" + tables
     src = YAML.read_text()
     head = src[: src.index("\ncard:\n") + 1]
