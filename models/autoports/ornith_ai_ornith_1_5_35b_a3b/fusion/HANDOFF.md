@@ -971,7 +971,7 @@ over the per-request MTP_STATS summaries with `runs/mtp_acc.py`: the "running" l
   sampling is free on the plain path.
 At 2.70 tokens per pass, break-even is a 12.4 ms pass, +15 % needs <= 10.8 ms. Best design (verify on the fused 4-row
 step 7.18, multi-token GDN op +0.3..1.8, commit 0.47, three device-side sampled drafts ~2.25, head rows 0.83, one
-read-back + loop ~0.5..1): 11.5..13.4 ms -> 236..203 tok/s (+8..-7 %); +15 % only if every piece lands at its floor
+read-back + loop ~0.5..1): 11.5..13.5 ms -> 236..200 tok/s (+8..-8 %); +15 % only if every piece lands at its floor
 and the head rows fold into the first draft. Four kernel-sized pieces (multi-token GDN op with snapshots, fused verify
 with shared page-table rows, device-side draft + rejection-sampling accept in one trace, the serving loop) for an
 expected ~0 %, single user only.
