@@ -961,8 +961,26 @@ measured real-text greedy acceptance (3.06 tokens per pass), vs plain fused 217.
 - ceiling (GDN rows at the 4-user cost, no host time): 10.9 ms -> 282 tok/s (+29 %), which needs the multi-token
   GDN op AND drafts + accept on device in one trace (the 5.2 ms is three draft read-backs, the verify read-back and the
   serving loop); sampled requests accept fewer drafts than greedy.
-Decision (the >= 15 % bar agreed before the check): MTP stays off in the fast builds; no new GDN op.
-Next: hub smoke tests of all fast repos (the last step). Ornith's plain package name at its next repackage.
+Second look (user asked, 2026-10-27): acceptance under Ornith's own sampling and the plain baseline under the same
+settings (`runs/mtp_sampled.sh` / `mtp_sampled_off.sh`, Ornith p300x2, real text 12 x 384, 1 user; acceptance summed
+over the per-request MTP_STATS summaries with `runs/mtp_acc.py`: the "running" lines reset per request):
+- MTP k = 3, tokens per pass: greedy 2.82 (the 3.06 above was one short window), T 1.0 / top-k 20 / top-p 0.95 (the
+  generation_config) 2.71, T 0.6 2.70; served 80.6 / 70.1 / 63.1 tok/s. Sampled drafts cost 1.68 ms each (the candidate
+  read) vs 0.82 greedy.
+- Plain fused (QWEN35_MTP=0; milestone.sh does not apply the profile env, so pass it): 217.6 / 217.6 / 217.5 tok/s -
+  sampling is free on the plain path.
+At 2.70 tokens per pass, break-even is a 12.4 ms pass, +15 % needs <= 10.8 ms. Best design (verify on the fused 4-row
+step 7.18, multi-token GDN op +0.3..1.8, commit 0.47, three device-side sampled drafts ~2.25, head rows 0.83, one
+read-back + loop ~0.5..1): 11.5..13.4 ms -> 236..203 tok/s (+8..-7 %); +15 % only if every piece lands at its floor
+and the head rows fold into the first draft. Four kernel-sized pieces (multi-token GDN op with snapshots, fused verify
+with shared page-table rows, device-side draft + rejection-sampling accept in one trace, the serving loop) for an
+expected ~0 %, single user only.
+Decision (the >= 15 % bar, confirmed by the second look): MTP stays off in the fast builds; no MTP work.
+**Final hub smoke (2026-10-27, `runs/final_hub_smoke.sh`):** each -blackhole-fast repo freshly `tt-model pull`ed (the box
+held older installs and card_bench serves with --no-update-check: pull first), served on p300x2, greedy vs its card
+run: Ornith (a7e5b6904100) 8/8 identical, real text 217.3 tok/s; Coder-Next (e92083dded8f) 8/8, 177.3; 122B
+(4973b43968a8) 8/8, 131.7; Coder-30B (8b91e57afdd3) 8/8, 95.5.
+Open: Ornith's plain package name at its next repackage (not urgent).
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
