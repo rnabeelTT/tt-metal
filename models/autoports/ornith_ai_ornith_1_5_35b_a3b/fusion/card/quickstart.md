@@ -1,7 +1,7 @@
-### What blackhole-fast changes
-This is [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b) with its decode step
+### What changed since v1
+This is the v1 bundle ([raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1)) with its decode step
 rebuilt around fused kernels. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is the
-original's (TTFT equal or lower). The changes, in the order they were made (each measured, kept only if it won):
+v1's (TTFT equal or lower). The changes, in the order they were made (each measured, kept only if it won):
 
 1. **Router.** One 1D matmul (was DRAM-sharded on 8 cores); top-8 + softmax + shared-gate sigmoid on the RISC cores in
    one op instead of a 7-op chain.
@@ -28,7 +28,7 @@ matmul reads), activations / routing weights rounded to the 7 bits the matmul's 
 and DeltaNet ops sum in a different order than the op chain they replace. Output quality is checked below.
 
 On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout, so those profiles keep the
-original MoE and gain only the fused router top-k (1-row steps), with MTP on as in the original.
+v1 MoE and gain only the fused router top-k (1-row steps), with MTP on as in v1.
 
 ### Use with your client
 Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -38,10 +38,10 @@ large `max_tokens`. Tool calls use the `qwen3_xml` parser. Images (up to 4 per r
 `image_url` parts on the multi-die profiles.
 
 ### Profiles
-`tt-model serve raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast --profile <name>`:
+`tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile <name>`:
 - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images (no fabric boundary: its receive buffers do
   not fit next to the two-die prefill).
 - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
-- `p150` / `p100` - one die, bfp4 routed experts, text only (original MoE, MTP on).
+- `p150` / `p100` - one die, bfp4 routed experts, text only (v1 MoE, MTP on).
 
 Every profile: 32 concurrent sequences, 262144-token context.

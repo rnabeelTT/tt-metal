@@ -1,5 +1,5 @@
-# tt-model container (v5.1) manifest for Ornith-1.5-35B-A3B "blackhole-fast" on Blackhole: the v2 bundle
-# (raahemnabeel/ornith-1.5-35b-a3b, this directory's tt-model.yaml) plus the fused decode work of fusion/HANDOFF.md:
+# tt-model container (v5.1) manifest for Ornith-1.5-35B-A3B on Blackhole (the fused-decode "blackhole-fast" build, now
+# the current bundle): the v1 bundle (raahemnabeel/ornith-1.5-35b-a3b-v1, this directory's tt-model.yaml) plus the fused decode work of fusion/HANDOFF.md:
 # - steps 1-3: the routed + shared experts in three ops streaming the expert weights in place for every decode width
 #   (1..32 rows), and the replicated-residual decode boundary (one all-reduce per mixer / MoE);
 # - steps 4-6: the Gated DeltaNet decode mixer as two generic_op programs (conv; gates + norms + recurrent state update
@@ -8,12 +8,13 @@
 #   router inside the boundary's program, the sampler's rows top-k, the MoE split-pair gate|up with off-row readers,
 #   the GDN head value split.
 # MTP off on the multi-die profiles (the MTP verify pass keeps the unfused path: plain fused decode is ~2x faster on
-# real text). Same weights, same plugin build; the one fast repo (its earlier revisions stay in the Hub history).
+# real text). Same weights, same plugin build. Published as the model's main repo (renamed from
+# raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast 2026-10-27; its earlier revisions stay in the Hub history).
 # Authoring interface of `tt-model package --container models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt-model-fast.yaml`.
 schema: "5.1"
 
-repo: raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast
-name: ornith-1.5-35b-a3b-blackhole-fast
+repo: raahemnabeel/ornith-1.5-35b-a3b
+name: ornith-1.5-35b-a3b
 # weights stay a pointer: the exact HF snapshot every check of this port ran against
 weights: {repo: ornith-ai/Ornith-1.5-35B-A3B, revision: 10fbf86fed7ecee4a061f8b499a618f46001cac1}
 kind: vllm-plugin
@@ -141,12 +142,12 @@ verify:
 
 card:
   description: >
-    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the original bundle (raahemnabeel/ornith-1.5-35b-a3b) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode ops for 1-32 concurrent users. Same weights, profiles and serving recipe; on four dies single-user decode 45 -> 220 tok/s and 32-user output 346 -> 591 tok/s, prefill unchanged or faster.
+    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the v1 bundle (raahemnabeel/ornith-1.5-35b-a3b-v1) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode ops for 1-32 concurrent users. Same weights, profiles and serving recipe; on four dies single-user decode 45 -> 220 tok/s and 32-user output 346 -> 591 tok/s, prefill unchanged or faster.
   quickstart: |
-    ### What blackhole-fast changes
-    This is [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b) with its decode step
+    ### What changed since v1
+    This is the v1 bundle ([raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1)) with its decode step
     rebuilt around fused kernels. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is the
-    original's (TTFT equal or lower). The changes, in the order they were made (each measured, kept only if it won):
+    v1's (TTFT equal or lower). The changes, in the order they were made (each measured, kept only if it won):
 
     1. **Router.** One 1D matmul (was DRAM-sharded on 8 cores); top-8 + softmax + shared-gate sigmoid on the RISC cores in
        one op instead of a 7-op chain.
@@ -173,7 +174,7 @@ card:
     and DeltaNet ops sum in a different order than the op chain they replace. Output quality is checked below.
 
     On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout, so those profiles keep the
-    original MoE and gain only the fused router top-k (1-row steps), with MTP on as in the original.
+    v1 MoE and gain only the fused router top-k (1-row steps), with MTP on as in v1.
 
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -183,31 +184,31 @@ card:
     `image_url` parts on the multi-die profiles.
 
     ### Profiles
-    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b-blackhole-fast --profile <name>`:
+    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile <name>`:
     - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images (no fabric boundary: its receive buffers do
       not fit next to the two-die prefill).
     - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
-    - `p150` / `p100` - one die, bfp4 routed experts, text only (original MoE, MTP on).
+    - `p150` / `p100` - one die, bfp4 routed experts, text only (v1 MoE, MTP on).
 
     Every profile: 32 concurrent sequences, 262144-token context.
   performance: |
     ### Accuracy
     Benchmark evals through the served API (p300 profile, thinking off, one sample per question, seed 42, temperature 0.6 /
-    top_p 0.95 / top_k 20, lm-evaluation-harness), the same settings and box as the original bundle's run:
+    top_p 0.95 / top_k 20, lm-evaluation-harness), the same settings and box as the v1 bundle's run:
 
-    | Eval | original | blackhole-fast |
+    | Eval | v1 | current |
     | --- | ---: | ---: |
     | GPQA-Diamond (40 questions) | 0.775 | 0.675 |
     | IFEval prompt-level strict (100) | 0.76 | 0.82 |
     | LiveCodeBench v6 (50) | 0.36 | 0.40 |
 
     All within the error bars of these subset sizes (GPQA +-0.07, IFEval +-0.04, LiveCodeBench +-0.07): no measurable
-    quality change. The whole GPQA-Diamond set (198 questions, same settings) scores 0.707 +-0.032 on blackhole-fast; the
+    quality change. The whole GPQA-Diamond set (198 questions, same settings) scores 0.707 +-0.032 on this bundle; the
     same build scored 0.75 on the first 40 questions in that run (0.675 in the subset run above), the spread one sample
     per question gives at n = 40. Layer-level PCC against Hugging Face (real weights): decode >= 0.9999 at 1 user,
     per-user minimum >= 0.9999 at 32 users.
 
-    Teacher forcing against the Hugging Face bf16 model (original bundle; 100 greedy tokens, top-1 / top-5 / top-100):
+    Teacher forcing against the Hugging Face bf16 model (v1 bundle; 100 greedy tokens, top-1 / top-5 / top-100):
 
     | profile | code chat prompt | 2048-token book prompt |
     | --- | --- | --- |
@@ -219,10 +220,10 @@ card:
     Measured 2026-10-25 on one QuietBox 2 (4 Blackhole p300c dies; p300 and p150 rows on a subset of it), both bundles
     served exactly as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of
     exactly the input length, output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop;
-    TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. The original
-    runs MTP speculative decoding while one request is live (its single-user rows include it); blackhole-fast runs plain
+    TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. v1
+    runs MTP speculative decoding while one request is live (its single-user rows include it); this bundle runs plain
     decode on the multi-die profiles. The real-text row (12 chat prompts, 384 output tokens, temperature 0) shows
-    single-user speed on predictable text, where MTP helps the original most. Each cell is `original -> blackhole-fast`.
+    single-user speed on predictable text, where MTP helps v1 most. Each cell is `v1 -> current`.
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -236,7 +237,7 @@ card:
 
     Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 bits, for two dies). This revision, same setup: 1 user 4.57 ms TPOT, real text 217.4 tok/s, 8 users 9.71 ms, 32 users 1024/256 24.2 ms.
 
-    Latency, batch 1 (single user): original -> blackhole-fast
+    Latency, batch 1 (single user): v1 -> current
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -250,7 +251,7 @@ card:
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 58.5 -> **217.9 tok/s** (+272 %).
 
-    Concurrency, 128 input / 128 output tokens: original -> blackhole-fast
+    Concurrency, 128 input / 128 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -260,7 +261,7 @@ card:
     | 16 | 64 | 2,112 -> 2,052 | 55.1 -> 13.7 | 18.2 -> 73.2 | 225.0 -> **541.5** (+141 %) | 9.11 -> 3.77 |
     | 32 | 128 | 3,975 -> 3,927 | 62.0 -> 24.0 | 16.1 -> 41.7 | 345.8 -> **591.1** (+71 %) | 11.84 -> 6.96 |
 
-    Concurrency, 1024 input / 256 output tokens: original -> blackhole-fast
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -272,7 +273,7 @@ card:
 
     #### p300
 
-    Latency, batch 1 (single user): original -> blackhole-fast
+    Latency, batch 1 (single user): v1 -> current
 
     | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -286,7 +287,7 @@ card:
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 52.6 -> **125.6 tok/s** (+139 %).
 
-    Concurrency, 128 input / 128 output tokens: original -> blackhole-fast
+    Concurrency, 128 input / 128 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -296,7 +297,7 @@ card:
     | 16 | 64 | 2,264 -> 2,288 | 75.3 -> 24.7 | 13.3 -> 40.5 | 172.8 -> **378.2** (+119 %) | 11.85 -> 5.40 |
     | 32 | 128 | 4,315 -> 4,226 | 84.8 -> 40.6 | 11.8 -> 24.6 | 270.8 -> **437.8** (+62 %) | 15.07 -> 9.36 |
 
-    Concurrency, 1024 input / 256 output tokens: original -> blackhole-fast
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -308,11 +309,11 @@ card:
 
     #### p150
 
-    One die keeps the original decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or more dies, and the replicated boundary needs a mesh): p150 decode is the original MoE plus the fused router top-k on 1-row steps, MTP on, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not repeat on one die (15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs of the original); the original card's p150 latency rows still describe this bundle.
+    One die keeps the v1 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or more dies, and the replicated boundary needs a mesh): p150 decode is the v1 MoE plus the fused router top-k on 1-row steps, MTP on, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not repeat on one die (15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs of v1); the v1 card's p150 latency rows still describe this bundle.
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 42.6 -> **44.1 tok/s** (+4 %).
 
-    Concurrency, 128 input / 128 output tokens: original -> blackhole-fast
+    Concurrency, 128 input / 128 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -322,7 +323,7 @@ card:
     | 16 | 64 | 2,715 -> 2,711 | 100.4 -> 100.4 | 10.0 -> 10.0 | 132.4 -> **132.4** (+0 %) | 15.47 -> 15.47 |
     | 32 | 128 | 5,244 -> 5,219 | 120.2 -> 120.2 | 8.3 -> 8.3 | 200.0 -> **200.0** (+0 %) | 20.51 -> 20.47 |
 
-    Concurrency, 1024 input / 256 output tokens: original -> blackhole-fast
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
 
     | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
     | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -337,11 +338,11 @@ card:
       multi-token verify is the way back to MTP.
     - Two dies (`p300`, `p150x2`) run without the fabric layer boundary: its persistent receive buffers do not fit next to
       the two-die prefill's circular buffers.
-    - One die (`p150`, `p100`) keeps the original MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
+    - One die (`p150`, `p100`) keeps the v1 MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
       expert, one die holds 4 (and p100 has 7 banks).
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - The device sampler supports `top_k` up to 32.
     - Benchmark evals ran on subsets (40 / 100 / 50 questions, plus the full 198-question GPQA-Diamond for this build) on the
       p300 profile only.
   related: >
-    The original bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b). Engineering log with every measurement: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `ornith_fusion` branch of github.com/rnabeelTT/tt-metal.
+    The v1 bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1). Engineering log with every measurement: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `ornith_fusion` branch of github.com/rnabeelTT/tt-metal.

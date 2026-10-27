@@ -3,7 +3,7 @@
   multi-token verify is the way back to MTP.
 - Two dies (`p300`, `p150x2`) run without the fabric layer boundary: its persistent receive buffers do not fit next to
   the two-die prefill's circular buffers.
-- One die (`p150`, `p100`) keeps the original MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
+- One die (`p150`, `p100`) keeps the v1 MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
   expert, one die holds 4 (and p100 has 7 banks).
 - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
 - The device sampler supports `top_k` up to 32.
