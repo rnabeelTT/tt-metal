@@ -660,6 +660,10 @@ class MtpServing:
                 f"MTP_STATS ({why}): {st['passes']} passes, {st['tokens']} tokens = {st['tokens'] / st['passes']:.2f} per pass, "
                 f"acceptance hist {st['hist']}, {ms:.1f} ms per pass -> {st['tokens'] / st['wall']:.1f} tok/s (device steps only)"
             )
+            tm = getattr(self.runner, "timing", None)
+            if tm:  # per-stage wall time (each stage ends in a host read / sync), median over the last 256 calls
+                med = {k: sorted(v[-256:])[len(v[-256:]) // 2] * 1e3 for k, v in tm.items() if v}
+                logger.info("MTP_STAGES (ms, median; calls): " + ", ".join(f"{k} {m:.2f}; {len(tm[k])}" for k, m in med.items()))
 
     def end_prefill(self, tok0, P, slots=None):
         """Single user: (tok0, P) scalars. Multi: lists per prefilled request with their slots."""
