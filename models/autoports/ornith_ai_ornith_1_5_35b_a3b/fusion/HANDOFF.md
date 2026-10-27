@@ -948,7 +948,21 @@ page table at consecutive positions; GDN: one op looping the R tokens over the h
 each row, so commit = pick a snapshot) ~ 7-9 ms + drafts 2.5 + rows 0.8 -> ~11-13 ms per 3.06 tokens = 235-280 tok/s
 vs 218 plain (+8..+28 %, greedy acceptance; sampled text accepts less). First check before any kernel: the verify
 with the fused GDN op chained once per row (upper bound on the GDN cost).
-Next: user decision on the fused MTP verify. Hub smoke tests of all fast repos at the very end (user).
+**Fused MTP verify: measured, not built** (2026-10-27, user go-ahead for the check). One die, Ornith TP4 GDN shapes,
+traced replays (`tests/bench_gdn_rows_chain.py`): GDN decode ops over 4 users 40.5 us, 1 user 34.9 us; 4 sequential
+rows of one user chained on the B=1 op (row slice, op, state + conv-carry snapshot after rows 0..2, concat) 271.3 us
+(+231 us per GDN layer, x 30 = +6.9 ms per pass); commit = restore one snapshot 23.0 us (x 30 = 0.7 ms, ~52 % of
+passes). Served p300x2 128/128 (card_fast_p300x2): 1 / 2 / 4 users 4.55 / 6.69 / 7.18 ms. Per-pass budget at the
+measured real-text greedy acceptance (3.06 tokens per pass), vs plain fused 217.9 tok/s:
+- chained GDN (the upper bound): 7.18 + 6.9 verify + 0.4 commit + 2.46 drafts + 0.83 head rows + 5.2 host = 23.0 ms
+  -> 133 tok/s (-39 %); with no host time 17.8 ms -> 172 tok/s (-21 %).
+- a multi-token GDN op (rows looped in the kernel on the 32 cores one user gets, ~4 x 25 us per row of compute: about
+  +2 ms per pass): 18.2 ms -> 168 tok/s (-23 %); host time cut to 1 ms: 14.0 ms -> 219 tok/s (+0.5 %).
+- ceiling (GDN rows at the 4-user cost, no host time): 10.9 ms -> 282 tok/s (+29 %), which needs the multi-token
+  GDN op AND drafts + accept on device in one trace (the 5.2 ms is three draft read-backs, the verify read-back and the
+  serving loop); sampled requests accept fewer drafts than greedy.
+Decision (the >= 15 % bar agreed before the check): MTP stays off in the fast builds; no new GDN op.
+Next: hub smoke tests of all fast repos (the last step). Ornith's plain package name at its next repackage.
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
