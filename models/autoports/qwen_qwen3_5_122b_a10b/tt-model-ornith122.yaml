@@ -174,6 +174,134 @@ verify:
 
 card:
   description: >
-    ornith-ai/Ornith-1.5-122B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated
-    DeltaNet + gated attention, vision tower) on four Blackhole dies through vLLM and the Tenstorrent plugin, with the
-    fused decode step of the Qwen3.5-122B-A10B / Ornith-1.5-35B-A3B Blackhole bundles. PLACEHOLDER: measurements pending.
+    ornith-ai/Ornith-1.5-122B (122B total / 10B active MoE: 256 experts, top-8 + shared expert, 48 layers of Gated DeltaNet + gated attention, vision tower) on four Blackhole dies through vLLM and the Tenstorrent plugin, served by the fused-decode code of the Qwen3.5-122B-A10B Blackhole bundle (same architecture): about 132 tok/s for one user on chat text, 21 tok/s each for 32 concurrent users, 262144-token context, text + images, tool calls, thinking on.
+  quickstart: |
+    ### What this is
+    [ornith-ai/Ornith-1.5-122B](https://huggingface.co/ornith-ai/Ornith-1.5-122B) has the Qwen3.5-122B-A10B architecture
+    (`Qwen3_5MoeForConditionalGeneration`: 256 experts top-8 + shared expert, 48 layers of Gated DeltaNet and gated
+    attention, vision tower, MTP head; every config shape and all 1949 tensor names match). It is served here by the code
+    of the Qwen3.5-122B-A10B Blackhole bundle ([raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b)),
+    unchanged: same fused decode step, same profiles and serving recipe; only the checkpoint differs. The decode step:
+
+    1. **Fused MoE decode.** Router top-8 + softmax + shared-gate in one op; routed + shared experts in three ops that
+       stream each selected expert's weights in place, for every decode width from 1 to 32 rows.
+    2. **Layer boundary.** The decode residual stays replicated on every die; for 1-4 users the all-reduce, residual add
+       and RMSNorm run as one fabric op with the next layer's input projection (or the MoE router) inside its program.
+    3. **Gated DeltaNet decode mixer** as two programs (causal conv; gates + norms + recurrent state update + gated norm).
+    4. **Attention decode ops** around the QKV matmul, cache update and SDPA decode.
+    5. **Sampler top-k over the live rows only** (1-8 users).
+
+    MTP speculative decoding is off: its verify pass runs the unfused path, and the fused plain decode step is faster.
+
+    Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
+    reads; bfp4 routed experts as in the Qwen3.5-122B bundle's precision policy), activations / routing weights rounded to
+    the 7 bits the matmul's other operand reads. Output quality is checked below.
+
+    ### Use with your client
+    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
+    `ornith-ai/Ornith-1.5-122B`. Thinking is ON by default (the model is a reasoning model): the reasoning arrives in the
+    message's `reasoning` field (vLLM 0.26; older clients know it as `reasoning_content`) and the answer in `content`.
+    Give thinking requests a large `max_tokens` (thousands): when the budget ends inside the think block, `content` is
+    empty. Turn thinking off per request with `"chat_template_kwargs": {"enable_thinking": false}`. Without sampling
+    parameters a request uses the checkpoint's defaults (temperature 0.6, top_p 0.95, top_k 20); the model card recommends
+    temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5 for general tasks and temperature 0.6 for precise coding.
+    Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
+
+    ### Profiles - which one for which use case
+    `tt-model serve raahemnabeel/ornith-1.5-122b --profile <name>` (p300x2 names below; the same four exist as
+    `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
+    - `p300x2` (default) - interactive assistants and agents: a single user gets about 132 tok/s on chat text; images and
+      tool calls work; thinking on.
+    - `p300x2-burst` - many short prompts arriving together: up to four prompts are prefilled per pass (faster first token
+      for bursts, same decode speed); a request's first token can then depend on what arrived with it.
+    - `p300x2-longctx` - very long prompts mixed with short ones: prefill runs in 4096-token chunks shared between prompts
+      (about 132 tok/s for a lone user); running users still pause while prefill chunks run.
+    - `p300x2-text` - text only: the vision tower is not loaded, giving a larger KV pool; image requests are rejected.
+  performance: |
+    ### Accuracy
+    Evaluated on the served bundle (p300x2, thinking off, one sample per question, seed 42, temperature 0.6 / top_p 0.95 /
+    top_k 20, lm-evaluation-harness through the chat API), next to the Qwen3.5-122B-A10B bundle on the same code, box and
+    settings:
+
+    | Eval | Ornith-1.5-122B | Qwen3.5-122B-A10B |
+    | --- | ---: | ---: |
+    | GPQA-Diamond (all 198 questions) | 0.712 ±0.032 | 0.697 |
+    | IFEval prompt-level strict (100) | 0.76 ±0.043 | 0.88 |
+    | IFEval prompt-level loose (100) | 0.79 ±0.041 | 0.93 |
+    | LiveCodeBench v6 (50) | 0.52 ±0.071 | 0.54 |
+
+    The IFEval misses are instruction-following misses in fluent text (exact sentence counts, keyword / letter frequencies,
+    all-caps or all-lowercase replies with an added Markdown heading), not corrupted output; the smaller Ornith-1.5-35B-A3B
+    scores 0.76-0.82 on the same harness and box. The model card's own benchmarks (agentic coding and tool use) were not
+    reproduced here.
+
+    Layer-level PCC against Hugging Face on the Ornith-1.5-122B weights (4 dies, shipped precision policy, fused decode):
+    Gated DeltaNet decode 0.99933 (prefill 0.99624), attention decode 0.99406 (prefill 0.99332); 32 concurrent users,
+    worst user 0.99717 (DeltaNet) / 0.99530 (attention) - the same as the Qwen3.5-122B-A10B checkpoint on this code
+    (0.99965 / 0.99471, worst users 0.99719 / 0.99532). Sampled long-context text (6 samples at temperature 0.6): coherent;
+    the probe's 8.9 flagged words per 1k are all real technical terms (quantize, outliers, dimensionality, embeddings).
+
+    ### Performance
+    Measured on one QuietBox 2 (4 Blackhole p300c dies), 2026-10-27, the bundle served exactly as shipped
+    (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of exactly the input length,
+    output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop; TTFT = time to first streamed
+    token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row; total output tok/s includes prefill. The
+    right-hand column is the Qwen3.5-122B-A10B bundle on the same code (2026-10-26) for reference.
+
+    #### p300x2 (default profile)
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0, median per prompt): **131.7 tok/s** (Qwen3.5-122B-A10B on the same code: 131.8).
+
+    Latency, batch 1 (single user)
+
+    | input tokens | TTFT ms | TPOT ms | decode tok/s | Qwen3.5-122B TPOT ms |
+    | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 230 | 7.51 | 133.1 | 7.64 |
+    | 1024 | 446 | 7.69 | 130.1 | 7.70 |
+    | 4096 | 1111 | 7.86 | 127.2 | 7.88 |
+    | 16384 | 4395 | 8.10 | 123.5 | 8.10 |
+    | 32768 | 9075 | 8.42 | 118.8 | 8.44 |
+    | 65536 | 19275 | 9.02 | 110.9 | 9.03 |
+    | 130816 | 43101 | 10.12 | 98.9 | 10.17 |
+
+    Concurrency, 128 input / 128 output tokens
+
+    | users | TPOT ms | tok/s per user | total output tok/s | TTFT ms | Qwen3.5-122B TPOT ms |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 7.51 | 133.1 | 108.3 | 230 | 7.64 |
+    | 2 | 12.63 | 79.2 | 121.1 | 506 | 12.71 |
+    | 4 | 16.63 | 60.1 | 164.6 | 1003 | 16.58 |
+    | 8 | 24.60 | 40.7 | 211.9 | 1753 | 25.52 |
+    | 16 | 36.53 | 27.4 | 260.8 | 3208 | 35.19 |
+    | 32 | 46.05 | 21.7 | 342.6 | 6157 | 45.14 |
+
+    Concurrency, 1024 input / 256 output tokens
+
+    | users | TPOT ms | tok/s per user | total output tok/s | TTFT ms | Qwen3.5-122B TPOT ms |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 7.69 | 130.1 | 106.4 | 446 | 7.70 |
+    | 2 | 12.19 | 82.1 | 128.8 | 866 | 12.03 |
+    | 4 | 16.73 | 59.8 | 171.9 | 1726 | 16.84 |
+    | 8 | 26.12 | 38.3 | 210.3 | 3202 | 25.25 |
+    | 16 | 36.89 | 27.1 | 264.5 | 6166 | 36.44 |
+    | 32 | 47.09 | 21.2 | 343.8 | 12072 | 46.83 |
+
+    #### p300x2-longctx (chunked prefill at 4096 tokens)
+
+    Real text, single user: **131.9 tok/s**.
+
+    | input tokens | TTFT ms | TPOT ms |
+    | ---: | ---: | ---: |
+    | 128 | 219 | 7.54 |
+    | 2048 | 596 | 7.71 |
+  limitations: |
+    - MTP speculative decoding is off: the MTP verify pass still runs the unfused rows path, which is slower than the fused
+      plain step.
+    - The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
+      and `-text` profiles run the same decode code; the p150x4 profiles run the same mesh but were not run on p150 boards.
+    - The device sampler supports `top_k` up to 32.
+    - Benchmark evals ran with thinking off; IFEval and LiveCodeBench on subsets (100 / 50 questions). The model card's own
+      benchmarks (agentic coding and tool use) were not reproduced here.
+    - The first start converts the 250 GB bf16 checkpoint and takes about 20 minutes on p300x2; later starts about 14.
+  related: >
+    Same code, Qwen checkpoint: [raahemnabeel/qwen3-5-122b-a10b](https://huggingface.co/raahemnabeel/qwen3-5-122b-a10b). Smaller sibling: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b). Engineering log: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `ornith122_fusion` branch of github.com/rnabeelTT/tt-metal.
