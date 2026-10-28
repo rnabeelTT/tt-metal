@@ -1069,8 +1069,11 @@ Coder-Next thinking-chat turn 4). The Ornith-35B one (`runs/pc_o35_chat_{on,off}
 Likely cause: those turns resume at 8192 on KV blocks that turn 1 wrote inside its partial last segment, which a cold
 run computes inside a full segment (last-bit prefill numerics; vLLM keeps the first cached copy of a block, as with
 decode-written blocks; GPU prefix caching has the same property). Restored GDN state itself is exact.
+p300 (2 dies, `runs/pc_chain5.sh`, caching on): Ornith-35B 16 snapshots x 45.0 MiB per die, resent 27k prompt 5.78 ->
+0.37 s, chat turns 2-4 0.45-0.55 s after 1.62 s; Coder-Next 16 x 54.0 MiB, resent 25k 7.70 -> 0.53 s, chat 0.62 s after
+2.35 s; repeats identical. p150 / p100 profiles keep MTP on, so caching stays off there (the model declares no support).
 Next: rebuild the four fast images with the branch (manifests already pass `--enable-prefix-caching`), Hub smoke,
-publish on the user's go-ahead; p300 / p150 profiles (slots and budget scale with the dies) still to be run.
+publish on the user's go-ahead.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
