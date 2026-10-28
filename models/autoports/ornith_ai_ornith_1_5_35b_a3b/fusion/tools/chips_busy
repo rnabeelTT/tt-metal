@@ -1,0 +1,10 @@
+#!/bin/bash
+# exit 0 when something holds the chips: a tt-model-* container, or any running container (other than TT Studio's own
+# tt_studio_* services) that maps or mounts /dev/tenstorrent. Eval harness containers (SearXNG, SWE-bench, sandboxes,
+# buildkit) do neither and do not count.
+for c in $(docker ps --format '{{.Names}}' | grep -v '^tt_studio_'); do
+  [[ $c == tt-model-* ]] && exit 0
+  docker inspect -f '{{range .HostConfig.Devices}}{{.PathOnHost}} {{end}}{{range .Mounts}}{{.Source}} {{end}}' "$c" 2>/dev/null \
+    | grep -q "/dev/tenstorrent" && exit 0
+done
+exit 1
