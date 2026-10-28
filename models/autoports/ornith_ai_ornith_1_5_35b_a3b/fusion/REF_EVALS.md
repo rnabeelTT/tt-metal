@@ -26,20 +26,20 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | GPQA Diamond | 89.2 | | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
 | HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 33.4 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
-| Terminal-Bench 2.1 (Terminus-2) | 67.8 | | setup | Harbor/Terminus-2; card: 32 CPU / 48 GB per task |
-| Terminal-Bench 2.1 (Claude Code) | 68.5 | | setup | |
-| SWE-bench Verified | 79 | | setup | OpenHands per card |
-| SWE-bench Pro | 59.6 | | setup | |
-| SWE-bench Multilingual | 71.4 | | setup | |
-| DeepSWE | 22 | | setup | feasibility check |
-| Frontier-Bench v0.1 | 5.1 | | setup | feasibility check |
-| NL2Repo | 46.2 | | setup | feasibility check |
-| SWE Atlas - QnA | 39.8 | | setup | feasibility check |
-| MCP-Atlas | 70.2 | | setup | feasibility check (Claude judge) |
-| Toolathlon-Verified | 48.7 | | setup | feasibility check (official service) |
+| Terminal-Bench 2.1 (Terminus-2) | 67.8 | | staged | Harbor 0.25 + Terminus-2 json, T1.0/top_p 1.0, 128K, 4 h; 8 CPU per task (card 32), 1 run (card 5) |
+| Terminal-Bench 2.1 (Claude Code) | 68.5 | | ready | Harbor + Claude Code 2.1.126 via /v1/messages; not yet tested end to end |
+| SWE-bench Verified | 79 | | staged | OpenHands SDK, T1.0/top_p 0.95, 256K, no network, git history squashed; official swebench 5.0.2 evaluator |
+| SWE-bench Pro | 59.6 | | staged | Pro v1 (731, as the cards); OpenHands; Scale evaluator; fix-commit refs removed |
+| SWE-bench Multilingual | 71.4 | | staged | OpenHands, as Verified |
+| DeepSWE | 22 | | open | Datacurve DeepSWE 113 tasks, public; Pier/Harbor + Claude Code; medium setup |
+| Frontier-Bench v0.1 | 5.1 | | open | = terminal-bench@3.0.0 (74 tasks); 6 need an H100, so at most 68/74 |
+| NL2Repo | 46.2 | | open | public, but per-task test images not found; card used 400K context (we serve 262K) |
+| SWE Atlas - QnA | 39.8 | | open | public; Harbor + mini-swe-agent (as the card); rubric judged by Claude; easy setup |
+| MCP-Atlas | 70.2 | | open | 500 public tasks; 16 of 36 MCP servers need SaaS keys; claim-level judge |
+| Toolathlon-Verified | 48.7 | | open | official evaluation service (180 min/IP/day quota) or ~8 SaaS accounts to self-host |
 | WideSearch | 67.8 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
 | BrowseComp | 67.6 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
-| ClawEval | 72.5 | | setup | feasibility check |
+| ClawEval | 72.5 | | open | = Claw-Eval (MIT, 300 tasks); own harness; rubric judge (Claude) |
 
 ## Ornith-1.5-122B (card: ornith-ai/Ornith-1.5-122B)
 
@@ -48,27 +48,27 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | SciCode | 53.8 | | queued | official harness (inspect), test split 288 subproblems, with background, subproblem pass@1 (AA protocol); runs first |
 | HLE (w/o tools) | 37.68 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 48.0 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
-| TerminalBench 2.1 | 81.2 | | setup | |
-| CyberGym | 80.0 | | setup | feasibility check |
-| NL2Repo | 51.2 | | setup | feasibility check |
-| SWE-bench Pro (no-hack) | 76.9 | | setup | OpenHands per card |
-| SWE-bench Verified (non-hack) | 84.5 | | setup | |
-| SWE-bench Multilingual (non-hack) | 76.4 | | setup | |
+| TerminalBench 2.1 | 81.2 | | staged | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
+| CyberGym | 80.0 | | open | 1,507 tasks (~10 TB of images): full set infeasible; a subset is not comparable |
+| NL2Repo | 51.2 | | open | see Ornith-35B |
+| SWE-bench Pro (no-hack) | 76.9 | | staged | Pro v1; OpenHands + don't-reward-hack notice; hack review of trajectories by Claude |
+| SWE-bench Verified (non-hack) | 84.5 | | staged | OpenHands, no network, git squashed, don't-reward-hack notice |
+| SWE-bench Multilingual (non-hack) | 76.4 | | staged | OpenHands, as Verified |
 | WideSearch | 75.2 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
 | BrowseComp | 78.5 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
-| MCP-Atlas | 74.6 | | setup | feasibility check |
-| Toolathlon-Verified | 70.8 | | setup | feasibility check |
-| ClawEval | 79.4 | | setup | feasibility check |
+| MCP-Atlas | 74.6 | | open | see Ornith-35B |
+| Toolathlon-Verified | 70.8 | | open | see Ornith-35B |
+| ClawEval | 79.4 | | open | see Ornith-35B |
 
 ## Qwen3-Coder-Next (card: Qwen/Qwen3-Coder-Next; no thinking)
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | Aider (polyglot) | 66.2 | | queued | aider benchmark, 225 exercises, 2 tries, diff and whole (Qwen's format unpublished), T1.0/0.95/40 |
-| SWE-Bench Verified (SWE-Agent) | 70.6 | | setup | |
-| SWE-Bench Multilingual (SWE-Agent) | 62.8 | | setup | |
-| SWE-Bench Pro (SWE-Agent) | 44.3 | | setup | |
-| Terminal-Bench 2.0 (Terminus-2 json) | 36.2 | | setup | |
+| SWE-Bench Verified (SWE-Agent) | 70.6 | | staged | SWE-agent 300 steps, T1.0/0.95/40 (the chart); plus OpenHands (tech-report column 71.3) |
+| SWE-Bench Multilingual (SWE-Agent) | 62.8 | | staged | SWE-agent; plus OpenHands (tech report 64.3) |
+| SWE-Bench Pro (SWE-Agent) | 44.3 | | staged | Pro v1, Scale's SWE-agent fork + Scale evaluator |
+| Terminal-Bench 2.0 (Terminus-2 json) | 36.2 | | staged | Harbor + Terminus-2 json, 3 h (assumed), 8 CPU per task |
 
 ## Qwen3.5-122B-A10B (card: Qwen/Qwen3.5-122B-A10B)
 
@@ -89,8 +89,8 @@ Language:
 | GPQA Diamond | 86.6 | | queued | lm-eval r1_gpqa_diamond, 198 |
 | HMMT Feb 25 | 91.4 | | queued | MathArena data, 4 samples/problem, 81,920 max tokens |
 | HMMT Nov 25 | 90.3 | | queued | MathArena data, 4 samples/problem, 81,920 max tokens |
-| SWE-bench Verified | 72.0 | | setup | |
-| Terminal Bench 2 | 49.4 | | setup | |
+| SWE-bench Verified | 72.0 | | staged | OpenHands, 200K (Qwen's scaffold is internal: labelled 'OpenHands, not Qwen's scaffold') |
+| Terminal Bench 2 | 49.4 | | staged | 2.0, Terminus-2, 3 h, T1.0/0.95/20, 80K max tokens, 256K |
 | LiveCodeBench v6 | 78.9 | | queued | lm-eval, code_generation_lite test6 (175, 2025-01..04) |
 | CodeForces | 2100 | | n/s | Qwen's own query set, not public: not reproducible |
 | OJBench | 39.5 | | queued | 232 problems, C++, DMOJ judge, 65,536 max tokens |
