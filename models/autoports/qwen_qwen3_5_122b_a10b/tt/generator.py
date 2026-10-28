@@ -660,7 +660,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         t = ttnn.to_torch(lg, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh_device, dim=0))
         return t.float().reshape(-1, self.args.vocab_size)[:1].reshape(1, 1, -1)
 
-    def _prefill_single(self, tokens, page_table, segment=None, want_sharded=False, start=0, vision=None):
+    def _prefill_single(
+        self, tokens, page_table, segment=None, want_sharded=False, start=0, vision=None, cuts=(), on_cut=None
+    ):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
@@ -668,9 +670,15 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         vocab-sharded logits [1,1,32,vocab/TP] of the last segment)`` for on-device sampling (row 0)."""
         segment = segment or int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         T = tokens.shape[1]
-        # `start` (chunked prefill continuation): ``tokens`` are positions start .. start+T-1 of the request; the GDN
-        # state is reset by the bucket only at chunk_start 0, so a continuation runs on the state restored by the caller
-        assert start % segment == 0, f"chunk start {start} must be a multiple of the {segment}-token segment"
+        # `start` (chunked prefill continuation / prefix-cache hit): ``tokens`` are positions start .. start+T-1 of the
+        # request; the GDN state is reset by the bucket only at chunk_start 0, so a continuation runs on the state
+        # restored by the caller. Segments run [start, start + segment), ... and also end at every position in ``cuts``
+        # (prefix caching: ``on_cut(pos)`` snapshots the GDN state there); every segment start stays block aligned.
+        block = self.block_size
+        assert start % block == 0, f"chunk start {start} must be a multiple of the {block}-token KV block"
+        cuts = sorted(int(c) for c in cuts if start < int(c) <= start + T)
+        assert all(c % block == 0 for c in cuts), f"cut points {cuts} must be block aligned"
+        bounds = sorted({*range(start, start + T, segment), *(c for c in cuts if c < start + T)}) + [start + T]
         # multimodal request: ``vision`` = (packed image rows on device [n, H/TP], image_grid_thw). The M-RoPE table is
         # staged once over the WHOLE prompt (the segments slice it by position) and every segment splices its own
         # image rows (row offset = placeholders before the segment). Chunked continuations of image prompts are not
@@ -684,9 +692,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.model._build_request_rope(tokens, vision_tokens)
             vkw = {"rope_staged": True}
         logits, sh = None, None
-        for cs in range(start, start + T, segment):
-            seg = tokens[:, cs - start : min(cs - start + segment, T)]
-            last = cs + segment >= start + T
+        for cs, ce in zip(bounds[:-1], bounds[1:]):
+            seg = tokens[:, cs - start : ce - start]
+            last = ce == start + T
             if vision_tokens is not None:
                 vkw["vision_tokens"] = vision_tokens
                 vkw["vis_row_offset"] = self.model._vis_row_offset_for(tokens, cs)
@@ -696,8 +704,64 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 )
             else:
                 lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs, **vkw)
+            if on_cut is not None and ce in cuts:
+                on_cut(ce)
             logits = self._host_logits(lg)
         return (logits, sh) if want_sharded else logits
+
+    # ------------------------------------------------------------------ prefix caching (GDN state snapshots)
+    _STATE_BYTES = {"BFLOAT16": 2, "FLOAT32": 4, "BFLOAT8_B": 1.0625, "BFLOAT4_B": 0.5625}
+
+    def alloc_prefix_state_pool(self, n_slots):
+        """Device pool of ``n_slots`` GDN state snapshots for vLLM prefix caching (the plugin's ``prefix_state_cache``):
+        one slot = the recurrent state + conv taps of every GDN layer in the B = 1 prefill layout. The plugin's index
+        chooses the slots; :meth:`prefill_serving` saves into and restores from them. Allocated with the KV cache (before
+        any trace capture) and warmed with one save / restore. Returns the bytes per device of one slot."""
+        prev = self.model._bind_gdn_prefill_scratch() if self.max_batch_size > 1 else None
+        try:
+            dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+            self._prefix_pool = [
+                (
+                    [ttnn.clone(dn.rec_state) for dn in dn_layers],
+                    [[ttnn.clone(c) for c in dn.conv_states] for dn in dn_layers],
+                )
+                for _ in range(int(n_slots))
+            ]
+            self._prefix_save(0)
+            self._prefix_restore(0)
+        finally:
+            if prev is not None:
+                self.model._unbind_gdn_prefill_scratch(prev)
+        recs, convs = self._prefix_pool[0]
+        tensors = recs + [t for taps in convs for t in taps]
+        return int(
+            sum(
+                math.prod(t.padded_shape) * self._STATE_BYTES.get(str(t.dtype).split(".")[-1].upper(), 2)
+                for t in tensors
+            )
+        )
+
+    def _prefix_save(self, slot):
+        """GDN state of the bound B = 1 prefill scratch (B = 1 build: the decode buffers) -> pool slot."""
+        recs, convs = self._prefix_pool[slot]
+        dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+        for dn, rec, taps in zip(dn_layers, recs, convs):
+            ttnn.copy(dn.rec_state, rec)
+            for c, t in zip(dn.conv_states, taps):
+                ttnn.copy(c, t)
+
+    def _prefix_restore(self, slot):
+        """Pool slot -> the bound B = 1 prefill scratch, then the chunk-outer conv left context from the taps (as
+        :meth:`_pending_restore`)."""
+        from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rebuild_conv_carry
+
+        recs, convs = self._prefix_pool[slot]
+        dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+        for dn, rec, taps in zip(dn_layers, recs, convs):
+            ttnn.copy(rec, dn.rec_state)
+            for t, c in zip(taps, dn.conv_states):
+                ttnn.copy(t, c)
+            rebuild_conv_carry(dn)
 
     # ------------------------------------------------------------------ chunked prefill (turn 7)
     def _pending_key(self, pt_row):
@@ -736,7 +800,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             for t in taps:
                 ttnn.deallocate(t)
 
-    def _batched_groups(self, lens, starts, finals, vision, pt):
+    def _batched_groups(self, lens, starts, finals, vision, pt, keys=None, single=()):
         """Groups (lists of request indices, same bucket, 2..B each) of the requests the batched pass can admit: final
         text prompts starting at 0 whose length fits a batched bucket. Stale carried state on a reused first block is
         dropped here (as the single path does)."""
@@ -747,11 +811,11 @@ class Qwen35MoeGenerator(ReadinessGenerator):
 
         by_bucket = {}
         for u in range(len(lens)):
-            if not (finals[u] and starts[u] == 0 and (vision is None or vision[u] is None)):
+            if not (finals[u] and starts[u] == 0 and (vision is None or vision[u] is None)) or u in single:
                 continue
             if lens[u] > MAX_BATCHED_BUCKET:
                 continue
-            key = self._pending_key(pt[u])
+            key = keys[u] if keys is not None else self._pending_key(pt[u])
             if key in self._pending_prefill:
                 self._pending_free(self._pending_prefill.pop(key))
             by_bucket.setdefault(self.model._mask_bucket_for(lens[u]), []).append(u)
@@ -764,7 +828,17 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         return groups
 
     def prefill_serving(
-        self, tokens, page_table, prompt_lens, slots, sampler=None, start_pos=None, final=None, vision=None, mtp=None
+        self,
+        tokens,
+        page_table,
+        prompt_lens,
+        slots,
+        sampler=None,
+        start_pos=None,
+        final=None,
+        vision=None,
+        mtp=None,
+        prefix_state=None,
     ):
         """vLLM prefill: ``tokens`` [N, max_T] host ids (row u valid up to ``prompt_lens[u]``), ``page_table`` [N, width]
         (row u = request u's blocks), ``slots`` = the decode slot of each request. Runs each request through the warmed
@@ -772,6 +846,10 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         the prefill runs on the model's B=1 scratch). ``sampler(logits_sharded, u)`` -> host token (the adapter applies
         the request's sampling params to the on-device sampler and samples row 0 of the [1,1,32,vocab/TP] logits while
         the bucket output is still live); without it returns the host logits ``[N, 1, vocab]``.
+        ``prefix_state`` (vLLM prefix caching, the plugin's ``prefix_state_cache``): per request ``{"req_id", "restore":
+        (pool slot, pos) | None, "saves": [(pos, pool slot), ...]}`` - a hit restores the GDN state saved at ``pos`` (==
+        its start) and runs only the uncached suffix; every save position becomes a segment end whose GDN state is
+        copied into its pool slot. Every save must happen: the plugin marks the slot valid once this step returns.
         Returns ``[N, 1]`` int64 tokens (sampler) or ``[N, 1, vocab]`` float logits."""
         N = tokens.shape[0]
         lens = [int(prompt_lens[u]) for u in range(N)]  # chunked prefill: this chunk's END per request
@@ -785,10 +863,16 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         A = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
         V = int(self.args.vocab_size)
         outs_by_u = {}
+        ps = list(prefix_state) if prefix_state is not None else [None] * N
+        restores = [p.get("restore") if p else None for p in ps]
+        saves = [sorted((int(q), int(k)) for q, k in (p.get("saves") or ())) if p else [] for p in ps]
+        # carried chunked-prefill state is keyed by request when the plugin names it (prefix caching shares first blocks)
+        keys = [p["req_id"] if p and p.get("req_id") is not None else self._pending_key(pt[u]) for u, p in enumerate(ps)]
+        single = {u for u in range(N) if restores[u] is not None or saves[u]}
         # batched short-prompt admissions first: one pass per group of 2..4 same-bucket final text prompts; their GDN
         # state is written from the B-row scratch, their MTP head rows are skipped (MtpServing.note_batched marks the
         # slot: plain decode even when it ends up alone)
-        for g in self._batched_groups(lens, starts, finals, vision, pt):
+        for g in self._batched_groups(lens, starts, finals, vision, pt, keys=keys, single=single):
             g_lens = [lens[u] for u in g]
             g_slots = [slots[u] for u in g]
             lg, sh, hid = self.batched_prefill.prefill(
@@ -813,8 +897,13 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             # request's own processed end s0 (the plugin's s may lie inside a segment: its tokens are resent with the next
             # chunk), carries the GDN state in device clones keyed by the request's first block, and returns zero logits;
             # the final chunk runs to e, samples and writes the decode slot as a whole prefill does.
-            key = self._pending_key(pt[u])
+            key = keys[u]
             pending = self._pending_prefill.get(key)
+            restore = restores[u]
+            if restore is not None:
+                assert pending is None and int(restore[1]) == starts[u] > 0, (
+                    f"request {u}: prefix-cache restore {restore} at start {starts[u]} (carried state {pending is not None})"
+                )
             if pending is not None and starts[u] == 0:
                 # a request starting from scratch on a first block that still carries another request's state (that
                 # request was aborted / preempted mid-prefill and vLLM reused its blocks): drop the stale entry
@@ -823,15 +912,21 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             s0 = pending[0] if pending is not None else 0
             if pending is None:
                 assert (
-                    starts[u] == 0 or starts[u] % A == 0
+                    starts[u] == 0 or starts[u] % A == 0 or restore is not None
                 ), f"request {u}: chunk start {starts[u]} without carried state"
                 s0 = 0 if starts[u] == 0 else starts[u]
             E = lens[u] if finals[u] else (lens[u] // A) * A
+            # an intermediate chunk runs at least to its last save
+            E = max(E, max((q for q, _ in saves[u]), default=0))
+            assert all(s0 < q <= E for q, _ in saves[u]), f"request {u}: saves {saves[u]} outside [{s0}, {E}]"
+            cut_slot = dict(saves[u])
             batched = self.max_batch_size > 1
             prev = self.model._bind_gdn_prefill_scratch() if batched else None
             try:
                 if pending is not None:
                     self._pending_restore(key)
+                elif restore is not None:
+                    self._prefix_restore(int(restore[0]))
                 elif batched:
                     self.model._reset_gdn_state_for_new_sequence()
                 vis_u = vision[u] if vision is not None else None
@@ -842,6 +937,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                         want_sharded=finals[u],
                         start=s0,
                         vision=vis_u,
+                        cuts=list(cut_slot),
+                        on_cut=lambda q: self._prefix_save(cut_slot[q]),
                     )
                     lg, sh = res if finals[u] else (res, None)
                 if finals[u]:

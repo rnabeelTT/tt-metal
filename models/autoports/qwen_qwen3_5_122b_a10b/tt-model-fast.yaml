@@ -112,7 +112,7 @@ serve:
   # weights) - the checkpoint's generation_config (temperature 0.6, top_p 0.95, top_k 20) applies when a request sends no
   # sampling parameters. Every release gate (TTI release, 73 / 73 and 22 / 22 conformance) ran with thinking OFF, i.e.
   # the per-request {"enable_thinking": false} configuration.
-  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
+  args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
 # `tt-model serve <bundle> --profile <name>`. Numbers: doc/perf_pass/deployed_sweep.md and doc/HANDOFF.md §1.
@@ -141,7 +141,7 @@ serve_profiles:
     hardware: p300x2
     mesh_device: P300x2
     env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
   - name: p300x2-text
     description: >
       Text only, largest KV pool: the vision tower is not loaded (28472 KV blocks of 64 tokens instead of 22725, i.e.
@@ -149,7 +149,7 @@ serve_profiles:
     hardware: p300x2
     mesh_device: P300x2
     env: {QWEN35_VISION: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   # The same four configurations on four p150 boards (the identical (1,4) mesh; kernels compile at launch). Untested on
   # this host (p300x2 only); the p300x2 numbers are the expectation.
   - name: p150x4
@@ -166,13 +166,13 @@ serve_profiles:
     hardware: p150x4
     mesh_device: P150x4
     env: {QWEN35_CHUNKED_PREFILL: "1", QWEN35_MTP: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --enable-chunked-prefill, [--max-num-batched-tokens, "4096"]]
   - name: p150x4-text
     description: Four p150 boards, text only with the largest KV pool (no vision tower); see p300x2-text.
     hardware: p150x4
     mesh_device: P150x4
     env: {QWEN35_VISION: "0"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
 default_profile: p300x2
 
 verify:

@@ -168,6 +168,22 @@ if _MTP_K > 0:
 # in the served A/B, but its first-token numerics differ from a single admission and the conformance suite's seeded /
 # greedy consistency tests across batch compositions failed with it on (bundle run 8, 12 / 73) - see HANDOFF §6
 _VISION = os.environ.get("QWEN35_VISION", "0") == "1"
+
+# vLLM prefix caching (plugin prefix_state.py): QWEN35_PREFIX_STATE_SLOTS GDN state snapshots on device (~45 MiB per die on p300x2 each)
+# let a request resume from a cached KV prefix; 0 = off. A snapshot is saved at every prefill segment boundary and at the
+# last block boundary of each prompt of at least QWEN35_PREFIX_STATE_MIN tokens. Not wired with MTP.
+_PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048"))  # the model's PREFILL_SEGMENT
+# dies the GDN state is sharded over (MESH_DEVICE): a snapshot per die is 4 / dies times the p300x2 size, so the default
+# slot count scales with the mesh (32 on four dies, 16 on two, 8 on one: the same ~0.7 GiB pool per die)
+_PREFIX_DEVICES = {"P150": 1, "N150": 1, "P100": 1, "P300": 2, "P150X2": 2}.get(
+    os.environ.get("MESH_DEVICE", "P300x2").strip().upper(), 4
+)
+_PREFIX_STATE_SLOTS = int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if _MTP_K == 0 else 0
+_PREFIX_STATE_MIN = int(os.environ.get("QWEN35_PREFIX_STATE_MIN", "1024"))
+# QWEN35_PREFIX_STATE_PROMPT_END=1 also snapshots each prompt's last block boundary: hits reach the end of the previous
+# turn, but every cold prompt pays one more prefill pass (+57..133 ms on Ornith p300x2) and its segment split (numerics)
+# changes. Off: snapshots only at segment boundaries, cold prefill unchanged and a hit is bit-identical to a cold run.
+_PREFIX_STATE_PROMPT_END = os.environ.get("QWEN35_PREFIX_STATE_PROMPT_END", "0") == "1"
 _VISION_MAX_IMAGES = int(os.environ.get("QWEN35_VISION_MAX_IMAGES", "4") or 4)
 
 
@@ -212,7 +228,19 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # is implemented (Qwen35MoeGenerator.decode_forward(read_from_device=False) -> read_decode_output -> process_...).
     # Overlap stays off until the page-growth refresh of the plugin revision is proven (doc/vllm_integration/README.md).
     model_capabilities = {
-        "supports_prefix_caching": False,
+        "supports_prefix_caching": _PREFIX_STATE_SLOTS > 0,
+        **(
+            {
+                "prefix_state_cache": {
+                    "slots": _PREFIX_STATE_SLOTS,
+                    "segment": _PREFILL_SEGMENT,
+                    "min_tokens": _PREFIX_STATE_MIN,
+                    "prompt_end": _PREFIX_STATE_PROMPT_END,
+                }
+            }
+            if _PREFIX_STATE_SLOTS > 0
+            else {}
+        ),
         "supports_async_decode": True,
         # Not read by this plugin revision (5961e48): overlap = vLLM's async scheduling (on by default, "Asynchronous
         # scheduling is enabled" in every served log) + supports_async_decode; the plugin's steady-decode fast path then
@@ -378,6 +406,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # and templates). The masked-bucket prefill programs allocate transients while a request runs (the expert-sorted
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
+    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size)
+    _PREFIX_SLOT_GIB = 48.0 / 1024 * 4 / _PREFIX_DEVICES
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
     _KV_LAYERS = 12  # attention layers holding paged K/V
@@ -403,6 +433,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         c = _context_contract()["datatype_sweep_stage8"]
         B = int(max_num_seqs or 1)
         nonkv = float(c["non_kv_footprint_gib"]) + (B - 1) * cls._PER_SLOT_GIB
+        nonkv += _PREFIX_STATE_SLOTS * cls._PREFIX_SLOT_GIB
         kv_bytes_per_token = int(c["kv_bytes_per_token_per_device"])
         if _mtp_k_env() > 0:
             # the MTP head: one more attention layer's paged K/V over the same blocks (13 instead of 12 KV layers) plus
@@ -441,6 +472,13 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         kv = self._gen.model.allocate_kv_caches(shape, self._gen.kv_dtype, batch_size=self._gen.max_batch_size)
         width = min(math.ceil(self._context / block), num_blocks)  # == the plugin's max_num_blocks_per_req
         self._gen.bind_kv_cache(kv, num_blocks, width)
+        if _PREFIX_STATE_SLOTS > 0:
+            slot_bytes = self._gen.alloc_prefix_state_pool(_PREFIX_STATE_SLOTS)
+            logger.info(
+                f"prefix cache: {_PREFIX_STATE_SLOTS} GDN state snapshots x {slot_bytes / 2**20:.1f} MiB per device "
+                f"(budgeted {self._PREFIX_SLOT_GIB * 1024:.1f} MiB)"
+            )
+            assert slot_bytes <= self._PREFIX_SLOT_GIB * 2**30, "prefix-cache snapshot larger than its KV-pool budget"
         if self._mtp is not None:
             self._mtp.allocate_kv(shape, self._gen.kv_dtype)
             hk = self._mtp.head.kv_cache[0]
@@ -519,8 +557,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         N = tokens.shape[0]
         start_pos = kwargs.get("start_pos")
         starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
-        if any(starts) and not self.model_capabilities["supports_chunked_prefill"]:
-            raise NotImplementedError("chunked / cached-prefix prefill is not supported (model_capabilities)")
+        prefix_state = kwargs.get("prefix_state")
+        restored = [bool(p and p.get("restore")) for p in prefix_state] if prefix_state is not None else [False] * N
+        if any(s and not r for s, r in zip(starts, restored)) and not self.model_capabilities["supports_chunked_prefill"]:
+            raise NotImplementedError("chunked prefill is not supported (model_capabilities)")
         # which rows end their prompt in this chunk: the plugin's intermediate mask (added to the kwargs by the chunked
         # prefill shim when QWEN35_CHUNKED_PREFILL=1); without it every row is final - the plugin never chunks a prompt
         # when chunked prefill is off. (A former heuristic "device sampling params present <=> final" marked every
@@ -572,6 +612,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             f"Prefilling {N} request(s) into slots {slots} (chunk ends {plens}, starts {starts}, final {finals})"
         )
         chunked = dict(start_pos=starts, final=finals) if (any(starts) or not all(finals)) else {}
+        if prefix_state is not None:
+            chunked["prefix_state"] = prefix_state
         if self._mtp is not None:
             if chunked:
                 raise NotImplementedError(
@@ -596,7 +638,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._mtp.end_prefill(tok0[0], plens[0])
             self._live_slots |= set(slots)
             return out, torch.zeros(N, dtype=torch.long)
-        if vision is not None and chunked:
+        if vision is not None and (any(starts) or not all(finals)):
             raise NotImplementedError("image prompts are prefilled whole (no chunked prefill)")
         out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, **chunked)
         self._live_slots |= set(slots)
