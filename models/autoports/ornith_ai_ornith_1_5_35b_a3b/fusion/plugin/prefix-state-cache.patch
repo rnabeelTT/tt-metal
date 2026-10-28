@@ -1,0 +1,579 @@
+From ca75621a58f3971666aa175e0ee9425dfe22ebeb Mon Sep 17 00:00:00 2001
+From: rnabeelTT <rnabeel@tenstorrent.com>
+Date: Wed, 28 Oct 2026 04:30:01 +0000
+Subject: [PATCH] Prefix caching for recurrent-state hybrids: scheduler-side
+ index of model state snapshots
+
+A model with recurrent state (Gated DeltaNet / Mamba hybrids) declares
+model_capabilities['prefix_state_cache'] = {slots, segment, min_tokens, prompt_end}.
+The platform then keeps vLLM prefix caching on; the scheduler caps each KV hit
+to the longest block hash with a valid snapshot, plans restore / save
+directives per prefill row (SchedulerOutput attribute, like the forced-reset
+counts), pins snapshots a scheduled restore reads, and marks saves valid once
+their step is processed (LRU eviction over unpinned slots). The runner passes
+the directives to prefill_forward as prefix_state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/vllm_tt_plugin/model_input.py  |   4 +
+ src/vllm_tt_plugin/model_runner.py |  19 ++
+ src/vllm_tt_plugin/platform.py     |  15 ++
+ src/vllm_tt_plugin/prefix_state.py | 293 +++++++++++++++++++++++++++++
+ src/vllm_tt_plugin/scheduler.py    |  26 ++-
+ tests/test_prefix_state.py         |  90 +++++++++
+ 6 files changed, 446 insertions(+), 1 deletion(-)
+ create mode 100644 src/vllm_tt_plugin/prefix_state.py
+ create mode 100644 tests/test_prefix_state.py
+
+diff --git a/src/vllm_tt_plugin/model_input.py b/src/vllm_tt_plugin/model_input.py
+index 6f63927..78ad715 100644
+--- a/src/vllm_tt_plugin/model_input.py
++++ b/src/vllm_tt_plugin/model_input.py
+@@ -170,6 +170,10 @@ class TTModelInput:
+     # ``None`` for decode.
+     intermediate_prefill_mask: torch.Tensor | None = None
+ 
++    # Prefill only, models with ``prefix_state_cache``: per row, the recurrent
++    # state snapshot to restore and the snapshots to save (prefix_state.py).
++    prefix_state: list[dict] | None = None
++
+     # Request id per forward row. A prefill build can drop rows, so forward row
+     # order is not recoverable from the persistent batch; sample-time consumers
+     # must resolve rows through this. ``None`` for lane builds, whose rows are
+diff --git a/src/vllm_tt_plugin/model_runner.py b/src/vllm_tt_plugin/model_runner.py
+index 4a92549..a8483d8 100644
+--- a/src/vllm_tt_plugin/model_runner.py
++++ b/src/vllm_tt_plugin/model_runner.py
+@@ -65,6 +65,10 @@ from vllm_tt_plugin.model_input import (
+     slice_tt_sampling_params,
+ )
+ from vllm_tt_plugin.platform import TTPlatform
++from vllm_tt_plugin.prefix_state import (
++    get_prefix_state_directives,
++    get_prefix_state_policy,
++)
+ from vllm_tt_plugin.scheduler import get_tt_forced_reset_discard_counts
+ from vllm_tt_plugin.structured_output import (
+     has_structured_outputs,
+@@ -1445,8 +1449,21 @@ class TTModelRunner:
+             # state. Stateless models ignore it.
+             prefill_empty_slots=prefill_empty_slots,
+             intermediate_prefill_mask=intermediate_prefill_mask,
++            prefix_state=self._prefix_state_rows(scheduler_output, row_req_ids)
++            if is_prompt
++            else None,
+         )
+ 
++    def _prefix_state_rows(self, scheduler_output, row_req_ids) -> list[dict] | None:
++        """The scheduler's recurrent-state snapshot directives in row order."""
++        if get_prefix_state_policy(self.vllm_config) is None:
++            return None
++        directives = get_prefix_state_directives(scheduler_output) or {}
++        return [
++            directives.get(req_id) or {"req_id": req_id, "restore": None, "saves": []}
++            for req_id in row_req_ids
++        ]
++
+     def build_model_input(
+         self,
+         scheduler_output: SchedulerOutput,
+@@ -2030,6 +2047,8 @@ class TTModelRunner:
+                     empty_slots.append(dp_rank * stride + i)
+         if empty_slots is not None:
+             kwargs["empty_slots"] = list(empty_slots)
++        if model_input.prefix_state is not None:
++            kwargs["prefix_state"] = model_input.prefix_state
+ 
+         if self.request_specific_rope:
+             tt_out, rope_deltas = self.model.prefill_forward(**kwargs)
+diff --git a/src/vllm_tt_plugin/platform.py b/src/vllm_tt_plugin/platform.py
+index fb87ef5..f04cc01 100644
+--- a/src/vllm_tt_plugin/platform.py
++++ b/src/vllm_tt_plugin/platform.py
+@@ -25,6 +25,10 @@ from vllm_tt_plugin.config import (
+     validate_tt_lane_config,
+ )
+ from vllm_tt_plugin.logger import init_tt_logger
++from vllm_tt_plugin.prefix_state import (
++    PREFIX_STATE_CAPABILITY,
++    store_prefix_state_policy,
++)
+ from vllm_tt_plugin.utils.dp_discovery import (
+     StandardDPAssignmentT,
+     run_standard_dp_visible_device_group_discovery,
+@@ -1627,6 +1631,17 @@ class TTPlatform(Platform):
+                 "but block-output models (output_tokens_per_step > 1) bypass "
+                 "the vLLM prefix cache; fix the model's capability declaration"
+             )
++        prefix_state_policy = (
++            model_capabilities.get(PREFIX_STATE_CAPABILITY) if model_capabilities else None
++        )
++        if (
++            prefix_state_policy
++            and supports_prefix_caching
++            and vllm_config.cache_config.enable_prefix_caching
++        ):
++            # Recurrent-state hybrid: the KV prefix cache is usable because the
++            # model snapshots its recurrent state (prefix_state.py).
++            store_prefix_state_policy(vllm_config, prefix_state_policy)
+         if vllm_config.cache_config.enable_prefix_caching:
+             if not supports_prefix_caching:
+                 vllm_config.cache_config.enable_prefix_caching = False
+diff --git a/src/vllm_tt_plugin/prefix_state.py b/src/vllm_tt_plugin/prefix_state.py
+new file mode 100644
+index 0000000..de971a7
+--- /dev/null
++++ b/src/vllm_tt_plugin/prefix_state.py
+@@ -0,0 +1,293 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: 2025 Tenstorrent USA, Inc.
++"""Prefix caching for models with recurrent state (Gated DeltaNet / Mamba hybrids).
++
++vLLM's prefix cache reuses paged KV blocks. A hybrid model also needs its
++recurrent state at the position where the reused prefix ends, and no KV block
++holds that. The model keeps a small device pool of recurrent-state snapshots
++("slots"); this module is the scheduler's index over that pool:
++
++* A snapshot is keyed by the vLLM block hash of the block that ends at the
++  snapshot position. The hash chains the whole prefix (plus cache salt, LoRA
++  and multimodal keys), exactly as the KV blocks are keyed.
++* A KV cache hit is capped to the longest position that has a valid snapshot,
++  so the model restores its state at exactly the position vLLM resumes from.
++* Every scheduled prefill chunk asks the model to save snapshots at the
++  positions it declares cheap: the segment boundaries its prefill crosses
++  anyway and, unless the model opts out (``prompt_end``), the last block
++  boundary of the prompt (the point a follow-up turn resumes from; it costs
++  the model an extra prefill pass).
++* A snapshot becomes usable once the step that writes it has been processed.
++  Snapshots that a scheduled restore reads are pinned until that step has been
++  processed. Eviction is LRU over unpinned snapshots.
++
++A model opts in with ``model_capabilities["prefix_state_cache"] = {"slots": N,
++"segment": S, "min_tokens": M, "prompt_end": bool}``. ``prompt_end`` False saves at segment boundaries only (the
++model's prefill then runs exactly the passes it runs without caching; a hit resumes at a segment boundary). It then receives the prefill kwarg
++``prefix_state``: one dict per row, ``{"req_id": str, "restore": (slot, pos) |
++None, "saves": [(pos, slot), ...]}``. ``restore`` means "load slot ``slot``
++before running from ``pos`` (== this row's start_pos)". ``saves`` means "after
++the first ``pos`` tokens, copy the recurrent state into slot ``slot``".
++"""
++
++from __future__ import annotations
++
++from collections import OrderedDict
++from dataclasses import dataclass
++from typing import TYPE_CHECKING, Any
++
++from vllm_tt_plugin.logger import init_tt_logger
++
++if TYPE_CHECKING:
++    from vllm.config import VllmConfig
++    from vllm.v1.core.sched.output import SchedulerOutput
++    from vllm.v1.request import Request
++
++logger = init_tt_logger(__name__)
++
++PREFIX_STATE_CAPABILITY = "prefix_state_cache"
++_CONFIG_KEY = "_tt_prefix_state_cache"
++# Directives ride on the SchedulerOutput object, like the forced-reset discard
++# counts in scheduler.py, so they reach the runner with the step they belong to.
++_DIRECTIVES_ATTR = "_tt_prefix_state_directives"
++_STEP_ATTR = "_tt_prefix_state_step"
++
++
++def store_prefix_state_policy(vllm_config: "VllmConfig", policy: dict) -> None:
++    slots = int(policy.get("slots", 0))
++    if slots < 1:
++        raise ValueError(f"{PREFIX_STATE_CAPABILITY} needs slots >= 1, got {policy!r}")
++    additional = getattr(vllm_config, "additional_config", None)
++    if not isinstance(additional, dict):
++        additional = {}
++        vllm_config.additional_config = additional
++    additional[_CONFIG_KEY] = {
++        "slots": slots,
++        "segment": int(policy.get("segment", 0)),
++        "min_tokens": int(policy.get("min_tokens", 0)),
++        "prompt_end": bool(policy.get("prompt_end", True)),
++    }
++
++
++def get_prefix_state_policy(vllm_config: "VllmConfig") -> dict | None:
++    additional = getattr(vllm_config, "additional_config", None) or {}
++    return additional.get(_CONFIG_KEY)
++
++
++def get_prefix_state_directives(
++    scheduler_output: "SchedulerOutput",
++) -> dict[str, dict] | None:
++    return getattr(scheduler_output, _DIRECTIVES_ATTR, None)
++
++
++@dataclass
++class _Snapshot:
++    slot: int
++    pos: int
++    valid: bool = False
++    pins: int = 0
++
++
++class PrefixStateIndex:
++    """Scheduler-side index of the model's recurrent-state snapshot slots."""
++
++    def __init__(self, policy: dict, block_size: int, hash_block_size: int):
++        self.num_slots = int(policy["slots"])
++        self.segment = int(policy.get("segment", 0))
++        self.min_tokens = int(policy.get("min_tokens", 0))
++        self.prompt_end = bool(policy.get("prompt_end", True))
++        self.block_size = int(block_size)
++        self.hash_block_size = int(hash_block_size)
++        assert self.block_size % self.hash_block_size == 0
++        self._free = list(range(self.num_slots - 1, -1, -1))
++        # key -> snapshot, in LRU order (most recently used last)
++        self._snaps: OrderedDict[Any, _Snapshot] = OrderedDict()
++        # req_id -> key pinned for a restore planned by get_computed_blocks
++        self._planned: dict[str, Any] = {}
++        self._step = 0
++        # step -> (keys written by the step, keys pinned by the step's restores)
++        self._inflight: dict[int, tuple[list, list]] = {}
++        self.stats = {"lookups": 0, "hits": 0, "hit_tokens": 0, "capped_tokens": 0, "saves": 0, "evictions": 0}
++
++    # -------------------------------------------------------------- lookups
++    def _key_at(self, block_hashes, pos: int):
++        i = pos // self.hash_block_size - 1
++        return block_hashes[i] if 0 <= i < len(block_hashes) else None
++
++    def longest(self, block_hashes, max_tokens: int) -> int:
++        """Longest block-aligned position <= ``max_tokens`` with a valid snapshot."""
++        pos = max_tokens // self.block_size * self.block_size
++        while pos > 0:
++            snap = self._snaps.get(self._key_at(block_hashes, pos))
++            if snap is not None and snap.valid and snap.pos == pos:
++                return pos
++            pos -= self.block_size
++        return 0
++
++    def cap_hit(self, block_hashes, blocks, num_tokens: int, num_uncached: int):
++        """Wraps ``KVCacheCoordinator.find_longest_cache_hit``: cap a KV hit to a snapshot."""
++        if num_tokens <= 0:
++            return blocks, num_tokens, num_uncached
++        self.stats["lookups"] += 1
++        pos = self.longest(block_hashes, num_tokens)
++        if pos < num_tokens:
++            self.stats["capped_tokens"] += num_tokens - pos
++            n_blocks = pos // self.block_size
++            blocks = tuple(list(group)[:n_blocks] for group in blocks)
++            return blocks, pos, 0
++        return blocks, num_tokens, num_uncached
++
++    def plan_restore(self, request: "Request", num_tokens: int) -> None:
++        """After ``get_computed_blocks``: pin the snapshot the request resumes from."""
++        self.unplan(request.request_id)
++        if num_tokens <= 0:
++            return
++        key = self._key_at(request.block_hashes, num_tokens)
++        snap = self._snaps.get(key)
++        assert snap is not None and snap.valid and snap.pos == num_tokens, (num_tokens, snap)
++        snap.pins += 1
++        self._planned[request.request_id] = key
++
++    def unplan(self, req_id: str) -> None:
++        key = self._planned.pop(req_id, None)
++        if key is not None:
++            snap = self._snaps.get(key)
++            if snap is not None:
++                snap.pins -= 1
++
++    # -------------------------------------------------------------- scheduling
++    def _alloc_slot(self) -> int | None:
++        if self._free:
++            return self._free.pop()
++        for key, snap in self._snaps.items():  # LRU first
++            if snap.valid and snap.pins == 0:
++                del self._snaps[key]
++                self.stats["evictions"] += 1
++                return snap.slot
++        return None
++
++    def _save_positions(self, start: int, end: int, prompt_len: int) -> list[int]:
++        bs = self.block_size
++        out = []
++        if self.segment > 0:
++            out += list(range(start + self.segment, end + 1, self.segment))
++        if self.prompt_end and end >= prompt_len:  # the chunk that finishes the prompt: its last block boundary
++            out.append(end // bs * bs)
++        return sorted({q for q in out if start < q <= end and q % bs == 0 and q >= max(self.min_tokens, bs)})
++
++    def plan_step(self, scheduler_output: "SchedulerOutput", requests: dict[str, "Request"]) -> None:
++        """Attach restore / save directives for every prefill row of a scheduled step."""
++        self._step += 1
++        written, pinned = [], []
++        directives: dict[str, dict] = {}
++        for req_id, n_sched in scheduler_output.num_scheduled_tokens.items():
++            request = requests.get(req_id)
++            if request is None:
++                continue
++            end = request.num_computed_tokens  # already advanced by _update_after_schedule
++            start = end - int(n_sched)
++            if start >= request.num_prompt_tokens and start >= request.num_tokens - 1:
++                continue  # a decode row
++            restore = None
++            key = self._planned.pop(req_id, None)
++            if key is not None:
++                snap = self._snaps.get(key)
++                if snap is not None and snap.pos == start:
++                    restore = (snap.slot, snap.pos)
++                    self._snaps.move_to_end(key)
++                    pinned.append(key)  # stays pinned until this step is processed
++                    self.stats["hits"] += 1
++                    self.stats["hit_tokens"] += start
++                elif snap is not None:
++                    snap.pins -= 1
++            saves = []
++            if not request.mm_features:
++                # latest first: when slots run short, the prompt-end snapshot (where a follow-up turn resumes) wins
++                for q in reversed(self._save_positions(start, end, request.num_prompt_tokens)):
++                    k = self._key_at(request.block_hashes, q)
++                    if k is None or k in self._snaps:
++                        continue
++                    slot = self._alloc_slot()
++                    if slot is None:
++                        break
++                    self._snaps[k] = _Snapshot(slot=slot, pos=q)
++                    written.append(k)
++                    saves.append((q, slot))
++                    self.stats["saves"] += 1
++                saves.sort()
++            directives[req_id] = {"req_id": req_id, "restore": restore, "saves": saves}
++        if directives:
++            setattr(scheduler_output, _DIRECTIVES_ATTR, directives)
++            setattr(scheduler_output, _STEP_ATTR, self._step)
++            self._inflight[self._step] = (written, pinned)
++            if written or pinned:
++                logger.info(
++                    "prefix state: step restores %s, saves %s; totals %s, %d/%d slots used",
++                    [d["restore"] for d in directives.values() if d["restore"]],
++                    [q for d in directives.values() for q, _ in d["saves"]],
++                    self.stats,
++                    len(self._snaps),
++                    self.num_slots,
++                )
++
++    def step_processed(self, scheduler_output: "SchedulerOutput") -> None:
++        step = getattr(scheduler_output, _STEP_ATTR, None)
++        if step is None:
++            return
++        written, pinned = self._inflight.pop(step, ([], []))
++        for key in written:
++            snap = self._snaps.get(key)
++            if snap is not None:
++                snap.valid = True
++        for key in pinned:
++            snap = self._snaps.get(key)
++            if snap is not None:
++                snap.pins -= 1
++
++    def reset(self) -> None:
++        """``reset_prefix_cache``: drop every snapshot no in-flight step still uses."""
++        for key, snap in list(self._snaps.items()):
++            if snap.pins == 0 and snap.valid:
++                del self._snaps[key]
++                self._free.append(snap.slot)
++
++
++def install_prefix_state_index(scheduler) -> PrefixStateIndex | None:
++    """Build the index for a TT scheduler and hook it into the KV cache manager."""
++    policy = get_prefix_state_policy(scheduler.vllm_config)
++    manager = scheduler.kv_cache_manager
++    if policy is None or not manager.enable_caching:
++        return None
++    coordinator = manager.coordinator
++    if len(coordinator.single_type_managers) != 1:
++        raise ValueError("prefix_state_cache supports one KV cache group (uniform full attention)")
++    index = PrefixStateIndex(policy, scheduler.block_size, scheduler.hash_block_size)
++
++    find_longest = coordinator.find_longest_cache_hit
++
++    def find_longest_cache_hit(block_hashes, max_cache_hit_length):
++        blocks, n, uncached = find_longest(block_hashes, max_cache_hit_length)
++        return index.cap_hit(block_hashes, blocks, n, uncached)
++
++    coordinator.find_longest_cache_hit = find_longest_cache_hit
++
++    get_computed = manager.get_computed_blocks
++
++    def get_computed_blocks(request):
++        if request.mm_features:  # image prompts are prefilled whole
++            index.unplan(request.request_id)
++            return manager.empty_kv_cache_blocks, 0, 0
++        blocks, n, boundary = get_computed(request)
++        index.plan_restore(request, n)
++        return blocks, n, boundary
++
++    manager.get_computed_blocks = get_computed_blocks
++    logger.info(
++        "Recurrent-state prefix caching: %d snapshot slots, segment %d, min %d tokens, block %d, prompt end %s",
++        index.num_slots,
++        index.segment,
++        index.min_tokens,
++        index.block_size,
++        index.prompt_end,
++    )
++    return index
+diff --git a/src/vllm_tt_plugin/scheduler.py b/src/vllm_tt_plugin/scheduler.py
+index 7f7df47..b871ec8 100644
+--- a/src/vllm_tt_plugin/scheduler.py
++++ b/src/vllm_tt_plugin/scheduler.py
+@@ -16,6 +16,7 @@ from vllm_tt_plugin.config import (
+     is_tt_block_output_model,
+ )
+ from vllm_tt_plugin.logger import init_tt_logger
++from vllm_tt_plugin.prefix_state import install_prefix_state_index
+ 
+ logger = init_tt_logger(__name__)
+ 
+@@ -116,6 +117,7 @@ class TTScheduler(AsyncScheduler):
+         self._pending_forced_reset_discard_counts: dict[str, int] = {}
+         self._output_tokens_per_step = get_tt_output_tokens_per_step(self.vllm_config)
+         self._is_block_output_model = is_tt_block_output_model(self.vllm_config)
++        self._prefix_state = install_prefix_state_index(self)
+         if self._is_block_output_model:
+             assert self.num_sampled_tokens_per_step == 1, (
+                 "Block-output accounting requires upstream to reserve exactly "
+@@ -458,8 +460,27 @@ class TTScheduler(AsyncScheduler):
+         if pending_reset_discards:
+             set_tt_forced_reset_discard_counts(scheduler_output, pending_reset_discards)
+             self._pending_forced_reset_discard_counts = {}
++        if self._prefix_state is not None:
++            self._prefix_state.plan_step(scheduler_output, self.requests)
+         return scheduler_output
+ 
++    def update_from_output(self, scheduler_output, model_runner_output):
++        if self._prefix_state is not None:
++            self._prefix_state.step_processed(scheduler_output)
++        return super().update_from_output(scheduler_output, model_runner_output)
++
++    def finish_requests(self, request_ids, finished_status):
++        if self._prefix_state is not None:
++            if request_ids is None:
++                ids = list(self.requests)
++            elif isinstance(request_ids, str):
++                ids = [request_ids]
++            else:
++                request_ids = ids = list(request_ids)
++            for req_id in ids:
++                self._prefix_state.unplan(req_id)
++        return super().finish_requests(request_ids, finished_status)
++
+     def _schedule_prefill_only(self) -> SchedulerOutput:
+         """Schedule prefill work: waiting requests and partial continuations.
+ 
+@@ -555,7 +576,10 @@ class TTScheduler(AsyncScheduler):
+             else []
+         )
+         try:
+-            return super().reset_prefix_cache(reset_running_requests, reset_connector)
++            reset = super().reset_prefix_cache(reset_running_requests, reset_connector)
++            if reset and self._prefix_state is not None:
++                self._prefix_state.reset()
++            return reset
+         finally:
+             for request, placeholder_count in reset_candidates:
+                 if (
+diff --git a/tests/test_prefix_state.py b/tests/test_prefix_state.py
+new file mode 100644
+index 0000000..b66fd22
+--- /dev/null
++++ b/tests/test_prefix_state.py
+@@ -0,0 +1,90 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: 2025 Tenstorrent USA, Inc.
++"""PrefixStateIndex: snapshot planning, hit capping, pinning and LRU eviction (no device)."""
++
++import types
++
++from vllm_tt_plugin.prefix_state import PrefixStateIndex, get_prefix_state_directives
++
++B = 64
++
++
++def req(rid, hashes, prompt, computed, mm=None):
++    return types.SimpleNamespace(
++        request_id=rid,
++        block_hashes=hashes,
++        num_prompt_tokens=prompt,
++        num_tokens=prompt,
++        num_computed_tokens=computed,
++        mm_features=mm or [],
++    )
++
++
++def out(sched):
++    return types.SimpleNamespace(num_scheduled_tokens=sched)
++
++
++def blocks(n):
++    return (list(range(n)),)
++
++
++def test_prefix_state_index():
++    idx = PrefixStateIndex({"slots": 2, "segment": 2048, "min_tokens": 1024}, B, B)
++    hA = [("A", i) for i in range(5000 // B)]
++    A = req("A", hA, 5000, 5000)
++    so = out({"A": 5000})
++    idx.plan_step(so, {"A": A})
++    d = get_prefix_state_directives(so)["A"]
++    assert [q for q, _ in d["saves"]] == [4096, 4992], d  # 2 slots: the two latest, prompt end included
++    # before processing: no hit
++    assert idx.longest(hA, 4992) == 0
++    idx.step_processed(so)
++    assert idx.longest(hA, 4992) == 4992 and idx.longest(hA, 4500) == 4096 and idx.longest(hA, 4000) == 0
++    # B shares A's first 78 blocks, then diverges
++    hB = hA[:78] + [("B", i) for i in range(78, 6000 // B)]
++    Bq = req("B", hB, 6000, 0)
++    bl, n, unc = idx.cap_hit(hB, blocks(80), 80 * B, 0)  # pretend the KV hit was 80 blocks (5120)
++    assert n == 4992 and len(bl[0]) == 78, (n, len(bl[0]))
++    idx.plan_restore(Bq, n)
++    Bq.num_computed_tokens = 6000
++    so = out({"B": 6000 - 4992})
++    idx.plan_step(so, {"B": Bq})
++    d = get_prefix_state_directives(so)["B"]
++    assert d["restore"][1] == 4992
++    # B's saves: segment boundary 4992+2048 > end, prompt end 5952 -> needs a slot: both slots valid, A@4992 pinned -> evict A@4096
++    assert [q for q, _ in d["saves"]] == [5952], d
++    assert idx.longest(hA, 4500) == 0  # A@4096 evicted
++    idx.step_processed(so)
++    assert idx.longest(hB, 5999) == 5952
++    assert all(s.pins == 0 for s in idx._snaps.values())
++    # image request: no saves
++    C = req("C", [("C", i) for i in range(40)], 2600, 2600, mm=[1])
++    so = out({"C": 2600})
++    idx.plan_step(so, {"C": C})
++    assert get_prefix_state_directives(so)["C"]["saves"] == []
++    # decode rows produce no directives
++    A.num_tokens = 5001; A.num_computed_tokens = 5001
++    so = out({"A": 1})
++    idx.plan_step(so, {"A": A})
++    assert get_prefix_state_directives(so) is None
++    # short prompt below min_tokens: no saves
++    D = req("D", [("D", i) for i in range(10)], 700, 700)
++    so = out({"D": 700}); idx.plan_step(so, {"D": D})
++    assert get_prefix_state_directives(so)["D"]["saves"] == []
++    # unplan on abort releases the pin
++    idx.plan_restore(req("E", hB, 6000, 0), 4992)
++    assert sum(s.pins for s in idx._snaps.values()) == 1
++    idx.unplan("E")
++    assert sum(s.pins for s in idx._snaps.values()) == 0
++
++
++def test_prefix_state_segment_only():
++    idx = PrefixStateIndex({"slots": 8, "segment": 2048, "min_tokens": 1024, "prompt_end": False}, B, B)
++    a = req("A", [("A", i) for i in range(5000 // B)], 5000, 5000)
++    so = out({"A": 5000})
++    idx.plan_step(so, {"A": a})
++    assert [q for q, _ in get_prefix_state_directives(so)["A"]["saves"]] == [2048, 4096]
++    b = req("B", [("B", i) for i in range(4096 // B)], 4096, 4096)  # ends on a segment boundary: saved, no extra pass
++    so = out({"B": 4096})
++    idx.plan_step(so, {"B": b})
++    assert [q for q, _ in get_prefix_state_directives(so)["B"]["saves"]] == [2048, 4096]
+-- 
+2.43.0
+
