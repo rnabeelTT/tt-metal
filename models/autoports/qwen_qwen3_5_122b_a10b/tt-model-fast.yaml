@@ -223,6 +223,13 @@ card:
     card's general preset (temperature 1.0, top_p 0.95, top_k 20, presence_penalty 1.5) avoids repetition.
     Tool calls use the `qwen3_xml` parser; images (up to 4 per request, resized to at most 4 MP) as `image_url` parts.
 
+    ### Prefix caching
+    On by default (every profile). When a prompt starts with the same 2,048 or more tokens as a recent one (a document sent
+    again, the next turn of a chat, a long shared system prompt), the server resumes from the last 2,048-token boundary
+    the two share instead of prefilling from the start: vLLM reuses the attention KV blocks, and the server restores the
+    Gated DeltaNet state it saved at that boundary (32 snapshots of 45 MiB per die, 1.4 GiB per die in all, taken from the KV pool, least recently used evicted). A prompt seen for the first time
+    runs exactly the prefill it ran without caching. Turn it off with `tt-model serve ... -- --no-enable-prefix-caching`.
+
     ### Profiles - which one for which use case
     `tt-model serve raahemnabeel/qwen3-5-122b-a10b --profile <name>` (p300x2 names below; the same four exist
     as `p150x4`, `p150x4-burst`, `p150x4-longctx`, `p150x4-text` for four p150 boards):
@@ -315,12 +322,31 @@ card:
     | 2,048 | 128 | 590 -> 592 | 3,469 -> 3,458 | 31.3 -> 7.7 | 31.9 -> **129.7** (+307 %) | 4.57 -> 1.57 |
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0, MTP off in both; median per prompt): 31.9 -> **131.9 tok/s** (+313 %).
+
+    ### Prefix caching
+    Measured 2026-10-28 on p300x2, one user, temperature 0: the same build served with caching off and on. TTFT of a
+    prompt (Python source from this repo) sent a second time, and of each turn of a chat that opens with an 8k-token code
+    document and resends the conversation so far (as every chat client does):
+
+    | Request | caching off | caching on |
+    | --- | ---: | ---: |
+    | 7,652-token prompt, sent again | 2.20 s | 0.68 s (3.3x) |
+    | 24,224-token prompt, sent again | 6.66 s | 0.74 s (9.0x) |
+    | chat turns 2-6 (7.9k-8.6k tokens) | 2.17-2.44 s | 0.26-0.76 s |
+    | chat with thinking on, turns 1-4 (4.0k-4.1k tokens, the document cached by the chat above) | 1.09-1.22 s | 0.58-0.71 s |
+
+    Prompts seen for the first time are unchanged: no-hit rows at 128 / 2,048 / 8,192 input tokens (1 user) and 128/128 at
+    32 users, TTFT and TPOT within 2 % (1 user 128/128: TTFT 191 / 192 ms, TPOT 7.54 / 7.54 ms). Greedy output with caching on matched caching off on every resent prompt and on
+    all 10 chat turns; output can still differ at a near-tie token, since a resumed prompt reuses KV blocks computed in an earlier prefill pass.
   limitations: |
     - MTP speculative decoding is off: the MTP verify pass still runs the unfused rows path, which is slower than the fused
       plain step. A fused multi-token verify is the way back to MTP.
     - The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
       and `-text` profiles run the same decode code (they change prefill batching and the vision tower); the p150x4
       profiles run the same mesh but were not run on p150 boards.
+    - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
+      gets no benefit, and the shared tokens past the last boundary are prefilled again. Requests with images are not
+      cached.
     - The device sampler supports `top_k` up to 32.
     - Benchmark evals ran with thinking off; IFEval and LiveCodeBench on subsets (100 / 50 questions).
     - v1's `-longctx` profiles do not start on this image (vLLM rejects a 2048-token chunk budget below
