@@ -97,27 +97,27 @@ serve:
 # picks the precision policy and the KV budget at build.
 serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 262144 context, bfp8 routed experts.
+    description: 'Fastest profile: four dies, text and images.'
     hardware: p300x2
     mesh_device: P300x2
     env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
-    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on hardware (the identical (1,4) mesh).
+    description: '`p300x2` on four p150 boards.'
     hardware: p150x4
     mesh_device: P150x4
     env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
-    description: One p300 board (2 dies, tensor parallel 2), 32 sequences, 262144 context, bfp8 routed experts.
+    description: 'Default: two dies, text and images, at about 60 % of the four-die single-user speed.'
     hardware: p300
     mesh_device: P300
     env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
   - name: p150x2
-    description: Two p150 boards (2 dies), same configuration as p300. Not run on hardware (the identical (1,2) mesh).
+    description: '`p300` on two p150 boards.'
     hardware: p150x2
     mesh_device: P150x2
     env: {TT_VISIBLE_DEVICES: "0,1"}
   - name: p150
-    description: "One p150 (1 die), 32 sequences, bfp4 routed experts (bfp8 does not fit one die), text only, no fabric. One die holds 4 up|gate columns per DRAM bank and expert, which the fused MoE kernels do not read yet: this profile keeps the v2 MoE (with the fused router top-k)."
+    description: 'One die: text only, routed experts at bfp4, MTP speculative decoding on.'
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
@@ -125,7 +125,7 @@ serve_profiles:
     env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
     args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
-    description: "One p100 (1 die, 7 DRAM banks): the p150 profile unchanged - 32 sequences, bfp4 routed experts, text only, no fabric. Like p150 it keeps the v2 MoE (7 DRAM banks, 4 columns per bank)."
+    description: '`p150` on one p100.'
     hardware: p100
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
@@ -141,81 +141,47 @@ verify:
   - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
 
 card:
-  description: >
-    Ornith-1.5-35B-A3B (35B total / 3B active MoE: 256 experts, top-8 + shared expert, 40 layers of Gated DeltaNet + gated attention, vision tower, MTP head) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the v1 bundle (raahemnabeel/ornith-1.5-35b-a3b-v1) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode ops for 1-32 concurrent users. Same weights, profiles and serving recipe; on four dies single-user decode 45 -> 220 tok/s and 32-user output 346 -> 591 tok/s, prefill unchanged or faster.
-  quickstart: |
-    ### What changed since v1
-    This is the v1 bundle ([raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1)) with its decode step
-    rebuilt around fused kernels. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is the
-    v1's (TTFT equal or lower). The changes, in the order they were made (each measured, kept only if it won):
+  attribution: |
+    Derived from [ornith-ai/Ornith-1.5-35B-A3B](https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B) by ornith-ai.
+    The checkpoint is used as published; expert weights are converted to lower precision when the server loads
+    them (see Limitations). See the original model card for training and evaluation details.
+  description: |
+    Ornith-1.5-35B-A3B, a 35B-parameter mixture-of-experts model with 3B parameters active per token (256 experts,
+    top-8 plus a shared expert; 40 layers mixing Gated DeltaNet linear attention with gated full attention) and a
+    vision encoder, served with vLLM. A reasoning model that thinks before it answers by default, with text and image
+    input (text only on one die), tool calling and a 262,144-token context, for up to 32 concurrent users.
+  intended_use: |
+    Agentic coding and tool use, plus chat and reasoning over text and images, through an OpenAI-compatible API.
+  usage: |
+    Thinking is on by default. Give thinking requests a large `max_tokens` (thousands): when the budget runs out inside
+    the reasoning, `content` is empty.
+    Turn thinking off per request with `"chat_template_kwargs": {"enable_thinking": false}`.
 
-    1. **Router.** One 1D matmul (was DRAM-sharded on 8 cores); top-8 + softmax + shared-gate sigmoid on the RISC cores in
-       one op instead of a 7-op chain.
-    2. **Fused MoE decode.** Routed + shared experts in three ops (route, gate|up + SwiGLU, down) that stream each selected
-       expert's weights in place, for every decode width from 1 to 32 rows (several users' experts as one union, each weight
-       column read once for all rows). On four dies the gate and up halves of an expert column are split across a pair of
-       cores, with readers placed off the congested NOC rows.
-    3. **Replicated-residual layer boundary.** The decode residual stays replicated on every die: each mixer / MoE output is
-       one all-reduce + add + local RMSNorm.
-    4. **Gated DeltaNet decode mixer** as two programs (causal conv; gates + norms + recurrent state update + gated norm),
-       with each head's value dimension split across up to four cores.
-    5. **Attention decode ops** around the QKV matmul, cache update and SDPA decode (q / k norm + RoPE + gate in one prep op,
-       output gating in one post op).
-    6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm run as one op over the
-       fabric, and the next layer's input projection (or the MoE router) runs inside the same program, streaming its weights
-       while the boundary computes.
-    7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
+    A request without sampling parameters uses the checkpoint's defaults (temperature 1.0, top_p 0.95, top_k 20). Sampling runs on the
+    device; `top_k` is limited to 32.
 
-    MTP speculative decoding is off on the multi-die profiles: its verify pass runs the unfused path, and the fused plain
-    decode step is faster on real text (four dies: 218 vs 86 tok/s).
+    Images: up to 4 per request as `image_url` parts, resized to at most 4 MP (two- and four-die profiles). Video input is not accepted.
 
-    Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (exactly what the LoFi expert
-    matmul reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary
-    and DeltaNet ops sum in a different order than the op chain they replace. Output quality is checked below.
-
-    On one die (`p150`, `p100`) the full expert width does not fit the fused kernels' bank layout, so those profiles keep the
-    v1 MoE and gain only the fused router top-k (1-row steps), with MTP on as in v1.
-
-    ### Use with your client
-    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
-    `ornith-ai/Ornith-1.5-35B-A3B`. Thinking is ON by default (reasoning in the message's `reasoning` field, answer in
-    `content`); turn it off per request with `"chat_template_kwargs": {"enable_thinking": false}`. Give thinking requests a
-    large `max_tokens`. Tool calls use the `qwen3_xml` parser. Images (up to 4 per request, resized to at most 4 MP) as
-    `image_url` parts on the multi-die profiles.
-
-    ### Prefix caching
-    On by default (multi-die profiles). When a prompt starts with the same 2,048 or more tokens as a recent one (a document sent
-    again, the next turn of a chat, a long shared system prompt), the server resumes from the last 2,048-token boundary
-    the two share instead of prefilling from the start: vLLM reuses the attention KV blocks, and the server restores the
-    Gated DeltaNet state it saved at that boundary (32 snapshots on four dies, 16 on two; each snapshot 22.5 MiB per die on four dies, 0.7 GiB per die in all, taken from the KV pool, least recently used evicted). A prompt seen for the first time
-    runs exactly the prefill it ran without caching. Turn it off with `tt-model serve ... -- --no-enable-prefix-caching`.
-
-    ### Profiles
-    `tt-model serve raahemnabeel/ornith-1.5-35b-a3b --profile <name>`:
-    - `p300` (default) / `p150x2` - two dies, bfp8 routed experts, text + images (no fabric boundary: its receive buffers do
-      not fit next to the two-die prefill).
-    - `p300x2` / `p150x4` - four dies, bfp8 routed experts, text + images: the fastest profile.
-    - `p150` / `p100` - one die, bfp4 routed experts, text only (v1 MoE, MTP on).
-
-    Every profile: 32 concurrent sequences, 262144-token context.
+    Prefix caching is on on the two- and four-die profiles. A prompt that starts with the same 2,048 or more tokens as a recent one (a document sent
+    again, the next turn of a chat, a shared system prompt) resumes from the last 2,048-token boundary the two share
+    instead of being prefilled from the start. The server keeps 32 (four dies) or 16 (two dies) such resume points, least recently used
+    evicted; they use 0.7 GiB (four dies) of each die's KV pool. Turn caching off with `tt-model serve <repo> -- --no-enable-prefix-caching`.
   performance: |
     ### Accuracy
-    Benchmark evals through the served API (p300 profile, thinking off, one sample per question, seed 42, temperature 0.6 /
-    top_p 0.95 / top_k 20, lm-evaluation-harness), the same settings and box as the v1 bundle's run:
+    Evaluated through the served chat API (p300 profile, thinking off, one sample per question, seed 42, temperature
+    0.6 / top_p 0.95 / top_k 20, lm-evaluation-harness), next to the previous version of this package (v1) on the same
+    box and settings. The reference column is Ornith's model card, measured with thinking on and Ornith's own harness,
+    so it is not measured the same way as the other two columns.
 
-    | Eval | v1 | current |
-    | --- | ---: | ---: |
-    | GPQA-Diamond (40 questions) | 0.775 | 0.675 |
-    | IFEval prompt-level strict (100) | 0.76 | 0.82 |
-    | LiveCodeBench v6 (50) | 0.36 | 0.40 |
+    | Eval | v1 | this package | reference (Ornith card, thinking on) | prompts |
+    | --- | ---: | ---: | ---: | ---: |
+    | GPQA-Diamond | — | 0.707 ±0.032 | 0.892 | 198 |
+    | GPQA-Diamond, first 40 questions | 0.775 | 0.675 ±0.074 | — | 40 |
+    | IFEval prompt-level strict | 0.76 | 0.82 ±0.038 | not reported | 100 |
+    | LiveCodeBench v6 | 0.36 | 0.40 ±0.069 | not reported | 50 |
 
-    All within the error bars of these subset sizes (GPQA +-0.07, IFEval +-0.04, LiveCodeBench +-0.07): no measurable
-    quality change. The whole GPQA-Diamond set (198 questions, same settings) scores 0.707 +-0.032 on this bundle; the
-    same build scored 0.75 on the first 40 questions in that run (0.675 in the subset run above), the spread one sample
-    per question gives at n = 40. Layer-level PCC against Hugging Face (real weights): decode >= 0.9999 at 1 user,
-    per-user minimum >= 0.9999 at 32 users.
-
-    Teacher forcing against the Hugging Face bf16 model (v1 bundle; 100 greedy tokens, top-1 / top-5 / top-100):
+    Top-1 / top-5 / top-100 token agreement with the Hugging Face bf16 model under teacher forcing (100 greedy tokens;
+    measured on v1, whose expert precision this package keeps):
 
     | profile | code chat prompt | 2048-token book prompt |
     | --- | --- | --- |
@@ -242,7 +208,7 @@ card:
 
     #### p300x2
 
-    Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 bits, for two dies). This revision, same setup: 1 user 4.57 ms TPOT, real text 217.4 tok/s, 8 users 9.71 ms, 32 users 1024/256 24.2 ms.
+    Four-die rows measured on the previous build of this package. This build, same setup: 1 user 4.57 ms TPOT (219 tok/s), real text 217.4 tok/s, 8 users 9.71 ms, 32 users at 1024/256 24.2 ms.
 
     Latency, batch 1 (single user): v1 -> current
 
@@ -316,7 +282,7 @@ card:
 
     #### p150
 
-    One die keeps the v1 decode path (the fused MoE kernel needs at most two up|gate columns per DRAM bank, i.e. two or more dies, and the replicated boundary needs a mesh): p150 decode is the v1 MoE plus the fused router top-k on 1-row steps, MTP on, and the tables below show parity. The single-user random-token latency table is left out: with adaptive MTP on random tokens it does not repeat on one die (15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs of v1); the v1 card's p150 latency rows still describe this bundle.
+    On one die this package decodes as v1 does, with MTP speculative decoding on. The single-user random-token latency table is left out: with MTP on random tokens it varies from run to run on one die (15.9, 52.4 and 27.0 ms TPOT at 128/128 in three runs of v1); the v1 card's p150 latency rows apply.
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 42.6 -> **44.1 tok/s** (+4 %).
 
@@ -353,22 +319,30 @@ card:
     | chat with thinking on, turns 2-4 (4.1k tokens) | 0.75-0.76 s | 0.14-0.44 s |
 
     Prompts seen for the first time are unchanged: no-hit rows at 128 / 2,048 / 8,192 input tokens (1 user) and 128/128 at
-    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 120 / 120 ms, TPOT 4.55 / 4.58 ms). Two dies (p300): a 27,176-token prompt sent again 5.78 -> 0.37 s, chat turns 2-4 0.45-0.55 s (turn 1 1.62 s). Greedy output with caching on matched caching off on every resent prompt and on
-    9 of 10 chat turns; the one that differs diverges at a near-tie token 71 characters in (the reused KV blocks were computed in a different prefill pass).
+    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 120 / 120 ms, TPOT 4.55 / 4.58 ms). Two dies (p300): a 27,176-token prompt sent again 5.78 -> 0.37 s, chat turns 2-4 0.45-0.55 s (turn 1 1.62 s). Greedy output with caching on matched caching off on every resent prompt and on 9 of 10 chat turns.
   limitations: |
-    - MTP speculative decoding is off on the multi-die profiles: the MTP verify pass still runs the unfused rows path, and
-      with it on, single-user real-text decode is slower than the fused plain step (four dies: 86 vs 218 tok/s). A fused
-      multi-token verify is the way back to MTP.
-    - Two dies (`p300`, `p150x2`) run without the fabric layer boundary: its persistent receive buffers do not fit next to
-      the two-die prefill's circular buffers.
-    - One die (`p150`, `p100`) keeps the v1 MoE: the fused kernels read 1 or 2 up|gate columns per DRAM bank and
-      expert, one die holds 4 (and p100 has 7 banks).
+    - On the two- and four-die profiles the checkpoint's MTP head is not used: decoding produces one token per step,
+      without speculative decoding. The one-die profiles (`p150`, `p100`) decode with MTP on.
+    - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
+      can differ from the bf16 original where two candidate tokens are close; see Accuracy.
+    - One die (`p150`, `p100`): text only, no prefix caching.
+    - Evals ran with thinking off on the p300 profile only, IFEval and LiveCodeBench on subsets (100 / 50 questions).
+      Ornith's own benchmarks (agentic coding and tool use) were not reproduced.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
       gets no benefit, and the shared tokens past the last boundary are prefilled again. Requests with images are not
-      cached. The one-die profiles (`p150`, `p100`) keep MTP on and serve without prefix caching.
-    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
-    - The device sampler supports `top_k` up to 32.
-    - Benchmark evals ran on subsets (40 / 100 / 50 questions, plus the full 198-question GPQA-Diamond for this build) on the
-      p300 profile only.
-  related: >
-    The v1 bundle this builds on: [raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1). Engineering log with every measurement: `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `ornith_fusion` branch of github.com/rnabeelTT/tt-metal.
+      cached. With caching on, a resumed prompt's output can differ from an uncached run where two candidate tokens are
+      nearly tied (greedy output differed on 1 of 10 chat turns).
+    - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - Startup takes about 6 minutes on p300x2.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
+      a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
+      model's.
+  related: |
+    - [raahemnabeel/ornith-1.5-35b-a3b-v1](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b-v1): the previous
+      version of this package (the `v1` columns above), replaced by this one.
+    - [raahemnabeel/ornith-1.5-122b](https://huggingface.co/raahemnabeel/ornith-1.5-122b): Ornith-1.5-122B, the
+      larger Ornith-1.5 model.
+  license:
+    id: mit
