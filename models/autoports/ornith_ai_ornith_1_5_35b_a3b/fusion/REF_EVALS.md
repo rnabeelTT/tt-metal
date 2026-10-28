@@ -96,8 +96,8 @@ Language:
 | OJBench | 39.5 | | queued | 232 problems, C++, DMOJ judge, 65,536 max tokens |
 | FullStackBench en / zh | 62.6 / 58.7 | | queued | SandboxFusion, 1,687 each |
 | BFCL-V4 | 72.2 | | queued | official bfcl_eval; web_search part via SearXNG |
-| TAU2-Bench | 79.5 | | setup | 278 tasks x 4 trials; Claude agents as simulated user (user decision; official gpt-4.1) |
-| VITA-Bench | 33.6 | | setup | 400 tasks; Claude agents as simulated user + rubric judge |
+| TAU2-Bench | 79.5 | | ready | 278 tasks x 4 trials; Claude worker agents as the simulated user through ~/evals/usersim (relay shim on :28400); supervised run, not in the unattended queue |
+| VITA-Bench | 33.6 | | ready | 400 tasks x 4 trials (Avg@4); Claude workers as the simulated user + rubric judge rounds; supervised run |
 | DeepPlanning | 24.1 | | setup | Qwen-Agent benchmark; travel plan-to-JSON step Claude-judged |
 | HLE w/ tool | 47.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | Browsecomp | 63.8 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
