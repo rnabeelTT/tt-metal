@@ -166,6 +166,13 @@ card:
     (`--enable-auto-tool-choice` is on). Without sampling parameters a request uses the checkpoint's defaults
     (temperature 1.0, top_p 0.95, top_k 40).
 
+    ### Prefix caching
+    On by default (every profile, together with chunked prefill). When a prompt starts with the same 2,048 or more tokens as a recent one (a document sent
+    again, the next turn of a chat, a long shared system prompt), the server resumes from the last 2,048-token boundary
+    the two share instead of prefilling from the start: vLLM reuses the attention KV blocks, and the server restores the
+    Gated DeltaNet state it saved at that boundary (32 snapshots on four dies, 16 on two; each snapshot 27 MiB per die on four dies, 0.84 GiB per die in all, taken from the KV pool, least recently used evicted). A prompt seen for the first time
+    runs exactly the prefill it ran without caching. Turn it off with `tt-model serve ... -- --no-enable-prefix-caching`.
+
     ### Profiles
     `tt-model serve raahemnabeel/qwen3-coder-next --profile <name>`:
     - `p300x2` (default) / `p150x4` - four dies: the faster profile.
@@ -284,6 +291,21 @@ card:
     | 8 | 32 | 2,653 -> 2,631 | 59.3 -> 19.0 | 16.9 -> 52.7 | 115.2 -> **273.0** (+137 %) | 17.79 -> 7.49 |
     | 16 | 64 | 4,161 -> 4,161 | 97.7 -> 31.0 | 10.2 -> 32.3 | 140.9 -> **338.8** (+140 %) | 29.07 -> 12.06 |
     | 32 | 128 | 7,135 -> 7,126 | 154.6 -> 65.3 | 6.5 -> 15.3 | 175.9 -> **344.0** (+96 %) | 46.55 -> 23.89 |
+
+    ### Prefix caching
+    Measured 2026-10-28 on p300x2, one user, temperature 0: the same build served with caching off and on. TTFT of a
+    prompt (Python source from this repo) sent a second time, and of each turn of a chat that opens with an 8k-token code
+    document and resends the conversation so far (as every chat client does):
+
+    | Request | caching off | caching on |
+    | --- | ---: | ---: |
+    | 7,160-token prompt, sent again | 1.79 s | 0.37 s (4.8x) |
+    | 22,815-token prompt, sent again | 5.81 s | 0.36 s (16x) |
+    | chat turns 2-6 (7.6k-8.2k tokens) | 1.94-2.08 s | 0.52-0.68 s |
+
+    Prompts seen for the first time are unchanged: no-hit rows at 128 / 2,048 / 8,192 input tokens (1 user) and 128/128 at
+    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 171 / 174 ms, TPOT 5.59 / 5.61 ms). Two dies (p300): a 25,113-token prompt sent again 7.70 -> 0.53 s, chat turns 2-4 0.62-0.63 s (turn 1, uncached, 2.35 s). Greedy output with caching on matched caching off on every resent prompt and on
+    9 of 10 chat turns; the one that differs (a thinking-on turn) diverges at a near-tie token (the reused KV blocks were computed in a different prefill pass).
   limitations: |
     - Two dies (`p300`, `p150x2`) run without the fabric layer boundary (its persistent receive buffers do not fit next to
       the two-die prefill).
@@ -291,6 +313,9 @@ card:
       32 rather than moved to host sampling.
     - Agentic benchmarks (SWE-Bench Verified, LiveCodeBench), which Qwen publishes for this checkpoint, were not run; the
       evals ran on the p300x2 profile only.
+    - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
+      gets no benefit, and the shared tokens past the last boundary are prefilled again. Requests with images are not
+      cached.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
   related: >
     The v1 bundle this builds on: [raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `coder_next_fusion` branch of github.com/rnabeelTT/tt-metal.
