@@ -1,8 +1,8 @@
 From ca75621a58f3971666aa175e0ee9425dfe22ebeb Mon Sep 17 00:00:00 2001
 From: rnabeelTT <rnabeel@tenstorrent.com>
 Date: Wed, 28 Oct 2026 04:30:01 +0000
-Subject: [PATCH] Prefix caching for recurrent-state hybrids: scheduler-side
- index of model state snapshots
+Subject: [PATCH 1/2] Prefix caching for recurrent-state hybrids:
+ scheduler-side index of model state snapshots
 
 A model with recurrent state (Gated DeltaNet / Mamba hybrids) declares
 model_capabilities['prefix_state_cache'] = {slots, segment, min_tokens, prompt_end}.
@@ -574,6 +574,38 @@ index 0000000..b66fd22
 +    so = out({"B": 4096})
 +    idx.plan_step(so, {"B": b})
 +    assert [q for q, _ in get_prefix_state_directives(so)["B"]["saves"]] == [2048, 4096]
+-- 
+2.43.0
+
+
+From e37ccd87d88f87628ffb63e24bcd3d2f16350936 Mon Sep 17 00:00:00 2001
+From: rnabeelTT <rnabeel@tenstorrent.com>
+Date: Wed, 28 Oct 2026 04:48:30 +0000
+Subject: [PATCH 2/2] prefix_state: reset core's Mamba align mode when the
+ model keeps its own state snapshots (align needs chunked MM input, off on TT)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/vllm_tt_plugin/platform.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/vllm_tt_plugin/platform.py b/src/vllm_tt_plugin/platform.py
+index f04cc01..2ca7c9e 100644
+--- a/src/vllm_tt_plugin/platform.py
++++ b/src/vllm_tt_plugin/platform.py
+@@ -1640,8 +1640,11 @@ class TTPlatform(Platform):
+             and vllm_config.cache_config.enable_prefix_caching
+         ):
+             # Recurrent-state hybrid: the KV prefix cache is usable because the
+-            # model snapshots its recurrent state (prefix_state.py).
++            # model snapshots its recurrent state (prefix_state.py). Core's own
++            # Mamba "align" mode (which needs chunked MM input, off on TT) is
++            # not used: the TT model keeps its recurrent state itself.
+             store_prefix_state_policy(vllm_config, prefix_state_policy)
++            _renormalize_mamba_cache_config(vllm_config)
+         if vllm_config.cache_config.enable_prefix_caching:
+             if not supports_prefix_caching:
+                 vllm_config.cache_config.enable_prefix_caching = False
 -- 
 2.43.0
 

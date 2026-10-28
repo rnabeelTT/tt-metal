@@ -91,7 +91,7 @@ serve:
     QWEN35_ROWS_TOPK: "1"
   # Thinking ON by default (the model's own default); turn it off per request with
   # "chat_template_kwargs": {"enable_thinking": false}.
-  args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
+  args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}']
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). The mesh size
 # picks the precision policy and the KV budget at build.
@@ -123,14 +123,14 @@ serve_profiles:
     additional_config: {tt: {fabric_config: DISABLED}}
     # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there
     env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
     description: "One p100 (1 die, 7 DRAM banks): the p150 profile unchanged - 32 sequences, bfp4 routed experts, text only, no fabric. Like p150 it keeps the v2 MoE (7 DRAM banks, 4 columns per bank)."
     hardware: p100
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
     env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
-    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
+    args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
 # Default = the best balance of hardware and performance: two chips keep the 4-chip accuracy (bfp8 routed experts;
 # teacher forcing 0.96 / 0.91 top-1 vs 0.97 / 0.89) and vision, at ~80 % of the 4-chip throughput (peak 275 vs 351 tok/s,
 # TTFT 4K 0.89 vs 0.72 s) on half the hardware; one chip needs bfp4 experts (book top-1 0.84) and drops vision.

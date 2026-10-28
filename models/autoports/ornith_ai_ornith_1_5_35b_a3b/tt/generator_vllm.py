@@ -172,7 +172,12 @@ _VISION = os.environ.get("QWEN35_VISION", "0") == "1"
 # vLLM prefix caching (plugin prefix_state.py): QWEN35_PREFIX_STATE_SLOTS GDN state snapshots on device (~23 MiB per die
 # each on p300x2) let a request resume from a cached KV prefix; 0 = off. A snapshot is saved at every prefill segment
 # boundary and at the last block boundary of each prompt of at least QWEN35_PREFIX_STATE_MIN tokens. Not wired with MTP.
-_PREFIX_STATE_SLOTS = int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", "32")) if _MTP_K == 0 else 0
+# dies the GDN state is sharded over (MESH_DEVICE): a snapshot per die is 4 / dies times the p300x2 size, so the default
+# slot count scales with the mesh (32 on four dies, 16 on two, 8 on one: the same ~0.7 GiB pool per die)
+_PREFIX_DEVICES = {"P150": 1, "N150": 1, "P100": 1, "P300": 2, "P150X2": 2}.get(
+    os.environ.get("MESH_DEVICE", "P300x2").strip().upper(), 4
+)
+_PREFIX_STATE_SLOTS = int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if _MTP_K == 0 else 0
 _PREFIX_STATE_MIN = int(os.environ.get("QWEN35_PREFIX_STATE_MIN", "1024"))
 # QWEN35_PREFIX_STATE_PROMPT_END=1 also snapshots each prompt's last block boundary: hits reach the end of the previous
 # turn, but every cold prompt pays one more prefill pass (+57..133 ms on Ornith p300x2) and its segment split (numerics)
@@ -400,8 +405,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # and templates). The masked-bucket prefill programs allocate transients while a request runs (the expert-sorted
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
-    # one prefix-cache GDN snapshot per die (allocate_kv_cache checks the real size against it)
-    _PREFIX_SLOT_GIB = 24.0 / 1024
+    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size)
+    _PREFIX_SLOT_GIB = 24.0 / 1024 * 4 / _PREFIX_DEVICES
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
     _KV_LAYERS = 10  # attention layers holding paged K/V (Ornith: 40 layers, full attention every 4th)

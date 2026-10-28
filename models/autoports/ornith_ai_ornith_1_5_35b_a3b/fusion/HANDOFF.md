@@ -1025,6 +1025,53 @@ After the releases: the fused MTP verify (user: consider it then). Left alone on
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
 `systemd-run --user --unit=<name> ...` (see runs/*.sh).
 
+### Prefix caching (user request 2026-10-28: reusable across the models)
+
+Before: Coder-30B (plain attention) already served vLLM prefix caching. The four Gated-DeltaNet hybrids (Ornith-35B,
+Coder-Next, Qwen3.5-122B, Ornith-122B) did not: the plugin switched it off because their recurrent state at the end of
+a cached prefix lives in no KV block (and vLLM 0.26 defaults it off for hybrids, so the serve command needs
+`--enable-prefix-caching`).
+
+Design (generic in the plugin, two small hooks per model):
+- Plugin branch `prefix-state-cache` of ~/vllm-tt-plugin-pub (local commits ca75621, e37ccd8; the patch over the
+  shipped 556404a is `fusion/plugin/prefix-state-cache.patch`). `prefix_state.py`: a model declares
+  `model_capabilities["prefix_state_cache"] = {slots, segment, min_tokens, prompt_end}`; the scheduler indexes the
+  model's device pool of recurrent-state snapshots by vLLM block hash, caps each KV hit to the longest position with a
+  valid snapshot, attaches restore / save directives per prefill row to the SchedulerOutput (like the forced-reset
+  counts), pins snapshots a scheduled restore reads, marks saves valid once their step is processed, LRU-evicts unpinned
+  ones; the runner passes them to `prefill_forward(prefix_state=...)`. Platform: keeps caching on for such a model and
+  resets core's Mamba "align" mode (it needs chunked MM input, off on TT). Host test `tests/test_prefix_state.py`.
+- Model (same diff in all three trees): `generator.alloc_prefix_state_pool` (B = 1 layout clones of every GDN layer's
+  rec_state + conv taps; 8 x dies slots, ~0.7 GiB per die, budgeted out of the KV pool), `_prefix_restore` (copy +
+  rebuild_conv_carry, as the chunked-prefill carry does) and `_prefix_save`; `_prefill_single` takes cut points;
+  carried chunked state is keyed by request id (prefix caching shares first blocks). Env: `QWEN35_PREFIX_STATE_SLOTS`
+  (0 = off), `QWEN35_PREFIX_STATE_MIN`, `QWEN35_PREFIX_STATE_PROMPT_END`. Commits: ornith_fusion 129583bc1c8 (+ mesh
+  scaling), tt-metal-q122 ornith122_fusion d6e2f1719c6, coder_next_fusion (this section's commit).
+- Snapshots only at prefill segment ends (every 2048 tokens) by default: a cold prompt then runs exactly the passes it
+  ran before, and a resumed prompt runs the same segments a cold one would. Saving the prompt's last block boundary too
+  (`QWEN35_PREFIX_STATE_PROMPT_END=1`) gets closer hits (Ornith 8k chat 0.19-0.27 s instead of 0.21-0.51 s) but costs
+  every cold prompt one more pass (+57..133 ms) and changes its numerics (greedy no longer equals caching off).
+
+Before / after, p300x2, 1 user, published images with the branch mounted (`fusion/tools/prefix_bench.py`,
+`runs/pc_tests.sh`, `fusion/tools/prefix_summary.py`; runs/pc_on2 vs pc_off, pc_cn_*, pc_q122_*, pc_o122_*):
+
+| Model | 24k prompt resent: TTFT off -> on | 8k-document chat, turns 2-6 | no-hit rows (TTFT / TPOT) |
+|---|---|---|---|
+| Ornith-1.5-35B-A3B | 4.02 -> 0.42 s (9.6x) | 1.29-1.48 -> 0.21-0.51 s | equal (120/341/1305 ms, 4.6 ms) |
+| Qwen3-Coder-Next (chunked prefill) | 5.81 -> 0.36 s (16x, 22.8k) | 1.94-2.08 -> 0.52-0.68 s | equal (171/486/1844 ms, 5.6 ms) |
+| Qwen3.5-122B-A10B | 6.66 -> 0.74 s (9.0x) | 2.17-2.44 -> 0.26-0.76 s | within 1-2 % |
+| Ornith-1.5-122B | 6.82 -> 0.71 s (9.6x) | 2.18-2.45 -> 0.27-0.76 s | within 1-2 % |
+
+Cold TTFT unchanged (Ornith 24k 4.028 / 4.027 s). Prompts under one segment (< 2048 tokens) get no hit. Greedy output
+equals caching off on all 12 resent prompts and on 36 of 40 chat turns (Ornith-35B turn 6, Ornith-122B turns 5-6,
+Coder-Next thinking-chat turn 4). The Ornith-35B one (`runs/pc_o35_chat_{on,off}.log`, full text): character 71 of
+703, "Qwen3.6" vs "Qwen36" (a near tie; the code path is qwen36), later turns differ because their history does.
+Likely cause: those turns resume at 8192 on KV blocks that turn 1 wrote inside its partial last segment, which a cold
+run computes inside a full segment (last-bit prefill numerics; vLLM keeps the first cached copy of a block, as with
+decode-written blocks; GPU prefix caching has the same property). Restored GDN state itself is exact.
+Next: rebuild the four fast images with the branch (manifests already pass `--enable-prefix-caching`), Hub smoke,
+publish on the user's go-ahead; p300 / p150 profiles (slots and budget scale with the dies) still to be run.
+
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
 Knobs (Ornith / 122B / GLM share tt/mtp_serving.py): `QWEN35_MTP=k` drafts per pass (default 3); `QWEN35_MTP_ADAPTIVE=1`
