@@ -1072,8 +1072,21 @@ decode-written blocks; GPU prefix caching has the same property). Restored GDN s
 p300 (2 dies, `runs/pc_chain5.sh`, caching on): Ornith-35B 16 snapshots x 45.0 MiB per die, resent 27k prompt 5.78 ->
 0.37 s, chat turns 2-4 0.45-0.55 s after 1.62 s; Coder-Next 16 x 54.0 MiB, resent 25k 7.70 -> 0.53 s, chat 0.62 s after
 2.35 s; repeats identical. p150 / p100 profiles keep MTP on, so caching stays off there (the model declares no support).
-Next: rebuild the four fast images with the branch (manifests already pass `--enable-prefix-caching`), Hub smoke,
-publish on the user's go-ahead.
+**Published 2026-10-28 (user's go-ahead) into the four existing repos** (`runs/pc_release.sh`, plugin e37ccd8 baked in,
+cards gained a "Prefix caching" section in quickstart / performance / limitations; q122_fusion fast-forwarded to
+ornith122_fusion). Per model: package -> local p300x2 serve gated on greedy 8/8 + 8/8 vs the previous hub smoke, a resent
+27k prompt >= 3x faster, 32 snapshot slots in the log -> push --publish -> fresh pull + the same checks vs the local run
+(`runs/rel_<k>`, `runs/hub_<k>`). Every gate passed; hub runs, resent 7.1k / 27k prompt cold -> warm, 1 user and 32 users
+128/128 TPOT:
+- Ornith-35B tt-model/ornith-1.5-35b-a3b:9f0546abcdb8: 1.21 -> 0.27 s, 4.65 -> 0.34 s; 4.58 / 23.90 ms (prev 23.93).
+- Coder-Next tt-model/qwen3-coder-next:0c170421ca1b: 2.01 -> 0.48 s, 6.46 -> 0.45 s; 5.58 / 35.43 ms (prev 35.58).
+- Qwen3.5-122B tt-model/qwen3-5-122b-a10b:ddb75be866ed: 2.02 -> 0.40 s, 7.73 -> 0.47 s; 7.55 / 45.20 ms (prev 46.26).
+- Ornith-1.5-122B tt-model/ornith-1.5-122b:d214f6aa9c89: 2.26 -> 0.61 s, 7.76 -> 0.56 s; 7.54 / 46.64 ms.
+Boots: Ornith-35B ~5-6 min, Coder-Next ~10, 122B ~14.5. The local 32-user rows read +2 % twice (orn, cn) and were back
+to the previous value on the hub run: noise.
+Sampling note (scorecard reader, 2026-10-28): bench.sh sends no sampling params, so card latency / concurrency rows are
+sampled with each model's generation_config (vLLM 0.26 bench no longer defaults to temperature 0); real text and greedy
+checks are temperature 0. Scorecard labels each number accordingly.
 
 ### MTP parameters (user request 2026-10-23: decide k, which batch sizes run MTP, and the resulting throughput)
 
