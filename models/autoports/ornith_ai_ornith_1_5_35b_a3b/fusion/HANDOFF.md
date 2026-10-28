@@ -1008,6 +1008,18 @@ scratchpad (tt-transformers-PR-draft.md); upstream PR #41 (ezietlowTT, Qwen3.8 G
 pattern. Box incident: after the first 0.79.0-wheel device open the chips needed `tt-smi -r` (ethernet core 29-25 on
 device 0 not running; our runtime failed the same way); after the reset both runtimes open the mesh and every test ran
 cleanly.
+**Ornith-1.5-122B published 2026-10-28: raahemnabeel/ornith-1.5-122b** (public + catalog, image
+tt-model/ornith-1.5-122b:43ba2504c8de; tt-metal-q122 branch `ornith122_fusion`, manifest
+`qwen_qwen3_5_122b_a10b/tt-model-ornith122.yaml`, card sources `fusion_card_ornith122/`). The checkpoint
+(ornith-ai/Ornith-1.5-122B @7681ef6, MIT) has the Qwen3.5-122B-A10B architecture (config shapes and all 1949 tensor
+names identical), so the 122B fast code serves it unchanged (HF_MODEL=ornith-ai/Ornith-1.5-122B). Validation
+(`runs/o122_chain.sh`): layer PCC vs HF on the real weights 6/6 (GDN decode 0.99933, attention 0.99406, B=32 worst
+0.99717 / 0.99530 = the Qwen checkpoint's); p300x2 card rows = the Qwen 122B bundle's within noise (1 user 7.51 ms,
+130816 in 10.12 ms, 32 users 46.1 / 47.1 ms, real text 131.7 tok/s, longctx 131.9); GPQA-198 0.712, IFEval-100 strict
+0.76 (Qwen 0.88: formatting-rule misses in fluent text; Ornith-35B scores 0.76-0.82 on this harness), LCB-50 0.52;
+garble 8.87 per 1k, every flagged word a real term. First boot 1154 s (weight conversion), later 853 s. Hub smoke
+(fresh pull) 8/8 identical, real text 131.8 tok/s. Disk: docker build cache pruned (user's choice) to fit the 234 GB
+checkpoint.
 After the releases: the fused MTP verify (user: consider it then). Left alone on purpose (user, 2026-10-26): the
 2-chip fabric boundary, conv folded into the in-proj, sampler all-gathers, 8-row boundary, one-die fused MoE.
 Box note: background chains die when the Claude session disconnects (nohup / setsid too): launch them with
