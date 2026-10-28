@@ -76,10 +76,10 @@ Language:
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| MMLU-Pro | 86.7 | | setup | 1,000 sample |
-| MMLU-Redux | 94.0 | | setup | |
-| C-Eval | 91.9 | | setup | test labels are not public |
-| SuperGPQA | 67.1 | | setup | 1,000 sample |
+| MMLU-Pro | 86.7 | | queued | qtext: card MCQ prompt, 0-shot, 1,000 of 12,032 |
+| MMLU-Redux | 94.0 | | queued | qtext: redux-2.0, 1,000 of 5,700 over 57 subjects |
+| C-Eval | 91.9 | | queued | qtext: val split 1,346 (test labels hidden) |
+| SuperGPQA | 67.1 | | queued | qtext: 1,000 of 26,529 |
 | IFEval | 93.4 | | queued | lm-eval ifeval, all 541 |
 | IFBench | 76.1 | | queued | text2 ifbench, 300, official run_eval.py |
 | MultiChallenge | 61.5 | | queued | 273 convs; Claude-judged (official: gpt-4o) |
@@ -104,14 +104,14 @@ Language:
 | Browsecomp-zh | 69.9 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | WideSearch | 60.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | Seal-0 | 44.1 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| MMMLU | 86.7 | | setup | 1,000 sample over 14 languages |
-| MMLU-ProX | 82.2 | | setup | 1,000 sample over 29 languages |
-| NOVA-63 | 58.6 | | setup | |
-| INCLUDE | 82.8 | | setup | 1,000 sample |
-| Global PIQA | 88.4 | | setup | |
-| PolyMATH | 68.9 | | setup | |
-| WMT24++ | 78.3 | | setup | XCOMET-XXL scoring, no GPU here |
-| MAXIFE | 87.9 | | setup | |
+| MMMLU | 86.7 | | queued | qtext: 14 languages (Yoruba dropped as in the Qwen3 report), 1,000 |
+| MMLU-ProX | 82.2 | | queued | qtext: 29 languages, 1,000 |
+| NOVA-63 | 58.6 | | n/s | dataset not public (HF repo holds only a README) |
+| INCLUDE | 82.8 | | queued | qtext: include-base-44, 1,000 |
+| Global PIQA | 88.4 | | queued | qtext: official generation prompt, 136 languages, 1,000 of 13,600 |
+| PolyMATH | 68.9 | | queued | qtext: official scorer, DW-ACC over 18 languages, 1,000 of 9,000, 81,920 max tokens |
+| WMT24++ | 78.3 | | queued | qtext: 1,000 segments over 55 pairs; Qwen's harder subset is not public; XCOMET-XXL licence needed to score |
+| MAXIFE | 87.9 | | queued | qtext: 23 monolingual files, 1,000; judged parts by Claude (official: claude-3.5-sonnet) |
 
 Vision language (images; up to 4 per request, resized to at most 4 MP by the server):
 
