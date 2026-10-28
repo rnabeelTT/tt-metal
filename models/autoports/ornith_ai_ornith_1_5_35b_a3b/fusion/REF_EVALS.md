@@ -10,7 +10,8 @@ card measures it, next to the card's figure. Decisions (user, 2026-10-28):
 
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
 default), the checkpoint's generation_config sampling, up to 32 requests in flight, max 32,768 generated tokens, only
-the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_*`; chains `runs/ref_evals.sh`, `runs/ref_evals2.sh`.
+the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`; queue runner `tools/evalq.sh` reads `runs/evalq.txt` (one task per line,
+finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode, aider, ...; not in this repo).
 
 Status: **queued** (harness ready, waiting for chips) · **setup** (harness being prepared) · **run** (in progress) ·
 **done** · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
@@ -20,8 +21,8 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | GPQA Diamond | 89.2 | | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
-| HLE (no tools) | 25.6 | | setup | Claude-judged (card: Claude 4.6 Opus judge) |
-| HLE (with tools) | 33.4 | | open | needs search / code tools |
+| HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
+| HLE (with tools) | 33.4 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | setup | Harbor/Terminus-2; card: 32 CPU / 48 GB per task |
 | Terminal-Bench 2.1 (Claude Code) | 68.5 | | setup | |
 | SWE-bench Verified | 79 | | setup | OpenHands per card |
@@ -33,25 +34,25 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | SWE Atlas - QnA | 39.8 | | setup | feasibility check |
 | MCP-Atlas | 70.2 | | setup | feasibility check (Claude judge) |
 | Toolathlon-Verified | 48.7 | | setup | feasibility check (official service) |
-| WideSearch | 67.8 | | open | needs a search backend |
-| BrowseComp | 67.6 | | open | needs a search backend |
+| WideSearch | 67.8 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| BrowseComp | 67.6 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | ClawEval | 72.5 | | setup | feasibility check |
 
 ## Ornith-1.5-122B (card: ornith-ai/Ornith-1.5-122B)
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| SciCode | 53.8 | | queued | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol) |
-| HLE (w/o tools) | 37.68 | | setup | Claude-judged |
-| HLE (with tools) | 48.0 | | open | needs search / code tools |
+| SciCode | 53.8 | | queued | official harness (inspect), test split 288 subproblems, with background, subproblem pass@1 (AA protocol); runs first |
+| HLE (w/o tools) | 37.68 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
+| HLE (with tools) | 48.0 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | TerminalBench 2.1 | 81.2 | | setup | |
 | CyberGym | 80.0 | | setup | feasibility check |
 | NL2Repo | 51.2 | | setup | feasibility check |
 | SWE-bench Pro (no-hack) | 76.9 | | setup | OpenHands per card |
 | SWE-bench Verified (non-hack) | 84.5 | | setup | |
 | SWE-bench Multilingual (non-hack) | 76.4 | | setup | |
-| WideSearch | 75.2 | | open | needs a search backend |
-| BrowseComp | 78.5 | | open | needs a search backend |
+| WideSearch | 75.2 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| BrowseComp | 78.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | MCP-Atlas | 74.6 | | setup | feasibility check |
 | Toolathlon-Verified | 70.8 | | setup | feasibility check |
 | ClawEval | 79.4 | | setup | feasibility check |
@@ -77,29 +78,29 @@ Language:
 | C-Eval | 91.9 | | setup | test labels are not public |
 | SuperGPQA | 67.1 | | setup | 1,000 sample |
 | IFEval | 93.4 | | queued | lm-eval ifeval, all 541 |
-| IFBench | 76.1 | | setup | |
-| MultiChallenge | 61.5 | | setup | Claude-judged |
-| AA-LCR | 66.9 | | setup | Claude-judged |
-| LongBench v2 | 60.2 | | setup | |
-| HLE w/ CoT | 25.3 | | setup | Claude-judged |
+| IFBench | 76.1 | | queued | text2 ifbench, 300, official run_eval.py |
+| MultiChallenge | 61.5 | | queued | 273 convs; Claude-judged (official: gpt-4o) |
+| AA-LCR | 66.9 | | queued | 100 Qs, v1.0.0 keys; Claude-judged |
+| LongBench v2 | 60.2 | | queued | official pred.py prompt, 503 |
+| HLE w/ CoT | 25.3 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | GPQA Diamond | 86.6 | | queued | lm-eval r1_gpqa_diamond, 198 |
-| HMMT Feb 25 | 91.4 | | setup | |
-| HMMT Nov 25 | 90.3 | | setup | |
+| HMMT Feb 25 | 91.4 | | queued | MathArena data, 4 samples/problem, 81,920 max tokens |
+| HMMT Nov 25 | 90.3 | | queued | MathArena data, 4 samples/problem, 81,920 max tokens |
 | SWE-bench Verified | 72.0 | | setup | |
 | Terminal Bench 2 | 49.4 | | setup | |
 | LiveCodeBench v6 | 78.9 | | queued | lm-eval, code_generation_lite test6 (175, 2025-01..04) |
-| CodeForces | 2100 | | open | Qwen's own query set (not public) |
-| OJBench | 39.5 | | setup | |
-| FullStackBench en / zh | 62.6 / 58.7 | | setup | |
-| BFCL-V4 | 72.2 | | setup | |
-| TAU2-Bench | 79.5 | | setup | simulated user |
-| VITA-Bench | 33.6 | | setup | simulated user |
-| DeepPlanning | 24.1 | | setup | |
-| HLE w/ tool | 47.5 | | open | needs search / code tools |
-| Browsecomp | 63.8 | | open | needs a search backend |
-| Browsecomp-zh | 69.9 | | open | needs a search backend |
-| WideSearch | 60.5 | | open | needs a search backend |
-| Seal-0 | 44.1 | | open | needs a search backend |
+| CodeForces | 2100 | | n/s | Qwen's own query set, not public: not reproducible |
+| OJBench | 39.5 | | queued | 232 problems, C++, DMOJ judge, 65,536 max tokens |
+| FullStackBench en / zh | 62.6 / 58.7 | | queued | SandboxFusion, 1,687 each |
+| BFCL-V4 | 72.2 | | queued | official bfcl_eval; web_search part via SearXNG |
+| TAU2-Bench | 79.5 | | setup | 278 tasks x 4 trials; Claude agents as simulated user (user decision; official gpt-4.1) |
+| VITA-Bench | 33.6 | | setup | 400 tasks; Claude agents as simulated user + rubric judge |
+| DeepPlanning | 24.1 | | setup | Qwen-Agent benchmark; travel plan-to-JSON step Claude-judged |
+| HLE w/ tool | 47.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| Browsecomp | 63.8 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| Browsecomp-zh | 69.9 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| WideSearch | 60.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| Seal-0 | 44.1 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
 | MMMLU | 86.7 | | setup | 1,000 sample over 14 languages |
 | MMLU-ProX | 82.2 | | setup | 1,000 sample over 29 languages |
 | NOVA-63 | 58.6 | | setup | |
