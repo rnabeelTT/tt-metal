@@ -99,27 +99,24 @@ serve:
 # `tt-model serve <bundle> --profile <name>`. The mesh size picks the precision policy and the KV budget at build.
 serve_profiles:
   - name: p300x2
-    description: >
-      Two p300 boards (4 dies, TP4): 32 sequences, 262144 context, routed experts in the 4-die precision policy.
+    description: 'Default and fastest profile: four dies.'
     hardware: p300x2
     mesh_device: P300x2
     env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
-    description: Four p150 boards (4 dies, TP4), same configuration as p300x2. Untested on hardware (built for the identical (1,4) mesh).
+    description: '`p300x2` on four p150 boards.'
     hardware: p150x4
     mesh_device: P150x4
     env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
-    description: >
-      One p300 board (2 dies, TP2): 32 sequences, 262144 context, bfp4 routed experts (the 4-die policy's experts do not
-      fit two dies).
+    description: 'Two dies: the same features with routed experts at bfp4.'
     hardware: p300
     mesh_device: P300
     # the first two chips (on a 4-chip host: the two dies of the first board; fabric init needs every visible chip in
     # the mesh). A no-op on a single p300.
     env: {TT_VISIBLE_DEVICES: "0,1"}
   - name: p150x2
-    description: Two p150 boards (2 dies, TP2), same configuration as p300. Untested on hardware (built for the identical (1,2) mesh).
+    description: '`p300` on two p150 boards.'
     hardware: p150x2
     mesh_device: P150x2
     env: {TT_VISIBLE_DEVICES: "0,1"}
@@ -130,78 +127,49 @@ verify:
   - "import models.autoports.qwen_qwen3_coder_next.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
 
 card:
-  description: >
-    Qwen3-Coder-Next (80B total / 3B active MoE: 512 experts, top-10 + shared expert, 48 layers of Gated DeltaNet + gated attention) on Blackhole through vLLM and the Tenstorrent plugin, with a fused decode step: the v1 bundle (raahemnabeel/qwen3-coder-next-v1) plus fused MoE, Gated DeltaNet, attention, layer-boundary and sampler decode ops for 1-32 concurrent users, ported from the Ornith-1.5-35B-A3B fusion. Same weights, profiles and serving recipe; prefill unchanged.
-  quickstart: |
-    ### What changed since v1
-    This is the v1 bundle ([raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1)) with its decode step
-    rebuilt around fused kernels, ported from the Ornith-1.5-35B-A3B fusion
-    ([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)).
-    Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill is unchanged (TTFT equal or
-    lower). The changes:
+  attribution: |
+    Derived from [Qwen/Qwen3-Coder-Next](https://huggingface.co/Qwen/Qwen3-Coder-Next) by the Qwen team. The
+    checkpoint is used as published; expert weights are converted to lower precision when the server loads them
+    (see Limitations). See the original model card for training and evaluation details.
+  description: |
+    Qwen3-Coder-Next, an 80B-parameter mixture-of-experts coding model with 3B parameters active per token (512
+    experts, top-10 plus a shared expert; 48 layers mixing Gated DeltaNet linear attention with gated full
+    attention), served with vLLM. Text only and without a thinking mode; tool calling and a 262,144-token context,
+    for up to 32 concurrent users.
+  intended_use: |
+    Coding assistants and coding agents: code generation, editing and repository-level tasks with tool calls,
+    through an OpenAI-compatible API.
+  usage: |
+    The model answers directly (no reasoning block). A request without sampling parameters uses the checkpoint's
+    defaults (temperature 1.0, top_p 0.95, top_k 40); sampling runs on the device, where `top_k` is limited to 32, so
+    the default `top_k` 40 runs as 32.
 
-    1. **Router.** The decode router matmul runs as one 1D matmul, and the 1-token top-10 + softmax + shared-gate sigmoid
-       run on the RISC cores in one op instead of the top-k route -> slice -> softmax -> untilize chain.
-    2. **Fused MoE decode.** Routed + shared experts in three ops (route, gate|up + SwiGLU, down) that stream each selected
-       expert's weights in place from the existing DRAM layout (no duplicate copy), for every decode width from 1 to 32
-       rows (several users' experts as one union over the 512 experts, each weight column read once for all rows).
-    3. **Replicated-residual decode boundary.** The decode residual stays replicated on every die: each mixer / MoE output
-       is one all-reduce + add + local RMSNorm (two collectives per layer instead of four, no gathers).
-    4. **Gated DeltaNet decode mixer** as two programs (short conv; gates + norms + recurrent state update + gated norm),
-       each head's value dimension split across up to four cores.
-    5. **Attention decode ops** around the QKV matmul, cache update and SDPA decode (q / k norm + RoPE + gate in one prep op,
-       output gating in one post op).
-    6. **Fabric layer boundary** (four dies, 1-4 users): the all-reduce, residual add and RMSNorm as one op over the fabric,
-       with the next layer's input projection (or the MoE router) inside the same program; the MoE gate|up columns split
-       across core pairs with readers off the congested NOC rows.
-    7. **Sampler top-k over the live rows only** (1-8 users), instead of all 32 slot rows.
+    Every profile runs chunked prefill: a long prompt is prefilled in chunks shared with other requests, so it does
+    not hold up short ones.
 
-    Numerics: the routed and shared expert weights are stored rounded to 5 significant bits (what the LoFi expert matmul
-    reads), activations / routing weights rounded to the 7 bits the matmul's other operand reads; the fused boundary and DeltaNet ops
-    sum in a different order than the op chain they replace. Output quality is checked below.
-
-    ### Use with your client
-    Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
-    `Qwen/Qwen3-Coder-Next`. The model does not think (no reasoning block); tool calls use vLLM's `qwen3_coder` parser
-    (`--enable-auto-tool-choice` is on). Without sampling parameters a request uses the checkpoint's defaults
-    (temperature 1.0, top_p 0.95, top_k 40).
-
-    ### Prefix caching
-    On by default (every profile, together with chunked prefill). When a prompt starts with the same 2,048 or more tokens as a recent one (a document sent
-    again, the next turn of a chat, a long shared system prompt), the server resumes from the last 2,048-token boundary
-    the two share instead of prefilling from the start: vLLM reuses the attention KV blocks, and the server restores the
-    Gated DeltaNet state it saved at that boundary (32 snapshots on four dies, 16 on two; each snapshot 27 MiB per die on four dies, 0.84 GiB per die in all, taken from the KV pool, least recently used evicted). A prompt seen for the first time
-    runs exactly the prefill it ran without caching. Turn it off with `tt-model serve ... -- --no-enable-prefix-caching`.
-
-    ### Profiles
-    `tt-model serve raahemnabeel/qwen3-coder-next --profile <name>`:
-    - `p300x2` (default) / `p150x4` - four dies: the faster profile.
-    - `p300` / `p150x2` - two dies: the same features on half the hardware, with bfp4 routed experts.
-
-    Every profile: 32 concurrent sequences, 262144-token context, chunked prefill (long prompts do not block short
-    requests). The checkpoint has no MTP head and no vision tower.
+    Prefix caching is on. A prompt that starts with the same 2,048 or more tokens as a recent one (a document sent
+    again, the next turn of a chat, a shared system prompt) resumes from the last 2,048-token boundary the two share
+    instead of being prefilled from the start. The server keeps 32 (four dies) or 16 (two dies) such resume points, least recently used
+    evicted; they use 0.84 GiB (four dies) of each die's KV pool. Turn caching off with `tt-model serve <repo> -- --no-enable-prefix-caching`.
   performance: |
     ### Accuracy
-    Both bundles evaluated on the same box (v1 2026-10-23, current 2026-10-26), p300x2, through the served chat API with lm-evaluation-harness
-    0.4.9 at temperature 0 (full sets, 8 requests in flight, seed 42):
+    Evaluated through the served chat API (p300x2, temperature 0, full sets, 8 requests in flight, seed 42,
+    lm-evaluation-harness 0.4.9), next to the previous version of this package (v1) on the same box and settings.
+    Qwen's card reports agentic coding benchmarks (SWE-Bench and others) and none of these evals, and those benchmarks
+    were not run here.
 
-    | Eval | v1 | current |
-    | --- | ---: | ---: |
-    | HumanEval pass@1 (164) | 0.939 | 0.933 |
-    | MBPP pass@1 (500) | 0.826 | 0.824 |
-    | GSM8K exact match, strict (1319) | 0.954 | 0.954 |
-    | IFEval prompt-level strict (541) | 0.799 | 0.791 |
-    | IFEval prompt-level loose (541) | 0.841 | 0.824 |
+    | Eval | v1 | this package | reference (Qwen card) | prompts |
+    | --- | ---: | ---: | ---: | ---: |
+    | HumanEval pass@1 | 0.939 | 0.933 ±0.020 | not reported | 164 |
+    | MBPP pass@1 | 0.826 | 0.824 ±0.017 | not reported | 500 |
+    | GSM8K exact match, strict (8-shot) | 0.954 | 0.954 ±0.006 | not reported | 1,319 |
+    | IFEval prompt-level strict | 0.799 | 0.791 ±0.018 | not reported | 541 |
+    | IFEval prompt-level loose | 0.841 | 0.824 ±0.016 | not reported | 541 |
 
-    All differences are within one standard error (HumanEval +-0.020, IFEval +-0.018, MBPP +-0.017, GSM8K +-0.006): no
-    measurable quality change. The
-    harness's stock chat variants do not work through a chat API (`humaneval_instruct` and `mbpp_instruct` pre-fill the
-    assistant turn, which the API does not continue: both score 0), so HumanEval uses a chat prompt that asks for the whole
-    function in one code block, and MBPP answers are scored from their first code block; `gsm8k_cot_llama` is the stock
-    8-shot task with the dataset's current id. The task files are in `fusion/tools/lm_tasks` on the source branch. These
-    numbers are not comparable to the v1 card's (68.9 / 77.2 / 92.4 / 75.8 %), which used the stock tasks at an
-    unrecorded configuration; compare the two columns above. Greedy outputs of the p300 profile (bfp4 experts on two dies)
-    were checked against the v1 bundle's.
+    HumanEval uses a chat prompt that asks for the whole function in one code block, and MBPP answers are scored from
+    their first code block (the harness's stock instruct variants pre-fill the assistant turn, which a chat API does
+    not continue); GSM8K is the stock 8-shot chain-of-thought task. The task files are in `fusion/tools/lm_tasks` on
+    the source branch.
 
     ### Performance
     Measured on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them; v1 2026-10-23, current
@@ -304,18 +272,25 @@ card:
     | chat turns 2-6 (7.6k-8.2k tokens) | 1.94-2.08 s | 0.52-0.68 s |
 
     Prompts seen for the first time are unchanged: no-hit rows at 128 / 2,048 / 8,192 input tokens (1 user) and 128/128 at
-    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 171 / 174 ms, TPOT 5.59 / 5.61 ms). Two dies (p300): a 25,113-token prompt sent again 7.70 -> 0.53 s, chat turns 2-4 0.62-0.63 s (turn 1, uncached, 2.35 s). Greedy output with caching on matched caching off on every resent prompt and on
-    9 of 10 chat turns; the one that differs (a thinking-on turn) diverges at a near-tie token (the reused KV blocks were computed in a different prefill pass).
+    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 171 / 174 ms, TPOT 5.59 / 5.61 ms). Two dies (p300): a 25,113-token prompt sent again 7.70 -> 0.53 s, chat turns 2-4 0.62-0.63 s (turn 1, uncached, 2.35 s). Greedy output with caching on matched caching off on every resent prompt and on 9 of 10 chat turns.
   limitations: |
-    - Two dies (`p300`, `p150x2`) run without the fabric layer boundary (its persistent receive buffers do not fit next to
-      the two-die prefill).
-    - The device sampler supports `top_k` up to 32. This checkpoint's recommended default is `top_k 40`, which is clamped to
-      32 rather than moved to host sampling.
-    - Agentic benchmarks (SWE-Bench Verified, LiveCodeBench), which Qwen publishes for this checkpoint, were not run; the
-      evals ran on the p300x2 profile only.
+    - Expert weights run at reduced precision (bfp4 routed experts on two dies), so output can differ from the bf16
+      original where two candidate tokens are close; see Accuracy.
+    - Qwen's agentic benchmarks (SWE-Bench and others) were not run; the evals ran on the p300x2 profile only.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
       gets no benefit, and the shared tokens past the last boundary are prefilled again. Requests with images are not
-      cached.
-    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
-  related: >
-    The v1 bundle this builds on: [raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `coder_next_fusion` branch of github.com/rnabeelTT/tt-metal.
+      cached. With caching on, a resumed prompt's output can differ from an uncached run where two candidate tokens are
+      nearly tied (greedy output differed on 1 of 10 chat turns).
+    - The device sampler supports `top_k` up to 32; the checkpoint's default `top_k` 40 and any larger value are
+      clamped to 32.
+    - Startup takes about 10 minutes on p300x2.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
+      a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
+      model's.
+  related: |
+    - [raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1): the previous
+      version of this package (the `v1` columns above), replaced by this one.
+  license:
+    id: apache-2.0
