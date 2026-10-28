@@ -93,7 +93,7 @@ serve:
   # greedy override of 2026-10-05 is gone: the long-context word corruption it worked around was the
   # dies of the mesh drawing different tokens from the device sampler (doc/text_quality/README.md),
   # fixed in tt/model.py (_install_lockstep_sampling).
-  args: [--enable-auto-tool-choice, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+  args: [--enable-auto-tool-choice, --enable-prefix-caching, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
 
 # One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
 # `tt-model serve <bundle> --profile <name>`. The mesh size picks the precision policy and the KV budget at build.
