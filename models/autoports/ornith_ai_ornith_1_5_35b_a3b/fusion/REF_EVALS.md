@@ -7,6 +7,9 @@ card measures it, next to the card's figure. Decisions (user, 2026-10-28):
   the sample ids are saved so reruns use the same items. The card states the sample size and the error bar.
 - Video and VM / emulator / 3D benchmarks: listed on the card as not supported by this package, not run.
 - Earlier evals (scorecard, thinking off) are not reused: no card measured that way.
+- Skip rule (user, 2026-10-28): at most one or two benchmarks may be skipped, and only ones that are both very hard
+  to run here and of little relevance to readers. The main, doable ones that users look at (SWE-bench, Terminal-Bench,
+  GPQA, HLE, LiveCodeBench, MMLU-Pro, IFEval, HMMT, BrowseComp, TAU2, MMMU and the like) are always run.
 
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
 default), the checkpoint's generation_config sampling, up to 32 requests in flight, max 32,768 generated tokens, only
