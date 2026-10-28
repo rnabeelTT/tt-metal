@@ -1,0 +1,13 @@
+# Long agentic tasks: appended to evalq.txt once the quick evals are done (each runs for days).
+# Search benches: BLOCKLIST=bench (benchmark-leak sites only) except HLE with tools (CAIS protocol: full blocklist).
+o122 text2 browsecomp BLOCKLIST=bench
+o122 text2 widesearch BLOCKLIST=bench
+o122 text2 hle_tools BLOCKLIST=full
+orn text2 browsecomp BLOCKLIST=bench
+orn text2 widesearch BLOCKLIST=bench
+orn text2 hle_tools BLOCKLIST=full
+q122 text2 browsecomp BLOCKLIST=bench
+q122 text2 browsecomp_zh BLOCKLIST=bench
+q122 text2 widesearch BLOCKLIST=bench
+q122 text2 seal0 BLOCKLIST=bench
+q122 text2 hle_tools BLOCKLIST=full

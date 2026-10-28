@@ -17,7 +17,7 @@ the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`;
 finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode, aider, ...; not in this repo).
 
 Status: **queued** (harness ready, waiting for chips) · **setup** (harness being prepared) · **run** (in progress) ·
-**done** · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
+**staged** (ready; joins the queue after the quick evals) · **done** · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
 
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
@@ -25,7 +25,7 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | --- | ---: | ---: | --- | --- |
 | GPQA Diamond | 89.2 | | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
 | HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
-| HLE (with tools) | 33.4 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| HLE (with tools) | 33.4 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | setup | Harbor/Terminus-2; card: 32 CPU / 48 GB per task |
 | Terminal-Bench 2.1 (Claude Code) | 68.5 | | setup | |
 | SWE-bench Verified | 79 | | setup | OpenHands per card |
@@ -37,8 +37,8 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | SWE Atlas - QnA | 39.8 | | setup | feasibility check |
 | MCP-Atlas | 70.2 | | setup | feasibility check (Claude judge) |
 | Toolathlon-Verified | 48.7 | | setup | feasibility check (official service) |
-| WideSearch | 67.8 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| BrowseComp | 67.6 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| WideSearch | 67.8 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| BrowseComp | 67.6 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
 | ClawEval | 72.5 | | setup | feasibility check |
 
 ## Ornith-1.5-122B (card: ornith-ai/Ornith-1.5-122B)
@@ -47,15 +47,15 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | | queued | official harness (inspect), test split 288 subproblems, with background, subproblem pass@1 (AA protocol); runs first |
 | HLE (w/o tools) | 37.68 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
-| HLE (with tools) | 48.0 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| HLE (with tools) | 48.0 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | setup | |
 | CyberGym | 80.0 | | setup | feasibility check |
 | NL2Repo | 51.2 | | setup | feasibility check |
 | SWE-bench Pro (no-hack) | 76.9 | | setup | OpenHands per card |
 | SWE-bench Verified (non-hack) | 84.5 | | setup | |
 | SWE-bench Multilingual (non-hack) | 76.4 | | setup | |
-| WideSearch | 75.2 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| BrowseComp | 78.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| WideSearch | 75.2 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| BrowseComp | 78.5 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
 | MCP-Atlas | 74.6 | | setup | feasibility check |
 | Toolathlon-Verified | 70.8 | | setup | feasibility check |
 | ClawEval | 79.4 | | setup | feasibility check |
@@ -99,11 +99,11 @@ Language:
 | TAU2-Bench | 79.5 | | ready | 278 tasks x 4 trials; Claude worker agents as the simulated user through ~/evals/usersim (relay shim on :28400); supervised run, not in the unattended queue |
 | VITA-Bench | 33.6 | | ready | 400 tasks x 4 trials (Avg@4); Claude workers as the simulated user + rubric judge rounds; supervised run |
 | DeepPlanning | 24.1 | | setup | Qwen-Agent benchmark; travel plan-to-JSON step Claude-judged |
-| HLE w/ tool | 47.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| Browsecomp | 63.8 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| Browsecomp-zh | 69.9 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| WideSearch | 60.5 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
-| Seal-0 | 44.1 | | setup | self-hosted SearXNG + fetch + HLE blocklist (user decision); Claude-judged |
+| HLE w/ tool | 47.5 | | staged | 2,500 incl. images; CAIS tools protocol (search, fetch, full HLE blocklist, no-network Python sandbox) |
+| Browsecomp | 63.8 | | staged | full 1,266; SearXNG + fetch, benchmark-leak blocklist, 100 turns, folding at 240k; Claude-judged |
+| Browsecomp-zh | 69.9 | | staged | 289; Chinese engines (Sogou/360), robots.txt blocks baike/zhihu; Claude-judged |
+| WideSearch | 60.5 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| Seal-0 | 44.1 | | staged | 111; official SealQA grader template; answers are time-sensitive vs today's web; Claude-judged |
 | MMMLU | 86.7 | | queued | qtext: 14 languages (Yoruba dropped as in the Qwen3 report), 1,000 |
 | MMLU-ProX | 82.2 | | queued | qtext: 29 languages, 1,000 |
 | NOVA-63 | 58.6 | | n/s | dataset not public (HF repo holds only a README) |
