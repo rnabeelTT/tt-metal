@@ -117,38 +117,38 @@ Vision language (images; up to 4 per request, resized to at most 4 MP by the ser
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| MMMU | 83.9 | | setup | |
-| MMMU-Pro | 76.9 | | setup | |
-| MathVision | 86.2 | | setup | fixed \boxed{} prompt |
-| Mathvista(mini) | 87.4 | | setup | |
-| DynaMath | 85.9 | | setup | |
-| ZEROBench / ZEROBench_sub | 9 / 36.2 | | setup | |
-| VlmsAreBlind | 96.7 | | setup | |
-| BabyVision (with / without CI) | 40.2 / 34.5 | | setup | without CI first |
-| RealWorldQA | 85.1 | | setup | |
-| MMStar | 82.9 | | setup | |
-| MMBench EN-DEV-v1.1 | 92.8 | | setup | |
-| SimpleVQA | 61.7 | | setup | judged |
-| HallusionBench | 67.6 | | setup | |
-| OmniDocBench1.5 | 89.8 | | setup | |
-| CharXiv(RQ) | 77.2 | | setup | |
-| MMLongBench-Doc | 59.0 | | setup | many pages per document vs 4 images per request |
-| CC-OCR | 81.8 | | setup | |
-| AI2D_TEST | 93.3 | | setup | |
-| OCRBench | 92.1 | | setup | |
-| ERQA | 62.0 | | setup | |
-| CountBench | 97.0 | | setup | |
-| RefCOCO(avg) | 91.3 | | setup | grounding, scored from text boxes |
-| ODInW13 | 44.5 | | setup | |
-| EmbSpatialBench | 83.9 | | setup | |
-| RefSpatialBench | 69.3 | | setup | |
-| LingoQA | 80.8 | | setup | |
-| ScreenSpot Pro | 70.4 | | setup | high-resolution screenshots vs the 4 MP resize |
-| TIR-Bench (with / without CI) | 53.2 / 42.5 | | setup | |
-| V* (with / without CI) | 93.2 / 90.1 | | setup | |
-| SLAKE | 81.6 | | setup | |
-| PMC-VQA | 63.3 | | setup | |
-| MedXpertQA-MM | 67.3 | | setup | |
+| MMMU | 83.9 | | queued | 900 val, Qwen's script settings (T1.0, 40,960 tokens, pixel range) |
+| MMMU-Pro | 76.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| MathVision | 86.2 | | queued | 1,000 of 3,040, fixed boxed prompt, Qwen's script settings (T1.0, 40,960 tokens) |
+| Mathvista(mini) | 87.4 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| DynaMath | 85.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| ZEROBench / ZEROBench_sub | 9 / 36.2 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| VlmsAreBlind | 96.7 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| BabyVision (with / without CI) | 40.2 / 34.5 | | queued | without CI: 388 x 3 samples, judged every item; with CI not built (proposed skip) |
+| RealWorldQA | 85.1 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| MMStar | 82.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| MMBench EN-DEV-v1.1 | 92.8 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| SimpleVQA | 61.7 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| HallusionBench | 67.6 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| OmniDocBench1.5 | 89.8 | | queued | 1,355 pages, official v1_5 evaluator incl. CDM (docker) |
+| CharXiv(RQ) | 77.2 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| MMLongBench-Doc | 59.0 | | queued | up to 120 pages tiled into <=4 images of <=4 MP: package limit, not comparable to the card |
+| CC-OCR | 81.8 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| AI2D_TEST | 93.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| OCRBench | 92.1 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| ERQA | 62.0 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| CountBench | 97.0 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| RefCOCO(avg) | 91.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| ODInW13 | 44.5 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| EmbSpatialBench | 83.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| RefSpatialBench | 69.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| LingoQA | 80.8 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| ScreenSpot Pro | 70.4 | | queued | 1,581; 48% of screenshots exceed 4 MP and are downscaled (package limit) |
+| TIR-Bench (with / without CI) | 53.2 / 42.5 | | queued | without CI: 1,215, official extraction judged; with CI not built (proposed skip) |
+| V* (with / without CI) | 93.2 / 90.1 | | queued | without CI: 191; with CI not built (proposed skip) |
+| SLAKE | 81.6 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| PMC-VQA | 63.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
+| MedXpertQA-MM | 67.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | Hypersim | 12.7 | | n/s | 3D |
 | SUNRGBD | 36.2 | | n/s | 3D |
 | Nuscene | 15.4 | | n/s | 3D |
