@@ -11,6 +11,13 @@ card measures it, next to the card's figure. Decisions (user, 2026-10-28):
   to run here and of little relevance to readers. The main, doable ones that users look at (SWE-bench, Terminal-Bench,
   GPQA, HLE, LiveCodeBench, MMLU-Pro, IFEval, HMMT, BrowseComp, TAU2, MMMU and the like) are always run.
 
+Token budget (2026-10-29): Qwen's guidance for these checkpoints is 32,768 output tokens for most queries and 81,920
+for hard reasoning. At 32,768, 56% of Ornith-1.5-122B's HLE answers and 20% of its SciCode steps were cut mid-reasoning
+(scored as wrong), so HLE, SciCode, GPQA, LiveCodeBench, OJBench, HMMT and PolyMATH run at 81,920 (16 in flight).
+Runs that already finished at 32,768 are extended with `tools/extend_truncated.py`: a truncated answer is continued
+from its own reasoning up to 81,920 tokens (an exact equivalent of one generation at that budget), image items are
+regenerated at 81,920, finished answers are kept.
+
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
 default), the checkpoint's generation_config sampling, up to 32 requests in flight, max 32,768 generated tokens, only
 the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`; queue runner `tools/evalq.sh` reads `runs/evalq.txt` (one task per line,
@@ -45,7 +52,7 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| SciCode | 53.8 | | queued | official harness (inspect), test split 288 subproblems, with background, subproblem pass@1 (AA protocol); runs first |
+| SciCode | 53.8 | 39.9 at 32k (truncated: 58/288) | rerun | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); rerun at 81,920; main-problem 13.8 at 32k |
 | HLE (w/o tools) | 37.68 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 48.0 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | staged | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |

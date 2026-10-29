@@ -86,15 +86,24 @@ EOF
       tbench) ~/evals/tbench_run.sh $B $L $BASE ${MID[$M]} ${CONC:-4} ;;
       scicode) ~/evals/scicode_run.sh $L $BASE ${MID[$M]} ${CONC:-32} ${MAX_TOKENS:-32768} ;;
       aider)  ~/evals/aider_run.sh $L $BASE ${MID[$M]} ${CONC:-32} $B ;;
+      extend) # continue a finished text2 run's truncated answers to BUDGET tokens (exact; see extend_truncated.py)
+              cd $HOME/evals/text2 && .venv/bin/python extend_truncated.py $R/ref_${M}_${B}/$B ref_${M}_${B}_b${BUDGET} \
+                --budget $BUDGET --conc ${CONC:-16} ;;
       *) echo "unknown runner $RN" ;;
     esac
   ) > $LOG 2>&1
   local rc=$?
-  local res=$(grep -E "^(RESULT|JUDGE_PENDING|SCICODE|AIDER)" $LOG | tr '\n' ' ')
+  local res=$(grep -E "^(RESULT|JUDGE_PENDING|SCICODE|AIDER|EXTENDED)" $LOG | tr '\n' ' ')
   echo "$M $RN $B $* | exit $rc | $res | $(date '+%F %T')" >> $DONE
   echo "$M $B exit $rc: $res $(date +%T)"
 }
 
+# adopt a server that is already up (e.g. after a restart of this runner) instead of waiting for it to go away
+for m in "${!NAME[@]}"; do
+  if docker ps --format '{{.Names}}' | grep -qx "tt-model-${NAME[$m]}-p300x2" && curl -sf localhost:20000/v1/models >/dev/null; then
+    CUR=$m; C=tt-model-${NAME[$m]}-p300x2; echo "adopted running server $m $(date +%T)"
+  fi
+done
 while systemctl --user is-active -q cards-release || { [ -z "$CUR" ] && chips_busy; }; do sleep 60; done
 echo "evalq start $(date +%T)"
 while true; do
