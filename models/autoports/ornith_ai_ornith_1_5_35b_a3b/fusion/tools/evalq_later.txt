@@ -4,16 +4,11 @@
 cn swebench verified CONC=12
 cn swebench verified CONC=12 HARNESS=openhands TAG=oh
 orn swebench verified CONC=12
-o122 swebench verified CONC=12 NOHACK_PROMPT=1
 q122 swebench verified CONC=12
 cn tbench 2.0 CONC=8
 q122 tbench 2.0 CONC=8
 orn tbench 2.1 CONC=8
-o122 tbench 2.1 CONC=8 AGENT=claude-code TAG=cc
 # Search benches: BLOCKLIST=bench (benchmark-leak sites only) except HLE with tools (CAIS protocol: full blocklist).
-o122 text2 browsecomp BLOCKLIST=bench
-o122 text2 widesearch BLOCKLIST=bench
-o122 text2 hle_tools BLOCKLIST=full
 orn text2 browsecomp BLOCKLIST=bench
 orn text2 widesearch BLOCKLIST=bench
 orn text2 hle_tools BLOCKLIST=full
@@ -27,14 +22,11 @@ cn swebench pro CONC=12
 cn swebench multilingual CONC=12 HARNESS=openhands TAG=oh
 orn swebench multilingual CONC=12
 orn swebench pro CONC=12
-o122 swebench multilingual CONC=12 NOHACK_PROMPT=1
-o122 swebench pro CONC=12 NOHACK_PROMPT=1
 # Remaining Ornith-card agentic benchmarks (card settings come from the harnesses' per-model defaults)
 orn tbench 2.1 CONC=8 AGENT=claude-code TAG=cc
 orn sweatlas qna CONC=8 N_ATTEMPTS=5
 orn deepswe v1.1 CONC=8
 orn claweval all CONC=8
-o122 claweval all CONC=8
 orn tbench frontier CONC=4
 # Toolathlon-Verified: official service offline (2026-10-29, GitHub issue #99); add when it answers:
 # orn toolathlon verified

@@ -58,19 +58,19 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | 39.9 at 32k (truncated: 58/288) | rerun | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); rerun at 81,920; main-problem 13.8 at 32k |
-| HLE (w/o tools) | 37.68 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
-| HLE (with tools) | 48.0 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
-| TerminalBench 2.1 | 81.2 | | staged | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
+| HLE (w/o tools) | 37.68 | | running | fixed random 1,000 of 2,500 (seed 1234, images included; user 2026-10-29: the full set at 81,920 tokens is ~40 h of decode), official prompts, 81,920 tokens (32k answers continued exactly); judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
+| HLE (with tools) | 48.0 | | queued | the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
+| TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
 | NL2Repo | 51.2 | | n/s | skipped (user): per-task test images unpublished; card used 400K context (we serve 262K) |
-| SWE-bench Pro (no-hack) | 76.9 | | staged | Pro v1; OpenHands + don't-reward-hack notice; hack review of trajectories by Claude |
-| SWE-bench Verified (non-hack) | 84.5 | | staged | OpenHands, no network, git squashed, don't-reward-hack notice |
-| SWE-bench Multilingual (non-hack) | 76.4 | | staged | OpenHands, as Verified |
-| WideSearch | 75.2 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
-| BrowseComp | 78.5 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
+| SWE-bench Pro (no-hack) | 76.9 | | queued | Pro v1; OpenHands + don't-reward-hack notice; hack review of trajectories by Claude |
+| SWE-bench Verified (non-hack) | 84.5 | | queued | OpenHands, no network, git squashed, don't-reward-hack notice |
+| SWE-bench Multilingual (non-hack) | 76.4 | | queued | OpenHands, as Verified |
+| WideSearch | 75.2 | | queued | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| BrowseComp | 78.5 | | queued | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
 | MCP-Atlas | 74.6 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
 | Toolathlon-Verified | 70.8 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
-| ClawEval | 79.4 | | staged | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
+| ClawEval | 79.4 | | queued | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
 
 ## Qwen3-Coder-Next (card: Qwen/Qwen3-Coder-Next; no thinking)
 

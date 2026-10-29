@@ -97,7 +97,7 @@ EOF
       aider)  ~/evals/aider_run.sh $L $BASE ${MID[$M]} ${CONC:-32} $B ;;
       extend) # continue a finished text2 run's truncated answers to BUDGET tokens (exact; see extend_truncated.py)
               cd $HOME/evals/text2 && .venv/bin/python extend_truncated.py $R/ref_${M}_${B}/$B ref_${M}_${B}_b${BUDGET} \
-                --budget $BUDGET --conc ${CONC:-16} ;;
+                --budget $BUDGET --conc ${CONC:-16} --sample ${SAMPLE:-0} ;;
       *) echo "unknown runner $RN" ;;
     esac
   ) > $LOG 2>&1

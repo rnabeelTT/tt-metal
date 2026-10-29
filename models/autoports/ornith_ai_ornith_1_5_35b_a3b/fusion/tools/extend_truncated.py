@@ -1,6 +1,6 @@
 """Extend a finished text2 run to a larger token budget, exactly as if it had run at that budget.
 
-    extend_truncated.py <run_dir> <new_label> --budget 81920 [--conc 16]
+    extend_truncated.py <run_dir> <new_label> --budget 81920 [--conc 16] [--sample 1000]
 
 Writes a new run dir (sibling of <run_dir>, named <new_label>/<bench>) with responses.jsonl / reasoning.jsonl
 holding, per item:
@@ -10,13 +10,16 @@ holding, per item:
   chat template (via /tokenize, add_generation_prompt) + the saved reasoning tokens go to /v1/completions with the
   remaining budget, so the result is one generation of up to --budget tokens (only the KV prefix is re-prefilled);
 - image items: regenerated from scratch at the new budget through the chat API (the completions endpoint takes no
-  images), all of them, so their distribution is exact too.
+  images), all of them, so their distribution is exact too;
+- items the source run never answered (it was stopped early): generated from scratch at the new budget.
+--sample N restricts the run to the fixed random N items of core.select_items (seed 1234), recorded in sample_ids.json.
 config.json records max_tokens=<budget> plus "extended_from". Then score / judge the new run as usual.
 """
 import argparse
 import concurrent.futures as cf
 import json
 import os
+import random
 import sys
 import threading
 import time
@@ -40,6 +43,7 @@ def main():
     ap.add_argument("--budget", type=int, default=81920)
     ap.add_argument("--conc", type=int, default=16)
     ap.add_argument("--timeout", type=float, default=21600)
+    ap.add_argument("--sample", type=int, default=0)
     a = ap.parse_args()
     src = Path(a.run_dir)
     cfg = json.load(open(src / "config.json"))
@@ -54,11 +58,15 @@ def main():
         samp["presence_penalty"] = cfg["presence_penalty"]
 
     mod = __import__(f"benches.{bench}", fromlist=["load_items", "messages"])
-    items = {it["id"]: it for it in mod.load_items()}
+    all_items = mod.load_items()
+    sel, note = all_items, "full set"
+    if a.sample and a.sample < len(all_items):
+        from common.core import SAMPLE_SEED
+        sel = [all_items[k] for k in sorted(random.Random(SAMPLE_SEED).sample(range(len(all_items)), a.sample))]
+        note = f"random {a.sample} of {len(all_items)} (seed {SAMPLE_SEED})"
+    items = {it["id"]: it for it in sel}
     resp = {json.loads(l)["id"]: json.loads(l) for l in open(src / "responses.jsonl")}
     reas = {json.loads(l)["id"]: json.loads(l)["reasoning"] for l in open(src / "reasoning.jsonl")}
-    missing = [i for i in items if i not in resp]
-    assert not missing, f"{len(missing)} items have no response in {src}; finish the run first"
 
     done = set()
     if (out / "responses.jsonl").exists():
@@ -76,7 +84,7 @@ def main():
     for i, it in items.items():
         if i in done:
             continue
-        if it.get("image"):
+        if it.get("image") or i not in resp:
             todo["regen"].append(i)
         elif resp[i]["finish_reason"] == "length":
             todo["continue"].append(i)
@@ -135,9 +143,10 @@ def main():
                 extended_from={"run": str(src), "max_tokens": old_budget, "copied": len(todo["copy"]),
                                "continued": len(todo["continue"]), "regenerated": len(todo["regen"])})
     json.dump(ncfg, open(out / "config.json", "w"), indent=2)
-    for f in ("sample_ids.json",):
-        if (src / f).exists() and not (out / f).exists():
-            (out / f).write_text((src / f).read_text())
+    if a.sample:
+        (out / "sample_ids.json").write_text(json.dumps({"note": note, "total": len(all_items), "ids": [str(i) for i in items]}))
+    elif (src / "sample_ids.json").exists() and not (out / "sample_ids.json").exists():
+        (out / "sample_ids.json").write_text((src / "sample_ids.json").read_text())
     have = sum(1 for _ in open(out / "responses.jsonl"))
     print(f"EXTENDED {bench} {have}/{len(items)} -> {out}", flush=True)
 
