@@ -7,6 +7,11 @@ card measures it, next to the card's figure. Decisions (user, 2026-10-28):
   the sample ids are saved so reruns use the same items. The card states the sample size and the error bar.
 - Video and VM / emulator / 3D benchmarks: listed on the card as not supported by this package, not run.
 - Earlier evals (scorecard, thinking off) are not reused: no card measured that way.
+- LLM-judged benchmarks (user, 2026-10-29): kept where the benchmark is a headline one with no rule-scored
+  alternative (HLE, BrowseComp, BrowseComp-zh, WideSearch, Seal-0, Claw-Eval, the judged image sets), with the judge
+  named on the card; dropped where Claude would act inside the episode (TAU2 and VITA simulated users) and the
+  low-visibility judged extras (MultiChallenge, AA-LCR, DeepPlanning, MAXIFE). Judging: Claude agents with the
+  official judge prompt, schema-validated verdicts, then one audit pass over borderline "correct" verdicts.
 - Skip rule (user, 2026-10-28): at most one or two benchmarks may be skipped, and only ones that are both very hard
   to run here and of little relevance to readers. The main, doable ones that users look at (SWE-bench, Terminal-Bench,
   GPQA, HLE, LiveCodeBench, MMLU-Pro, IFEval, HMMT, BrowseComp, TAU2, MMMU and the like) are always run.
@@ -24,7 +29,7 @@ the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`;
 finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode, aider, ...; not in this repo).
 
 Status: **queued** (harness ready, waiting for chips) · **setup** (harness being prepared) · **run** (in progress) ·
-**staged** (ready; joins the queue after the quick evals) · **done** · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
+**staged** (ready; joins the queue after the quick evals) · **done** · **dropped** (user decision) · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
 
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
@@ -89,8 +94,8 @@ Language:
 | SuperGPQA | 67.1 | | queued | qtext: 1,000 of 26,529 |
 | IFEval | 93.4 | | queued | lm-eval ifeval, all 541 |
 | IFBench | 76.1 | | queued | text2 ifbench, 300, official run_eval.py |
-| MultiChallenge | 61.5 | | queued | 273 convs; Claude-judged (official: gpt-4o) |
-| AA-LCR | 66.9 | | queued | 100 Qs, v1.0.0 keys; Claude-judged |
+| MultiChallenge | 61.5 | | dropped | dropped (user, 2026-10-29): low-visibility; LLM-judged |
+| AA-LCR | 66.9 | | dropped | dropped (user, 2026-10-29): low-visibility; LLM-judged |
 | LongBench v2 | 60.2 | | queued | official pred.py prompt, 503 |
 | HLE w/ CoT | 25.3 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | GPQA Diamond | 86.6 | | queued | lm-eval r1_gpqa_diamond, 198 |
@@ -103,9 +108,9 @@ Language:
 | OJBench | 39.5 | | queued | 232 problems, C++, DMOJ judge, 65,536 max tokens |
 | FullStackBench en / zh | 62.6 / 58.7 | | queued | SandboxFusion, 1,687 each |
 | BFCL-V4 | 72.2 | | queued | official bfcl_eval; web_search part via SearXNG |
-| TAU2-Bench | 79.5 | | ready | 278 tasks x 4 trials; Claude worker agents as the simulated user through ~/evals/usersim (relay shim on :28400); supervised run, not in the unattended queue |
-| VITA-Bench | 33.6 | | ready | 400 tasks x 4 trials (Avg@4); Claude workers as the simulated user + rubric judge rounds; supervised run |
-| DeepPlanning | 24.1 | | setup | Qwen-Agent benchmark; travel plan-to-JSON step Claude-judged |
+| TAU2-Bench | 79.5 | | dropped | dropped (user, 2026-10-29): Claude would play the simulated customer (~13k turns), shaping the episodes, not just grading them |
+| VITA-Bench | 33.6 | | dropped | dropped (user, 2026-10-29): Claude would play the simulated user and the rubric judge |
+| DeepPlanning | 24.1 | | dropped | dropped (user, 2026-10-29): low-visibility; travel plans need an LLM conversion step |
 | HLE w/ tool | 47.5 | | staged | 2,500 incl. images; CAIS tools protocol (search, fetch, full HLE blocklist, no-network Python sandbox) |
 | Browsecomp | 63.8 | | staged | full 1,266; SearXNG + fetch, benchmark-leak blocklist, 100 turns, folding at 240k; Claude-judged |
 | Browsecomp-zh | 69.9 | | staged | 289; Chinese engines (Sogou/360), robots.txt blocks baike/zhihu; Claude-judged |
@@ -118,7 +123,7 @@ Language:
 | Global PIQA | 88.4 | | queued | qtext: official generation prompt, 136 languages, 1,000 of 13,600 |
 | PolyMATH | 68.9 | | queued | qtext: official scorer, DW-ACC over 18 languages, 1,000 of 9,000, 81,920 max tokens |
 | WMT24++ | 78.3 | | queued | qtext: 1,000 segments over 55 pairs; Qwen's harder subset is not public; XCOMET-XXL licence needed to score |
-| MAXIFE | 87.9 | | queued | qtext: 23 monolingual files, 1,000; judged parts by Claude (official: claude-3.5-sonnet) |
+| MAXIFE | 87.9 | | dropped | dropped (user, 2026-10-29): low-visibility; the card's metric includes LLM-judged instructions |
 
 Vision language (images; up to 4 per request, resized to at most 4 MP by the server):
 
