@@ -63,7 +63,12 @@ run_task() {  # <model> <runner> <bench> [KEY=VAL ...]
   echo "== $M $RN $B $* $(date +%T)"
   (
     [ $# -gt 0 ] && export "$@"
-    export RUNS_ROOT=$R TEMPERATURE=${TEMPERATURE:-$TT} TOP_P=${TOP_P:-$TP} TOP_K=${TOP_K:-$TK}
+    export RUNS_ROOT=$R
+    # The checkpoint's default sampling for the single-turn harnesses; the agentic harnesses (swebench, tbench,
+    # sweatlas, deepswe, claweval, toolathlon) set each card's own settings from the model id, so only explicit
+    # KEY=VAL overrides on the queue line reach them.
+    case $RN in lmeval|text2|qtext|vision|scicode|extend|aider)
+      export TEMPERATURE=${TEMPERATURE:-$TT} TOP_P=${TOP_P:-$TP} TOP_K=${TOP_K:-$TK} ;; esac
     case $RN in
       lmeval) OUT=$R/$L/evals/$B; mkdir -p $OUT
               cd $HOME/lm-eval-poc && .venv/bin/lm_eval --model local-chat-completions \
@@ -83,7 +88,11 @@ EOF
       qtext)  ~/evals/qwen_text_run.sh $B $L $BASE ${MID[$M]} ${CONC:-32} ;;
       vision) ~/evals/vision_run.sh $B $L $BASE ${MID[$M]} ${CONC:-32} ;;
       swebench) ~/evals/swebench_run.sh $B $L $BASE ${MID[$M]} ${CONC:-8} ;;
-      tbench) ~/evals/tbench_run.sh $B $L $BASE ${MID[$M]} ${CONC:-4} ;;
+      tbench) ~/evals/tbench_run.sh $B $L $BASE ${MID[$M]} ${CONC:-4} ;;     # 2.0 | 2.1 | frontier | sweatlas-qna
+      sweatlas) ~/evals/sweatlas_run.sh $B $L $BASE ${MID[$M]} ${CONC:-8} ;;  # qna
+      deepswe) ~/evals/deepswe_run.sh $B $L $BASE ${MID[$M]} ${CONC:-8} ;;    # v1.1
+      claweval) ~/evals/claweval_run.sh $B $L $BASE ${MID[$M]} ${CONC:-8} ;;  # all | general | multimodal | multi_turn
+      toolathlon) ~/evals/toolathlon_run.sh $B $L $BASE ${MID[$M]} ${CONC:-1} ;;  # verified (official service)
       scicode) ~/evals/scicode_run.sh $L $BASE ${MID[$M]} ${CONC:-32} ${MAX_TOKENS:-32768} ;;
       aider)  ~/evals/aider_run.sh $L $BASE ${MID[$M]} ${CONC:-32} $B ;;
       extend) # continue a finished text2 run's truncated answers to BUDGET tokens (exact; see extend_truncated.py)
@@ -106,7 +115,10 @@ for m in "${!NAME[@]}"; do
 done
 while systemctl --user is-active -q cards-release || { [ -z "$CUR" ] && chips_busy; }; do sleep 60; done
 echo "evalq start $(date +%T)"
+SELF_MTIME=$(stat -c %Y "$0")
 while true; do
+  # pick up edits to this script at a task boundary (the running server is adopted again on restart)
+  [ "$(stat -c %Y "$0")" != "$SELF_MTIME" ] && { echo "evalq.sh changed, restarting $(date +%T)"; exec "$0"; }
   if T=$(pick "$CUR"); then
     set -- $T
     if [ "$1" != "$CUR" ] || ! curl -sf localhost:20000/v1/models >/dev/null; then

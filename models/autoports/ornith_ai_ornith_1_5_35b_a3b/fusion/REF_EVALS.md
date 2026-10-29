@@ -34,19 +34,19 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 33.4 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | staged | Harbor 0.25 + Terminus-2 json, T1.0/top_p 1.0, 128K, 4 h; 8 CPU per task (card 32), 1 run (card 5) |
-| Terminal-Bench 2.1 (Claude Code) | 68.5 | | setup | Harbor + Claude Code 2.1.126; end-to-end test in progress |
+| Terminal-Bench 2.1 (Claude Code) | 68.5 | | staged | Harbor + Claude Code 2.1.126 via /v1/messages; Ornith's shipped chat template (the cards' modification) is what we serve |
 | SWE-bench Verified | 79 | | staged | OpenHands SDK, T1.0/top_p 0.95, 256K, no network, git history squashed; official swebench 5.0.2 evaluator |
 | SWE-bench Pro | 59.6 | | staged | Pro v1 (731, as the cards); OpenHands; Scale evaluator; fix-commit refs removed |
 | SWE-bench Multilingual | 71.4 | | staged | OpenHands, as Verified |
-| DeepSWE | 22 | | setup | Datacurve DeepSWE 113 tasks, public; Pier/Harbor + Claude Code; medium setup |
-| Frontier-Bench v0.1 | 5.1 | | setup | = terminal-bench@3.0.0 (74 tasks); 6 need an H100, so at most 68/74 |
+| DeepSWE | 22 | | staged | Pier 0.3.1 + Claude Code 2.1.126, deep-swe@435ee89e (113), T1.0/0.95, 256K, agent without network |
+| Frontier-Bench v0.1 | 5.1 | | staged | terminal-bench@3.0.0: 70 of 74 tasks (4 need an H100); Terminus-2, TB 2.1 settings |
 | NL2Repo | 46.2 | | n/s | skipped (user): per-task test images unpublished; card used 400K context (we serve 262K) |
-| SWE Atlas - QnA | 39.8 | | setup | public; Harbor + mini-swe-agent (as the card); rubric judged by Claude; easy setup |
+| SWE Atlas - QnA | 39.8 | | staged | Harbor + mini-swe-agent 2.4.6, SWE Atlas @49e4af3 (incl. rubric fixes), T1.0/0.95, 128K, 5 runs; rubric judged by Claude |
 | MCP-Atlas | 70.2 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
-| Toolathlon-Verified | 48.7 | | setup | official evaluation service (user decision), quota-limited |
+| Toolathlon-Verified | 48.7 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
 | WideSearch | 67.8 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
 | BrowseComp | 67.6 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
-| ClawEval | 72.5 | | setup | = Claw-Eval (MIT, 300 tasks); own harness; rubric judge (Claude) |
+| ClawEval | 72.5 | | staged | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
 
 ## Ornith-1.5-122B (card: ornith-ai/Ornith-1.5-122B)
 
@@ -64,8 +64,8 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | WideSearch | 75.2 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
 | BrowseComp | 78.5 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
 | MCP-Atlas | 74.6 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
-| Toolathlon-Verified | 70.8 | | setup | official evaluation service (user decision), quota-limited |
-| ClawEval | 79.4 | | setup | see Ornith-35B |
+| Toolathlon-Verified | 70.8 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
+| ClawEval | 79.4 | | staged | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
 
 ## Qwen3-Coder-Next (card: Qwen/Qwen3-Coder-Next; no thinking)
 
