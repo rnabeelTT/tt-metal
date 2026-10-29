@@ -124,7 +124,7 @@ Vision language (images; up to 4 per request, resized to at most 4 MP by the ser
 | DynaMath | 85.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | ZEROBench / ZEROBench_sub | 9 / 36.2 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | VlmsAreBlind | 96.7 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
-| BabyVision (with / without CI) | 40.2 / 34.5 | | queued | without CI: 388 x 3 samples, judged every item; with CI not built (proposed skip) |
+| BabyVision (with / without CI) | 40.2 / 34.5 | | queued | without CI: 388 x 3 samples, judged every item; with CI skipped (user, 2026-10-29): no published code-interpreter harness |
 | RealWorldQA | 85.1 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | MMStar | 82.9 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | MMBench EN-DEV-v1.1 | 92.8 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
@@ -144,8 +144,8 @@ Vision language (images; up to 4 per request, resized to at most 4 MP by the ser
 | RefSpatialBench | 69.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | LingoQA | 80.8 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | ScreenSpot Pro | 70.4 | | queued | 1,581; 48% of screenshots exceed 4 MP and are downscaled (package limit) |
-| TIR-Bench (with / without CI) | 53.2 / 42.5 | | queued | without CI: 1,215, official extraction judged; with CI not built (proposed skip) |
-| V* (with / without CI) | 93.2 / 90.1 | | queued | without CI: 191; with CI not built (proposed skip) |
+| TIR-Bench (with / without CI) | 53.2 / 42.5 | | queued | without CI: 1,215, official extraction judged; with CI skipped (user, 2026-10-29): no published code-interpreter harness |
+| V* (with / without CI) | 93.2 / 90.1 | | queued | without CI: 191; with CI skipped (user, 2026-10-29): no published code-interpreter harness |
 | SLAKE | 81.6 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | PMC-VQA | 63.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
 | MedXpertQA-MM | 67.3 | | queued | vision harness (VLMEvalKit / official scorers), Qwen3-VL report prompts; judged parts by Claude |
