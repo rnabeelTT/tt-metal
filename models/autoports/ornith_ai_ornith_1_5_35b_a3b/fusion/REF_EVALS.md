@@ -16,12 +16,14 @@ card measures it, next to the card's figure. Decisions (user, 2026-10-28):
   to run here and of little relevance to readers. The main, doable ones that users look at (SWE-bench, Terminal-Bench,
   GPQA, HLE, LiveCodeBench, MMLU-Pro, IFEval, HMMT, BrowseComp, TAU2, MMMU and the like) are always run.
 
-Token budget (2026-10-29): Qwen's guidance for these checkpoints is 32,768 output tokens for most queries and 81,920
-for hard reasoning. At 32,768, 56% of Ornith-1.5-122B's HLE answers and 20% of its SciCode steps were cut mid-reasoning
-(scored as wrong), so HLE, SciCode, GPQA, LiveCodeBench, OJBench, HMMT and PolyMATH run at 81,920 (16 in flight).
-Runs that already finished at 32,768 are extended with `tools/extend_truncated.py`: a truncated answer is continued
-from its own reasoning up to 81,920 tokens (an exact equivalent of one generation at that budget), image items are
-regenerated at 81,920, finished answers are kept.
+Run size (user, 2026-10-30): every run takes 1-2 h at most. Sets that would take longer run on a fixed random
+sample (seed 1234; `SAMPLE_N` in text2 / qwen_text / vision, task lists in `~/evals/samples` for the agentic sets),
+answers are capped at 32,768 tokens (Qwen's guidance for most queries), agentic tasks get a 1 h agent cap and one
+attempt, and evalq stops any run at `MAX_MIN` (150 min). Typical sizes: HLE 128, OJBench / LongBench v2 64, knowledge
+and multilingual sets 400, vision sets 300, FullStackBench 200, SWE-bench sets 24, Terminal-Bench 24, Claw-Eval 32,
+BrowseComp / HLE with tools 32, WideSearch 16; small sets (GPQA, IFEval, LiveCodeBench v6, HMMT, IFBench) run in full.
+The card states each row's n and its 95% interval. Earlier evidence for the 32k cap: in the first Ornith-1.5-122B HLE run
+(T0.6, the coding preset), of 339 answers cut at 32,768 tokens only 16 finished by 81,920.
 
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
 default), the card's thinking-mode sampling (Ornith-1.5-122B and Qwen3.5-122B: T1.0/0.95/20 + presence_penalty 1.5 for

@@ -7,6 +7,7 @@
 # appended while it runs. Finished tasks go to evalq.done with their RESULT lines; it stops the server when the
 # queue is empty and keeps polling. `# ...` lines and blank lines are ignored.
 export PATH=$HOME/ornith-fusion/bin:$HOME/.local/bin:$PATH
+set -m  # each run in its own process group, so the time cap can stop all of it
 R=$HOME/ornith-fusion/runs
 Q=$R/evalq.txt; DONE=$R/evalq.done
 touch $Q $DONE
@@ -111,9 +112,15 @@ EOF
                 --budget $BUDGET --conc ${CONC:-16} --sample ${SAMPLE:-0} ;;
       *) echo "unknown runner $RN" ;;
     esac
-  ) > $LOG 2>&1
-  local rc=$?
-  local res=$(grep -E "^(RESULT|JUDGE_PENDING|SCICODE|AIDER|EXTENDED)" $LOG | tr '\n' ' ')
+  ) > $LOG 2>&1 &
+  # hard wall-clock cap per run (user 2026-10-30: 1-2 h per run): MAX_MIN (default 150) kills the run's process group
+  local pid=$! cap=${MAX_MIN:-150}
+  for kv in "$@"; do [[ $kv == MAX_MIN=* ]] && cap=${kv#MAX_MIN=}; done
+  ( sleep $((cap * 60)); echo "TIMEOUT after $cap min $(date +%T)" >> $LOG; kill -TERM -- -$pid 2>/dev/null; sleep 60; kill -KILL -- -$pid 2>/dev/null ) &
+  local wd=$!
+  wait $pid; local rc=$?
+  kill -- -$wd 2>/dev/null
+  local res=$(grep -E "^(RESULT|JUDGE_PENDING|SCICODE|AIDER|EXTENDED|TIMEOUT)" $LOG | tr '\n' ' ')
   echo "$M $RN $B $* | exit $rc | $res | $(date '+%F %T')" >> $DONE
   echo "$M $B exit $rc: $res $(date +%T)"
 }
