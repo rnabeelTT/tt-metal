@@ -18,16 +18,24 @@ declare -A REPO=([orn]=raahemnabeel/ornith-1.5-35b-a3b [o122]=raahemnabeel/ornit
 declare -A NAME=([orn]=ornith-1.5-35b-a3b [o122]=ornith-1.5-122b [q122]=qwen3-5-122b-a10b [cn]=qwen3-coder-next)
 declare -A MID=([orn]=ornith-ai/Ornith-1.5-35B-A3B [o122]=ornith-ai/Ornith-1.5-122B
                 [q122]=Qwen/Qwen3.5-122B-A10B [cn]=Qwen/Qwen3-Coder-Next)
-declare -A SAMP=([orn]=1.0,0.95,20 [o122]=0.6,0.95,20 [q122]=0.6,0.95,20 [cn]=1.0,0.95,40)
+# Thinking-mode sampling from each card (temperature, top_p, top_k, presence_penalty). Ornith-1.5-122B and Qwen3.5-122B
+# recommend T1.0/0.95/20 + presence_penalty 1.5 for general tasks and T0.6/0.95/20 without penalty for precise coding
+# (SAMP_CODE, for the benches in CODE_BENCHES); Ornith-1.5-35B and Coder-Next have a single preset (generation_config).
+declare -A SAMP=([orn]=1.0,0.95,20,0 [o122]=1.0,0.95,20,1.5 [q122]=1.0,0.95,20,1.5 [cn]=1.0,0.95,40,0)
+declare -A SAMP_CODE=([o122]=0.6,0.95,20,0 [q122]=0.6,0.95,20,0)
+CODE_BENCHES=" scicode livecodebench_v6 ojbench fullstackbench_en fullstackbench_zh codeforces "
 CUR=""; C=""
 
-stop_server() { [ -n "$C" ] && docker rm -f $C >/dev/null 2>&1; CUR=""; C=""; }
+save_logs() {  # keep the server log of a container before it is removed (a crashed server's log is the only evidence)
+  [ -n "$1" ] && docker ps -a --format '{{.Names}}' | grep -qx "$1" && docker logs "$1" 2>&1 | grep -v DEBUG | tail -n 20000 > $R/serverlogs/$1_$(date +%m%d_%H%M%S).log; }
+mkdir -p $R/serverlogs
+stop_server() { [ -n "$C" ] && { save_logs $C; docker rm -f $C >/dev/null 2>&1; }; CUR=""; C=""; }
 
 serve() {  # <model>
   local M=$1 L=$R/evalq_serve_$1; mkdir -p $L
   stop_server
   C=tt-model-${NAME[$M]}-p300x2
-  docker rm -f $C >/dev/null 2>&1
+  save_logs $C; docker rm -f $C >/dev/null 2>&1
   tt-model serve ${REPO[$M]} --profile p300x2 --detach --port 20000 --no-update-check > $L/serve.log 2>&1
   local t0=$(date +%s)
   until curl -sf localhost:20000/v1/models >/dev/null; do
@@ -59,7 +67,8 @@ run_task() {  # <model> <runner> <bench> [KEY=VAL ...]
   local M=$1 RN=$2 B=$3; shift 3
   local TAG="" kv; for kv in "$@"; do [[ $kv == TAG=* ]] && TAG=_${kv#TAG=}; done
   local L=ref_${M}_${B}${TAG} LOG=$R/ref_${M}_${B}${TAG}.log
-  IFS=, read TT TP TK <<< "${SAMP[$M]}"
+  local S=${SAMP[$M]}; [[ -n ${SAMP_CODE[$M]} && $CODE_BENCHES == *" $B "* ]] && S=${SAMP_CODE[$M]}
+  IFS=, read TT TP TK TPP <<< "$S"
   echo "== $M $RN $B $* $(date +%T)"
   (
     [ $# -gt 0 ] && export "$@"
@@ -68,13 +77,15 @@ run_task() {  # <model> <runner> <bench> [KEY=VAL ...]
     # sweatlas, deepswe, claweval, toolathlon) set each card's own settings from the model id, so only explicit
     # KEY=VAL overrides on the queue line reach them.
     case $RN in lmeval|text2|qtext|vision|scicode|extend|aider)
-      export TEMPERATURE=${TEMPERATURE:-$TT} TOP_P=${TOP_P:-$TP} TOP_K=${TOP_K:-$TK} ;; esac
+      export TEMPERATURE=${TEMPERATURE:-$TT} TOP_P=${TOP_P:-$TP} TOP_K=${TOP_K:-$TK}
+      [ "${PRESENCE_PENALTY:-$TPP}" != 0 ] && export PRESENCE_PENALTY=${PRESENCE_PENALTY:-$TPP} ;; esac
+    echo "sampling: T=$TEMPERATURE top_p=$TOP_P top_k=$TOP_K presence_penalty=${PRESENCE_PENALTY:-0}"
     case $RN in
       lmeval) OUT=$R/$L/evals/$B; mkdir -p $OUT
               cd $HOME/lm-eval-poc && .venv/bin/lm_eval --model local-chat-completions \
                 --model_args "model=${MID[$M]},base_url=$BASE/chat/completions,num_concurrent=${CONC:-32},max_retries=3,tokenized_requests=False,timeout=7200" \
                 --tasks $B --apply_chat_template --seed ${SEED:-42} --confirm_run_unsafe_code \
-                --gen_kwargs "do_sample=True,temperature=$TEMPERATURE,top_p=$TOP_P,top_k=$TOP_K,max_gen_toks=${MAX_TOKENS:-32768}" \
+                --gen_kwargs "do_sample=True,temperature=$TEMPERATURE,top_p=$TOP_P,top_k=$TOP_K,max_gen_toks=${MAX_TOKENS:-32768}${PRESENCE_PENALTY:+,presence_penalty=$PRESENCE_PENALTY}" \
                 --output_path $OUT --log_samples
               python3 - $OUT <<'EOF'
 import json, sys, glob

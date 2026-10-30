@@ -24,7 +24,9 @@ from its own reasoning up to 81,920 tokens (an exact equivalent of one generatio
 regenerated at 81,920, finished answers are kept.
 
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
-default), the checkpoint's generation_config sampling, up to 32 requests in flight, max 32,768 generated tokens, only
+default), the card's thinking-mode sampling (Ornith-1.5-122B and Qwen3.5-122B: T1.0/0.95/20 + presence_penalty 1.5 for
+general tasks, T0.6/0.95/20 without penalty for precise coding = SciCode, LiveCodeBench, OJBench, FullStackBench,
+Codeforces; Ornith-1.5-35B and Coder-Next: their generation_config), up to 32 requests in flight, max 32,768 generated tokens, only
 the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`; queue runner `tools/evalq.sh` reads `runs/evalq.txt` (one task per line,
 finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode, aider, ...; not in this repo).
 
@@ -58,7 +60,7 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | 39.9 at 32k (truncated: 58/288) | rerun | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); rerun at 81,920; main-problem 13.8 at 32k |
-| HLE (w/o tools) | 37.68 | | running | fixed random 1,000 of 2,500 (seed 1234, images included; user 2026-10-29: the full set at 81,920 tokens is ~40 h of decode), official prompts, 81,920 tokens (32k answers continued exactly); judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
+| HLE (w/o tools) | 37.68 | | queued | rerun with the general-task preset (the first run used T0.6 without penalty: of the 339 sampled answers cut at 32,768 tokens, 317 were still cut at 81,920 and 16 finished); fixed random 1,000 of 2,500 (seed 1234, images included; user 2026-10-29: the full set at 81,920 tokens is ~40 h of decode), official prompts, 81,920 tokens (32k answers continued exactly); judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 48.0 | | queued | the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
