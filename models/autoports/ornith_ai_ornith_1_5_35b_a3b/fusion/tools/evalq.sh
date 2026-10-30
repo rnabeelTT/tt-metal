@@ -15,15 +15,17 @@ export HF_HUB_CACHE=$HOME/.cache/huggingface/hub HF_DATASETS_CACHE=$HOME/.cache/
 export HF_ALLOW_CODE_EVAL=1 NLTK_DATA=$HOME/ornith-fusion/nltk_data
 BASE=http://localhost:20000/v1
 declare -A REPO=([orn]=raahemnabeel/ornith-1.5-35b-a3b [o122]=raahemnabeel/ornith-1.5-122b
-                 [q122]=raahemnabeel/qwen3-5-122b-a10b [cn]=raahemnabeel/qwen3-coder-next)
-declare -A NAME=([orn]=ornith-1.5-35b-a3b [o122]=ornith-1.5-122b [q122]=qwen3-5-122b-a10b [cn]=qwen3-coder-next)
+                 [q122]=raahemnabeel/qwen3-5-122b-a10b [cn]=raahemnabeel/qwen3-coder-next [o122p8]=raahemnabeel/ornith-1.5-122b)
+# precision variants for A/B runs (not packages): the shipped image started by variants/<key>/run.sh with another policy
+declare -A VARIANT=([o122p8]=$R/variants/o122p8)
+declare -A NAME=([orn]=ornith-1.5-35b-a3b [o122]=ornith-1.5-122b [q122]=qwen3-5-122b-a10b [cn]=qwen3-coder-next [o122p8]=ornith-1.5-122b-p8)
 declare -A MID=([orn]=ornith-ai/Ornith-1.5-35B-A3B [o122]=ornith-ai/Ornith-1.5-122B
-                [q122]=Qwen/Qwen3.5-122B-A10B [cn]=Qwen/Qwen3-Coder-Next)
+                [q122]=Qwen/Qwen3.5-122B-A10B [cn]=Qwen/Qwen3-Coder-Next [o122p8]=ornith-ai/Ornith-1.5-122B)
 # Thinking-mode sampling from each card (temperature, top_p, top_k, presence_penalty). Ornith-1.5-122B and Qwen3.5-122B
 # recommend T1.0/0.95/20 + presence_penalty 1.5 for general tasks and T0.6/0.95/20 without penalty for precise coding
 # (SAMP_CODE, for the benches in CODE_BENCHES); Ornith-1.5-35B and Coder-Next have a single preset (generation_config).
-declare -A SAMP=([orn]=1.0,0.95,20,0 [o122]=1.0,0.95,20,1.5 [q122]=1.0,0.95,20,1.5 [cn]=1.0,0.95,40,0)
-declare -A SAMP_CODE=([o122]=0.6,0.95,20,0 [q122]=0.6,0.95,20,0)
+declare -A SAMP=([orn]=1.0,0.95,20,0 [o122]=1.0,0.95,20,1.5 [o122p8]=1.0,0.95,20,1.5 [q122]=1.0,0.95,20,1.5 [cn]=1.0,0.95,40,0)
+declare -A SAMP_CODE=([o122]=0.6,0.95,20,0 [o122p8]=0.6,0.95,20,0 [q122]=0.6,0.95,20,0)
 CODE_BENCHES=" scicode livecodebench_v6 ojbench fullstackbench_en fullstackbench_zh codeforces "
 CUR=""; C=""
 
@@ -37,7 +39,8 @@ serve() {  # <model>
   stop_server
   C=tt-model-${NAME[$M]}-p300x2
   save_logs $C; docker rm -f $C >/dev/null 2>&1
-  tt-model serve ${REPO[$M]} --profile p300x2 --detach --port 20000 --no-update-check > $L/serve.log 2>&1
+  if [ -n "${VARIANT[$M]}" ]; then ${VARIANT[$M]}/run.sh $C > $L/serve.log 2>&1
+  else tt-model serve ${REPO[$M]} --profile p300x2 --detach --port 20000 --no-update-check > $L/serve.log 2>&1; fi
   local t0=$(date +%s)
   until curl -sf localhost:20000/v1/models >/dev/null; do
     docker ps --format '{{.Names}}' | grep -qx $C || { echo "serve $M: server died $(date +%T)"; docker logs $C 2>&1 | grep -v DEBUG | tail -n 300 > $L/boot_fail.log; C=""; return 1; }
@@ -137,6 +140,11 @@ SELF_MTIME=$(stat -c %Y "$0")
 while true; do
   # pick up edits to this script at a task boundary (the running server is adopted again on restart)
   [ "$(stat -c %Y "$0")" != "$SELF_MTIME" ] && { echo "evalq.sh changed, restarting $(date +%T)"; exec "$0"; }
+  # runs/evalq.pause: finish the current run, free the chips and wait (image releases need them)
+  if [ -f $R/evalq.pause ]; then
+    [ -n "$CUR" ] && { echo "paused, stopping $CUR $(date +%T)"; stop_server; }
+    while [ -f $R/evalq.pause ]; do sleep 60; done; echo "resumed $(date +%T)"
+  fi
   if T=$(pick "$CUR"); then
     set -- $T
     if [ "$1" != "$CUR" ] || ! curl -sf localhost:20000/v1/models >/dev/null; then

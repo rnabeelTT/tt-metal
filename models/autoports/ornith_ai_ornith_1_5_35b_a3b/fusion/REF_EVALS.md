@@ -35,6 +35,25 @@ finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode
 Status: **queued** (harness ready, waiting for chips) · **setup** (harness being prepared) · **run** (in progress) ·
 **staged** (ready; joins the queue after the quick evals) · **done** · **dropped** (user decision) · **n/s** (not supported by the package) · **open** (needs a decision or a service we do not have yet).
 
+## Numerics check (2026-10-30)
+
+User question: are we getting the math right compared with the official release? The Ornith-1.5-122B runs so far
+are well under the card (HLE ~16 vs 37.68, SciCode 40.3 vs 53.8), and the gap is unfinished answers: 98% of the HLE
+answers still running at 81,920 tokens repeat whole paragraphs (zlib ratio of the last 20k chars > 6x; finished
+answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference (user):
+- Sampler: device-sampled token frequencies at T 0.6 / 1.0, top_k 20, top_p 0.95 match the distribution from the
+  server's own logprobs (TVD within sampling noise, prefill and decode steps). The sampling math is right.
+- Prefill vs decode on the same text (`pd_consistency.py`, 3 chat prompts x 159 greedy positions): top-1 agreement
+  0.994 / 0.943 / 0.956, KL median 0.0003-0.0011 nats, p95 0.09-0.31, and confident flips (prefill 0.999 vs decode
+  0.377 for the same token). Same weights, so this is precision error in one or both paths. The shipped policy is
+  aggressive: routed experts, attention, GDN projections and LM head bfp4 (LoFi), bfp8 decode CCL; the bring-up
+  teacher forcing (top-1 0.97 vs HF, 100-token references) cannot see failures thousands of tokens into an answer.
+- A/B queued: `o122p8` = shipped image + `tools/numerics/o122p8/policy.json` (attention / GDN / LM head bfp8 HiFi2,
+  routed down bfp8, bf16 CCL; gate|up stays bfp4: all-bfp8 experts need ~31 GiB/die). HLE 128 at the card's general
+  preset (shipped and p8) and HLE 64 at T0.6 without penalty (p8, paired with the first run's 44 overlapping answers).
+  The fused MoE decode reads expert weights at 5 significant bits either way (moe_decode.fused.WEIGHT_SIG_BITS).
+  Republishing a policy that shrinks the KV pool needs the user's OK first (user, 2026-10-30).
+
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
 | Benchmark | Card | Ours | Status | Harness / note |
@@ -61,8 +80,8 @@ Status: **queued** (harness ready, waiting for chips) · **setup** (harness bein
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| SciCode | 53.8 | 39.9 at 32k (truncated: 58/288) | rerun | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); rerun at 81,920; main-problem 13.8 at 32k |
-| HLE (w/o tools) | 37.68 | | queued | rerun with the general-task preset (the first run used T0.6 without penalty: of the 339 sampled answers cut at 32,768 tokens, 317 were still cut at 81,920 and 16 finished); fixed random 1,000 of 2,500 (seed 1234, images included; user 2026-10-29: the full set at 81,920 tokens is ~40 h of decode), official prompts, 81,920 tokens (32k answers continued exactly); judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
+| SciCode | 53.8 | 40.3 (T0.6, 81,920; 60/288 cut at the cap) | open | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); main-problem 15.4. Gap = unfinished answers (looping, see the numerics section); at the finished subproblems' pass rate (51%) the score would be ~51. Not on the card until the precision A/B settles it |
+| HLE (w/o tools) | 37.68 | ~16 (T0.6, 32k; not for the card) | run | first run (T0.6 coding preset, 32k): 55% of answers cut at 32,768 tokens and scored wrong; accuracy on finished answers 36.0% (215/598 judged) is NOT the HLE metric (an earlier note compared it to the card). Now: fixed random 128 of 2,500 (seed 1234, images included), the card's general preset, 32k, shipped vs the o122p8 precision variant; judged by Claude agents (card: Claude 4.6 Opus); score with `tools/hle_batch.py tally` (official denominator) |
 | HLE (with tools) | 48.0 | | queued | the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
