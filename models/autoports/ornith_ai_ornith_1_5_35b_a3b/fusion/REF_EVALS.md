@@ -53,6 +53,12 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   teacher forcing (top-1 0.97 vs HF, 100-token references) cannot see failures thousands of tokens into an answer.
 - Shipped model at the card preset (2026-10-31): HLE 128 = 18.0 +/- 6.6 vs 37.68 (27% capped, half of those looping),
   so the A/B runs (o122p8 HLE 128 at the same preset, then HLE 64 at T0.6); the other O122 runs wait for it.
+- o122p8 booted on the 4th try (2026-10-31 03:25; variant-only fixes in `tools/numerics/o122p8`): KV pool capped at
+  655,360 tokens (the 8-bit weights take ~5.6 GiB/die more than the context contract assumes); prefill matmuls in
+  1,024-row slices (bfp8 GDN qkvz weights overflowed L1 by 20 KB at 2,048 rows); unfused MoE decode (mixed bfp4
+  gate|up + bfp8 down is outside the fused kernel, so no 5-bit weight rounding either): ~260 tok/s at 32 users vs ~490.
+  Prefill vs decode on it (same 3 prompts): top-1 0.987 / 0.994 / 0.987 (shipped 0.994 / 0.943 / 0.956), KL p95
+  0.012 / 0.105 / 0.095 (shipped 0.093 / 0.308 / 0.283). The precision gap shrinks 3-8x at the tail.
 - A/B held (user, 2026-10-30): first the shipped model at the card's general preset (HLE 128, T1.0/0.95/20,
   presence 1.5, 32k). If that lands near 37.68 with few capped answers, or other benchmarks land near their card
   values, the math is fine and the A/B is skipped. Only if it still misses: `o122p8` = shipped image +
