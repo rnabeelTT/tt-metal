@@ -48,11 +48,16 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   0.377 for the same token). Same weights, so this is precision error in one or both paths. The shipped policy is
   aggressive: routed experts, attention, GDN projections and LM head bfp4 (LoFi), bfp8 decode CCL; the bring-up
   teacher forcing (top-1 0.97 vs HF, 100-token references) cannot see failures thousands of tokens into an answer.
-- A/B queued: `o122p8` = shipped image + `tools/numerics/o122p8/policy.json` (attention / GDN / LM head bfp8 HiFi2,
-  routed down bfp8, bf16 CCL; gate|up stays bfp4: all-bfp8 experts need ~31 GiB/die). HLE 128 at the card's general
-  preset (shipped and p8) and HLE 64 at T0.6 without penalty (p8, paired with the first run's 44 overlapping answers).
-  The fused MoE decode reads expert weights at 5 significant bits either way (moe_decode.fused.WEIGHT_SIG_BITS).
-  Republishing a policy that shrinks the KV pool needs the user's OK first (user, 2026-10-30).
+- A/B held (user, 2026-10-30): first the shipped model at the card's general preset (HLE 128, T1.0/0.95/20,
+  presence 1.5, 32k). If that lands near 37.68 with few capped answers, or other benchmarks land near their card
+  values, the math is fine and the A/B is skipped. Only if it still misses: `o122p8` = shipped image +
+  `tools/numerics/o122p8/policy.json` (attention / GDN / LM head bfp8 HiFi2, routed down bfp8, bf16 CCL; gate|up stays
+  bfp4: all-bfp8 experts need ~31 GiB/die), HLE 128 at the same preset plus HLE 64 at T0.6 without penalty (evalq
+  `#HOLD-P8` lines). The fused MoE decode reads expert weights at 5 significant bits either way
+  (moe_decode.fused.WEIGHT_SIG_BITS). Republishing a policy that shrinks the KV pool needs the user's OK first.
+- Scheduler fix released 2026-10-31 (vllm-tt-plugin 8b1f8b1: the scheduler split prompts at an image when the
+  encoder budget was full, killing the engine under 32 concurrent HLE requests with images; crash at 21:07): Ornith-1.5-122B image b5412d165536, Qwen3.5-122B ca9132847bd2; gate greedy 8/8 sequential + concurrent,
+  MM_BURST 128/128, TPOT 7.53 / 7.54 ms (133 tok/s, 1 user), hub pull smoke the same.
 
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
