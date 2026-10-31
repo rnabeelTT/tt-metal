@@ -1,0 +1,19 @@
+--- /home/raahem/ornith-fusion/runs/variants/o122p8/tp_common.orig.py	2026-10-31 03:03:15.708463746 +0000
++++ /home/raahem/ornith-fusion/runs/variants/o122p8/tp_common.py	2026-10-31 03:03:26.791873509 +0000
+@@ -7,6 +7,7 @@
+ """
+ 
+ import math
++import os
+ 
+ import torch
+ from loguru import logger
+@@ -674,7 +675,7 @@
+ 
+ # Max prefill rows per sharded_decode_matmul call (None = no limit: every multi-device mesh). Set by callers that run
+ # the TP modules at degree 1, whose full-width 2D prefill configs overflow L1 above ~512 rows.
+-PREFILL_MAX_ROWS = None
++PREFILL_MAX_ROWS = int(os.environ.get("QWEN35_PREFILL_MAX_ROWS", "0")) or None  # o122p8 variant: bfp8 GDN weights overflow L1 at 2048 rows
+ 
+ 
+ def replicate(torch_tensor, mesh, cache_path, dtype=ttnn.bfloat16):
