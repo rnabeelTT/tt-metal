@@ -142,7 +142,7 @@ Language:
 | TAU2-Bench | 79.5 | | dropped | dropped (user, 2026-10-29): Claude would play the simulated customer (~13k turns), shaping the episodes, not just grading them |
 | VITA-Bench | 33.6 | | dropped | dropped (user, 2026-10-29): Claude would play the simulated user and the rubric judge |
 | DeepPlanning | 24.1 | | dropped | dropped (user, 2026-10-29): low-visibility; travel plans need an LLM conversion step |
-| HLE w/ tool | 47.5 | | staged | 2,500 incl. images; CAIS tools protocol (search, fetch, full HLE blocklist, no-network Python sandbox) |
+| HLE w/ tool | 47.5 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 2,500 incl. images; CAIS tools protocol (search, fetch, full HLE blocklist, no-network Python sandbox) |
 | Browsecomp | 63.8 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; full 1,266; SearXNG + fetch, benchmark-leak blocklist, 100 turns, folding at 240k; Claude-judged |
 | Browsecomp-zh | 69.9 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 289; Chinese engines (Sogou/360), robots.txt blocks baike/zhihu; Claude-judged |
 | WideSearch | 60.5 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
