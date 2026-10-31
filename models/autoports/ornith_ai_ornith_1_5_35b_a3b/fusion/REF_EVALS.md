@@ -20,10 +20,13 @@ Run size (user, 2026-10-30): every run takes 1-2 h at most. Sets that would take
 sample (seed 1234; `SAMPLE_N` in text2 / qwen_text / vision, task lists in `~/evals/samples` for the agentic sets),
 answers are capped at 32,768 tokens (Qwen's guidance for most queries), agentic tasks get a 1 h agent cap and one
 attempt, and evalq stops any run at `MAX_MIN` (150 min). Typical sizes: HLE 128, OJBench / LongBench v2 64, knowledge
-and multilingual sets 400, vision sets 300, FullStackBench 200, SWE-bench sets 24, Terminal-Bench 24, Claw-Eval 32,
-BrowseComp / HLE with tools 32, WideSearch 16; small sets (GPQA, IFEval, LiveCodeBench v6, HMMT, IFBench) run in full.
+and multilingual sets 400, vision sets 300, FullStackBench 200, SWE-bench sets 24, Terminal-Bench 24, Claw-Eval 32; small sets (GPQA, IFEval, LiveCodeBench v6, HMMT, IFBench) run in full.
 The card states each row's n and its 95% interval. Earlier evidence for the 32k cap: in the first Ornith-1.5-122B HLE run
 (T0.6, the coding preset), of 339 answers cut at 32,768 tokens only 16 finished by 81,920.
+Long search-agent benchmarks (BrowseComp, BrowseComp-zh, WideSearch, HLE with tools) are not run and stay off the
+cards (user, 2026-10-31): Ornith-1.5-122B BrowseComp n32 under the 1 h agent cap scored 9.4 vs the card's 78.5 with 25
+of 32 agents stopped after ~13 turns; the cards' 100-turn protocol needs ~6 h per agent on this box (~225 s per turn).
+SWE-bench and Terminal-Bench keep the 1 h cap; check their cap-hit rate before trusting a score.
 
 Common settings unless a row says otherwise: served from the hub repo as shipped, p300x2, thinking on (the checkpoint's
 default), the card's thinking-mode sampling (Ornith-1.5-122B and Qwen3.5-122B: T1.0/0.95/20 + presence_penalty 1.5 for
@@ -65,7 +68,7 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | --- | ---: | ---: | --- | --- |
 | GPQA Diamond | 89.2 | | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
 | HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
-| HLE (with tools) | 33.4 | | staged | 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
+| HLE (with tools) | 33.4 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | staged | Harbor 0.25 + Terminus-2 json, T1.0/top_p 1.0, 128K, 4 h; 8 CPU per task (card 32), 1 run (card 5) |
 | Terminal-Bench 2.1 (Claude Code) | 68.5 | | staged | Harbor + Claude Code 2.1.126 via /v1/messages; Ornith's shipped chat template (the cards' modification) is what we serve |
 | SWE-bench Verified | 79 | | staged | OpenHands SDK, T1.0/top_p 0.95, 256K, no network, git history squashed; official swebench 5.0.2 evaluator |
@@ -77,8 +80,8 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | SWE Atlas - QnA | 39.8 | | staged | Harbor + mini-swe-agent 2.4.6, SWE Atlas @49e4af3 (incl. rubric fixes), T1.0/0.95, 128K, 5 runs; rubric judged by Claude |
 | MCP-Atlas | 70.2 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
 | Toolathlon-Verified | 48.7 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
-| WideSearch | 67.8 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
-| BrowseComp | 67.6 | | staged | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
+| WideSearch | 67.8 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| BrowseComp | 67.6 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
 | ClawEval | 72.5 | | staged | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
 
 ## Ornith-1.5-122B (card: ornith-ai/Ornith-1.5-122B)
@@ -87,15 +90,15 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | 40.3 (T0.6, 81,920; 60/288 cut at the cap) | open | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); main-problem 15.4. Gap = unfinished answers (looping, see the numerics section); at the finished subproblems' pass rate (51%) the score would be ~51. Not on the card until the precision A/B settles it |
 | HLE (w/o tools) | 37.68 | ~16 (T0.6, 32k; not for the card) | run | first run (T0.6 coding preset, 32k): 55% of answers cut at 32,768 tokens and scored wrong; accuracy on finished answers 36.0% (215/598 judged) is NOT the HLE metric (an earlier note compared it to the card). Now: fixed random 128 of 2,500 (seed 1234, images included), the card's general preset, 32k, shipped vs the o122p8 precision variant; judged by Claude agents (card: Claude 4.6 Opus); score with `tools/hle_batch.py tally` (official denominator) |
-| HLE (with tools) | 48.0 | | queued | the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
+| HLE (with tools) | 48.0 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
 | NL2Repo | 51.2 | | n/s | skipped (user): per-task test images unpublished; card used 400K context (we serve 262K) |
 | SWE-bench Pro (no-hack) | 76.9 | | queued | Pro v1; OpenHands + don't-reward-hack notice; hack review of trajectories by Claude |
 | SWE-bench Verified (non-hack) | 84.5 | | queued | OpenHands, no network, git squashed, don't-reward-hack notice |
 | SWE-bench Multilingual (non-hack) | 76.4 | | queued | OpenHands, as Verified |
-| WideSearch | 75.2 | | queued | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
-| BrowseComp | 78.5 | 9.4 +/- 10.1 (n32; cap-bound, not for the card) | run | fixed random 32 (seed 1234), 16 agents at once, 1 h agent cap: 25 of 32 agents stopped by the cap after ~13 turns (mean 33k completion tokens, ~225 s per turn: about half decode, half search/fetch/prefill), 3 correct, 8 with no answer; the card's protocol allows 100 turns, ~6 h per agent here. Claude-judged |
+| WideSearch | 75.2 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| BrowseComp | 78.5 | 9.4 +/- 10.1 (n32; cap-bound, not for the card) | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; fixed random 32 (seed 1234), 16 agents at once, 1 h agent cap: 25 of 32 agents stopped by the cap after ~13 turns (mean 33k completion tokens, ~225 s per turn: about half decode, half search/fetch/prefill), 3 correct, 8 with no answer; the card's protocol allows 100 turns, ~6 h per agent here. Claude-judged |
 | MCP-Atlas | 74.6 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
 | Toolathlon-Verified | 70.8 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
 | ClawEval | 79.4 | | queued | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
@@ -140,9 +143,9 @@ Language:
 | VITA-Bench | 33.6 | | dropped | dropped (user, 2026-10-29): Claude would play the simulated user and the rubric judge |
 | DeepPlanning | 24.1 | | dropped | dropped (user, 2026-10-29): low-visibility; travel plans need an LLM conversion step |
 | HLE w/ tool | 47.5 | | staged | 2,500 incl. images; CAIS tools protocol (search, fetch, full HLE blocklist, no-network Python sandbox) |
-| Browsecomp | 63.8 | | staged | full 1,266; SearXNG + fetch, benchmark-leak blocklist, 100 turns, folding at 240k; Claude-judged |
-| Browsecomp-zh | 69.9 | | staged | 289; Chinese engines (Sogou/360), robots.txt blocks baike/zhihu; Claude-judged |
-| WideSearch | 60.5 | | staged | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
+| Browsecomp | 63.8 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; full 1,266; SearXNG + fetch, benchmark-leak blocklist, 100 turns, folding at 240k; Claude-judged |
+| Browsecomp-zh | 69.9 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 289; Chinese engines (Sogou/360), robots.txt blocks baike/zhihu; Claude-judged |
+| WideSearch | 60.5 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
 | Seal-0 | 44.1 | | staged | 111; official SealQA grader template; answers are time-sensitive vs today's web; Claude-judged |
 | MMMLU | 86.7 | | queued | qtext: 14 languages (Yoruba dropped as in the Qwen3 report), 1,000 |
 | MMLU-ProX | 82.2 | | queued | qtext: 29 languages, 1,000 |
