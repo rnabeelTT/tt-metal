@@ -59,6 +59,12 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   gate|up + bfp8 down is outside the fused kernel, so no 5-bit weight rounding either): ~260 tok/s at 32 users vs ~490.
   Prefill vs decode on it (same 3 prompts): top-1 0.987 / 0.994 / 0.987 (shipped 0.994 / 0.943 / 0.956), KL p95
   0.012 / 0.105 / 0.095 (shipped 0.093 / 0.308 / 0.283). The precision gap shrinks 3-8x at the tail.
+- o122p8 HLE 128 at the card preset: 25.0 +/- 7.5 (32 correct) vs shipped 18.0 +/- 6.7 (23); paired: 16 right only on
+  p8, 7 only on shipped (McNemar exact p = 0.09). Capped at 32k: 16 vs 34, looping 0 vs 17; finished answers 28.6% vs
+  24.5%. Precision is part of the gap but p8 is still 12.7 under the card. Next: ablations with pd_consistency (cheap):
+  `o122s7` = the bring-up's stage-7 policy `baseline_s7` (attention / GDN / LM head bfp8 HiFi2, bf16 CCL, experts bfp4
+  LoFi, fused decode on; +0.575 GiB/die, KV pool -5%, decode -2.4% at bring-up), then the fused kernel's 5-bit
+  rounding alone (shipped policy, fused decode off). The o122p8 T0.6 run was stopped for these.
 - A/B held (user, 2026-10-30): first the shipped model at the card's general preset (HLE 128, T1.0/0.95/20,
   presence 1.5, 32k). If that lands near 37.68 with few capped answers, or other benchmarks land near their card
   values, the math is fine and the A/B is skipped. Only if it still misses: `o122p8` = shipped image +
@@ -97,7 +103,7 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | 40.3 (T0.6, 81,920; 60/288 cut at the cap) | open | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); main-problem 15.4. Gap = unfinished answers (looping, see the numerics section); at the finished subproblems' pass rate (51%) the score would be ~51. Not on the card until the precision A/B settles it |
-| HLE (w/o tools) | 37.68 | 18.0 +/- 6.6 (n128, card preset; under review) | run | fixed random 128 of 2,500 (seed 1234, images included), the card's general preset (T1.0/0.95/20, presence 1.5), 32k: 23 correct; 34 answers (27%) cut at the cap (17 of them looping, none of the finished ones), 5 empty; 23/94 = 24.5% on finished answers, so the card is out of reach even if every capped answer had finished. Judged by Claude agents (card: Claude 4.6 Opus), official denominator. First run (T0.6 coding preset): 55% capped, ~16. Precision A/B (o122p8) running |
+| HLE (w/o tools) | 37.68 | 18.0 +/- 6.7 (n128, card preset; under review) | run | fixed random 128 of 2,500 (seed 1234, images included), the card's general preset (T1.0/0.95/20, presence 1.5), 32k: 23 correct; 34 answers (27%) cut at the cap (17 of them looping, none of the finished ones), 5 empty; 23/94 = 24.5% on finished answers, so the card is out of reach even if every capped answer had finished. Judged by Claude agents (card: Claude 4.6 Opus), official denominator. First run (T0.6 coding preset): 55% capped, ~16. Precision A/B: the 8-bit variant o122p8 scores 25.0 +/- 7.5 on the same 128 (see Numerics check) |
 | HLE (with tools) | 48.0 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
