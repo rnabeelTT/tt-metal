@@ -95,7 +95,7 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | SWE-bench Verified (non-hack) | 84.5 | | queued | OpenHands, no network, git squashed, don't-reward-hack notice |
 | SWE-bench Multilingual (non-hack) | 76.4 | | queued | OpenHands, as Verified |
 | WideSearch | 75.2 | | queued | 200 tasks, 50 turns, no context management (as the Qwen card); official scorer, Item-F1; Claude-judged cells |
-| BrowseComp | 78.5 | | queued | full 1,266; SearXNG (DuckDuckGo/Yahoo/Mojeek) + fetch, benchmark-leak blocklist, 100 turns, context folding at 240k; Claude-judged |
+| BrowseComp | 78.5 | 9.4 +/- 10.1 (n32; cap-bound, not for the card) | run | fixed random 32 (seed 1234), 16 agents at once, 1 h agent cap: 25 of 32 agents stopped by the cap after ~13 turns (mean 33k completion tokens, ~225 s per turn: about half decode, half search/fetch/prefill), 3 correct, 8 with no answer; the card's protocol allows 100 turns, ~6 h per agent here. Claude-judged |
 | MCP-Atlas | 74.6 | | n/s | skipped (user, 2026-10-29): 16 of 36 MCP servers need SaaS accounts |
 | Toolathlon-Verified | 70.8 | | open | official service offline since 2026-10-28 (GitHub issue #99); client ready (outbound only, no public endpoint) |
 | ClawEval | 79.4 | | queued | claw-eval@5680b8b (300 tasks), T0.6/0.95/20, 256K; grader judge by Claude; multi_turn user via the Claude relay; web via SearXNG |
