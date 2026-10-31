@@ -51,6 +51,8 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   0.377 for the same token). Same weights, so this is precision error in one or both paths. The shipped policy is
   aggressive: routed experts, attention, GDN projections and LM head bfp4 (LoFi), bfp8 decode CCL; the bring-up
   teacher forcing (top-1 0.97 vs HF, 100-token references) cannot see failures thousands of tokens into an answer.
+- Shipped model at the card preset (2026-10-31): HLE 128 = 18.0 +/- 6.6 vs 37.68 (27% capped, half of those looping),
+  so the A/B runs (o122p8 HLE 128 at the same preset, then HLE 64 at T0.6); the other O122 runs wait for it.
 - A/B held (user, 2026-10-30): first the shipped model at the card's general preset (HLE 128, T1.0/0.95/20,
   presence 1.5, 32k). If that lands near 37.68 with few capped answers, or other benchmarks land near their card
   values, the math is fine and the A/B is skipped. Only if it still misses: `o122p8` = shipped image +
@@ -89,7 +91,7 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
 | SciCode | 53.8 | 40.3 (T0.6, 81,920; 60/288 cut at the cap) | open | official harness (inspect), test split, with background, subproblem pass@1 (AA protocol); main-problem 15.4. Gap = unfinished answers (looping, see the numerics section); at the finished subproblems' pass rate (51%) the score would be ~51. Not on the card until the precision A/B settles it |
-| HLE (w/o tools) | 37.68 | ~16 (T0.6, 32k; not for the card) | run | first run (T0.6 coding preset, 32k): 55% of answers cut at 32,768 tokens and scored wrong; accuracy on finished answers 36.0% (215/598 judged) is NOT the HLE metric (an earlier note compared it to the card). Now: fixed random 128 of 2,500 (seed 1234, images included), the card's general preset, 32k, shipped vs the o122p8 precision variant; judged by Claude agents (card: Claude 4.6 Opus); score with `tools/hle_batch.py tally` (official denominator) |
+| HLE (w/o tools) | 37.68 | 18.0 +/- 6.6 (n128, card preset; under review) | run | fixed random 128 of 2,500 (seed 1234, images included), the card's general preset (T1.0/0.95/20, presence 1.5), 32k: 23 correct; 34 answers (27%) cut at the cap (17 of them looping, none of the finished ones), 5 empty; 23/94 = 24.5% on finished answers, so the card is out of reach even if every capped answer had finished. Judged by Claude agents (card: Claude 4.6 Opus), official denominator. First run (T0.6 coding preset): 55% capped, ~16. Precision A/B (o122p8) running |
 | HLE (with tools) | 48.0 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; the same fixed 1,000 of 2,500 (incl. images); CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | TerminalBench 2.1 | 81.2 | | queued | Harbor + Claude Code (the card's footnote); 8 CPU per task, 1 run |
 | CyberGym | 80.0 | | n/s | skipped (user): 1,507 tasks with ~10 TB of images; level and harness unpublished |
