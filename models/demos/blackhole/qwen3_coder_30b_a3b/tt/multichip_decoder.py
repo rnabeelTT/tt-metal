@@ -143,6 +143,14 @@ from .optimized_decoder import (
     moe_prefill_optimized,
 )
 from .precision import DEFAULT_PRECISION, PrecisionConfig  # noqa: F401  (re-exported)
+
+# Fused MoE decode (models/demos/blackhole/qwen36/tt/moe_decode, the Ornith-1.5 fusion) in expert-parallel mode: the
+# router's global top-8, each die streaming its window's experts in place ([gate | up] packed, bfp4) and summing them,
+# in 3 ops instead of the replicated router chain + two dynamic sparse matmuls + SwiGLU / weighting / sum, for decode
+# widths up to QWEN3_MOE_FUSED_ROWS_MAX (multi-row: the experts of all rows as one union per die).
+MOE_FUSED_DECODE = os.environ.get("QWEN3_MOE_FUSED_DECODE", "0") == "1"
+MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN3_MOE_FUSED_ROWS_MAX", "32") or 0)
+_FUSED_ARGS: dict = {}  # per mesh: the namespace the fused ops / buffers are shared through (one set per model)
 from .weight_mapping import hf_to_meta_channels, permute_head_vector_to_meta, permute_wqkv_to_meta
 
 # The target mesh. This module deliberately supports exactly one shape: the
@@ -743,6 +751,39 @@ class MultichipWeights:
     # not copies, so this costs one extra DRAM-sharded qkv (11.14 MB/4 per die)
     # and two 128-element vectors, and prefill cannot reach it.
     experts_meta: OptimizedWeights | None = None
+    # The fused expert-parallel MoE decode (MOE_FUSED_DECODE): a moe_decode.FusedMoEDecode over ``experts``.
+    fused_moe: object | None = None
+
+
+def _fused_moe(mesh_device, router: torch.Tensor, experts: OptimizedWeights, config: MeshDecoderConfig):
+    """The layer's FusedMoEDecode (expert parallel: die d holds experts [32 d, 32 d + 32)), or None when the shapes or
+    dtypes are outside the fused kernels."""
+    import types
+
+    from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
+
+    moe = config.global_config.moe
+    n = mesh_device.get_num_devices()
+    E, H, I = moe.num_experts, moe.hidden_size, moe.moe_intermediate_size
+    gu_dt, dn_dt = experts.gate_up_proj.dtype, experts.down_proj.dtype
+    if not (
+        moe_fused.supported(E, H, I, gu_dt, banks=len(moe_fused.bank_workers(mesh_device)))
+        and dn_dt in (ttnn.bfloat4_b, ttnn.bfloat8_b)
+        and E % n == 0
+    ):
+        return None
+    ns = _FUSED_ARGS.setdefault(id(mesh_device), types.SimpleNamespace())
+    ckc = ttnn.init_device_compute_kernel_config(
+        mesh_device.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, packer_l1_acc=False
+    )
+    fused = moe_fused.FusedMoEDecode(
+        mesh_device, ns, hidden=H, inter_local=I, num_experts=E, k=moe.num_experts_per_tok, tp=n, dtype=gu_dt,
+        down_dtype=dn_dt, router_weight=router, shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None,
+        shared_down_proj=None, cache_name=lambda name: None, router_ckc=ckc, ep_experts=E // n, gate_first=True,
+    )
+    for m in range(2, min(MOE_FUSED_ROWS_MAX, 32) + 1):
+        fused.rows_ops(m)  # host uploads before any trace capture
+    return fused
 
 
 # SDPA-decode's tree reduction is capped at 6 rounds, i.e. 64 cores per KV head
@@ -1322,6 +1363,7 @@ def upload_multichip_weights(
         experts_meta=experts_meta,
         input_layernorm_rm=norm_row_major(torch_weights["input_layernorm"]),
         post_attention_layernorm_rm=norm_row_major(torch_weights["post_attention_layernorm"]),
+        fused_moe=_fused_moe(mesh_device, router, experts, config) if MOE_FUSED_DECODE else None,
     )
 
 
@@ -1827,7 +1869,22 @@ def decoder_layer_decode_multichip(
     ttnn.deallocate(attn_out)
 
     normed_sharded = decode_residual_norm(hidden, weights.post_attention_layernorm_rm, eps, precision)
-    if moe_sorted.use_sorted_decode(int(normed_sharded.shape[-2])):
+    rows = int(normed_sharded.shape[-2])
+    if weights.fused_moe is not None and rows <= MOE_FUSED_ROWS_MAX:
+        # Fused expert-parallel MoE: route + gate|up + down per die; the partial lands in a model-wide buffer the
+        # all-reduce reads (inactive rows' experts are streamed too and their rows discarded).
+        normed = ttnn.sharded_to_interleaved(normed_sharded, ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(normed_sharded)
+        ex = weights.experts
+        fm = weights.fused_moe
+        moe_partial = fm(normed, ex.gate_up_proj, ex.down_proj) if rows == 1 else fm.rows(normed, ex.gate_up_proj, ex.down_proj)
+        ttnn.deallocate(normed)
+        moe_out = all_reduce_decode(moe_partial, ctx, precision)
+        out = ttnn.add(hidden, moe_out)
+        ttnn.deallocate(hidden)
+        ttnn.deallocate(moe_out)
+        return out
+    if moe_sorted.use_sorted_decode(rows):
         # Wide decode batches (2026-10-07): the expert-sorted path of tt/moe_sorted.py reads each local expert's
         # weights once per step instead of once per (row, expert) pair, and keeps the [B x 32 experts] intermediates out
         # of the L1 -> DRAM cliff above 18 rows. Inactive slots are dispatched too (their rows are discarded).

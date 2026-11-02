@@ -1,0 +1,427 @@
+# The current bundle (the fused-decode "blackhole-fast" build; user, 2026-10-27: the model's main repo, the original is
+# raahemnabeel/qwen3-coder-30b-a3b-v1): the v1 manifest + the fused expert-parallel MoE decode.
+# tt-model container package (v5.1) — qwen3-coder-30b-a3b on QB2 (2x P300, 4 chips).
+#
+# This one file is the whole authoring interface:
+#   tt-model package --container models/demos/blackhole/qwen3_coder_30b_a3b/tt-model.yaml
+#
+# It lives next to the model on purpose: the serving recipe then travels through review
+# in the same PR as the code it serves.
+schema: "5.1"
+
+repo: raahemnabeel/qwen3-coder-30b-a3b
+name: qwen3-coder-30b-a3b
+weights: {repo: Qwen/Qwen3-Coder-30B-A3B-Instruct, revision: b2cff646eb4bb1d68355c01b18ae02e7cf42d120}   # a POINTER (57 GB), never baked into the image
+kind: vllm-plugin                            # stock vLLM + the standalone tenstorrent/vllm-tt-plugin
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal-c30   # worktree, branch c30_fusion
+
+  # EXACTLY what ships — an allowlist, never a denylist. The image's tt-metal tree holds
+  # NO models/ except these, so an under-specified list fails the image's own build-time
+  # import check on the author's machine, not on a consumer's first boot.
+  code:
+    # tt/ imports models.common.modules.sampling.sampling_1d,
+    # models.common.modules.tt_ccl and models.common.readiness_check.contract
+    - models/common
+    # the whole model, 1.6 MB: tt/, vllm_bundle/, config/, tests/, README.md
+    - models/demos/blackhole/qwen3_coder_30b_a3b
+    # the fused MoE decode (QWEN3_MOE_FUSED_DECODE) and the one helper it imports
+    - models/demos/blackhole/qwen36/__init__.py
+    - models/demos/blackhole/qwen36/tt/__init__.py
+    - models/demos/blackhole/qwen36/tt/tp_common.py
+    - models/demos/blackhole/qwen36/tt/moe_decode
+
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  # The plugin monkeypatches vLLM internals, so this pin is load-bearing, not cosmetic.
+  # This box serves with 0.24.0 (reported 0.24.0+empty — the local tag comes from the
+  # VLLM_TARGET_DEVICE=empty sdist build, which is what the image does too).
+  vllm: {version: "0.26.0"}
+
+  # THE PLUGIN, bundled from your own checkout — the same hermetic treatment
+  # source.tt_metal gets. Whatever is in this directory ships, uncommitted work
+  # included; nothing is fetched at build time and nothing is resolved at serve time.
+  # `package` records its HEAD sha and flags the tree dirty if it is.
+  #
+  # Alternatives, when a local checkout is not the right input:
+  #   plugin: {repo: https://github.com/tenstorrent/vllm-tt-plugin, ref: <pushed sha>}
+  #   plugin: {version: "0.1.0"}
+  plugin:
+    path: /home/raahem/vllm-tt-plugin-pub   # 92403f3, the build the published bundle shipped
+
+  # The directory the plugin SCANS — it walks the CHILDREN of this dir for
+  # vllm_metadata.json. Registration chain:
+  #   register_tt_models() -> _register_models_from_extra_dir() -> this dir ->
+  #   vllm_bundle/qwen3_coder_30b_a3b_instruct/vllm_metadata.json ->
+  #   Qwen3MoeForCausalLM registered as TTQwen3MoeForCausalLM ->
+  #   "tt_qwen3_coder_30b_a3b_instruct:Qwen3CoderForCausalLM" -> the shim ->
+  #   models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm:Qwen3CoderForCausalLM
+  # The shim's parents[6] still resolves in-container: the tree lands at
+  # /opt/tt-metal/models/demos/blackhole/<model>/vllm_bundle/<bundle>/, so six levels up
+  # is /opt/tt-metal, which is also PYTHONPATH. Setting this also makes the build pass
+  # TT_VLLM_BUILTIN_MODELS=0, so registration comes solely from here.
+  extra_models_dir: models/demos/blackhole/qwen3_coder_30b_a3b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+  # Uncomment once requirements.lock is committed next to this file, after the first
+  # successful build — later builds then resolve nothing at all.
+  # lock: requirements.lock
+
+serve:
+  # The port the image binds under a bare `docker run`. `tt-model serve` does NOT use this
+  # as its seed — it opens 20000 and walks past busy ports — so leave it at vLLM's default.
+  port: 8000
+
+  # 256000, NOT the 262144 HF advertises. config/context_contract.json records
+  # current_supported_context: 256000 with capability_reduction: true, and
+  # tt/generator_vllm.py reads that file as the source of truth and REFUSES to start
+  # above it. (Reason on record: an unresolved prefill cliff in the last ~3,100 tokens,
+  # and 17.5 min TTFT at that length even on the path that works.)
+  max_model_len: 256000
+
+  # 64, from the validated tt-inference-server P300X2 spec, which is authoritative here.
+  # config/context_contract.json's prose says "paging is unchanged (block_size 32)"; that
+  # text is older than the serving config and the spec supersedes it.
+  block_size: 64
+
+  # One configuration, measured. max_num_seqs only bounds what vLLM batches IN FLIGHT, and
+  # with the stage-11 decode-width ladder now the model default, batch-1 decode is already
+  # efficient at this cap — so a lower cap buys nothing. Measured on this box, 128 output
+  # tokens, tt-model 0.1.0:
+  #
+  # (All figures below are p300x2. The p150x4 profile is validated by the author but its
+  # throughput was not separately measured, so do not read these numbers as applying to it.)
+  #
+  #                          seqs=1        seqs=32
+  #   single-stream TTFT     0.232 s       0.219 s
+  #   single-stream decode   50.6 tok/s    49.2 tok/s
+  #   8 concurrent, total    46.7 tok/s    71.4 tok/s
+  #   8 concurrent, /user     5.8 tok/s     8.9 tok/s
+  #   slowest of the 8       21.9 s        14.4 s
+  #
+  # seqs=32 is identical for one user and strictly better for several, so there is no
+  # latency-vs-capacity trade to expose as separate profiles. Untested above 8 concurrent,
+  # and TTFT-under-load is unmeasured; if either turns out to matter, `serve_profiles:`
+  # is how you would split this again.
+  #
+  # Those decode figures are the ARGMAX path, which the --override-generation-config below
+  # now makes the default request — so they describe what an unparameterised client gets.
+  # A client that asks for sampling gets 38.6 tok/s instead; that gap is the strategy, not
+  # the configuration. Re-measured on this box after the warmup change: unparameterised
+  # 49.147 tok/s at 0.304 s TTFT first request, 8 concurrent 77.55 tok/s aggregate
+  # (9.69 tok/s/u), max TTFT 0.90 s.
+  # hardware/mesh_device are the ONLY per-profile fields — see serve_profiles below.
+  max_num_seqs: 32
+
+  # Structured, not a JSON string: tt-model renders it into --additional-config.
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 50331648
+      fabric_config: FABRIC_1D_RING
+
+  # Tool calling. tt-model emits --enable-auto-tool-choice alongside the parser, because
+  # vLLM hard-errors on the parser flag without it.
+  capabilities:
+    tool_parser: qwen3_coder
+
+  # Runtime environment, from the validated tt-inference-server P300X2 spec.
+  # MESH_DEVICE is NOT listed: it is derived from each profile's mesh_device.
+  # VLLM_TARGET_DEVICE is NOT listed either: it is a BUILD-time variable for the vLLM
+  # fork, and this image builds stock vLLM with VLLM_TARGET_DEVICE=empty plus the plugin.
+  env:
+    ARCH_NAME: blackhole
+    VLLM_CONFIGURE_LOGGING: "1"
+    VLLM_RPC_TIMEOUT: "900000"
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    TORCHDYNAMO_DISABLE: "1"
+    TT_METAL_OPERATION_TIMEOUT_SECONDS: "120.0"
+    # The variable-width decode ladder (stage 11, doc/batch_scaling). This is the model's
+    # default now, so setting it changes nothing today — it is kept to pin the behaviour
+    # explicitly, so a future change to that default cannot silently move this model.
+    QWEN3_DECODE_WIDTHS: "1,2,4,8,16,32"
+    # blackhole-fast: the fused expert-parallel MoE decode (models/demos/blackhole/qwen36/tt/moe_decode)
+    QWEN3_MOE_FUSED_DECODE: "1"
+    # Warm a decode graph for every ladder width in BOTH sampling strategies at startup,
+    # rather than compiling one on whichever request first needs it. Costs 9.5 s of boot
+    # (decode warmup 2.41 s -> 11.89 s) and 24.8 MB/die; buys 1.64 s off the first
+    # request's TTFT (1.9416 s -> 0.2989 s) and removes the same stall from the first
+    # request at any other width or strategy. "both" is the model default; it is pinned
+    # here for the same reason QWEN3_DECODE_WIDTHS is.
+    QWEN3_WARMUP_SAMPLING: "both"
+    # Prefill bucketing (doc/prefill_buckets). A prefill program is compiled per exact
+    # sequence length, so without this every new prompt length paid a fresh compile —
+    # measured on 4 dies, cold cache: 4–11 s on top of the 0.89 ms/token floor, and
+    # recurring, not a startup cost (2443 tok cost 22.87 s, then 2444 tok cost 4.29 s
+    # again). Bucketing rounds each prefill to a ladder rung so the shape space is
+    # finite and warmable. "proportional" bounds the padding waste at 1/8th of the
+    # prefill at every length; measured steady-state tax is 2–3%, against 26% for a
+    # half-power-of-two ladder and ~111 s worst case for plain powers of two.
+    QWEN3_PREFILL_BUCKETS: "proportional"
+    # Warm the ladder once per HOST, not once per boot. The rungs and the cached-suffix
+    # shapes cost 217.9 s to compile on a cold cache and ~68 k tokens of prefill to run,
+    # so "auto" runs them only when its marker is absent from TT_METAL_CACHE — which
+    # tt-model mounts per model and keeps across container removal on purpose. Clearing
+    # that cache clears the marker, and the next boot re-warms. "full" ignores the
+    # marker; "off" skips it and leaves every shape to compile on a real request.
+    QWEN3_PREFILL_WARMUP: "auto"
+    # Warm every rung up to and including the one that covers 8192 tokens (23 rungs).
+    # Longer prompts still compile lazily, once each, and persist in the same cache.
+    # Raising this lengthens only the first boot on a fresh host; "0" warms all 52.
+    QWEN3_PREFILL_WARMUP_MAX: "8192"
+    # The cached-suffix (prefix-cache hit) path is a separate program set, keyed on the
+    # chunked-SDPA chunk size AND the suffix length. Reachable chunk sizes are just
+    # {64, 128, 256} at block_size 64, so this caps the second axis: suffix rungs up to
+    # 1024, which is where a hit's new tail actually lands.
+    QWEN3_PREFILL_WARMUP_SUFFIX_MAX: "1024"
+
+  # Anything without a named field goes here, verbatim.
+  args:
+    - [--max-num-batched-tokens, "256000"]
+    - [--max-log-len, "32"]
+    - [--generation-config, vllm]
+    # A GREEDY DEFAULT, measured. `--generation-config vllm` alone means an
+    # unparameterised request arrives at vLLM's own temperature=1.0 / top_p=1.0, and the
+    # model routes anything with k>1 or p>0 to split sampling: 25.88 ms/token (38.6 t/s/u)
+    # against 20.35 ms (49.1) for argmax, on 4 dies, 24-token completions. For a coding
+    # model that is the wrong default three times over — 21 % slower, non-deterministic
+    # across identical prompts, and full-distribution sampling at temperature 1.0 is the
+    # worst of the three available regimes for code. Overriding temperature to 0 makes the
+    # default request greedy (verified: 49.147 t/s/u unparameterised) while leaving
+    # repetition_penalty unset, so the decode graph stays on penalty mode 0. A client that
+    # wants sampling still sends temperature itself and gets the split path, warm — the
+    # model warms both strategies at startup (QWEN3_WARMUP_SAMPLING below).
+    #
+    # QUOTING IS LOAD-BEARING. launchers.py joins these with spaces into ONE
+    # Written BARE. The extra single quotes this used to carry were a workaround for the
+    # vllm-fork path, which joins args into one --additional-server-args string that the
+    # runner shlex-splits: bare JSON lost its double quotes there and reached vLLM as
+    # {temperature: 0}. This model is vllm-plugin, which passes argv loose -- compose_run
+    # hands docker the list and the entrypoint ends in `exec "$@"`, so nothing consumes a
+    # shell quote and the literal ' characters reached json.loads instead. tt-model now
+    # shlex-quotes the fork path itself, so bare is correct for both kinds.
+    - [--override-generation-config, '{"temperature": 0}']
+    - [--seed, "9472"]
+
+
+# TWO BOARDS, ONE CONFIGURATION. p300x2 (2x P300) and p150x4 (4x P150) are both four
+# Blackhole chips on a (1, 4) mesh — tt-model derives 4 from either label and
+# parse_mesh_device resolves both SKUs to the same (1, 4) — so nothing above this line
+# differs between them: same context bound, same block size, same slot count, same
+# trace region, same fabric, same env, same args. Both were tested on hardware.
+#
+# They are separate profiles rather than one because `hardware` is what tt-model uses to
+# state a package's device requirement, and a p150x4 box should not have to read "p300x2"
+# and infer that the chip counts happen to match.
+#
+# p300x2 stays the default: it is the box every number in this file was measured on.
+# `tt-model serve --profile p150x4` selects the other; `tt-model profiles` lists both.
+# Default = the best balance of hardware and performance: two chips keep the full 256000-token context and the 4-chip
+# accuracy at ~80 % of its throughput (peak 460 vs 585 tok/s, TTFT 1K 0.34 vs 0.33 s) on half the hardware; one chip caps
+# the context at 98304 tokens and decodes a single user 1.8x slower.
+default_profile: p300
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, experts 32 per die), 32 sequences, 256000 context.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2.
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: One p300 board (2 dies, experts 64 per die, Linear collectives), 32 sequences, 256000 context.
+    hardware: p300
+    mesh_device: P300
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300. Not run on hardware (the identical (1,2) mesh).
+    hardware: p150x2
+    mesh_device: P150x2
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: One p150 (1 die, all 128 experts), 32 sequences sharing a 98304-token context (bf16 KV is 96 KiB per token on one die), no fabric.
+    hardware: p150
+    mesh_device: P150
+    max_model_len: 98304
+    additional_config: {tt: {fabric_config: DISABLED}}
+    args: [[--max-num-batched-tokens, "98304"], [--max-log-len, "32"], [--generation-config, vllm], [--override-generation-config, '{"temperature": 0}'], [--seed, "9472"]]
+
+verify:
+  # config/ is RUNTIME DATA, not documentation. tt/generator_vllm.py reads both files;
+  # _supported_context() swallows OSError and silently falls back to in-code defaults, so
+  # a missing file would serve at the wrong precision/context with no error at all.
+  - "from pathlib import Path; p = Path('/opt/tt-metal/models/demos/blackhole/qwen3_coder_30b_a3b'); assert (p/'config'/'selected_precision_config.json').is_file(), 'precision config missing — the model would silently use in-code defaults'; assert (p/'config'/'context_contract.json').is_file(), 'context contract missing — _supported_context() would silently fall back'"
+  # the real adapter. (The bundle shim is NOT asserted here: it is importable only once
+  # something has put its folder on sys.path, which is what the plugin does. tt-model
+  # verifies that resolution generically for every model — see launchers.py's
+  # RESOLVE_EXTRA_MODELS — so a per-model assertion would only duplicate it, badly.)
+  - "from models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm import Qwen3CoderForCausalLM; assert Qwen3CoderForCausalLM"
+
+card:
+  description: >
+    Qwen3-Coder-30B-A3B-Instruct (30B total / 3B active MoE: 128 experts, top-8, 48 layers) for agentic coding with tool calling on Blackhole through vLLM, with a fused MoE decode: the v1 bundle (raahemnabeel/qwen3-coder-30b-a3b-v1) plus the Ornith-1.5-35B-A3B fused MoE decode kernels in expert-parallel form for 1-32 concurrent users. Same weights, profiles and serving recipe; prefill unchanged.
+  quickstart: |
+    ### What changed since v1
+    This is the v1 bundle ([raahemnabeel/qwen3-coder-30b-a3b-v1](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b-v1)) with
+    its MoE decode replaced by the fused kernels of the Ornith-1.5-35B-A3B fusion
+    ([raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b)),
+    in expert-parallel form. Same checkpoint, same vLLM plugin build, same profiles and serving recipe; prefill (the
+    expert-sorted MoE) is unchanged. Per decode layer and die, three ops replace the replicated router chain, the two
+    dynamic sparse matmuls, SwiGLU, the routing weights and the expert sum (and the expert-sorted path at 4+ rows):
+
+    1. **Route.** The router projection (FP32 accumulation) and the global top-8 + softmax run in one op; each die keeps
+       the selected experts that fall in its own window (die d holds experts 32 d .. 32 d + 31 on four dies, 64 per die on
+       two, all 128 on one).
+    2. **Gate|up + SwiGLU** and **down + weighted sum** stream each selected local expert's weights in place from the
+       bundle's existing bfp4 DRAM layout (no copy, no re-rounding), for every decode width from 1 to 32 rows: several
+       users' experts form one union per die, so each weight column is read once for all rows. A die whose window holds no
+       selected expert writes a zero partial; the existing all-reduce sums the dies.
+
+    Numerics: the same bfp4 expert weights and FP32 router logits as v1. The fused route op accumulates
+    the logits in a different order and its expert matmuls accumulate in FP32, so a near-tied 8th expert can be picked
+    differently and the last bits of an expert's output can differ. Output quality is checked below.
+
+    ### Use with your client
+    Point any OpenAI client at the address `tt-model serve` prints (port 20000 unless it was busy), with model id
+    `Qwen/Qwen3-Coder-30B-A3B-Instruct`. Tool calls use the `qwen3_coder` parser. The server's default generation config
+    is greedy (temperature 0); per-request sampling parameters apply.
+
+    ### Profiles
+    `tt-model serve raahemnabeel/qwen3-coder-30b-a3b --profile <name>`:
+    - `p300` (default) / `p150x2` - two dies (64 experts per die), 256000-token context.
+    - `p300x2` / `p150x4` - four dies (32 experts per die), 256000-token context: the fastest profile.
+    - `p150` - one die (all 128 experts), 98304-token context (the bf16 KV cache is 96 KiB per token on one die).
+
+    All profiles: 32 concurrent sequences, prefix caching, bfp4 routed experts.
+  performance: |
+    ### Accuracy
+    Both bundles evaluated side by side on the same box, p300x2, through the served chat API with lm-evaluation-harness
+    0.4.9 at temperature 0 (full sets, 8 requests in flight, seed 42):
+
+    | Eval | v1 | current |
+    | --- | ---: | ---: |
+    | HumanEval pass@1 (164) | 0.939 | 0.933 |
+    | MBPP pass@1 (500) | 0.802 | 0.786 |
+    | GSM8K exact match, strict (1319) | 0.919 | 0.914 |
+    | IFEval prompt-level strict (541) | 0.795 | 0.813 |
+    | IFEval prompt-level loose (541) | 0.839 | 0.861 |
+
+    Every difference is within one standard error of the difference (HumanEval 1 problem, MBPP 8, GSM8K 7; IFEval goes the other way). The harness's stock chat variants do not work through a chat API (`humaneval_instruct` and `mbpp_instruct`
+    pre-fill the assistant turn, which the API does not continue), so HumanEval uses a chat prompt that asks for the whole
+    function in one code block, and MBPP answers are scored from their first code block; `gsm8k_cot_llama` is the stock
+    8-shot task with the dataset's current id. The task files are in `fusion/tools/lm_tasks` on the source branch. Greedy
+    outputs on every profile were checked against the v1 bundle's: they stay coherent and part after 17 to 1074
+    characters (the fused MoE decode rounds differently).
+
+    ### Performance
+    Measured 2026-10-24 on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them, p150 on one), both bundles
+    served exactly as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of
+    exactly the input length, output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop;
+    TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. A real-text
+    single-user row (12 chat prompts, 384 output tokens, temperature 0) is added. Each cell is `v1 -> current`.
+
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 4 | 145 | 881 | 95.5 | 1.47 |
+    | p300x2 | 1024 | 256 | 32 | 128 | 3,518 | 291 | 42.0 | 9.60 |
+    | p300 | 128 | 128 | 1 | 4 | 141 | 908 | 86.0 | 1.62 |
+    | p300 | 1024 | 256 | 32 | 128 | 4,301 | 238 | 30.4 | 12.76 |
+    | p150 | 128 | 128 | 1 | 4 | 161 | 794 | 77.4 | 1.80 |
+
+    #### p300x2
+
+    Latency, batch 1 (single user): v1 -> current
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 202 -> 145 | 634 -> 881 | 20.2 -> 10.5 | 49.5 -> **95.5** (+93 %) | 2.77 -> 1.47 |
+    | 1,024 | 256 | 431 -> 376 | 2,377 -> 2,722 | 20.5 -> 10.8 | 48.7 -> **92.9** (+91 %) | 5.67 -> 3.12 |
+    | 4,096 | 256 | 904 -> 848 | 4,530 -> 4,830 | 21.2 -> 11.4 | 47.2 -> **87.8** (+86 %) | 6.31 -> 3.75 |
+    | 16,384 | 256 | 1,810 -> 1,745 | 9,053 -> 9,387 | 22.1 -> 12.3 | 45.3 -> **81.5** (+80 %) | 7.44 -> 4.87 |
+    | 32,768 | 256 | 2,481 -> 2,418 | 13,205 -> 13,551 | 23.2 -> 13.4 | 43.1 -> **74.9** (+74 %) | 8.40 -> 5.82 |
+    | 65,536 | 256 | 5,338 -> 5,261 | 12,277 -> 12,457 | 25.4 -> 15.6 | 39.4 -> **64.2** (+63 %) | 11.81 -> 9.23 |
+    | 130,816 | 256 | 12,699 -> 12,637 | 10,301 -> 10,352 | 29.5 -> 19.6 | 33.9 -> **50.9** (+50 %) | 20.21 -> 17.64 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 49.5 -> **95.5 tok/s** (+93 %).
+
+    Concurrency, 128 input / 128 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 201 -> 165 | 27.7 -> 12.4 | 36.1 -> 80.4 | 68.7 -> **146.9** (+114 %) | 3.73 -> 1.74 |
+    | 4 | 16 | 398 -> 329 | 33.0 -> 12.7 | 30.3 -> 78.6 | 107.1 -> **249.1** (+133 %) | 4.59 -> 1.96 |
+    | 8 | 32 | 614 -> 557 | 33.6 -> 14.0 | 29.8 -> 71.3 | 210.0 -> **444.5** (+112 %) | 4.88 -> 2.31 |
+    | 16 | 64 | 1,055 -> 979 | 35.0 -> 16.2 | 28.6 -> 61.7 | 359.1 -> **646.1** (+80 %) | 5.53 -> 3.07 |
+    | 32 | 128 | 1,919 -> 1,853 | 36.8 -> 24.0 | 27.2 -> 41.7 | 598.2 -> **812.7** (+36 %) | 6.62 -> 4.91 |
+
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 338 -> 336 | 27.8 -> 12.4 | 36.0 -> 80.5 | 68.6 -> **145.8** (+112 %) | 7.50 -> 3.54 |
+    | 4 | 16 | 532 -> 500 | 33.4 -> 13.0 | 29.9 -> 77.2 | 112.3 -> **266.3** (+137 %) | 9.13 -> 3.86 |
+    | 8 | 32 | 962 -> 931 | 34.2 -> 14.3 | 29.2 -> 69.9 | 210.0 -> **444.8** (+112 %) | 9.76 -> 4.62 |
+    | 16 | 64 | 1,834 -> 1,793 | 35.7 -> 16.7 | 28.0 -> 59.7 | 372.0 -> **674.4** (+81 %) | 11.00 -> 6.09 |
+    | 32 | 128 | 3,546 -> 3,518 | 37.8 -> 23.8 | 26.5 -> 42.0 | 616.7 -> **853.4** (+38 %) | 13.25 -> 9.60 |
+
+    #### p300
+
+    Latency, batch 1 (single user): v1 -> current
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 188 -> 141 | 679 -> 908 | 26.3 -> 11.6 | 38.0 -> **86.0** (+126 %) | 3.53 -> 1.62 |
+    | 1,024 | 256 | 432 -> 381 | 2,372 -> 2,690 | 26.7 -> 12.0 | 37.4 -> **83.2** (+122 %) | 7.24 -> 3.45 |
+    | 4,096 | 256 | 915 -> 871 | 4,475 -> 4,704 | 27.7 -> 13.0 | 36.1 -> **76.7** (+113 %) | 7.99 -> 4.19 |
+    | 16,384 | 256 | 2,115 -> 2,059 | 7,745 -> 7,956 | 29.2 -> 14.6 | 34.2 -> **68.6** (+101 %) | 9.57 -> 5.78 |
+    | 32,768 | 256 | 3,125 -> 3,075 | 10,485 -> 10,656 | 31.3 -> 16.6 | 32.0 -> **60.1** (+88 %) | 11.10 -> 7.32 |
+    | 65,536 | 256 | 7,800 -> 7,748 | 8,402 -> 8,458 | 35.2 -> 20.5 | 28.4 -> **48.7** (+71 %) | 16.77 -> 12.98 |
+    | 130,816 | 256 | 20,673 -> 20,648 | 6,328 -> 6,336 | 42.7 -> 28.1 | 23.4 -> **35.6** (+52 %) | 31.56 -> 27.80 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 38.0 -> **86.3 tok/s** (+127 %).
+
+    Concurrency, 128 input / 128 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 212 -> 185 | 39.0 -> 14.0 | 25.6 -> 71.6 | 49.6 -> **130.5** (+163 %) | 5.16 -> 1.96 |
+    | 4 | 16 | 409 -> 351 | 41.4 -> 15.5 | 24.2 -> 64.5 | 88.7 -> **219.9** (+148 %) | 5.67 -> 2.33 |
+    | 8 | 32 | 696 -> 634 | 43.6 -> 17.4 | 22.9 -> 57.4 | 163.9 -> **356.6** (+117 %) | 6.22 -> 2.82 |
+    | 16 | 64 | 1,266 -> 1,203 | 47.5 -> 21.6 | 21.0 -> 46.3 | 276.5 -> **517.1** (+87 %) | 7.38 -> 3.96 |
+    | 32 | 128 | 2,389 -> 2,332 | 51.1 -> 32.8 | 19.6 -> 30.5 | 455.6 -> **626.7** (+38 %) | 8.88 -> 6.57 |
+
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 415 -> 410 | 39.2 -> 14.4 | 25.5 -> 69.6 | 49.2 -> **126.8** (+158 %) | 10.46 -> 4.08 |
+    | 4 | 16 | 613 -> 572 | 41.5 -> 15.2 | 24.1 -> 65.9 | 91.2 -> **225.3** (+147 %) | 11.23 -> 4.62 |
+    | 8 | 32 | 1,150 -> 1,118 | 43.5 -> 17.8 | 23.0 -> 56.3 | 167.2 -> **363.6** (+117 %) | 12.27 -> 5.63 |
+    | 16 | 64 | 2,216 -> 2,182 | 47.3 -> 21.8 | 21.1 -> 45.9 | 287.2 -> **527.5** (+84 %) | 14.28 -> 7.76 |
+    | 32 | 128 | 4,342 -> 4,301 | 49.8 -> 32.9 | 20.1 -> 30.4 | 479.1 -> **645.3** (+35 %) | 17.15 -> 12.76 |
+
+    #### p150
+
+    Latency, batch 1 (single user): v1 -> current
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 193 -> 161 | 663 -> 794 | 36.6 -> 12.9 | 27.3 -> **77.4** (+183 %) | 4.84 -> 1.80 |
+    | 1,024 | 256 | 473 -> 440 | 2,166 -> 2,327 | 37.3 -> 13.5 | 26.8 -> **73.8** (+175 %) | 9.98 -> 3.89 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 27.2 -> **76.9 tok/s** (+183 %).
+  limitations: |
+    - p150x4 and p150x2 run the same meshes as p300x2 / p300 but were not run on p150 boards; the p150 profile ran on one
+      p300c die (single-user rows only).
+    - Every newly admitted request re-captures the decode traces (as in v1), which shows up as TTFT under
+      concurrent load.
+    - The evals ran on the p300x2 profile only. Agentic benchmarks (SWE-Bench Verified, LiveCodeBench) were not run.
+  related: >
+    The v1 bundle this builds on: [raahemnabeel/qwen3-coder-30b-a3b-v1](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b-v1). The fusion it ports: [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b); engineering log `models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md` on the `c30_fusion` branch of github.com/rnabeelTT/tt-metal.
