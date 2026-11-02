@@ -1,0 +1,12 @@
+#!/bin/bash
+# pc_serve.sh <name> [docker args...]: the published raahemnabeel/ornith-1.5-35b-a3b p300x2 launch (tt-model serve --print),
+# with this checkout's models/ and the prefix-state-cache plugin branch mounted over the image's. Extra docker args
+# (e.g. --env QWEN35_PREFIX_STATE_SLOTS=0) go before the image.
+NAME=$1; shift
+IMG=${IMG:-tt-model/ornith-1.5-35b-a3b:fe0482ed6aa2}
+C=$HOME/.cache/tt-model/ornith-1.5-35b-a3b
+docker rm -f $NAME >/dev/null 2>&1
+docker run -d --name $NAME --user 1004:1004 --device /dev/tenstorrent/0:/dev/tenstorrent/0 --device /dev/tenstorrent/1:/dev/tenstorrent/1 --device /dev/tenstorrent/2:/dev/tenstorrent/2 --device /dev/tenstorrent/3:/dev/tenstorrent/3 --ipc host --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G --volume $HOME/.cache/huggingface:/hf --env HF_HOME=/hf --volume $C/cache:/cache --env TT_METAL_CACHE=/cache --volume $C/weights:/weight-cache --env TT_DIT_CACHE_DIR=/weight-cache --volume $C/tensors:/tensor-cache --env TT_CACHE_PATH=/tensor-cache --publish 20000:20000 --env ARCH_NAME=blackhole --env HF_MODEL=ornith-ai/Ornith-1.5-35B-A3B --env MESH_DEVICE=P300x2 --env QWEN35_ATTN_DECODE_OPS=1 --env QWEN35_BATCHED_PREFILL=0 --env QWEN35_DECODE_REPLICATED=1 --env QWEN35_FABRIC_BOUNDARY=1 --env QWEN35_FB_CONSUMER=1 --env QWEN35_FB_MAX_ROWS=4 --env QWEN35_FB_ROUTER=1 --env QWEN35_GDN_DECODE_OPS=1 --env QWEN35_MOE_FUSED_DECODE=1 --env QWEN35_MOE_SPLIT_PAIR=1 --env QWEN35_MTP=0 --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_ROWS_TOPK=1 --env QWEN35_TRACE_REGION_MIB=768 --env QWEN35_VISION=1 --env QWEN35_VISION_MAX_IMAGES=4 --env QWEN35_VISION_MAX_PIXELS=4194304 --env VLLM_ENGINE_READY_TIMEOUT_S=3600 \
+  --volume $HOME/tt-metal-bringups/models:/opt/tt-metal/models:ro \
+  --volume $HOME/vllm-tt-plugin-pub/src/vllm_tt_plugin:/opt/tt-venv/lib/python3.12/site-packages/vllm_tt_plugin:ro \
+  "$@" $IMG vllm serve ornith-ai/Ornith-1.5-35B-A3B --revision 10fbf86fed7ecee4a061f8b499a618f46001cac1 --max-model-len 262144 --max-num-seqs 32 --block-size 64 --additional-config '{"tt": {"sample_on_device_mode": "all", "trace_region_size": 805306368, "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}' --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning_parser qwen3 --enable-auto-tool-choice --default-chat-template-kwargs '{"enable_thinking": true}' --limit-mm-per-prompt '{"image": 4, "video": 0}' ${VARGS:-} --port 20000

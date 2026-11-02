@@ -1,0 +1,108 @@
+# 122B HLE at 81,920 skipped for now (user, 2026-11-02): ~4 h per 64 (KV pool holds ~19 full answers); extension runs biased (presence penalty)
+# 81,920-token budget (user, 2026-11-02): 32k answers were our cap, not the cards'; hard sets halved to stay ~2 h
+#BIASED-EXTEND o122 extend hle BUDGET=81920 SRC_TAG=pp SUBSAMPLE=64 CONC=32 TAG=b81920_n64
+orn lmeval r1_gpqa_diamond SEED=42 SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=32 TAG=s42_b81920
+# Precision A/B (user 2026-10-30): shipped HLE 128 at the card preset = 17.97 vs card 37.68 -> o122p8 runs; o122 lines #WAIT-P8 until the A/B is judged
+# o122p8 KV pool capped at 655,360 tokens (QWEN35_MAX_TOKENS_ALL_USERS in variants/o122p8/env.list): the 8-bit weights take ~5.6 GiB/die more than the context contract assumes; first boot OOMed allocating KV
+# o122p8 also mounts variants/o122p8/tp_common.py (QWEN35_PREFILL_MAX_ROWS=1024): bfp8 GDN qkvz weights overflow L1 in the 2048-row prefill matmul (20 KB CB clash)
+# o122p8: QWEN35_FB_ROUTER=0 / MOE_FUSED_DECODE=0 (mixed bfp4 gate|up + bfp8 down is outside the fused decode kernel; unfused decode, no 5-bit weight rounding)
+# Runs are sized to 1-2 h each (user 2026-10-30): fixed random samples (seed 1234), 32,768-token answers
+# Rest of the Ornith-1.5-122B card (user 2026-10-29: finish Ornith's benchmarks, update the card, then the next model)
+#DROP-AGENT o122 text2 widesearch BLOCKLIST=bench SAMPLE_N=16 CONC=16 AGENT_MAX_WALL=3600 TAG=n16
+#LATER-AGENT o122 swebench verified CONC=12 NOHACK_PROMPT=1 INSTANCES=/home/raahem/evals/samples/swe_verified_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT o122 tbench 2.1 CONC=12 AGENT=claude-code TASKS=adaptive-rejection-sampler,bn-fit-modify,break-filter-js-from-html,build-cython-ext,build-pmars,cobol-modernization,code-from-image,compile-compcert,constraints-scheduling,distribution-search,extract-moves-from-video,fix-ocaml-gc,gcode-to-text,make-doom-for-mips,make-mips-interpreter,password-recovery,polyglot-c-py,portfolio-optimization,protein-assembly,pypi-server,rstan-to-pystan,sparql-university,video-processing,winning-avg-corewars AGENT_TIMEOUT=3600 TAG=cc_n24
+#LATER-AGENT o122 swebench multilingual CONC=12 NOHACK_PROMPT=1 INSTANCES=/home/raahem/evals/samples/swe_multilingual_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT o122 swebench pro CONC=12 NOHACK_PROMPT=1 INSTANCES=/home/raahem/evals/samples/swe_pro_v1_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+# image runs wait for the encoder-budget split fix (server crash 2026-10-30 21:04, see HANDOFF)
+#DROP-AGENT o122 text2 hle_tools BLOCKLIST=full SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#LATER-AGENT o122 claweval all CONC=16 TASKS=C04zh_image_processing,C08zh_personal_finance_3,C09zh_ai_video_creation,C16en_hr_workforce_planning,C18en_statistical_analysis_spss,C24zh_fire_safety_code,C34zh_product_design,C36zh_insurance_planning,M005_score_canon,M008_metro_map_1,M009_metro_map_2,M013_metro_route_1,M021_doc_reference_verification,M022_video_movie_recognition,M039_video_lvb_machine_dog,M056_video_badminton_net_error,M084_doc_figure_reproduction_pie,M090_video_movie_qa_wedding,M101_chinese_food_identification_zh,T039zh_onboarding_coordinator,T043zh_service_outage_research,T090_pinbench_config_change_plan,T102_xss_filter,T103_schema_migration,T112_expense_email_check,T114_meeting_preparation,T122_industry_briefing,T128_ticket_assignment,T142_sla_compliance_audit,T149zh_project_progress_report,T161zh_automation_failure_recovery,T163zh_quarterly_customer_review TAG=n32
+# Ornith-1.5-122B (user priority)
+# Ornith-1.5-35B: GPQA x5 (the card averages 5 runs), HLE
+# Qwen3.5-122B text
+q122 lmeval r1_gpqa_diamond SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=20
+q122 lmeval ifeval MAX_TOKENS=81920 CONC=32
+q122 lmeval livecodebench_v6 SAMPLE_N=88 TOTAL=175 MAX_TOKENS=81920 CONC=20
+q122 text2 ifbench MAX_TOKENS=81920 CONC=32
+q122 text2 hmmt_feb25 MAX_TOKENS=81920 CONC=20
+q122 text2 hmmt_nov25 MAX_TOKENS=81920 CONC=20
+q122 text2 longbench_v2 SAMPLE_N=64 MAX_TOKENS=81920 CONC=32
+q122 text2 ojbench SAMPLE_N=32 MAX_TOKENS=81920 CONC=20
+q122 text2 fullstackbench_en SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
+q122 text2 fullstackbench_zh SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
+q122 text2 bfcl_v4 BLOCKLIST=bench BFCL_PER_CAT=20 MAX_TOKENS=81920 CONC=32
+# Qwen3-Coder-Next
+cn aider diff
+cn aider whole
+# Qwen3.5-122B knowledge / multilingual (qwen_text harness; >3k-item sets use the frozen 1,000 sample)
+q122 qtext mmlu_pro SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext mmlu_redux SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext ceval SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext supergpqa SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext mmmlu SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext mmlu_prox SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext include SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext global_piqa SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+q122 qtext polymath SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
+q122 qtext wmt24pp SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
+# Qwen3.5-122B images (vision harness; Qwen3-VL report prompts; Qwen's script settings where published)
+q122 vision ai2d SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision babyvision SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision ccocr SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision charxiv_rq SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision countbench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision dynamath SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision embspatial SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision erqa SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision hallusionbench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision lingoqa SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mathvista SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision medxpertqa_mm SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mmbench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mmlongbench_doc SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mmmu_pro SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mmstar SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision ocrbench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision odinw13 SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision pmc_vqa SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision realworldqa SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision refcoco SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision refspatial SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision screenspot_pro SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision simplevqa SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision slake SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision tirbench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision vlmsareblind SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision vstar SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision zerobench SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision zerobench_sub SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mmmu TEMPERATURE=1.0 SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision mathvision TEMPERATURE=1.0 SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+q122 vision omnidocbench OMNIDOC_CDM=docker SAMPLE_N=300 MAX_TOKENS=81920 CONC=32
+# Long agentic tasks, sized to 1-2 h per run (user 2026-10-30): fixed random samples (seed 1234, ~/evals/samples),
+# 1 h agent cap per task, 1 attempt. Appended to evalq.txt after the quick evals.
+#LATER-AGENT cn swebench verified CONC=12 INSTANCES=/home/raahem/evals/samples/swe_verified_n24.txt AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT orn swebench verified CONC=12 INSTANCES=/home/raahem/evals/samples/swe_verified_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT q122 swebench verified CONC=12 INSTANCES=/home/raahem/evals/samples/swe_verified_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT cn tbench 2.0 CONC=12 TASKS=adaptive-rejection-sampler,bn-fit-modify,break-filter-js-from-html,build-cython-ext,build-pmars,cobol-modernization,code-from-image,compile-compcert,constraints-scheduling,distribution-search,extract-moves-from-video,fix-ocaml-gc,gcode-to-text,make-doom-for-mips,make-mips-interpreter,password-recovery,polyglot-c-py,portfolio-optimization,protein-assembly,pypi-server,rstan-to-pystan,sparql-university,video-processing,winning-avg-corewars AGENT_TIMEOUT=3600 TAG=n24
+#LATER-AGENT q122 tbench 2.0 CONC=12 TASKS=adaptive-rejection-sampler,bn-fit-modify,break-filter-js-from-html,build-cython-ext,build-pmars,cobol-modernization,code-from-image,compile-compcert,constraints-scheduling,distribution-search,extract-moves-from-video,fix-ocaml-gc,gcode-to-text,make-doom-for-mips,make-mips-interpreter,password-recovery,polyglot-c-py,portfolio-optimization,protein-assembly,pypi-server,rstan-to-pystan,sparql-university,video-processing,winning-avg-corewars AGENT_TIMEOUT=3600 TAG=n24
+#LATER-AGENT orn tbench 2.1 CONC=12 TASKS=adaptive-rejection-sampler,bn-fit-modify,break-filter-js-from-html,build-cython-ext,build-pmars,cobol-modernization,code-from-image,compile-compcert,constraints-scheduling,distribution-search,extract-moves-from-video,fix-ocaml-gc,gcode-to-text,make-doom-for-mips,make-mips-interpreter,password-recovery,polyglot-c-py,portfolio-optimization,protein-assembly,pypi-server,rstan-to-pystan,sparql-university,video-processing,winning-avg-corewars AGENT_TIMEOUT=3600 TAG=n24
+#LATER-AGENT orn tbench 2.1 CONC=12 AGENT=claude-code TASKS=adaptive-rejection-sampler,bn-fit-modify,break-filter-js-from-html,build-cython-ext,build-pmars,cobol-modernization,code-from-image,compile-compcert,constraints-scheduling,distribution-search,extract-moves-from-video,fix-ocaml-gc,gcode-to-text,make-doom-for-mips,make-mips-interpreter,password-recovery,polyglot-c-py,portfolio-optimization,protein-assembly,pypi-server,rstan-to-pystan,sparql-university,video-processing,winning-avg-corewars AGENT_TIMEOUT=3600 TAG=cc_n24
+#DROP-AGENT orn text2 browsecomp BLOCKLIST=bench SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#DROP-AGENT orn text2 widesearch BLOCKLIST=bench SAMPLE_N=16 CONC=16 AGENT_MAX_WALL=3600 TAG=n16
+#DROP-AGENT orn text2 hle_tools BLOCKLIST=full SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#DROP-AGENT q122 text2 browsecomp BLOCKLIST=bench SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#DROP-AGENT q122 text2 browsecomp_zh BLOCKLIST=bench SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#DROP-AGENT q122 text2 widesearch BLOCKLIST=bench SAMPLE_N=16 CONC=16 AGENT_MAX_WALL=3600 TAG=n16
+#LATER-AGENT q122 text2 seal0 BLOCKLIST=bench SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#DROP-AGENT q122 text2 hle_tools BLOCKLIST=full SAMPLE_N=32 CONC=16 AGENT_MAX_WALL=3600 TAG=n32
+#LATER-AGENT cn swebench multilingual CONC=12 INSTANCES=/home/raahem/evals/samples/swe_multilingual_n24.txt AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT cn swebench pro CONC=12 INSTANCES=/home/raahem/evals/samples/swe_pro_v1_n24.txt AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT orn swebench multilingual CONC=12 INSTANCES=/home/raahem/evals/samples/swe_multilingual_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT orn swebench pro CONC=12 INSTANCES=/home/raahem/evals/samples/swe_pro_v1_n24.txt OH_CRITIC_RUNS=1 AGENT_TIMEOUT=3600 EVAL_TIMEOUT=1200 TAG=n24
+#LATER-AGENT orn sweatlas qna CONC=12 N_ATTEMPTS=1 TASKS=task-6905333b74f22949d97ba998,task-6905333b74f22949d97ba99a,task-6905333b74f22949d97ba99b,task-6905333b74f22949d97ba99d,task-6905333b74f22949d97ba9a6,task-6905333b74f22949d97ba9a7,task-6905333b74f22949d97ba9a8,task-6905333b74f22949d97ba9aa,task-6905333b74f22949d97ba9bd,task-6905333b74f22949d97ba9cc,task-6905333b74f22949d97ba9cd,task-6905333b74f22949d97ba9d8,task-6905333b74f22949d97ba9f2,task-6905333b74f22949d97ba9f9,task-6905333b74f22949d97ba9fc,task-6905333b74f22949d97baa01,task-6905333b74f22949d97baa04,task-6905333b74f22949d97baa11,task-6905333b74f22949d97baa12,task-6905333b74f22949d97baa14,task-6905333b74f22949d97baa17,task-6905333b74f22949d97baa1b,task-6905333b74f22949d97baa25,task-6905333b74f22949d97baa2d TAG=n24
+#LATER-AGENT orn deepswe v1.1 CONC=12 TASKS=abs-module-cache-flags,actionlint-action-pinning-lint,adaptix-name-mapping-aliases,aiomonitor-task-snapshots-diff,bandit-incremental-cache-control,bandit-interprocedural-taint-checks,bandit-structured-nosec-directives,cattrs-partial-structuring-recovery,fd-deterministic-multi-key-sorting,igel-persist-feature-schema,ink-grid-box-layout,koota-pair-relation-tracking,langchain-request-coalescing,meriyah-explicit-resource-declarations,oxvg-structural-selector-preservation,prometheus-transactional-reload-status,prometheus-typed-label-sorting,python-statemachine-state-data-scoping,returns-validated-error-accumulation,skrub-duration-encoding,testem-bail-on-test-failure,testem-per-launcher-reports,textual-kitty-key-phases,ts-pattern-match-each TAG=n24
+#LATER-AGENT orn claweval all CONC=16 TASKS=C04zh_image_processing,C08zh_personal_finance_3,C09zh_ai_video_creation,C16en_hr_workforce_planning,C18en_statistical_analysis_spss,C24zh_fire_safety_code,C34zh_product_design,C36zh_insurance_planning,M005_score_canon,M008_metro_map_1,M009_metro_map_2,M013_metro_route_1,M021_doc_reference_verification,M022_video_movie_recognition,M039_video_lvb_machine_dog,M056_video_badminton_net_error,M084_doc_figure_reproduction_pie,M090_video_movie_qa_wedding,M101_chinese_food_identification_zh,T039zh_onboarding_coordinator,T043zh_service_outage_research,T090_pinbench_config_change_plan,T102_xss_filter,T103_schema_migration,T112_expense_email_check,T114_meeting_preparation,T122_industry_briefing,T128_ticket_assignment,T142_sla_compliance_audit,T149zh_project_progress_report,T161zh_automation_failure_recovery,T163zh_quarterly_customer_review TAG=n32
+#LATER-AGENT orn tbench frontier CONC=8 TASKS=atrx-vep-crispr,batched-eval-parity,cad-model,data-anonymization,distributed-dedup,embedding-drift-monitor,fin-saccr-rwa,fix-uautomizer-soundness,glycan-ms2-elucidation,mp-checkpoint-consolidation,production-planning,protein-autointerp-disulfide,satb-audio-transcription,sglang-qwen-burst,shadow-relay,takens-embedding-lean AGENT_TIMEOUT=3600 TAG=n16
+# Toolathlon-Verified: official service offline (2026-10-29, GitHub issue #99); add when it answers:
+# orn toolathlon verified
+# o122 toolathlon verified

@@ -1,0 +1,15 @@
+#!/bin/bash
+# Serve Ornith-1.5-122B from the shipped image with the precision variant in policy.json (A/B only, not a package).
+# Same env / command / mounts as `tt-model serve raahemnabeel/ornith-1.5-122b --profile p300x2`, separate tensor caches.
+D=$(cd "$(dirname "$0")" && pwd)
+C=${1:-tt-model-ornith-1.5-122b-s7-p300x2}
+IMG=tt-model/ornith-1.5-122b:b5412d165536  # the released image (scheduler fix 8b1f8b1)
+mkdir -p $HOME/.cache/tt-model/ornith-1.5-122b-s7/{weights,tensors}  # docker would create missing mount dirs as root
+mapfile -t CMD < <(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))))' $D/cmd.json)
+docker run -d --name $C --ipc host -u 1004:1004 --shm-size 64m \
+  --device /dev/tenstorrent/0 --device /dev/tenstorrent/1 --device /dev/tenstorrent/2 --device /dev/tenstorrent/3 \
+  -v /dev/hugepages-1G:/dev/hugepages-1G -p 20000:20000 --env-file $D/env.list \
+  -v $HOME/.cache/huggingface:/hf -v $HOME/.cache/tt-model/ornith-1.5-122b/cache:/cache \
+  -v $HOME/.cache/tt-model/ornith-1.5-122b-s7/weights:/weight-cache -v $HOME/.cache/tt-model/ornith-1.5-122b-s7/tensors:/tensor-cache \
+  -v $D:/variant:ro -v $D/tp_common.py:/opt/tt-metal/models/demos/blackhole/qwen36/tt/tp_common.py:ro --label org.tenstorrent.tt-model.variant=o122s7 $IMG "${CMD[@]}"
+echo "variant $C image $IMG"

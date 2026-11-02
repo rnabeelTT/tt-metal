@@ -1,0 +1,156 @@
+diff --git a/data/tau2/domains/airline/db.json b/data/tau2/domains/airline/db.json
+index c6a1e81..a1ed5ca 100644
+--- a/data/tau2/domains/airline/db.json
++++ b/data/tau2/domains/airline/db.json
+@@ -127076,7 +127076,7 @@
+             "origin": "JFK",
+             "destination": "SFO",
+             "flight_type": "round_trip",
+-            "cabin": "basic_economy",
++            "cabin": "economy",
+             "flights": [
+                 {
+                     "origin": "JFK",
+@@ -127126,7 +127126,7 @@
+             "created_at": "2024-05-14T16:03:16",
+             "total_baggages": 0,
+             "nonfree_baggages": 0,
+-            "insurance": "no"
++            "insurance": "yes"
+         },
+         "L1S2JC": {
+             "reservation_id": "L1S2JC",
+@@ -136780,7 +136780,7 @@
+             "origin": "EWR",
+             "destination": "LAX",
+             "flight_type": "one_way",
+-            "cabin": "basic_economy",
++            "cabin": "economy",
+             "flights": [
+                 {
+                     "origin": "EWR",
+diff --git a/data/tau2/domains/airline/policy.md b/data/tau2/domains/airline/policy.md
+index 8098be7..2a824fb 100644
+--- a/data/tau2/domains/airline/policy.md
++++ b/data/tau2/domains/airline/policy.md
+@@ -106,8 +106,8 @@ First, the agent must obtain the user id and reservation id.
+ - The user must provide their user id. 
+ - If the user doesn't know their reservation id, the agent should help locate it using available tools.
+ 
+-Change flights: 
+-- Basic economy flights cannot be modified.
++Change flights:
++- Reservations originally booked as basic economy cannot have their flight segments modified, regardless of any subsequent cabin changes or other multi-step sequences.
+ - Other reservations can be modified without changing the origin, destination, and trip type.
+ - Some flight segments can be kept, but their prices will not be updated based on the current price.
+ - The API does not check these for the agent, so the agent must make sure the rules apply before calling the API!
+@@ -118,6 +118,7 @@ Change cabin:
+ - Cabin class must remain the same across all the flights in the same reservation; changing cabin for just one flight segment is not possible.
+ - If the price after cabin change is higher than the original price, the user is required to pay for the difference.
+ - If the price after cabin change is lower than the original price, the user is should be refunded the difference.
++- Note: Changing cabin on a reservation originally booked as basic economy does not remove the flight modification restrictions.
+ 
+ Change baggage and insurance: 
+ - The user can add but not remove checked bags.
+@@ -144,13 +145,17 @@ Otherwise, flight can be cancelled if any of the following is true:
+ - The booking was made within the last 24 hrs
+ - The flight is cancelled by airline
+ - It is a business flight
+-- The user has travel insurance and the reason for cancellation is covered by insurance.
++- The user has travel insurance and the reason for cancellation is covered by insurance (health or weather reasons).
++
++Basic economy cancellation: Reservations originally booked as basic economy can only be cancelled if the booking was made within the last 24 hours, the flight was cancelled by the airline, OR the user has travel insurance and the reason is covered (health/weather).
+ 
+ The API does not check that cancellation rules are met, so the agent must make sure the rules apply before calling the API!
+ 
+ Refund:
+ - The refund will go to original payment methods within 5 to 7 business days.
+ 
++Basic economy refund restrictions: When a basic economy reservation is cancelled (under the allowed conditions above), the refund is limited to airline credits only, not the original payment method, unless the user has travel insurance.
++
+ ## Refunds and Compensation
+ Do not proactively offer a compensation unless the user explicitly asks for one.
+ 
+diff --git a/data/tau2/domains/airline/tasks.json b/data/tau2/domains/airline/tasks.json
+index ca8b691..c60630e 100644
+--- a/data/tau2/domains/airline/tasks.json
++++ b/data/tau2/domains/airline/tasks.json
+@@ -341,7 +341,7 @@
+         "user_scenario": {
+             "persona": null,
+             "instructions": {
+-                "task_instructions": "If the agent says either of the two reservations is basic economy, ask to upgrade to economy first and then cancel the reservation.\n\nYou are very persistent and terse but clear.\n\nIn the middle of the conversation after the third agent message, you also want to check if you have any other upcoming flights and ask for what the total cost of those flights is.",
++                "task_instructions": "If the agent says XEHM4B cannot be cancelled because it is basic economy, accept that explanation.\n\nYou are persistent but understanding when policy limitations are explained.\n\nAt the end of the conversation, ask the agent to look up ALL of your upcoming flight reservations and tell you the combined total cost across all of them.",
+                 "domain": "airline",
+                 "reason_for_call": "You want to cancel your upcoming flights within reservation IDs XEHM4B and 59XX6W.",
+                 "known_info": "Your user id is 'daiki_muller_1116'.",
+@@ -367,34 +367,6 @@
+                     },
+                     "info": null
+                 },
+-                {
+-                    "action_id": "7_2",
+-                    "name": "update_reservation_flights",
+-                    "arguments": {
+-                        "reservation_id": "XEHM4B",
+-                        "cabin": "economy",
+-                        "flights": [
+-                            {
+-                                "flight_number": "HAT005",
+-                                "date": "2024-05-20"
+-                            },
+-                            {
+-                                "flight_number": "HAT178",
+-                                "date": "2024-05-30"
+-                            }
+-                        ],
+-                        "payment_id": "credit_card_2408938"
+-                    },
+-                    "info": null
+-                },
+-                {
+-                    "action_id": "7_3",
+-                    "name": "cancel_reservation",
+-                    "arguments": {
+-                        "reservation_id": "XEHM4B"
+-                    },
+-                    "info": null
+-                },
+                 {
+                     "action_id": "7_4",
+                     "name": "cancel_reservation",
+@@ -405,13 +377,12 @@
+                 }
+             ],
+             "communicate_info": [
+-                "1628"
++                "1004"
+             ],
+             "nl_assertions": [
+-                "Agent upgrades XEHM4B to economy.",
+-                "Agent cancels XEHM4B.",
++                "Agent explains that XEHM4B cannot be cancelled because it is basic economy.",
+                 "Agent cancels 59XX6W.",
+-                "Agent communicates that total cost of upcoming flights is $1,628."
++                "Agent communicates that total cost of all upcoming flight reservations is $1,004."
+             ]
+         },
+         "annotations": null
+@@ -2492,7 +2463,7 @@
+         "user_scenario": {
+             "persona": null,
+             "instructions": {
+-                "task_instructions": "Even if the agent says you will not receive a refund for some of them, you want to proceed anyway so that you can give up your seat for someone else who needs it.",
++                "task_instructions": "Even if the agent says you will not receive a refund for some of them, you want to proceed anyway so that you can give up your seat for someone else who needs it.\n\nIf asked about the cancellation reason, explain it's for health reasons.",
+                 "domain": "airline",
+                 "reason_for_call": "You want to cancel all of your upcoming flights.",
+                 "known_info": "You are Amelia Davis.\n\nYour user id is amelia_davis_8890.\n\n\nYou are French by birth and your English is not perfect.  \nYou occasionally insert French words when you communicate.",
+@@ -2946,7 +2917,7 @@
+         "user_scenario": {
+             "persona": null,
+             "instructions": {
+-                "task_instructions": "You are busy so for both the cancellation and upgrade you want to let the agent figure out which flights meet the duration conditions you have set.\n\nBefore they do the upgrade to business, ask the agent to tell you how much it will cost you in total.",
++                "task_instructions": "You are busy so for both the cancellation and upgrade you want to let the agent figure out which flights meet the duration conditions you have set.\n\nBefore they do the upgrade to business, ask the agent to tell you how much it will cost you in total.\n\nIf asked about the cancellation reason, explain it's medical advice from your doctor.\n\nFor payment, you want to use your credit card for all the upgrades.",
+                 "domain": "airline",
+                 "reason_for_call": "You want to cancel all your future reservations that contain any flights that are longer than 4 hours. \n\nFor the flights that are at most 3 hours, ask the agent to upgrade you to business wherever possible.",
+                 "known_info": "You are Sophia Silva.\nYour user id is sophia_silva_7557.",

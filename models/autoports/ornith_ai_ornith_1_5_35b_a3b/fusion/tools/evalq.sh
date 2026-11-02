@@ -85,10 +85,11 @@ run_task() {  # <model> <runner> <bench> [KEY=VAL ...]
       [ "${PRESENCE_PENALTY:-$TPP}" != 0 ] && export PRESENCE_PENALTY=${PRESENCE_PENALTY:-$TPP} ;; esac
     echo "sampling: T=$TEMPERATURE top_p=$TOP_P top_k=$TOP_K presence_penalty=${PRESENCE_PENALTY:-0}"
     case $RN in
-      lmeval) OUT=$R/$L/evals/$B; mkdir -p $OUT
+      lmeval) OUT=$R/$L/evals/$B; mkdir -p $OUT  # SAMPLE_N=<k> TOTAL=<set size>: fixed random k items (seed 1234)
               cd $HOME/lm-eval-poc && .venv/bin/lm_eval --model local-chat-completions \
                 --model_args "model=${MID[$M]},base_url=$BASE/chat/completions,num_concurrent=${CONC:-32},max_retries=3,tokenized_requests=False,timeout=7200" \
                 --tasks $B --apply_chat_template --seed ${SEED:-42} --confirm_run_unsafe_code \
+                ${SAMPLE_N:+--samples "$(python3 -c 'import json,random,sys; n,t,b=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3]; print(json.dumps({b: sorted(random.Random(1234).sample(range(t), n))}))' $SAMPLE_N $TOTAL $B)"} \
                 --gen_kwargs "do_sample=True,temperature=$TEMPERATURE,top_p=$TOP_P,top_k=$TOP_K,max_gen_toks=${MAX_TOKENS:-32768}${PRESENCE_PENALTY:+,presence_penalty=$PRESENCE_PENALTY}" \
                 --output_path $OUT --log_samples
               python3 - $OUT <<'EOF'
@@ -111,8 +112,9 @@ EOF
       scicode) ~/evals/scicode_run.sh $L $BASE ${MID[$M]} ${CONC:-32} ${MAX_TOKENS:-32768} ;;
       aider)  ~/evals/aider_run.sh $L $BASE ${MID[$M]} ${CONC:-32} $B ;;
       extend) # continue a finished text2 run's truncated answers to BUDGET tokens (exact; see extend_truncated.py)
-              cd $HOME/evals/text2 && .venv/bin/python extend_truncated.py $R/ref_${M}_${B}/$B ref_${M}_${B}_b${BUDGET} \
-                --budget $BUDGET --conc ${CONC:-16} --sample ${SAMPLE:-0} ;;
+              # SRC_TAG picks a tagged source run (ref_<m>_<b>_<tag>); SUBSAMPLE=N keeps a fixed random N of its items
+              cd $HOME/evals/text2 && .venv/bin/python extend_truncated.py $R/ref_${M}_${B}${SRC_TAG:+_$SRC_TAG}/$B ref_${M}_${B}_b${BUDGET}${SUBSAMPLE:+_n$SUBSAMPLE} \
+                --budget $BUDGET --conc ${CONC:-16} --sample ${SAMPLE:-0} --subsample ${SUBSAMPLE:-0} ;;
       *) echo "unknown runner $RN" ;;
     esac
   ) > $LOG 2>&1 &

@@ -1,0 +1,6 @@
+# SWE Atlas v1.0 images have ENTRYPOINT ["/bin/bash"]; Harbor's prebuilt compose command
+# ["sh","-c","sleep infinity"] then runs `bash sh -c ...` and exits 126. Same fix as SWE Atlas'
+# run configs (--ek 'keepalive=["-c","sleep infinity"]').
+services:
+  main:
+    command: ["-c", "sleep infinity"]

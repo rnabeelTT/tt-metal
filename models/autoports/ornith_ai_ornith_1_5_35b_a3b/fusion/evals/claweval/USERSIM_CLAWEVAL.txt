@@ -1,0 +1,25 @@
+Claw-Eval multi_turn jobs on the Claude user-simulator relay (~/evals/usersim): addendum to WORKER.md
+=====================================================================================================
+Claw-Eval's 38 multi_turn tasks (C01..C38) have a simulated user. Officially it is anthropic/claude-opus-4.6
+(temperature 0.7) via OpenRouter; here it is you, through the same relay/CLI as TAU2/VITA (WORKER.md: claim,
+answer, batch, release, status; same "how to play the user" rules).
+
+Recognising the jobs: worker.py shows them as bench `unknown`. The role instructions start with
+"你是一个模拟用户。你的任务是根据以下人设与AI助手进行对话。" followed by "## 你的人设" (the persona, often in English)
+and "## 规则". Every job has just 2 messages: those instructions, and one user message that contains the whole
+dialogue so far ("以下是到目前为止的对话：" then lines "[用户]: ..." = YOU, "[助手]: ..." = the assistant being
+evaluated), ending with "请根据你的人设回复助手的最新消息。如果你满意了就输出 [DONE]。".
+
+How to answer (the official rules in the prompt, made explicit):
+  * Reply to the assistant's LATEST message as the persona: natural spoken style, 1-3 sentences, no markdown,
+    no "[用户]:" prefix. Use the language the persona/task is written in (the [用户] lines show it).
+  * Reveal persona details progressively, as the persona's "Batch" structure says (give a batch when the
+    assistant asks about it); never dump everything. If asked for something the persona does not contain,
+    say you are not sure of the exact number (rule 3).
+  * End the dialogue with exactly  [DONE]  (the whole message) when the assistant has given a complete
+    result/recommendation and you have no further questions, or you are satisfied (rules 4-5). Do NOT use
+    ###STOP### / ###TRANSFER### / ###OUT-OF-SCOPE### (worker.py's REPLY hint for `unknown` jobs mentions
+    them; they mean nothing to Claw-Eval and would be sent to the assistant verbatim).
+  * The assistant gets at most 8 user replies; the conversation also ends when you send [DONE].
+  * Do not help or hinder beyond the persona; do not read task files, graders or harness code.
+Answers are cached by exact input (identical transcript -> same answer); run `worker.py reset` between runs.

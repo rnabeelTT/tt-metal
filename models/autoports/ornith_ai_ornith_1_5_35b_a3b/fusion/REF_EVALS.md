@@ -32,7 +32,7 @@ Common settings unless a row says otherwise: served from the hub repo as shipped
 default), the card's thinking-mode sampling (Ornith-1.5-122B and Qwen3.5-122B: T1.0/0.95/20 + presence_penalty 1.5 for
 general tasks, T0.6/0.95/20 without penalty for precise coding = SciCode, LiveCodeBench, OJBench, FullStackBench,
 Codeforces; Ornith-1.5-35B and Coder-Next: their generation_config), up to 32 requests in flight, max 32,768 generated tokens, only
-the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`; queue runner `tools/evalq.sh` reads `runs/evalq.txt` (one task per line,
+the answer (`content`) scored. Runs: `~/ornith-fusion/runs/ref_<model>_<bench>`; queue runner `tools/evalq.sh` reads `runs/evalq.txt` (box scripts snapshot: `evalq/`, harness: `evals/`) (one task per line,
 finished ones in `runs/evalq.done`). Harnesses live in `~/evals` (text2, SciCode, aider, ...; not in this repo).
 
 Status: **queued** (harness ready, waiting for chips) · **setup** (harness being prepared) · **run** (in progress) ·

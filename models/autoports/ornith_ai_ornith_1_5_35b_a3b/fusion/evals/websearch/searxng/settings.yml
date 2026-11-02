@@ -1,0 +1,73 @@
+# SearXNG for the search-agent evals (BrowseComp, BrowseComp-zh, WideSearch, Seal-0, HLE w/ tools, BFCL web_search).
+# Bound to 127.0.0.1 only (docker -p 127.0.0.1:28010:8080). JSON API on. Query throttle + cache live in the
+# webtools service (websearch/service.py), not here.
+use_default_settings:
+  engines:
+    keep_only: [bing, brave, duckduckgo, google, baidu, sogou, 360search, mojeek, startpage, qwant, yahoo]
+general:
+  instance_name: "evals-searxng"
+  enable_metrics: true
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en-US"
+  formats: [html, json]
+  # engines that error/captcha are suspended for this long (seconds) by SearXNG itself
+  suspended_times:
+    SearxEngineAccessDenied: 3600
+    SearxEngineCaptcha: 3600
+    SearxEngineTooManyRequests: 600
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 50
+  enable_http2: true
+engines:
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+  - name: google
+    engine: google
+    shortcut: go
+    disabled: false
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: baidu
+    engine: baidu
+    baidu_category: general
+    categories: [general]
+    shortcut: bd
+    disabled: false
+  - name: sogou
+    engine: sogou
+    shortcut: sogou
+    disabled: false
+  - name: 360search
+    engine: 360search
+    shortcut: 360so
+    disabled: false
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    disabled: false
+  - name: mojeek
+    engine: mojeek
+    shortcut: mjk
+    disabled: false
+    inactive: false
+  - name: yahoo
+    engine: yahoo
+    shortcut: yh
+    disabled: false

@@ -1,0 +1,165 @@
+{
+  "config_id": "combo_mixer_lmhead_bfp4_ccl_bfp8",
+  "description": "round 2: mixers bfp4 LoFi + LM head bfp4 + bfp8 decode CCL payload",
+  "weight_groups": {
+    "embedding": {
+      "dtype": "bf16"
+    },
+    "norms": {
+      "dtype": "bf16"
+    },
+    "attention": {
+      "dtype": "bfp4"
+    },
+    "linear_attention": {
+      "dtype": "bfp4"
+    },
+    "router": {
+      "dtype": "bf16"
+    },
+    "shared_moe": {
+      "dtype": "bfp8"
+    },
+    "routed_moe": {
+      "gate_up": "bfp4",
+      "down": "bfp4"
+    },
+    "lm_head": {
+      "dtype": "bfp4"
+    }
+  },
+  "layer_exceptions": {},
+  "compute_fidelities": {
+    "attention": "lofi",
+    "linear_attention": "lofi",
+    "router": "hifi4",
+    "shared_moe": "hifi2",
+    "routed_moe": "lofi",
+    "lm_head": "ttnn_default"
+  },
+  "activation_dtype": "bf16",
+  "residual_dtype": "bf16",
+  "ccl_dtype": "bfp8",
+  "kv_cache_dtype": "bfp8",
+  "linear_state_dtype": "bf16",
+  "logits_dtype": "bf16",
+  "sampling_dtype": "uint32",
+  "selected_from_config_id": "combo_mixer_lmhead_bfp4_ccl_bfp8",
+  "selection_metric": "trace_verified_teacher_forcing_decode_t_s_u",
+  "selection_rule": "fastest passing candidate on the traced teacher-forcing metric; candidates within 0.3 t/s/u of it are a single-run TF tie, resolved by the 64-step token-out bench (model-only replay ms, repeatable to ~0.001 ms) when the tied candidates were benchmarked, else by the fewest policy changes vs baseline_s7 (skill tie rule); every measured reference must meet the bar; quality_gate_overrides.json can fail a candidate on the qualitative suite",
+  "accuracy_gate": {
+    "teacher_forcing_top1_min": 0.9,
+    "teacher_forcing_top5_min": 0.98,
+    "teacher_forcing_top100_min": 1.0
+  },
+  "selected_measurement": {
+    "aime24_chat_teacher_forcing": {
+      "top1": 0.97,
+      "top5": 1.0,
+      "top100": 1.0,
+      "ttft_ms": 559.0485250577331,
+      "decode_t_s_u": 41.44606274165823,
+      "trace_verified": true,
+      "policy_consumed": true
+    },
+    "other_references": {
+      "teacher_forcing_book": {
+        "top1": 0.95,
+        "top5": 0.99,
+        "top100": 1.0,
+        "ttft_ms": 388.02675798069686,
+        "decode_t/s/u": 41.305862564857264
+      },
+      "teacher_forcing_book_p2048": {
+        "top1": 1.0,
+        "top5": 1.0,
+        "top100": 1.0,
+        "ttft_ms": 1926.3813289580867,
+        "decode_t/s/u": 41.41037317920237
+      },
+      "teacher_forcing_book_p8192": {
+        "top1": 0.96,
+        "top5": 0.99,
+        "top100": 1.0,
+        "ttft_ms": 7717.9424589267,
+        "decode_t/s/u": 40.84683531869209
+      }
+    },
+    "quality_gate": "pass (6/6 coherent; 62/60/6/29/36/29)",
+    "post_selection_token_out": {
+      "ms_per_step": {
+        "blocking_readback": 24.077,
+        "deferred_readback": 23.936,
+        "replay_model_plus_sampler": 23.93,
+        "replay_model_only": 23.404,
+        "replay_sampler_only": 0.544
+      },
+      "tokens_per_s_per_user": {
+        "blocking_readback": 41.53,
+        "deferred_readback": 41.78
+      },
+      "steps": 64,
+      "regime": "48 layers, B=1, 64 traced decode steps, no readback on the serving path (tools/tokenout_bench.py)",
+      "source": "models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/artifacts/tokenout_selected_48layers.json",
+      "construction_path": "default (no QWEN35_PRECISION_CONFIG override)"
+    },
+    "baseline_s7_for_comparison": {
+      "aime24_top1": 0.97,
+      "decode_t_s_u": 39.82930220101132,
+      "ttft_ms": 557.9444899922237,
+      "token_out": {
+        "ms_per_step": {
+          "blocking_readback": 25.051,
+          "deferred_readback": 24.894,
+          "replay_model_plus_sampler": 24.892,
+          "replay_model_only": 24.357,
+          "replay_sampler_only": 0.547
+        },
+        "tokens_per_s_per_user": {
+          "blocking_readback": 39.92,
+          "deferred_readback": 40.17
+        },
+        "steps": 64,
+        "regime": "48 layers, B=1, 64 traced decode steps, no readback on the serving path (tools/tokenout_bench.py)",
+        "source": "models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/artifacts/tokenout_48layers_baseline_s7.json",
+        "construction_path": "candidate run (QWEN35_PRECISION_CONFIG=configs/<id>.json)"
+      },
+      "other_references": {
+        "prefill_check_aime24": {
+          "top1": 0.97,
+          "top5": 1.0,
+          "top100": 1.0
+        },
+        "teacher_forcing_book": {
+          "top1": 0.98,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 385.3983130538836,
+          "decode_t/s/u": 39.86568862857979
+        },
+        "teacher_forcing_book_p2048": {
+          "top1": 1.0,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 1939.0636959578842,
+          "decode_t/s/u": 39.74596878612372
+        },
+        "teacher_forcing_book_p8192": {
+          "top1": 0.98,
+          "top5": 1.0,
+          "top100": 1.0,
+          "ttft_ms": 7760.364963090979,
+          "decode_t/s/u": 39.36835629248017
+        }
+      }
+    },
+    "measurement_regime": "AIME24 chat-template prompt (161 tokens), 100 reference tokens, B=1: prefill TTFT + traced teacher-forcing decode (readiness_check.run_teacher_forcing)",
+    "hardware": "4 x Blackhole p300c dies (2 x p300, PCIe x4 each), 31.9 GiB GDDR per die, fw 19.13.1.0",
+    "mesh": "(1,4) P300x2, FABRIC_1D"
+  },
+  "fallback": {
+    "safe_baseline": "configs/baseline_s7.json (the stage-7 policy): QWEN35_PRECISION_CONFIG=models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/configs/baseline_s7.json or =none",
+    "intermediate": "configs/lm_head_bfp4.json (bfp4 LM head only): no measured accuracy loss on the 8192-token book prompt, +0.7 % decode"
+  },
+  "consumed_by": "tt/model.py::create_model via tt/precision.py (load_policy -> apply_policy -> MultichipConfig); the built model is checked against this file (effective_policy / check_effective) on every build"
+}
