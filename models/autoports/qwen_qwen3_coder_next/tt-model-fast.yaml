@@ -1,0 +1,296 @@
+# tt-model container (v5.1) manifest for Qwen3-Coder-Next (the fused-decode "blackhole-fast" build, now the current
+# bundle): the v1 bundle (raahemnabeel/qwen3-coder-next-v1, this directory's tt-model.yaml) plus the fused decode work of the Ornith fusion
+# (models/autoports/ornith_ai_ornith_1_5_35b_a3b/fusion/HANDOFF.md):
+# - steps 1-3: routed + shared experts in three ops that stream the expert weights in place for every decode width
+#   (1..32 rows), and the replicated-residual decode boundary;
+# - steps 4-5: the Gated DeltaNet decode mixer (short conv; gates + norms + recurrent state update + gated norm) and the
+#   attention decode prep / post ops, as generic_op programs for 1-32 rows;
+# - step 7: the fabric layer boundary (all-reduce + residual + RMSNorm as one op, 1-4 rows; four dies) with the next
+#   projection / router in its program, the sampler's live-rows top-k (16-bit indices: four dies only), the MoE
+#   split-pair gate|up with off-row readers, the GDN head value split.
+# Same weights, plugin build and serving recipe. Published as the model's main repo (the user renamed the fast repo
+# raahemnabeel/qwen3-coder-next-blackhole-fast to raahemnabeel/qwen3-coder-next 2026-10-27; earlier revisions stay in the Hub history).
+schema: "5.1"
+
+repo: raahemnabeel/qwen3-coder-next
+name: qwen3-coder-next   # image tt-model/qwen3-coder-next (user, 2026-10-26: no variant suffix on the image)
+# weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
+weights: {repo: Qwen/Qwen3-Coder-Next, revision: a7fbcb5c0e12d62a448eaa0e260346bf5dcc0feb}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/tt-metal-codernext   # worktree, branch coder_next_fusion
+  code:  # the autoport's import closure (checked with a symlinked tree of exactly these paths); the autoport ships its
+         # runtime files only (not the per-stage doc/ evidence with profiler CSVs, not tests/)
+    - models/autoports/qwen_qwen3_coder_next/__init__.py
+    - models/autoports/qwen_qwen3_coder_next/tt
+    - models/autoports/qwen_qwen3_coder_next/vllm_metadata.json
+    - models/autoports/qwen_qwen3_coder_next/vllm_bundle
+    - models/autoports/qwen_qwen3_coder_next/doc/context_contract.json            # read by generator_vllm at build
+    - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config.json       # 4-die policy
+    - models/autoports/qwen_qwen3_coder_next/doc/datatype_sweep/selected_precision_config_tp2.json   # 2-die policy
+    # machine-readable declaration of what this package serves: capabilities, the precision policy
+    # pinned by content hash, the device sampler's top-k ceiling, and the open defects. Same artifact
+    # the tt-hous/gpt-oss-120b-p150x4 bundle ships.
+    - models/autoports/qwen_qwen3_coder_next/readiness_vllm/vllm_serving_capability.json
+    # the long-context sampling defect (fixed): root cause, fix and the evidence trail, referenced by the card
+    - models/autoports/qwen_qwen3_coder_next/doc/text_quality/README.md
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  # the released sdist built in the image with VLLM_TARGET_DEVICE=empty, installed --no-deps on top of the lock (the
+  # wheel form resolves the wheel's own dependency set and would pull torch 2.14 over tt-metal's 2.11.0 pin)
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # the plugin build the published image shipped
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json (a copy of the autoport's vllm_metadata.json lives in
+  # vllm_bundle/qwen3_coder_next/; the checkout-based serving uses EXTRA_MODELS_DIR=models/autoports directly)
+  extra_models_dir: models/autoports/qwen_qwen3_coder_next/vllm_bundle
+  # resolution overrides: the torch / torchvision tt-metal pins (the ttnn extension is built against 2.11.0) and the
+  # transformers this bring-up validated; vLLM 0.26.0 would otherwise resolve torch 2.14 (a full dev-env freeze as a lock
+  # dragged unrelated conflicting pins in, so the build resolves live under these overrides and freezes the result)
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 262144
+  capabilities:
+    tool_parser: qwen3_coder
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 805306368
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: Qwen/Qwen3-Coder-Next
+    QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
+    QWEN35_PROGRAM_GUARD: "1"
+    # Chunked prefill ON in every profile: long prompts are prefilled in 2048-token scheduler chunks (GDN state carried
+    # per request), so a short request is not stuck behind a 100K-token prompt. The checkpoint has no MTP head and no
+    # vision tower, so nothing competes with it.
+    QWEN35_CHUNKED_PREFILL: "1"
+    # the fused decode path (ported from the Ornith fusion)
+    QWEN35_MOE_FUSED_DECODE: "1"
+    QWEN35_DECODE_REPLICATED: "1"
+    QWEN35_GDN_DECODE_OPS: "1"      # fused GDN decode mixer (gdn/tp.py checks its preconditions and keeps the op chain otherwise)
+    QWEN35_ATTN_DECODE_OPS: "1"     # attention decode prep / post ops (attention/tp.py checks its preconditions likewise)
+    QWEN35_ROWS_TOPK: "1"           # sampler top-k over the live rows (<= 8 rows; not installed where a die's vocab slice exceeds 16 bits)
+  # The checkpoint's own generation config is served (temperature 1.0 / top_p 0.95 / top_k 40). The
+  # greedy override of 2026-10-05 is gone: the long-context word corruption it worked around was the
+  # dies of the mesh drawing different tokens from the device sampler (doc/text_quality/README.md),
+  # fixed in tt/model.py (_install_lockstep_sampling).
+  args: [--enable-auto-tool-choice, --enable-prefix-caching, --enable-chunked-prefill, [--max-num-batched-tokens, "2048"]]
+
+# One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). Pick with
+# `tt-model serve <bundle> --profile <name>`. The mesh size picks the precision policy and the KV budget at build.
+serve_profiles:
+  - name: p300x2
+    description: 'Default and fastest profile: four dies.'
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+  - name: p150x4
+    description: '`p300x2` on four p150 boards.'
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+  - name: p300
+    description: 'Two dies: the same features with routed experts at bfp4.'
+    hardware: p300
+    mesh_device: P300
+    # the first two chips (on a 4-chip host: the two dies of the first board; fabric init needs every visible chip in
+    # the mesh). A no-op on a single p300.
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150x2
+    description: '`p300` on two p150 boards.'
+    hardware: p150x2
+    mesh_device: P150x2
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+default_profile: p300x2
+
+verify:
+  - "import models.autoports.qwen_qwen3_coder_next.tt.generator_vllm as g; assert g.Qwen3NextForCausalLM and not g.Qwen3NextForCausalLM.supports_multimodal"
+  - "import models.autoports.qwen_qwen3_coder_next.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+
+card:
+  attribution: |
+    Derived from [Qwen/Qwen3-Coder-Next](https://huggingface.co/Qwen/Qwen3-Coder-Next) by the Qwen team. The
+    checkpoint is used as published; expert weights are converted to lower precision when the server loads them
+    (see Limitations). See the original model card for training and evaluation details.
+  description: |
+    Qwen3-Coder-Next, an 80B-parameter mixture-of-experts coding model with 3B parameters active per token (512
+    experts, top-10 plus a shared expert; 48 layers mixing Gated DeltaNet linear attention with gated full
+    attention), served with vLLM. Text only and without a thinking mode; tool calling and a 262,144-token context,
+    for up to 32 concurrent users.
+  intended_use: |
+    Coding assistants and coding agents: code generation, editing and repository-level tasks with tool calls,
+    through an OpenAI-compatible API.
+  usage: |
+    The model answers directly (no reasoning block). A request without sampling parameters uses the checkpoint's
+    defaults (temperature 1.0, top_p 0.95, top_k 40); sampling runs on the device, where `top_k` is limited to 32, so
+    the default `top_k` 40 runs as 32.
+
+    Every profile runs chunked prefill: a long prompt is prefilled in chunks shared with other requests, so it does
+    not hold up short ones.
+
+    Prefix caching is on. A prompt that starts with the same 2,048 or more tokens as a recent one (a document sent
+    again, the next turn of a chat, a shared system prompt) resumes from the last 2,048-token boundary the two share
+    instead of being prefilled from the start. The server keeps 32 (four dies) or 16 (two dies) such resume points, least recently used
+    evicted; they use 0.84 GiB (four dies) of each die's KV pool. Turn caching off with `tt-model serve <repo> -- --no-enable-prefix-caching`.
+  performance: |
+    ### Accuracy
+    Evaluated through the served chat API (p300x2, temperature 0, full sets, 8 requests in flight, seed 42,
+    lm-evaluation-harness 0.4.9), next to the previous version of this package (v1) on the same box and settings.
+    Qwen's card reports agentic coding benchmarks (SWE-Bench and others) and none of these evals, and those benchmarks
+    were not run here.
+
+    | Eval | v1 | this package | reference (Qwen card) | prompts |
+    | --- | ---: | ---: | ---: | ---: |
+    | HumanEval pass@1 | 0.939 | 0.933 ±0.020 | not reported | 164 |
+    | MBPP pass@1 | 0.826 | 0.824 ±0.017 | not reported | 500 |
+    | GSM8K exact match, strict (8-shot) | 0.954 | 0.954 ±0.006 | not reported | 1,319 |
+    | IFEval prompt-level strict | 0.799 | 0.791 ±0.018 | not reported | 541 |
+    | IFEval prompt-level loose | 0.841 | 0.824 ±0.016 | not reported | 541 |
+
+    HumanEval uses a chat prompt that asks for the whole function in one code block, and MBPP answers are scored from
+    their first code block (the harness's stock instruct variants pre-fill the assistant turn, which a chat API does
+    not continue); GSM8K is the stock 8-shot chain-of-thought task. The task files are in `fusion/tools/lm_tasks` on
+    the source branch.
+
+    ### Performance
+    Measured on one QuietBox 2 (4 Blackhole p300c dies; p300 rows on two of them; v1 2026-10-23, current
+    2026-10-26), both bundles served exactly
+    as shipped (`tt-model serve <bundle> --profile <p>`), one server at a time: random-token prompts of exactly the input
+    length, output pinned with ignore_eos, streamed; users are concurrent requests in a closed loop; TTFT = time to first
+    streamed token; TPOT = (E2EL - TTFT) / (output - 1); one unrecorded warm-up per row. A real-text single-user row (12 chat
+    prompts, 384 output tokens, temperature 0) is added. Each cell is `v1 -> current`.
+
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill tok/s/u | Decode tok/s/u | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 4 | 173 | 742 | 179.3 | 0.88 |
+    | p300x2 | 1024 | 256 | 32 | 128 | 6,182 | 166 | 18.9 | 19.68 |
+    | p300 | 128 | 128 | 1 | 4 | 189 | 678 | 117.5 | 1.27 |
+    | p300 | 1024 | 256 | 32 | 128 | 7,126 | 144 | 15.3 | 23.89 |
+
+    #### p300x2
+
+    Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 bits, for two dies). This revision, same setup: 1 user 5.60 ms TPOT, real text 177.7 tok/s, 8 users 12.66 ms, 32 users 1024/256 52.7 ms.
+
+    Latency, batch 1 (single user): v1 -> current
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 176 -> 173 | 726 -> 742 | 23.3 -> 5.6 | 42.8 -> **179.3** (+319 %) | 3.14 -> 0.88 |
+    | 1,024 | 256 | 327 -> 330 | 3,130 -> 3,102 | 23.4 -> 5.7 | 42.7 -> **174.9** (+309 %) | 6.30 -> 1.79 |
+    | 4,096 | 256 | 948 -> 943 | 4,322 -> 4,346 | 23.6 -> 5.9 | 42.4 -> **168.9** (+298 %) | 6.96 -> 2.45 |
+    | 16,384 | 256 | 3,796 -> 3,777 | 4,316 -> 4,338 | 23.8 -> 6.2 | 41.9 -> **162.2** (+287 %) | 9.88 -> 5.35 |
+    | 32,768 | 256 | 7,906 -> 7,919 | 4,145 -> 4,138 | 24.2 -> 6.4 | 41.4 -> **155.2** (+275 %) | 14.07 -> 9.56 |
+    | 65,536 | 256 | 17,263 -> 17,247 | 3,796 -> 3,800 | 24.8 -> 7.1 | 40.3 -> **141.8** (+252 %) | 23.59 -> 19.05 |
+    | 130,816 | 256 | 40,072 -> 40,111 | 3,265 -> 3,261 | 26.0 -> 8.2 | 38.5 -> **121.6** (+216 %) | 46.70 -> 42.21 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 42.8 -> **177.7 tok/s** (+315 %).
+
+    Concurrency, 128 input / 128 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 470 -> 465 | 30.5 -> 8.4 | 32.8 -> 119.0 | 59.0 -> **166.9** (+183 %) | 4.34 -> 1.53 |
+    | 4 | 16 | 935 -> 935 | 36.6 -> 9.3 | 27.3 -> 107.9 | 91.5 -> **242.5** (+165 %) | 5.59 -> 2.11 |
+    | 8 | 32 | 1,613 -> 1,609 | 47.4 -> 12.8 | 21.1 -> 78.4 | 134.0 -> **318.0** (+137 %) | 7.64 -> 3.23 |
+    | 16 | 64 | 2,991 -> 2,951 | 72.0 -> 18.5 | 13.9 -> 54.1 | 168.4 -> **387.6** (+130 %) | 12.16 -> 5.29 |
+    | 32 | 128 | 5,582 -> 5,490 | 111.2 -> 35.7 | 9.0 -> 28.0 | 208.1 -> **408.0** (+96 %) | 19.74 -> 10.05 |
+
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 776 -> 777 | 29.7 -> 7.9 | 33.7 -> 126.6 | 61.3 -> **183.6** (+199 %) | 8.35 -> 2.78 |
+    | 4 | 16 | 1,297 -> 1,291 | 37.4 -> 10.1 | 26.7 -> 98.9 | 94.4 -> **266.0** (+182 %) | 10.84 -> 3.87 |
+    | 8 | 32 | 2,275 -> 2,279 | 49.7 -> 14.7 | 20.1 -> 68.0 | 136.9 -> **339.8** (+148 %) | 14.95 -> 6.03 |
+    | 16 | 64 | 3,611 -> 3,570 | 79.6 -> 25.8 | 12.6 -> 38.8 | 171.3 -> **406.4** (+137 %) | 23.93 -> 10.15 |
+    | 32 | 128 | 6,181 -> 6,182 | 127.7 -> 52.9 | 7.8 -> 18.9 | 211.3 -> **416.7** (+97 %) | 38.73 -> 19.68 |
+
+    #### p300
+
+    Latency, batch 1 (single user): v1 -> current
+
+    | Input tokens | Output tokens | TTFT (ms) | Prefill tok/s | TPOT (ms) | Decode tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 128 | 128 | 192 -> 189 | 668 -> 678 | 25.4 -> 8.5 | 39.4 -> **117.5** (+198 %) | 3.41 -> 1.27 |
+    | 1,024 | 256 | 385 -> 383 | 2,661 -> 2,675 | 25.4 -> 8.6 | 39.4 -> **115.7** (+194 %) | 6.86 -> 2.59 |
+    | 4,096 | 256 | 1,123 -> 1,122 | 3,647 -> 3,650 | 25.5 -> 8.8 | 39.2 -> **113.3** (+189 %) | 7.64 -> 3.37 |
+    | 16,384 | 256 | 4,490 -> 4,486 | 3,649 -> 3,653 | 25.8 -> 9.1 | 38.8 -> **110.2** (+184 %) | 11.07 -> 6.80 |
+    | 32,768 | 256 | 9,350 -> 9,317 | 3,505 -> 3,517 | 26.1 -> 9.4 | 38.3 -> **106.6** (+178 %) | 16.00 -> 11.71 |
+    | 65,536 | 256 | 20,185 -> 20,173 | 3,247 -> 3,249 | 26.7 -> 10.0 | 37.4 -> **99.9** (+167 %) | 27.00 -> 22.73 |
+    | 130,816 | 256 | 45,995 -> 46,010 | 2,844 -> 2,843 | 27.9 -> 11.2 | 35.8 -> **89.5** (+150 %) | 53.11 -> 48.86 |
+
+    Real text, single user (12 chat prompts x 384 output tokens, temperature 0; median per prompt): 39.4 -> **117.1 tok/s** (+197 %).
+
+    Concurrency, 128 input / 128 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 374 -> 482 | 32.7 -> 11.2 | 30.6 -> 89.6 | 54.9 -> **134.7** (+145 %) | 4.74 -> 1.90 |
+    | 4 | 16 | 959 -> 945 | 41.4 -> 12.8 | 24.1 -> 78.2 | 82.3 -> **199.1** (+142 %) | 6.22 -> 2.58 |
+    | 8 | 32 | 1,693 -> 1,687 | 57.1 -> 17.3 | 17.5 -> 57.8 | 114.3 -> **263.1** (+130 %) | 8.96 -> 3.89 |
+    | 16 | 64 | 3,164 -> 3,175 | 89.4 -> 23.7 | 11.2 -> 42.2 | 141.1 -> **332.9** (+136 %) | 14.52 -> 6.17 |
+    | 32 | 128 | 6,054 -> 5,943 | 134.4 -> 46.5 | 7.4 -> 21.5 | 177.6 -> **344.6** (+94 %) | 23.08 -> 11.86 |
+
+    Concurrency, 1024 input / 256 output tokens: v1 -> current
+
+    | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
+    | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 2 | 8 | 866 -> 861 | 32.8 -> 10.7 | 30.5 -> 93.6 | 55.5 -> **142.6** (+157 %) | 9.22 -> 3.59 |
+    | 4 | 16 | 1,503 -> 1,499 | 42.1 -> 13.3 | 23.8 -> 75.1 | 83.8 -> **210.3** (+151 %) | 12.23 -> 4.90 |
+    | 8 | 32 | 2,653 -> 2,631 | 59.3 -> 19.0 | 16.9 -> 52.7 | 115.2 -> **273.0** (+137 %) | 17.79 -> 7.49 |
+    | 16 | 64 | 4,161 -> 4,161 | 97.7 -> 31.0 | 10.2 -> 32.3 | 140.9 -> **338.8** (+140 %) | 29.07 -> 12.06 |
+    | 32 | 128 | 7,135 -> 7,126 | 154.6 -> 65.3 | 6.5 -> 15.3 | 175.9 -> **344.0** (+96 %) | 46.55 -> 23.89 |
+
+    ### Prefix caching
+    Measured 2026-10-28 on p300x2, one user, temperature 0: the same build served with caching off and on. TTFT of a
+    prompt (Python source from this repo) sent a second time, and of each turn of a chat that opens with an 8k-token code
+    document and resends the conversation so far (as every chat client does):
+
+    | Request | caching off | caching on |
+    | --- | ---: | ---: |
+    | 7,160-token prompt, sent again | 1.79 s | 0.37 s (4.8x) |
+    | 22,815-token prompt, sent again | 5.81 s | 0.36 s (16x) |
+    | chat turns 2-6 (7.6k-8.2k tokens) | 1.94-2.08 s | 0.52-0.68 s |
+
+    Prompts seen for the first time are unchanged: no-hit rows at 128 / 2,048 / 8,192 input tokens (1 user) and 128/128 at
+    32 users, TTFT and TPOT within 1 % (1 user 128/128: TTFT 171 / 174 ms, TPOT 5.59 / 5.61 ms). Two dies (p300): a 25,113-token prompt sent again 7.70 -> 0.53 s, chat turns 2-4 0.62-0.63 s (turn 1, uncached, 2.35 s). Greedy output with caching on matched caching off on every resent prompt and on 9 of 10 chat turns.
+  limitations: |
+    - Expert weights run at reduced precision (bfp4 routed experts on two dies), so output can differ from the bf16
+      original where two candidate tokens are close; see Accuracy.
+    - Qwen's agentic benchmarks (SWE-Bench and others) were not run; the evals ran on the p300x2 profile only.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
+    - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
+      gets no benefit, and the shared tokens past the last boundary are prefilled again. Requests with images are not
+      cached. With caching on, a resumed prompt's output can differ from an uncached run where two candidate tokens are
+      nearly tied (greedy output differed on 1 of 10 chat turns).
+    - The device sampler supports `top_k` up to 32; the checkpoint's default `top_k` 40 and any larger value are
+      clamped to 32.
+    - Startup takes about 10 minutes on p300x2.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
+      a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
+      model's.
+  related: |
+    - [raahemnabeel/qwen3-coder-next-v1](https://huggingface.co/raahemnabeel/qwen3-coder-next-v1): the previous
+      version of this package (the `v1` columns above), replaced by this one.
+  license:
+    id: apache-2.0

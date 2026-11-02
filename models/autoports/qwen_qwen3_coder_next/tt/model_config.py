@@ -47,6 +47,19 @@ class Qwen35MoeModelArgs(Qwen36ModelArgs):
     def __init__(self, mesh_device=None, max_batch_size=1, max_seq_len=2048, **kwargs):
         os.environ.setdefault("HF_MODEL", HF_MODEL_ID)
         super().__init__(mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len, **kwargs)
+        # QWEN35_DECODE_REPLICATED=1 (TP meshes): decode keeps the residual replicated, one all-reduce per layer boundary
+        # (models/demos/blackhole/qwen36/tt/decode_boundary.py; fusion step 3): the plain decode steps; the MTP head and
+        # verify passes feed fractured rows and keep the reduce-scatter contract (the layer dispatches on the width).
+        self.decode_replicated = (
+            os.environ.get("QWEN35_DECODE_REPLICATED", "0") == "1" and int(getattr(self, "num_devices", 1)) > 1
+        )
+        # QWEN35_FABRIC_BOUNDARY=1 (with the replicated residual): one-row decode steps run each layer boundary as one
+        # op (fabric all-reduce of the packed partial + residual add + RMSNorm, the residual flat on one core;
+        # models/demos/blackhole/qwen36/tt/fabric_boundary/ops.py); wider steps keep the replicated path.
+        self.fabric_boundary = self.decode_replicated and os.environ.get("QWEN35_FABRIC_BOUNDARY", "0") == "1"
+        # decode steps of up to this many rows take the fabric boundary (2 rows 9.4 us vs ~18 for the replicated path;
+        # 8 rows ~19 vs ~20-24: no gain there)
+        self.fabric_boundary_rows = int(os.environ.get("QWEN35_FB_MAX_ROWS", "4"))
         text_config = self.hf_config.get_text_config()
         self.num_experts = int(text_config.num_experts)
         self.num_experts_per_tok = int(text_config.num_experts_per_tok)
