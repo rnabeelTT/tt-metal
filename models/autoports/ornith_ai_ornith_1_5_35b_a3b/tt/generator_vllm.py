@@ -570,9 +570,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         mask = kwargs.get("intermediate_prefill_mask")
         finals = [not bool(v) for v in torch.as_tensor(mask).reshape(-1).tolist()] if mask is not None else [True] * N
         vision = None
-        if self._has_visual(kwargs, "pixel_values_videos"):
+        if self._any_visual(kwargs, "pixel_values_videos"):
             raise NotImplementedError("video input is not served (QWEN35_VISION covers images)")
-        if self._has_visual(kwargs, "pixel_values"):
+        if self._any_visual(kwargs, "pixel_values"):
             if not self._vision:
                 raise NotImplementedError("text-only serving: start with QWEN35_VISION=1 to serve images")
             vision = [self._vision_for_user(kwargs, u) for u in range(N)]
@@ -639,8 +639,14 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                 self._mtp.end_prefill(tok0[0], plens[0])
             self._live_slots |= set(slots)
             return out, torch.zeros(N, dtype=torch.long)
-        if vision is not None and (any(starts) or not all(finals)):
-            raise NotImplementedError("image prompts are prefilled whole (no chunked prefill)")
+        # per request: an image prompt must be prefilled whole; text rows of the same batch may resume from a prefix-cache
+        # hit or run a chunk (prefill_serving runs every row on its own, and the plugin never gives an image prompt a hit)
+        whole = [u for u in range(N) if vision is not None and vision[u] is not None and (starts[u] or not finals[u])]
+        if whole:
+            raise NotImplementedError(
+                f"image prompts are prefilled whole (no chunked prefill / prefix-cache resume): rows {whole} "
+                f"starts {[starts[u] for u in whole]} final {[finals[u] for u in whole]}"
+            )
         out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, **chunked)
         self._live_slots |= set(slots)
         self._log_program_cache(
@@ -717,6 +723,14 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if isinstance(tt_out, torch.Tensor):
             return tt_out
         return super().process_decode_output_host(tt_out, is_tokens=is_tokens)
+
+    @staticmethod
+    def _any_visual(kwargs, key):
+        """True when ANY row of the step carries visual data (the plugin's per-row list holds None for a text row). The
+        shared ``_has_visual`` tests row 0 only: a text request ahead of an image request in one prefill step made the
+        whole step text, and the image rows were prefilled as bare placeholder tokens."""
+        v = kwargs.get(key)
+        return v is not None and any(x is not None and len(x) > 0 for x in v)
 
     def _vision_for_user(self, kwargs, u):
         """Request ``u``'s image rows for the prefill: (packed [n, H/TP] device rows from the tower, image_grid_thw) or
