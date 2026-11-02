@@ -86,6 +86,10 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   ~100k chars, coherent; 10 looping). All reasoning runs now use 81,920; hard sets halved to keep ~2 h (user): HLE 64,
   GPQA 99 of 198, LiveCodeBench v6 88 of 175, OJBench 32. Finished 32k text2 runs are extended exactly
   (extend_truncated.py --subsample 64: the same 64 of the 128 for Qwen3.5-122B and Ornith-1.5-122B).
+- Extension runs dropped (2026-11-02): extend_truncated.py is not exact with a presence penalty (vLLM penalizes output
+  tokens only; the continued request carries the first 32k as prompt, unpenalized). The partial Qwen3.5-122B extension
+  (31 of 58 continued) still had 23 answers at 81,920 (7 hard loops, 16 circling re-checks). 122B HLE at 81,920 is
+  skipped for now (user): ~4 h per 64 questions, the KV pool (1,575,488 tokens) holds ~19 full answers at once.
 - Ornith-1.5-35B HLE (2026-11-02 16:49) crashed the published server (image 9f0546abcdb8 lacks plugin 8b1f8b1, the
   image-split fix packaged 2026-10-30 but not released for this model); released through the same gate, then rerun.
 
