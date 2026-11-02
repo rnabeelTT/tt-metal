@@ -618,8 +618,10 @@ def sharded_decode_matmul(
     prefill_progcfg_fn,
     prefill_k,
     decode_out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    out_dtype=None,
 ):
-    """DRAM-WIDTH_SHARDED weight matmul; branches on M (decode vs prefill).
+    """DRAM-WIDTH_SHARDED weight matmul; branches on M (decode vs prefill). ``out_dtype``: output dtype (None = the
+    matmul default, unchanged behaviour).
 
     Decode (M<=32): L1-sharded act + DRAM-sharded kernel. Prefill: 2D matmul.
     Gate on x.shape[-2] (seq/M), not x.shape[1] (Z=1 in both modes). Decode result placement is
@@ -636,6 +638,7 @@ def sharded_decode_matmul(
             compute_kernel_config=compute_cfg,
             program_config=decode_progcfg,
             memory_config=ttnn.L1_WIDTH_SHARDED_MEMORY_CONFIG,
+            **({"dtype": out_dtype} if out_dtype is not None else {}),
         )
         if not already_sharded:
             ttnn.deallocate(x_sh)
@@ -644,7 +647,12 @@ def sharded_decode_matmul(
     rows = PREFILL_MAX_ROWS or seq
     if rows >= seq:
         return ttnn.linear(
-            x, weight, compute_kernel_config=compute_cfg, program_config=pc, memory_config=ttnn.DRAM_MEMORY_CONFIG
+            x,
+            weight,
+            compute_kernel_config=compute_cfg,
+            program_config=pc,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **({"dtype": out_dtype} if out_dtype is not None else {}),
         )
     # PREFILL_MAX_ROWS (set by a caller that runs these modules at full width on ONE device, e.g. the GDN qkvzab
     # projection with N = 386 tiles): the 2D config's per-core output block grows with the rows and a long prefill
@@ -663,6 +671,7 @@ def sharded_decode_matmul(
                 compute_kernel_config=compute_cfg,
                 program_config=prefill_progcfg_fn(r1 - r0, prefill_k, weight.shape[-1]),
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                **({"dtype": out_dtype} if out_dtype is not None else {}),
             )
         )
         ttnn.deallocate(xs)
