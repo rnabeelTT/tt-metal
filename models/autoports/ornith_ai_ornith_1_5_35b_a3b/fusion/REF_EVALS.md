@@ -76,6 +76,10 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   encoder budget was full, killing the engine under 32 concurrent HLE requests with images; crash at 21:07): Ornith-1.5-122B image b5412d165536, Qwen3.5-122B ca9132847bd2; gate greedy 8/8 sequential + concurrent,
   MM_BURST 128/128, TPOT 7.53 / 7.54 ms (133 tok/s, 1 user), hub pull smoke the same.
 
+- Stopped (user, 2026-11-02): no more precision ablations; the quick benchmarks run first and the cards publish from
+  those, long agentic runs after (evalq `#LATER-AGENT`). The stage-7 variant (o122s7, baseline_s7 policy) never booted:
+  out of DRAM at a 1.72M and a 1.6M KV pool (o122s7 files under runs/variants only).
+
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
 | Benchmark | Card | Ours | Status | Harness / note |
