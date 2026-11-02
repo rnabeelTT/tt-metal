@@ -1,0 +1,10 @@
+- MTP speculative decoding is off: the MTP verify pass still runs the unfused rows path, which is slower than the fused
+  plain step. A fused multi-token verify is the way back to MTP.
+- The card rows were measured on the default `p300x2` profile and on `p300x2-longctx` (single-user rows). The `-burst`
+  and `-text` profiles run the same decode code (they change prefill batching and the vision tower); the p150x4
+  profiles run the same mesh but were not run on p150 boards.
+- The device sampler supports `top_k` up to 32.
+- Benchmark evals ran with thinking off; IFEval and LiveCodeBench on subsets (100 / 50 questions).
+- v1's `-longctx` profiles do not start on this image (vLLM rejects a 2048-token chunk budget below
+  one image item's 4096 tokens); this bundle chunks at 4096. The v1 longctx numbers above were measured with
+  `--max-num-batched-tokens 4096` added.

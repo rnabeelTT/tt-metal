@@ -424,6 +424,10 @@ def main():
                 check_experts(dev, I=128 * mc, dtype=ttnn.bfloat4_b, trials=1, one_program=True)
                 for m in [int(v) for v in os.environ.get("ROWS_LIST", "2,8,32").split(",")]:
                     check_rows(dev, m, I=128 * mc, dtype=ttnn.bfloat4_b, trials=1)
+        if "q122" in what:  # Qwen3.5-122B-A10B on 4 dies: hidden 3072 (12 tiles per bank), 256 expert columns, bfp4 experts
+            check_experts(dev, H=3072, I=256, dtype=ttnn.bfloat4_b, trials=1)
+            for m in [int(v) for v in os.environ.get("ROWS_LIST", "1,2,8,16,32").split(",")]:
+                check_rows(dev, m, H=3072, I=256, dtype=ttnn.bfloat4_b, trials=1)
         if "time" in what:
             time_experts(dev)
         if "experts" in what:
