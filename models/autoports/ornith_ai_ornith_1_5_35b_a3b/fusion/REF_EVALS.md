@@ -80,11 +80,20 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   those, long agentic runs after (evalq `#LATER-AGENT`). The stage-7 variant (o122s7, baseline_s7 policy) never booted:
   out of DRAM at a 1.72M and a 1.6M KV pool (o122s7 files under runs/variants only).
 
+- Answer budget (user, 2026-11-02): the 32,768-token cap was ours, not the cards' (Qwen3.5 card: 81,920 for complex
+  benchmarks; the Ornith cards state none smaller, 128K+ for agents). At 32k, Ornith-1.5-35B GPQA-198 = 73.7 vs 89.2 with
+  44 answers (22%) cut (146/154 = 94.8% of the finished right); Qwen3.5-122B HLE 128: 115 of 128 cut (median thinking
+  ~100k chars, coherent; 10 looping). All reasoning runs now use 81,920; hard sets halved to keep ~2 h (user): HLE 64,
+  GPQA 99 of 198, LiveCodeBench v6 88 of 175, OJBench 32. Finished 32k text2 runs are extended exactly
+  (extend_truncated.py --subsample 64: the same 64 of the 128 for Qwen3.5-122B and Ornith-1.5-122B).
+- Ornith-1.5-35B HLE (2026-11-02 16:49) crashed the published server (image 9f0546abcdb8 lacks plugin 8b1f8b1, the
+  image-split fix packaged 2026-10-30 but not released for this model); released through the same gate, then rerun.
+
 ## Ornith-1.5-35B-A3B (card: ornith-ai/Ornith-1.5-35B-A3B; results averaged over 5 runs)
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| GPQA Diamond | 89.2 | | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
+| GPQA Diamond | 89.2 | (73.7 at 32k: 22% cut, superseded) | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
 | HLE (no tools) | 25.6 | | queued | text2 hle: 2,500 Qs (images included), official prompts; judged by Claude agents (card: Claude 4.6 Opus / o3-mini) |
 | HLE (with tools) | 33.4 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | staged | Harbor 0.25 + Terminus-2 json, T1.0/top_p 1.0, 128K, 4 h; 8 CPU per task (card 32), 1 run (card 5) |
