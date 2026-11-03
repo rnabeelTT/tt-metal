@@ -32,6 +32,8 @@ CUR=""; C=""
 save_logs() {  # keep the server log of a container before it is removed (a crashed server's log is the only evidence)
   [ -n "$1" ] && docker ps -a --format '{{.Names}}' | grep -qx "$1" && docker logs "$1" 2>&1 | grep -v DEBUG | tail -n 20000 > $R/serverlogs/$1_$(date +%m%d_%H%M%S).log; }
 mkdir -p $R/serverlogs
+follow_logs() {  # stream a server's log to disk from boot: a container that dies is auto-removed with its log (2026-11-02)
+  (docker logs -f "$1" 2>&1 | grep --line-buffered -v DEBUG > $R/serverlogs/$1_$(date +%m%d_%H%M%S).follow.log &) ; }
 stop_server() { [ -n "$C" ] && { save_logs $C; docker rm -f $C >/dev/null 2>&1; }; CUR=""; C=""; }
 
 serve() {  # <model>
@@ -42,6 +44,7 @@ serve() {  # <model>
   if [ -n "${VARIANT[$M]}" ]; then ${VARIANT[$M]}/run.sh $C > $L/serve.log 2>&1
   else tt-model serve ${REPO[$M]} --profile p300x2 --detach --port 20000 --no-update-check > $L/serve.log 2>&1; fi
   local t0=$(date +%s)
+  follow_logs $C
   until curl -sf localhost:20000/v1/models >/dev/null; do
     docker ps --format '{{.Names}}' | grep -qx $C || { echo "serve $M: server died $(date +%T)"; docker logs $C 2>&1 | grep -v DEBUG | tail -n 300 > $L/boot_fail.log; C=""; return 1; }
     sleep 10
@@ -91,7 +94,7 @@ run_task() {  # <model> <runner> <bench> [KEY=VAL ...]
                 --tasks $B --apply_chat_template --seed ${SEED:-42} --confirm_run_unsafe_code \
                 ${SAMPLE_N:+--samples "$(python3 -c 'import json,random,sys; n,t,b=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3]; print(json.dumps({b: sorted(random.Random(1234).sample(range(t), n))}))' $SAMPLE_N $TOTAL $B)"} \
                 --gen_kwargs "do_sample=True,temperature=$TEMPERATURE,top_p=$TOP_P,top_k=$TOP_K,max_gen_toks=${MAX_TOKENS:-32768}${PRESENCE_PENALTY:+,presence_penalty=$PRESENCE_PENALTY}" \
-                --output_path $OUT --log_samples
+                --output_path $OUT --log_samples --use_cache $R/lmcache/$L  # sqlite, one row per finished request: a run cut by the watchdog resumes
               python3 - $OUT <<'EOF'
 import json, sys, glob
 f = sorted(glob.glob(sys.argv[1] + "/**/results_*.json", recursive=True))[-1]
@@ -133,7 +136,7 @@ EOF
 # adopt a server that is already up (e.g. after a restart of this runner) instead of waiting for it to go away
 for m in "${!NAME[@]}"; do
   if docker ps --format '{{.Names}}' | grep -qx "tt-model-${NAME[$m]}-p300x2" && curl -sf localhost:20000/v1/models >/dev/null; then
-    CUR=$m; C=tt-model-${NAME[$m]}-p300x2; echo "adopted running server $m $(date +%T)"
+    CUR=$m; C=tt-model-${NAME[$m]}-p300x2; echo "adopted running server $m $(date +%T)"; follow_logs $C
   fi
 done
 while systemctl --user is-active -q cards-release || { [ -z "$CUR" ] && chips_busy; }; do sleep 60; done

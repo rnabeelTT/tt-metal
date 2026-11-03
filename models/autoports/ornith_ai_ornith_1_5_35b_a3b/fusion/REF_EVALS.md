@@ -90,6 +90,13 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
   tokens only; the continued request carries the first 32k as prompt, unpenalized). The partial Qwen3.5-122B extension
   (31 of 58 continued) still had 23 answers at 81,920 (7 hard loops, 16 circling re-checks). 122B HLE at 81,920 is
   skipped for now (user): ~4 h per 64 questions, the KV pool (1,575,488 tokens) holds ~19 full answers at once.
+- 122B hard reasoning sets dropped from the 122B cards (user, 2026-11-03): Qwen3.5-122B at card settings and 81,920
+  tokens ran ~260 tok/s aggregate at 20 users and most answers hit the cap: HMMT Nov 18 of 21 finished requests cut
+  (2 hard loops, the rest coherent re-checking), HMMT Feb 16 of 30, IFBench mean 14.3k tokens; GPQA 99 reached 34
+  in 150 min. Ornith-1.5-122B shares the code and the pattern; Ornith-1.5-35B does not (GPQA 7% cut). Dropped: GPQA,
+  LiveCodeBench, HMMT Feb/Nov, OJBench, PolyMATH. Not tested: whether 8-bit experts (o122p8) shorten the thinking.
+  Lost to the watchdog overnight: q122 GPQA, IFEval (537/541), LiveCodeBench (lm-eval kept no partial results; it now
+  runs with --use_cache and resumes); text2 runs resume from responses.jsonl.
 - Ornith-1.5-35B HLE (2026-11-02 16:49) crashed the published server (image 9f0546abcdb8 lacks plugin 8b1f8b1, the
   image-split fix packaged 2026-10-30 but not released for this model); released through the same gate, then rerun.
 
