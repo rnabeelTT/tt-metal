@@ -691,6 +691,10 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.model._req_video_grid_thw = None
             self.model._build_request_rope(tokens, vision_tokens)
             vkw = {"rope_staged": True}
+        else:
+            # text: 1D RoPE. The bucket rebuilds the table only at chunk_start 0, so a continuation (prefix-cache resume,
+            # chunked prefill) would otherwise slice the M-RoPE table an earlier image request left staged
+            self.model._build_request_rope(tokens, None)
         logits, sh = None, None
         for cs, ce in zip(bounds[:-1], bounds[1:]):
             seg = tokens[:, cs - start : ce - start]
