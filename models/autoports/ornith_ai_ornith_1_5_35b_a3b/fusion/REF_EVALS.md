@@ -1,5 +1,35 @@
 # Original-card benchmarks on our packages
 
+## State: stopped 2026-11-03 16:30 (user); how to resume
+
+On the cards: Ornith-1.5-35B only (raahemnabeel/ornith-1.5-35b-a3b README, hub commit 4bfe9f96; source
+`tt-model-fast.yaml` card block): GPQA-Diamond 0.859 +/- 0.035 (99 of 198) and HLE no tools 0.188 +/- 0.096 (64 of
+2,500), thinking on at the card's sampling, 81,920-token answers; both within one standard error of the card (89.2,
+25.6). Nothing else measured so far is both finished and within its error bar: Ornith-1.5-122B HLE 18.0 +/- 6.7 vs
+37.68 and SciCode 40.3 vs 53.8 are not, and Qwen3.5-122B / Qwen3-Coder-Next have no finished rows.
+
+Stopped: the queue (evalq unit inactive, runs/evalq.pause present), all eval clients, the Qwen3.5-122B server. Partial
+runs keep their finished answers and resume when their queue line is run again (text2 / qtext / vision resume from
+responses.jsonl; lm-eval now from --use_cache runs/lmcache/<label>):
+
+| run (box: ~/ornith-fusion/runs) | done | note |
+| --- | ---: | --- |
+| ref_q122_longbench_v2 | 10 / 64 | mean 7.6k tokens per answer, none capped |
+| ref_q122_ifbench | 226 / 300 | mean 14.3k tokens, 8 capped |
+| ref_q122_hmmt_feb25, _nov25 | 30 / 120, 21 / 120 | dropped from the cards (most answers capped) |
+| q122 IFEval, GPQA, LiveCodeBench | 0 | lost to the watchdog before lm-eval cached anything |
+
+Raw outputs behind the card rows and the partial runs (responses, reasoning, lm-eval samples, HLE judgments):
+`fusion/results/evals_2026-11-03.tar.xz` (unpack in ~/ornith-fusion/runs). Queue as it stood: `fusion/evalq/evalq.txt`
+(first active lines: q122 longbench_v2, ifbench, ifeval, fullstackbench en/zh, bfcl_v4, cn aider diff/whole, q122 qtext
+x9, q122 vision x31); runner `fusion/tools/evalq.sh`, watcher `fusion/evalq/wait_run.sh`.
+
+To resume on this box: `rm runs/evalq.pause`, then from ~/ornith-fusion/runs
+`systemd-run --user --unit evalq --working-directory=$PWD bash -c "exec ./evalq.sh >> evalq.log 2>&1"`, and watch each
+run with `wait_run.sh <run label>`. Before resuming, size each q122 set to fit 2 h at ~260 tok/s aggregate (about 1.9M
+output tokens per run); the qtext sets at 400 items likely do not fit. Open question, not tested (user chose to drop the
+hard sets instead): whether the 8-bit-expert build (variants/o122p8) shortens the 122B models' thinking.
+
 User request 2026-10-28: every benchmark the official Hugging Face card reports goes on our card, measured the way the
 card measures it, next to the card's figure. Decisions (user, 2026-10-28):
 - LLM judges: Claude agents in this session judge (no external APIs). Judge inputs are written as JSONL by the harness.
