@@ -130,7 +130,74 @@ card:
     in the system prompt and parses `<use_mcp_tool>` blocks from `content` itself; both work against this server. The
     package serves the model only, bring your own search, browse and code tools.
   performance: |
-    PENDING
+    ### Accuracy
+    Pending. MiroMind's own scores (BrowseComp, BrowseComp-ZH, GAIA, HLE) are on the
+    [original model card](https://huggingface.co/miromind-ai/MiroThinker-1.7-mini) and
+    [GitHub](https://github.com/MiroMindAI/MiroThinker); measurements of this package on those benchmarks will be
+    added here.
+
+    ### Performance
+
+    Served as shipped (`tt-model serve --profile <profile>`), vLLM's random-token benchmark with `ignore_eos`, medians; one request per user at a time.
+
+    #### p300x2 (four dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 95 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 164 | 10.2 | 98 | 88 |
+    | 1 | 1,024 / 256 | 410 | 10.5 | 95 | 80 |
+    | 1 | 4,096 / 256 | 837 | 11.1 | 90 | 67 |
+    | 1 | 32,768 / 256 | 3,585 | 13.1 | 76 | 37 |
+    | 8 | 128 / 128 | 543 | 14.8 | 68 | 427 |
+    | 8 | 1,024 / 256 | 1,355 | 15.6 | 64 | 391 |
+    | 32 | 1,024 / 256 | 5,802 | 29.3 | 34 | 660 |
+
+    #### p300 (two dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 86 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 139 | 11.3 | 89 | 82 |
+    | 1 | 1,024 / 256 | 379 | 11.7 | 85 | 73 |
+    | 1 | 4,096 / 256 | 854 | 12.7 | 78 | 59 |
+    | 1 | 32,768 / 256 | 4,685 | 16.7 | 60 | 29 |
+    | 8 | 128 / 128 | 652 | 19.3 | 52 | 331 |
+    | 8 | 1,024 / 256 | 1,620 | 20.7 | 48 | 303 |
+    | 32 | 1,024 / 256 | 7,203 | 42.0 | 24 | 488 |
+
+    #### p150 (one die)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 77 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 156 | 12.9 | 77 | 71 |
+    | 1 | 1,024 / 256 | 439 | 13.6 | 74 | 64 |
+    | 1 | 4,096 / 256 | 961 | 15.1 | 66 | 50 |
+    | 1 | 32,768 / 256 | 6,657 | 22.2 | 45 | 21 |
+    | 8 | 128 / 128 | 872 | 27.5 | 36 | 238 |
+    | 8 | 1,024 / 256 | 2,099 | 29.5 | 34 | 217 |
+    | 32 | 1,024 / 256 | 9,787 | 65.0 | 15 | 331 |
+
+    ### Prefix caching
+
+    On for every profile. The same real-text prompt sent twice on a freshly started server, time to first token in
+    seconds: first send / resend with the prefix cached. The first send above 8,192 tokens also compiles that prefill
+    length once (later prompts of that length do not pay it; see the 32,768-token rows above for an uncached prompt
+    with compiled programs).
+
+    | prompt tokens | p300x2 first / cached | p300 first / cached | p150 first / cached |
+    | ---: | ---: | ---: | ---: |
+    | 1,563 | 1.07 / 1.56 | 0.74 / 1.17 | 0.86 / 1.19 |
+    | 7,239 | 2.87 / 1.32 | 2.84 / 1.06 | 3.58 / 1.09 |
+    | 22,894 | 11.78 / 1.44 | 13.53 / 1.19 | 18.73 / 1.23 |
+
+    A cache hit costs about 1.1-1.5 s whatever the prompt length. Against compiled uncached prefill (3.6 / 4.7 / 6.7 s at
+    32,768 tokens on p300x2 / p300 / p150) it pays for long shared prefixes, such as an agent's growing conversation;
+    for prompts of a few thousand tokens an uncached prefill is as fast or faster.
   limitations: |
     - Text only (the checkpoint has no vision tower).
     - Routed expert weights run at bfp4 on every profile (the fused decode reads that layout), so output can differ from
@@ -138,6 +205,9 @@ card:
     - Context: 256,000 tokens on two and four dies (the checkpoint advertises 262,144), 98,304 on one die.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on those boards.
     - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - With prefix caching, a cached prompt can continue differently from the same prompt sent cold (greedy outputs
+      matched on 4 of 9 prompt / profile pairs in the bring-up check): the cached path computes attention in chunks, so
+      near-tied tokens can flip. Both continuations were coherent. `--no-enable-prefix-caching` makes repeats identical.
     - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
       without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
       a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
