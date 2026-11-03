@@ -7,6 +7,7 @@ Env: HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (coun
 Writes <out_dir>/result.json.
 """
 
+import traceback
 import json
 import os
 import sys
@@ -107,4 +108,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        sys.stdout.flush()
+        os._exit(1)  # the hybrid prep thread pool and device threads otherwise keep a failed run alive
+    sys.stdout.flush()
+    os._exit(0)

@@ -6,3 +6,4 @@ runs/*
 routing/*.npz
 serve/server.log
 __pycache__/
+image_src/

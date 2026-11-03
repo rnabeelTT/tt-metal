@@ -263,6 +263,23 @@ def _add(a, b):
     return c
 
 
+def _host_inputs(x4, scores, ids):
+    """DRAM copies of what the host step reads (x, scores, ids); the L1 originals are freed. In a trace these stay
+    allocated for the trace's life, and the router leaves scores/ids in L1 at decode: 60 layers of live L1 tensors
+    clash with later programs' static circular buffers."""
+    return _to_dram(x4, free=False), _to_dram(scores, free=True), _to_dram(ids, free=True)
+
+
+def _to_dram(t, free):
+    # to_memory_config returns its input when the config already matches, so only L1 tensors are copied (and freed)
+    if t.memory_config().buffer_type != ttnn.BufferType.L1:
+        return t
+    d = ttnn.to_memory_config(t, ttnn.DRAM_MEMORY_CONFIG)
+    if free:
+        ttnn.deallocate(t)
+    return d
+
+
 def _forward(self, x, mode=None, partial=False, logits=None):
     from .seg import SEG
 
@@ -287,13 +304,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         B = self._hyb_bufs.get(T)
         if B is None:
             raise RuntimeError(f"layer {self.layer_num}: no hybrid buffers for T={T}; run one eager decode step first")
-        # the host step reads scores/ids/x at replay, so they stay allocated for the life of the trace; the router
-        # leaves them in L1 at decode, and 60 layers of live L1 tensors clash with later programs' static CBs
-        dram = ttnn.DRAM_MEMORY_CONFIG
-        h_sc, h_ids = ttnn.to_memory_config(scores, dram), ttnn.to_memory_config(ids, dram)
-        ttnn.deallocate(scores)
-        ttnn.deallocate(ids)
-        h_x = ttnn.to_memory_config(x4, dram) if x4.memory_config().buffer_type == ttnn.BufferType.L1 else x4
+        h_x, h_sc, h_ids = _host_inputs(x4, scores, ids)
         SEG.split(lambda: _host_step(self, h_x, h_sc, h_ids, T, "decode", B))
         routed = _routed(self, x4, B["sc"], B["ids"], T, mode)
         if self._dyn_attrs is not None:
@@ -304,8 +315,13 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         return _finish(self, out, orig, partial)
 
     # eager: same decision, uploaded as fresh tensors; decode also (re)creates the persistent buffers for capture
-    dec = _decide(self, x4, scores, ids, T, mode)
     if mode != "prefill":
+        # same DRAM copies as the capture path, so their programs are compiled before capture
+        h_x, h_sc, h_ids = _host_inputs(x4, scores, ids)
+        dec = _decide(self, h_x, h_sc, h_ids, T, mode)
+        scores, ids = h_sc, h_ids
+        if h_x is not x4:
+            ttnn.deallocate(h_x)
         B = _bufs(self, T, scores, ids, x4)
         _write_bufs(self, B, dec)
         routed = _routed(self, x4, B["sc"], B["ids"], T, mode)
@@ -317,6 +333,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
         return _finish(self, out, orig, partial)
+    dec = _decide(self, x4, scores, ids, T, mode)
     t1 = time.perf_counter()
     n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
     n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
