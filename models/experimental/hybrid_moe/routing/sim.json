@@ -1,0 +1,50 @@
+{
+ "prompts": 16,
+ "tokens": 4096,
+ "layers": 48,
+ "k": 8,
+ "results": {
+  "0.3": {
+   "static": 0.5018,
+   "static+lru_d0.1": 0.6556,
+   "static+lru_d0.25": 0.7064,
+   "static+lru_d0.5": 0.7354,
+   "static+lru_d1.0": 0.7848
+  },
+  "0.4": {
+   "static": 0.6124,
+   "static+lru_d0.1": 0.7669,
+   "static+lru_d0.25": 0.7988,
+   "static+lru_d0.5": 0.8201,
+   "static+lru_d1.0": 0.8605
+  },
+  "0.5": {
+   "static": 0.7073,
+   "static+lru_d0.1": 0.849,
+   "static+lru_d0.25": 0.8707,
+   "static+lru_d0.5": 0.8848,
+   "static+lru_d1.0": 0.913
+  },
+  "0.6": {
+   "static": 0.7879,
+   "static+lru_d0.1": 0.91,
+   "static+lru_d0.25": 0.9244,
+   "static+lru_d0.5": 0.9319,
+   "static+lru_d1.0": 0.9492
+  },
+  "0.7": {
+   "static": 0.8608,
+   "static+lru_d0.1": 0.9556,
+   "static+lru_d0.25": 0.9617,
+   "static+lru_d0.5": 0.9638,
+   "static+lru_d1.0": 0.9727
+  }
+ },
+ "consecutive_step_overlap": 0.3469,
+ "per_layer_mass_in_top_frac": {
+  "0.1": 0.278,
+  "0.25": 0.5319,
+  "0.5": 0.7935,
+  "0.75": 0.9363
+ }
+}

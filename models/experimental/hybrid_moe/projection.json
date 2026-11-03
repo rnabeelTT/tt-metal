@@ -1,0 +1,114 @@
+{
+ "Qwen3.5-122B-A10B (validation)": {
+  "expert_pool_GB": 65.2,
+  "device_capacity_frac": 0.5,
+  "host_RAM_needed_GB": 32.6,
+  "tok_s_if_all_on_device": [
+   131.6,
+   131.6
+  ],
+  "sync_ms_per_token": 4.91,
+  "static": {
+   "hit": 0.707,
+   "miss_MB_per_token": 596.6,
+   "tok_s": [
+    39.4,
+    39.4
+   ],
+   "pcie_promotion_load": null
+  },
+  "dynamic": {
+   "hit": 0.913,
+   "miss_MB_per_token": 177.3,
+   "tok_s": [
+    61.2,
+    61.2
+   ],
+   "pcie_promotion_load": 0.78
+  }
+ },
+ "Qwen3.5-397B-A17B": {
+  "expert_pool_GB": 217.4,
+  "device_capacity_frac": 0.51,
+  "host_RAM_needed_GB": 107.2,
+  "tok_s_if_all_on_device": [
+   77.4,
+   105.3
+  ],
+  "sync_ms_per_token": 6.14,
+  "static": {
+   "hit": 0.713,
+   "miss_MB_per_token": 1218.7,
+   "tok_s": [
+    22.1,
+    23.9
+   ],
+   "pcie_promotion_load": null
+  },
+  "dynamic": {
+   "hit": 0.916,
+   "miss_MB_per_token": 358.6,
+   "tok_s": [
+    37.3,
+    42.8
+   ],
+   "pcie_promotion_load": 1.1
+  }
+ },
+ "Qwen3-235B-A22B-2507": {
+  "expert_pool_GB": 127.7,
+  "device_capacity_frac": 0.88,
+  "host_RAM_needed_GB": 14.8,
+  "tok_s_if_all_on_device": [
+   59.8,
+   67.2
+  ],
+  "sync_ms_per_token": 9.62,
+  "static": {
+   "hit": 0.861,
+   "miss_MB_per_token": 1111.4,
+   "tok_s": [
+    19.9,
+    20.6
+   ],
+   "pcie_promotion_load": null
+  },
+  "dynamic": {
+   "hit": 0.973,
+   "miss_MB_per_token": 218.0,
+   "tok_s": [
+    32.2,
+    34.2
+   ],
+   "pcie_promotion_load": 0.53
+  }
+ },
+ "MiniMax-M2 (230B-A10B)": {
+  "expert_pool_GB": 126.4,
+  "device_capacity_frac": 0.92,
+  "host_RAM_needed_GB": 10.7,
+  "tok_s_if_all_on_device": [
+   101.9,
+   131.6
+  ],
+  "sync_ms_per_token": 6.35,
+  "static": {
+   "hit": 0.861,
+   "miss_MB_per_token": 549.8,
+   "tok_s": [
+    35.7,
+    38.8
+   ],
+   "pcie_promotion_load": null
+  },
+  "dynamic": {
+   "hit": 0.973,
+   "miss_MB_per_token": 107.8,
+   "tok_s": [
+    54.1,
+    61.5
+   ],
+   "pcie_promotion_load": 0.47
+  }
+ }
+}

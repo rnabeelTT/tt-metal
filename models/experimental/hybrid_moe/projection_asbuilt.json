@@ -1,0 +1,130 @@
+{
+ "Qwen3.5-122B-A10B (validation)": {
+  "expert_pool_GB": 65.2,
+  "device_capacity_frac": 0.5,
+  "host_RAM_needed_GB": 32.6,
+  "tok_s_if_all_on_device": [
+   131.6,
+   131.6
+  ],
+  "sync_ms_per_token": 25.68,
+  "dynamic": {
+   "hit": [
+    0.913,
+    0.913
+   ],
+   "promoted_share_of_misses": [
+    1.0,
+    1.0
+   ],
+   "miss_MB_per_token": [
+    177.3,
+    177.3
+   ],
+   "miss_ms_per_token": [
+    3.82,
+    3.82
+   ],
+   "tok_s": [
+    27.0,
+    27.0
+   ]
+  }
+ },
+ "Qwen3.5-397B-A17B": {
+  "expert_pool_GB": 217.4,
+  "device_capacity_frac": 0.51,
+  "host_RAM_needed_GB": 107.2,
+  "tok_s_if_all_on_device": [
+   77.4,
+   105.3
+  ],
+  "sync_ms_per_token": 32.1,
+  "dynamic": {
+   "hit": [
+    0.916,
+    0.916
+   ],
+   "promoted_share_of_misses": [
+    1.0,
+    1.0
+   ],
+   "miss_MB_per_token": [
+    358.6,
+    358.6
+   ],
+   "miss_ms_per_token": [
+    7.73,
+    7.73
+   ],
+   "tok_s": [
+    20.3,
+    19.0
+   ]
+  }
+ },
+ "Qwen3-235B-A22B-2507": {
+  "expert_pool_GB": 127.7,
+  "device_capacity_frac": 0.88,
+  "host_RAM_needed_GB": 14.8,
+  "tok_s_if_all_on_device": [
+   59.8,
+   67.2
+  ],
+  "sync_ms_per_token": 50.29,
+  "dynamic": {
+   "hit": [
+    0.973,
+    0.973
+   ],
+   "promoted_share_of_misses": [
+    1.0,
+    1.0
+   ],
+   "miss_MB_per_token": [
+    218.0,
+    218.0
+   ],
+   "miss_ms_per_token": [
+    4.7,
+    4.7
+   ],
+   "tok_s": [
+    14.3,
+    13.9
+   ]
+  }
+ },
+ "MiniMax-M2 (230B-A10B)": {
+  "expert_pool_GB": 126.4,
+  "device_capacity_frac": 0.92,
+  "host_RAM_needed_GB": 10.7,
+  "tok_s_if_all_on_device": [
+   101.9,
+   131.6
+  ],
+  "sync_ms_per_token": 33.17,
+  "dynamic": {
+   "hit": [
+    0.973,
+    0.973
+   ],
+   "promoted_share_of_misses": [
+    1.0,
+    1.0
+   ],
+   "miss_MB_per_token": [
+    107.8,
+    107.8
+   ],
+   "miss_ms_per_token": [
+    2.32,
+    2.32
+   ],
+   "tok_s": [
+    22.1,
+    23.2
+   ]
+  }
+ }
+}

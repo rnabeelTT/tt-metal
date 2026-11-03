@@ -1,0 +1,49 @@
+{
+ "roundtrip_us_per_layer": {
+  "one_trace": 93.9108004483084,
+  "split": 106.18373344186693,
+  "split_read": 119.19938357702146,
+  "split_write": 110.78983273667593,
+  "split_read_write": 196.2910833147665,
+  "overhead_us_per_layer": 102.3802828664581,
+  "overhead_ms_per_token_60_layers": 6.142816971987486
+ },
+ "h2d_bandwidth": {
+  "1.75MB_per_die_cq0": {
+   "GB_per_s_total": 21.23,
+   "ms_per_copy": 0.319
+  },
+  "1.75MB_per_die_cq1": {
+   "GB_per_s_total": 22.29,
+   "ms_per_copy": 0.304
+  },
+  "1.75MB_per_die_cq1_busy": {
+   "GB_per_s_total": 21.25,
+   "ms_per_copy": 0.319
+  },
+  "16MB_per_die_cq0": {
+   "GB_per_s_total": 27.0,
+   "ms_per_copy": 2.37
+  },
+  "16MB_per_die_cq1": {
+   "GB_per_s_total": 28.28,
+   "ms_per_copy": 2.263
+  },
+  "16MB_per_die_cq1_busy": {
+   "GB_per_s_total": 28.3,
+   "ms_per_copy": 2.262
+  },
+  "128MB_per_die_cq0": {
+   "GB_per_s_total": 8.99,
+   "ms_per_copy": 56.938
+  },
+  "128MB_per_die_cq1": {
+   "GB_per_s_total": 28.58,
+   "ms_per_copy": 17.913
+  },
+  "128MB_per_die_cq1_busy": {
+   "GB_per_s_total": 28.58,
+   "ms_per_copy": 17.91
+  }
+ }
+}

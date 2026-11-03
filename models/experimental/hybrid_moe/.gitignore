@@ -1,0 +1,8 @@
+cache/
+logs/
+ref397/
+runs/*
+!runs/plan397_merged.npz
+routing/*.npz
+serve/server.log
+__pycache__/

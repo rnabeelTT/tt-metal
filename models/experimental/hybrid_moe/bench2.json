@@ -1,0 +1,28 @@
+{
+ "ddr_read_GBps_8t": 44.62,
+ "ddr_read_GBps_16t": 42.93,
+ "bf16_8t": {
+  "GB_per_s": 34.3,
+  "us_per_expert": 733.7
+ },
+ "bf16_16t": {
+  "GB_per_s": 15.5,
+  "us_per_expert": 1623.1
+ },
+ "int8_8t": {
+  "GB_per_s": 40.55,
+  "us_per_expert": 310.3
+ },
+ "int8_16t": {
+  "GB_per_s": 36.66,
+  "us_per_expert": 343.2
+ },
+ "int4_8t": {
+  "GB_per_s": 32.39,
+  "us_per_expert": 194.3
+ },
+ "int4_16t": {
+  "GB_per_s": 21.22,
+  "us_per_expert": 296.5
+ }
+}
