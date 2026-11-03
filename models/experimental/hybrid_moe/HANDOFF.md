@@ -34,6 +34,11 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Speed (2026-11-03): C=256 static, D=0, RAM-resident int4 library -> 110-143 ms/token incl. prefill (~7-9 tok/s),
+  hit rate 73-78%, coherent (`runs/full397_c256/`). The dynamic slots' prep threads (FP8 dequant + bfp8 conversion)
+  starved the host step (transfers 50-100x slower than `bench_xfer.py`), so they are off; 16 bfp8 dyn slots = 32 bfp4
+  static in memory. 27.67 GiB/die allocated. Per token now: readback incl. device wait ~57 ms, upload ~22 ms, host
+  experts ~25-50 ms.
 - M0 done: 397B FP8 in HF cache (`Qwen/Qwen3.5-397B-A17B-FP8`); int4 host library (group 32, ~7.5 MB/expert, 226 GB)
   at `~/.cache/hybrid-moe/qwen35_397b_int4/layer_<L>.pt` (mounted `/hyblib`), built by `build_int4_library.py`.
 - M1 done: full 122B, C=128/256 static (plan `routing/routing.npz`): coherent text (`runs/full122_c128/`).
