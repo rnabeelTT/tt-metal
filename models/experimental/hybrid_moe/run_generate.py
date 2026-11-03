@@ -87,6 +87,7 @@ def main():
                 "upload_s": round(st["t_up"], 2),
                 "sync_s": round(st.get("t_sync", 0.0), 2),
                 "upload_conv_s": round(st.get("t_up_conv", 0.0), 2),
+                "lib_load_s": round(st.get("t_lib_load", 0.0), 2),
                 "prefill_rows": st["prefill_rows"],
                 "prefill_miss_pairs": st["prefill_miss_pairs"],
                 "text": text,

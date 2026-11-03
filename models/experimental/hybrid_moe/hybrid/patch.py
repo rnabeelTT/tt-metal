@@ -9,6 +9,7 @@ Env (read at install):
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
+  HYB_LIB_RESIDENT 1 (default): copy each layer's non-static int4 experts into RAM during the build (0: mmap only)
   HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user)
   HYB_THREADS      host torch threads (default 8)
 """
@@ -46,7 +47,9 @@ class HybridState:
         self.pending = {}  # (layer, e) -> Future of prepared host tensors
         self.resident = {}
         self._freq = None
-        self.lib = {}
+        self.lib = {}  # layer -> future of the layer's host library
+        self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
+        self.loader = ThreadPoolExecutor(max_workers=1)
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=int(os.environ.get("HYB_PREP_WORKERS", "2")))
         self.record = None
@@ -55,7 +58,7 @@ class HybridState:
 
     def reset_stats(self):
         self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
-                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0}
+                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0}
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -88,11 +91,33 @@ class HybridState:
 
     # -- host experts ---------------------------------------------------------------------------------------------
     def lib_layer(self, layer):
-        d = self.lib.get(layer)
-        if d is None:
-            d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
-            self.lib[layer] = d
-        return d
+        f = self.lib.get(layer)
+        if f is None:
+            f = self.lib[layer] = self.loader.submit(self._load_lib, layer)
+        return f.result()
+
+    def lib_layer_async(self, layer):
+        if layer not in self.lib:
+            self.lib[layer] = self.loader.submit(self._load_lib, layer)
+
+    def _load_lib(self, layer):
+        """The int4 experts of one layer that can miss (every expert not in the static set), copied out of the mmap
+        into process RAM: through the page cache the 225 GiB library is mostly evicted by the checkpoint load, and a
+        miss then reads its expert from NVMe. row[e] = the expert's row in the copies (-1: static, never on the host)."""
+        t0 = time.perf_counter()
+        d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
+        if not self.lib_resident:
+            d["row"] = np.arange(self.E, dtype=np.int64)
+            return d
+        cold = np.flatnonzero(self.slot_of[layer] < 0) if layer in self.slot_of else np.arange(self.E)
+        idx = torch.from_numpy(cold)
+        out = {k: d[k].index_select(0, idx).contiguous() for k in ("gu_p", "gu_sz", "dn_p", "dn_sz")}
+        out["gs"] = d["gs"]
+        row = np.full(self.E, -1, dtype=np.int64)
+        row[cold] = np.arange(len(cold))
+        out["row"] = row
+        self.st["t_lib_load"] += time.perf_counter() - t0
+        return out
 
     def host_compute(self, layer, X, ids, sc, miss_mask):
         """X [R, H] bf16, ids/sc [R, k], miss_mask [R, k] -> [R, H] fp32: the missed experts' weighted sum."""
@@ -109,10 +134,13 @@ class HybridState:
             if self.lib_dir:
                 lib = self.lib_layer(layer)
                 gs = int(lib["gs"])
-                h = torch._weight_int4pack_mm_for_cpu(xr, lib["gu_p"][e], gs, lib["gu_sz"][e])
+                r = int(lib["row"][e])
+                if r < 0:
+                    raise RuntimeError(f"layer {layer}: expert {e} missed on the device but is in the static set")
+                h = torch._weight_int4pack_mm_for_cpu(xr, lib["gu_p"][r], gs, lib["gu_sz"][r])
                 n = h.shape[1] // 2
                 a = (torch.nn.functional.silu(h[:, :n].float()) * h[:, n:].float()).to(torch.bfloat16)
-                y = torch._weight_int4pack_mm_for_cpu(a, lib["dn_p"][e], gs, lib["dn_sz"][e])
+                y = torch._weight_int4pack_mm_for_cpu(a, lib["dn_p"][r], gs, lib["dn_sz"][r])
             else:
                 with self.lock:
                     gu, dn = self.sd.expert(layer, e)
@@ -176,6 +204,8 @@ def install():
     def init(self, mesh_device, args, state_dict, tensor_cache_path=None, tt_ccl=None, layer_num=None):
         E = int(args.num_experts)
         HYB.plan(layer_num)
+        if HYB.lib_dir:
+            HYB.lib_layer_async(layer_num)  # load this layer's host library while the rest of the model builds
         args.num_experts = HYB.C
         try:
             orig_init(self, mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
