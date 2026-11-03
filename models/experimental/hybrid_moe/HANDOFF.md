@@ -44,7 +44,10 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
   prepared on 2 worker threads (FP8 dequant + TP pack + bfp8 host tensor, ~35 ms) and written at the start of that
   layer's next MoE call. Two routed passes per layer (static bfp4 + dynamic bfp8), then + host result.
 
-- M4 (in progress): segmented decode traces, `hybrid/seg.py`. It wraps `ttnn.begin/end/execute/release_trace`.
+- M4 done (works, slow): full 60-layer 397B traced decode coherent (`runs/full397_trace2/`): ~1.5 s/token, hit rate
+  ~67% (C=224 static + 16 dyn). Per token: host compute ~0.55 s, readback ~0.33 s, upload ~0.33 s, promotions ~0.13 s
+  -> host-side overheads dominate; device time is small. Speed work after M5.
+- M4 mechanism: segmented decode traces, `hybrid/seg.py`. It wraps `ttnn.begin/end/execute/release_trace`.
   While a decode trace is captured, each MoE layer calls `SEG.split(host_step)` right after its router. Replay of the
   generator's trace id runs the real segments in order and calls each layer's host step between them: read back
   ids/scores (and x when there are misses), apply promotions, host-compute misses, then `copy_host_to_device_tensor`
@@ -80,6 +83,7 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
 
 ## Log
+- 2026-11-03: M4 full-model traced decode coherent, 1.5 s/token. Next: M5 vLLM serving.
 - 2026-11-03: disk freed to 671 GB; 397B FP8 download done (~1 h); image source extracted to `image_src/`.
 - 2026-11-03: full 60-layer traced run crashed at capture: L1 CB clash (router scores/ids kept live in L1 per layer
   for the host step). Fix: DRAM copies for the host step. Repo initialised, plan copied to docs/PLAN.md.
