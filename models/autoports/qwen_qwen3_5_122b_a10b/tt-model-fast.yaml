@@ -52,6 +52,9 @@ runtime:
   # transformers this bring-up validated; vLLM 0.26.0 would otherwise resolve torch 2.14 (a full dev-env freeze as a lock
   # dragged unrelated conflicting pins in, so the build resolves live under these overrides and freezes the result)
   overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+  # the dependency set the published bundles were built with (their frozen requirements.lock, 2026-10-28): later
+  # builds install exactly it instead of re-resolving
+  lock: requirements.lock
 
 serve:
   port: 8000
