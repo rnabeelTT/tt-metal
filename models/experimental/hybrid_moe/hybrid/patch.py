@@ -6,6 +6,7 @@ Env (read at install):
   HYB_SLOTS        C, static expert slots per MoE layer (bfp4, the model's routed precision; default all E)
   HYB_DYN_SLOTS    D, dynamic expert slots per MoE layer (bfp8: ttnn.fill_cache cannot write bfp4); 0 = off
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
+  HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
   HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user)
@@ -33,6 +34,7 @@ class HybridState:
         self.C = int(os.environ.get("HYB_SLOTS", "0") or 0)
         self.D = int(os.environ.get("HYB_DYN_SLOTS", "0") or 0)
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
+        self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -53,7 +55,7 @@ class HybridState:
 
     def reset_stats(self):
         self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
-                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0}
+                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0}
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -396,7 +398,10 @@ def _write_bufs(self, B, dec):
     (idt, ilay), (sdt, slay) = B["dtypes"]["ids"], B["dtypes"]["sc"]
 
     def put(dst, t, dt, lay):
-        ttnn.copy_host_to_device_tensor(ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=rep), dst)
+        t1 = time.perf_counter()
+        h = ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=rep)
+        HYB.st["t_up_conv"] += time.perf_counter() - t1
+        ttnn.copy_host_to_device_tensor(h, dst)
 
     put(B["ids"], dec["ids"].to(torch.int32).reshape(sh["ids"]), idt, ilay)
     put(B["sc"], dec["sc"].to(torch.bfloat16).reshape(sh["sc"]), sdt, slay)
@@ -453,6 +458,10 @@ def _decide(self, x4, scores, ids, T, mode):
     the host part. Returns torch tensors: ids, sc (static), dids, dsc (dynamic), host [valid, H] fp32."""
     L = self.layer_num
     k = self.top_k
+    if HYB.profile:  # split "wait for the device segment" from the readback itself
+        t0 = time.perf_counter()
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_sync"] += time.perf_counter() - t0
     t0 = time.perf_counter()
     idh = ttnn.to_torch(_die0(ids)).reshape(-1, k).long()
     sch = ttnn.to_torch(_die0(scores)).reshape(-1, k).float()

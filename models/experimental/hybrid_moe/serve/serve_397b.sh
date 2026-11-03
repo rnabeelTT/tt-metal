@@ -14,7 +14,7 @@ P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); cd "$P" && mkdir -p logs c
   --user "$(id -u):$(id -g)" -p ${PORT}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=Qwen/Qwen3.5-397B-A17B-FP8 -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e TT_METAL_LOGGER_LEVEL=Error -e TT_METAL_CACHE=/cache -e TT_METAL_LOGS_PATH=/poc/logs \
-  -e QWEN35_TRACE_REGION_MIB=256 \
+  -e QWEN35_TRACE_REGION_MIB=256 -e QWEN35_PREFIX_STATE_SLOTS=0 -e QWEN35_MAX_TOKENS_ALL_USERS=${MAX_TOKENS:-${MAX_LEN:-8192}} \
   -e HYB_ENABLE=1 -e HYB_SLOTS=${HYB_SLOTS:-224} -e HYB_DYN_SLOTS=${HYB_DYN_SLOTS:-16} \
   -e HYB_LIB=/hyblib/qwen35_397b_int4 ${PLAN:+-e HYB_PLAN=/poc/$PLAN} \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
