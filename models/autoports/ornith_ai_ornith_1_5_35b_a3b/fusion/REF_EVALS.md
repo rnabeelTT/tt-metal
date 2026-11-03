@@ -97,7 +97,7 @@ answers 11-14%). Checks on the live server (`tools/numerics`), no CPU reference 
 
 | Benchmark | Card | Ours | Status | Harness / note |
 | --- | ---: | ---: | --- | --- |
-| GPQA Diamond | 89.2 | (73.7 at 32k: 22% cut, superseded) | queued | lm-eval r1_gpqa_diamond, 198 x 5 runs, T1.0/0.95/20 |
+| GPQA Diamond | 89.2 | 85.9 +/- 3.5 (n99, 81,920) | run | lm-eval r1_gpqa_diamond, fixed 99 of 198 (seed 1234), T1.0/0.95/20, 59 min; 7 answers (7%) cut at the cap, 92.4% of finished answers correct; 73.7 at 32k (22% cut) superseded |
 | HLE (no tools) | 25.6 | 18.8 +/- 9.6 (n64, 81,920) | run | fixed random 64 of 2,500 (seed 1234, images included), T1.0/0.95/20 (card: temperature 1.0), 81,920-token answers: 12 correct; 20 answers (31%) cut at the cap (4 looping), 0 empty otherwise; 12/44 = 27.3% on finished answers; median answer 44k tokens. Judged by Claude agents (card: Claude 4.6 Opus), official denominator. Image fix release 5cb20a8f1905 (the 32k run crashed the old image) |
 | HLE (with tools) | 33.4 |  | n/s | not run (user, 2026-10-31): search agents need ~6 h per task here; 2,500 incl. images; CAIS tools protocol (search <=20 results, fetch 60k chars, full HLE blocklist, no-network Python 3.11 sandbox) |
 | Terminal-Bench 2.1 (Terminus-2) | 67.8 | | staged | Harbor 0.25 + Terminus-2 json, T1.0/top_p 1.0, 128K, 4 h; 8 CPU per task (card 32), 1 run (card 5) |
