@@ -251,6 +251,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # QWEN35_CHUNKED_PREFILL=1 (turn 7): prompts prefilled in scheduler chunks (whole 2048-token segments per step,
         # GDN state carried per request; doc/perf_pass/chunked_prefill_plan.md); off until validated
         "supports_chunked_prefill": os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1",
+        # an image prompt is prefilled in one step (the M-RoPE table and the splice rows span the whole prompt): with
+        # chunked prefill on, the plugin schedules such a prompt only whole and rejects one past the step budget
+        "mm_prompts_whole": True,
         **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
