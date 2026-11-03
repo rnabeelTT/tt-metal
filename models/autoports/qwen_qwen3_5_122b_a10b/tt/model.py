@@ -711,6 +711,50 @@ class Qwen35MoeModel(Qwen36Model):
             x = x_new
         return x
 
+    def _set_vision_merge(self, ids_host, vision_tokens, vis_row_offset=0):
+        """The base splice staging, with the packed image rows given as a HOST tensor [n, dim] (the serving adapter
+        reads them back right after the tower, ``_vision_for_user``). A device rows tensor is allocated after the
+        prefill traces were captured and can share DRAM with a trace's intermediates: the next bucket replay
+        overwrote it (served: an image prompt after another request's 2048-token segment in the same prefill step,
+        or the second segment of an image prompt over 2048 tokens, spliced corrupted rows). Device rows go through
+        the base unchanged."""
+        if not isinstance(vision_tokens, torch.Tensor) or self._vis_buf is None:
+            return super()._set_vision_merge(ids_host, vision_tokens, vis_row_offset)
+        cs = self._vis_buf.shape[-2]
+        flat = ids_host.reshape(-1)
+        pos = torch.nonzero(flat[:cs] == self._vision_placeholder_token_id(), as_tuple=False).reshape(-1)
+        n = int(pos.numel())
+        if n == 0:
+            ttnn.copy_host_to_device_tensor(self._vis_zero_mask_host, self._vis_mask_buf)
+            return
+        assert vis_row_offset + n <= int(vision_tokens.shape[0]), (
+            f"vision splice out of range: row offset {vis_row_offset} + {n} image positions in this "
+            f"segment exceeds {int(vision_tokens.shape[0])} packed vision rows"
+        )
+        seg = vision_tokens[vis_row_offset : vis_row_offset + n].to(torch.bfloat16)
+        Hg = self.args.dim
+        if self.num_devices > 1:
+            vis_full = torch.zeros(1, 1, cs, Hg, dtype=torch.bfloat16)
+            vis_full[0, 0, pos] = seg
+            mask = torch.zeros(1, 1, cs, 1, dtype=torch.bfloat16)
+            mask[0, 0, pos, 0] = 1.0
+            vis_map = ttnn.ShardTensor2dMesh(self.mesh_device, dims=(None, -1), mesh_shape=self.args.cluster_shape)
+            mask_map = ttnn.ReplicateTensorToMesh(self.mesh_device)
+        else:
+            vis_full = torch.zeros(1, cs, Hg, dtype=torch.bfloat16)
+            vis_full[0, pos] = seg
+            mask = torch.zeros(1, cs, 1, dtype=torch.bfloat16)
+            mask[0, pos, 0] = 1.0
+            vis_map = mask_map = None
+        ttnn.copy_host_to_device_tensor(
+            ttnn.from_torch(vis_full, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=None, mesh_mapper=vis_map),
+            self._vis_buf,
+        )
+        ttnn.copy_host_to_device_tensor(
+            ttnn.from_torch(mask, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=None, mesh_mapper=mask_map),
+            self._vis_mask_buf,
+        )
+
     def prefill_masked_bucket(
         self,
         token_ids,

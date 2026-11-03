@@ -735,7 +735,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         return v is not None and any(x is not None and len(x) > 0 for x in v)
 
     def _vision_for_user(self, kwargs, u):
-        """Request ``u``'s image rows for the prefill: (packed [n, H/TP] device rows from the tower, image_grid_thw) or
+        """Request ``u``'s image rows for the prefill: (packed [n, H] HOST rows from the tower, image_grid_thw) or
         None for a text row. vLLM hands per-user lists (several images: a list of pixel tensors / grids)."""
         pv = kwargs.get("pixel_values")
         if pv is None or u >= len(pv) or pv[u] is None:
@@ -759,7 +759,12 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             )
         model = self._gen.model
         rows = model.get_image_features(pixel_values.float(), grid)  # stashes the grid for the M-RoPE table
-        return rows, grid
+        # to host NOW, before any prefill replay: a device tensor allocated after the trace captures can share DRAM
+        # with a trace's intermediates and be overwritten by the next replay (model._set_vision_merge splices host rows)
+        composer = ttnn.ConcatMeshToTensor(model.mesh_device, dim=1) if model.num_devices > 1 else None
+        host = ttnn.to_torch(rows, mesh_composer=composer).to(torch.bfloat16)  # [n_image_tokens, dim]
+        ttnn.deallocate(rows)
+        return host, grid
 
     def _warm_vision(self):
         """Compile the tower's programs for EVERY padded patch bucket under the served resolution cap (the tower runs
