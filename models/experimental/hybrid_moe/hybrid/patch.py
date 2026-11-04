@@ -7,6 +7,7 @@ Env (read at install):
   HYB_DYN_SLOTS    D, dynamic expert slots per MoE layer (bfp8: ttnn.fill_cache cannot write bfp4); 0 = off
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
   HYB_FUSED        1 (default): decode through the fused MoE kernels (C slots incl. an all-zero sink slot)
+  HYB_BOUNDARY     1 (default, with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -230,10 +231,12 @@ def install():
             if HYB.D:
                 raise RuntimeError("HYB_FUSED=1 does not support dynamic slots (HYB_DYN_SLOTS)")
             if HYB.crafted is None:  # model-wide: each layer writes it in its host step and its kernel reads it next
+                # DRAM: the kernels address it through a TensorAccessor built from the tensor, and a persistent L1
+                # buffer here lowers the L1 floor into later programs' static circular buffers (fabric boundary)
                 HYB.crafted = ttnn.from_torch(torch.zeros(1, 1, TILE_W, HYB.C + TILE_W), dtype=ttnn.bfloat16,
                                               layout=ttnn.TILE_LAYOUT, device=mesh_device,
                                               mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
-                                              memory_config=ttnn.L1_MEMORY_CONFIG)
+                                              memory_config=ttnn.DRAM_MEMORY_CONFIG)
             self._hyb_fused = True
         self._static_attrs = None
         self._dyn_attrs = None
@@ -394,17 +397,21 @@ def _fused_step1(self, x, logits, B):
     B["job"] = dec["job"]
 
 
-def _forward_fused(self, x4, orig, partial):
+def _forward_fused(self, x4, orig, partial, logits=None):
     """Decode (one row) through the fused MoE kernels with C slots: router (E-wide) | host step 1 | fused gate-up/down
-    on the crafted logits + shared expert | host step 2 (missed experts) | + host partial, reduce-scatter."""
+    on the crafted logits + shared expert | host step 2 (missed experts) | + host partial, then the layer's reduce:
+    reduce-scatter (partial False), the replicated-residual boundary's partial (True), or, for the fabric boundary
+    ("fabric"), the host partial added in place into the kernels' model-wide L1 output that the boundary reads.
+    logits: the E-wide router row when the fabric boundary computed it (QWEN35_FB_ROUTER)."""
     from .seg import SEG
 
-    if partial:
-        raise NotImplementedError("fused hybrid decode with the replicated-residual boundary (partial) is not wired")
     f = self._fused
     dram = ttnn.DRAM_MEMORY_CONFIG
-    logits = ttnn.linear(x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc,
-                         memory_config=dram)
+    if logits is None:
+        logits = ttnn.linear(x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc,
+                             memory_config=dram)
+    else:  # the boundary's L1 output: the host step reads it at replay, so keep a DRAM copy instead of live L1
+        logits = _to_dram(logits, free=True)
     B = _fused_bufs(self)
     h_x = _to_dram(x4, free=False)
     step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
@@ -415,11 +422,19 @@ def _forward_fused(self, x4, orig, partial):
     f.gate_up(x4, HYB.crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
     f.down_op(b.act, b.route, self.down, sdn, b.out)
     step2() if not SEG.capturing else SEG.split(step2)
-    out = ttnn.add(b.out, B["host"], memory_config=dram)
     if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
         ttnn.deallocate(logits)
         if h_x is not x4:
             ttnn.deallocate(h_x)
+    if partial == "fabric":
+        return ttnn.add(b.out, B["host"], output_tensor=b.out)
+    out = ttnn.add(b.out, B["host"], memory_config=dram)
+    if partial:
+        from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+        part = decode_boundary(self.args, self.device).to_partial(out)
+        ttnn.deallocate(out)
+        return ttnn.reshape(part, orig) if list(part.shape) != orig else part
     if self.num_devices > 1:
         red = ttnn.experimental.reduce_scatter_minimal_async(
             out,
@@ -470,7 +485,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
     x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
     if getattr(self, "_hyb_fused", False) and mode != "prefill" and T == 1:
-        return _forward_fused(self, x4, orig, partial)
+        return _forward_fused(self, x4, orig, partial, logits)
+    if partial and HYB.enabled and HYB.C < HYB.E and T == 1:
+        raise RuntimeError(f"layer {self.layer_num}: one-row decode boundary (partial={partial!r}) needs HYB_FUSED=1")
     scores, ids = self._route(x4)
     if not (HYB.enabled and HYB.C < HYB.E):
         routed = _routed(self, x4, scores, ids, T, mode)

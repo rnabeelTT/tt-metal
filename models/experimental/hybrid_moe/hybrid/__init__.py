@@ -45,6 +45,14 @@ def install():
         # fused MoE decode kernels on crafted logits (patch._forward_fused); one decode row (no multi-row ops)
         os.environ["QWEN35_MOE_FUSED_DECODE"] = "1"
         os.environ["QWEN35_MOE_FUSED_ROWS_MAX"] = "1"
+        if os.environ.get("HYB_BOUNDARY", "1") == "1":
+            # production decode boundary: replicated residual, fabric all-reduce + add + norm in one program, the
+            # router matmul and the next layer's in-projection inside it (patch._forward_fused handles "fabric")
+            for k in ("QWEN35_DECODE_REPLICATED", "QWEN35_FABRIC_BOUNDARY", "QWEN35_FB_ROUTER"):
+                os.environ.setdefault(k, "1")
+            # FB_CONSUMER (next layer's in-projection inside the boundary) holds L1 that, at hidden 4096, clashes with
+            # the prefill RMSNorm's static circular buffers (397B 4-layer: TT_THROW in the prefill warm-up)
+            os.environ.setdefault("QWEN35_FB_CONSUMER", "0")
     for k, v in _ENV_ON.items():
         os.environ.setdefault(k, v)
     from . import patch, seg
