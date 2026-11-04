@@ -1,0 +1,164 @@
+# tt-model container (v5.1) manifest for Alibaba-NLP/Tongyi-DeepResearch-30B-A3B on Blackhole. Tongyi-DeepResearch is a
+# Qwen3-30B-A3B model (Qwen3MoeForCausalLM: 48 layers, 128 experts top-8, the same tensor shapes as
+# Qwen3-Coder-30B-A3B-Instruct), so it is served by the fast Qwen3-Coder-30B port unchanged
+# (models/demos/blackhole/qwen3_coder_30b_a3b with QWEN3_MOE_FUSED_DECODE, published as raahemnabeel/qwen3-coder-30b-a3b)
+# with HF_MODEL pointing at this checkpoint, as raahemnabeel/mirothinker-1.7-mini is. Differences from that manifest:
+# - the checkpoint advertises 131072 positions (rope_theta 5e6, read from its config), so the context is 131072;
+# - the checkpoint ships no generation_config.json: the defaults are Tongyi's agent settings (temperature 0.6,
+#   top_p 0.95; DeepResearch inference/react_agent.py). Its presence_penalty 1.1 is left to the request (see the card).
+# Authoring interface of `tt-model package --container models/autoports/alibaba_nlp_tongyi_deepresearch_30b_a3b/tt-model.yaml`.
+schema: "5.1"
+
+repo: raahemnabeel/tongyi-deepresearch-30b-a3b
+name: tongyi-deepresearch-30b-a3b
+# weights stay a pointer: the exact HF snapshot every check of this port ran against
+weights: {repo: Alibaba-NLP/Tongyi-DeepResearch-30B-A3B, revision: 4b0ac5767427a55d08a254f0367e2934976598e0}
+kind: vllm-plugin
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal-c30   # worktree, branch tongyi_deepresearch (off mirothinker_mini)
+  code:
+    - models/common
+    - models/demos/blackhole/qwen3_coder_30b_a3b
+    - models/demos/blackhole/qwen36/__init__.py
+    - models/demos/blackhole/qwen36/tt/__init__.py
+    - models/demos/blackhole/qwen36/tt/tp_common.py
+    - models/demos/blackhole/qwen36/tt/moe_decode
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # the plugin build of the Coder-30B fast bundle
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json; it registers Qwen3MoeForCausalLM, the
+  # architecture of this checkpoint too (the bundle's hf_model field is not used for routing)
+  extra_models_dir: models/demos/blackhole/qwen3_coder_30b_a3b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  # the checkpoint advertises 131072 positions (max_position_embeddings)
+  max_model_len: 131072
+  block_size: 64
+  max_num_seqs: 32
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 50331648
+      fabric_config: FABRIC_1D_RING
+  capabilities:
+    tool_parser: hermes        # the chat template asks for <tool_call>{"name": ..., "arguments": ...}</tool_call>
+    reasoning_parser: qwen3
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: Alibaba-NLP/Tongyi-DeepResearch-30B-A3B
+    HF_REVISION: 4b0ac5767427a55d08a254f0367e2934976598e0
+    VLLM_CONFIGURE_LOGGING: "1"
+    VLLM_RPC_TIMEOUT: "900000"
+    TORCHDYNAMO_DISABLE: "1"
+    TT_METAL_OPERATION_TIMEOUT_SECONDS: "120.0"
+    QWEN3_DECODE_WIDTHS: "1,2,4,8,16,32"
+    QWEN3_MOE_FUSED_DECODE: "1"
+    QWEN3_WARMUP_SAMPLING: "both"
+    QWEN3_PREFILL_BUCKETS: "proportional"
+    QWEN3_PREFILL_WARMUP: "auto"
+    QWEN3_PREFILL_WARMUP_MAX: "8192"
+    QWEN3_PREFILL_WARMUP_SUFFIX_MAX: "1024"
+  args:
+    - [--max-num-batched-tokens, "131072"]
+    - [--max-log-len, "32"]
+    # no generation_config.json in the checkpoint: Tongyi's agent defaults
+    - [--override-generation-config, '{"temperature": 0.6, "top_p": 0.95}']
+
+default_profile: p300
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, experts 32 per die), 32 sequences, 131072 context.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2.
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: One p300 board (2 dies, experts 64 per die), 32 sequences, 131072 context.
+    hardware: p300
+    mesh_device: P300
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300.
+    hardware: p150x2
+    mesh_device: P150x2
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: One p150 (1 die, all 128 experts), 32 sequences sharing a 98304-token context (bf16 KV is 96 KiB per token on one die).
+    hardware: p150
+    mesh_device: P150
+    max_model_len: 98304
+    additional_config: {tt: {fabric_config: DISABLED}}
+    args:
+      - [--max-num-batched-tokens, "98304"]
+      - [--max-log-len, "32"]
+      - [--override-generation-config, '{"temperature": 0.6, "top_p": 0.95}']
+
+verify:
+  - "from pathlib import Path; p = Path('/opt/tt-metal/models/demos/blackhole/qwen3_coder_30b_a3b'); assert (p/'config'/'selected_precision_config.json').is_file(), 'precision config missing'; assert (p/'config'/'context_contract.json').is_file(), 'context contract missing'"
+  - "from models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm import Qwen3CoderForCausalLM; assert Qwen3CoderForCausalLM"
+
+card:
+  attribution: |
+    Derived from [Alibaba-NLP/Tongyi-DeepResearch-30B-A3B](https://huggingface.co/Alibaba-NLP/Tongyi-DeepResearch-30B-A3B)
+    by Tongyi Lab, Alibaba. The checkpoint is used as published; expert weights are converted to lower precision when the
+    server loads them (see Limitations). See the original model card,
+    [GitHub](https://github.com/Alibaba-NLP/DeepResearch) and the
+    [tech report](https://arxiv.org/abs/2510.24701) for training and evaluation details.
+  description: |
+    Tongyi DeepResearch, an agent model for long-horizon, deep information seeking: a 30B-parameter mixture of experts
+    with 3B active per token (Qwen3-30B-A3B architecture: 128 experts, top-8, 48 layers), trained with agentic continual
+    pre-training, fine-tuning and reinforcement learning for multi-step search, browsing and tool use. Served with vLLM: a
+    reasoning model that thinks before it answers, with tool calling and a 131,072-token context, for up to 32
+    concurrent users. Text only.
+  intended_use: |
+    Search-and-browse research agents (ReAct-style tool loops) and multi-step tool use, plus chat and reasoning over
+    text, through an OpenAI-compatible API.
+  usage: |
+    The model thinks before every answer (`reasoning_content`); give requests a large `max_tokens` (thousands): when the
+    budget runs out inside the reasoning, `content` is empty.
+
+    A request without sampling parameters uses temperature 0.6 and top_p 0.95, the defaults of Tongyi's agent
+    (the checkpoint ships no generation config). Tongyi's agent also sends `presence_penalty: 1.1`; the server applies
+    it on the device when a request sets it (see Performance for its cost). Sampling runs on the device; `top_k` is
+    limited to 32.
+
+    Tools: pass them as OpenAI `tools`; the chat template asks for `<tool_call>` JSON, parsed into `tool_calls` by the
+    server. Tongyi's own ReAct agent ([DeepResearch](https://github.com/Alibaba-NLP/DeepResearch), `inference/`)
+    instead puts its tools (`search`, `visit`, `google_scholar`, `PythonInterpreter`) in the system prompt, reads
+    `<tool_call>` and `<answer>` from `content` itself and stops on `<tool_response>`; point its server URL here and both
+    work. The package serves the model only, bring your own search, browse and code tools.
+  performance: |
+    PENDING
+  limitations: |
+    - Text only (the checkpoint has no vision tower).
+    - Routed expert weights run at bfp4 on every profile (the fused decode reads that layout), so output can differ from
+      the bf16 original where two candidate tokens are close.
+    - Context: 131,072 tokens on two and four dies (what the checkpoint advertises), 98,304 on one die.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on those boards.
+    - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - With prefix caching, a cached prompt can continue differently from the same prompt sent cold: the cached path
+      computes attention in chunks, so near-tied tokens can flip. `--no-enable-prefix-caching` makes repeats identical.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
+      a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
+      model's.
+  related: |
+    - [raahemnabeel/mirothinker-1.7-mini](https://huggingface.co/raahemnabeel/mirothinker-1.7-mini): MiroThinker-1.7-mini,
+      another Qwen3-30B-A3B deep-research model, served by the same code.
+    - [raahemnabeel/quest-35b-rl](https://huggingface.co/raahemnabeel/quest-35b-rl): QUEST-35B-RL, a deep-research model
+      on Qwen3.5-35B-A3B, with image input.
+    - [raahemnabeel/qwen3-coder-30b-a3b](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b): Qwen3-Coder-30B-A3B,
+      served by the same code.
+  license:
+    id: apache-2.0
