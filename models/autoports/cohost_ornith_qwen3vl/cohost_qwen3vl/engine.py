@@ -208,7 +208,12 @@ class SplitEngine:
             ttnn.end_trace_capture(self.device, slot.trace_id, cq_id=0)
             ttnn.synchronize_device(self.device)
             self.slots[(B, T)] = slot
-        log.info("qwen3vl-cohost: captured %d traces in %.1f s", len(self.slots), time.time() - t0)
+        try:
+            mv = ttnn.get_memory_view(self.device, ttnn.BufferType.TRACE)
+            used = f"; trace region now {mv.total_bytes_allocated_per_bank * mv.num_banks / 2**20:.0f} MiB used"
+        except Exception:  # noqa: BLE001 - accounting only
+            used = ""
+        log.info("qwen3vl-cohost: captured %d traces in %.1f s%s", len(self.slots), time.time() - t0, used)
 
     def release(self):
         for s in self.slots.values():

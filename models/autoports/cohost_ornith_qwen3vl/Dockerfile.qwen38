@@ -1,0 +1,51 @@
+# Co-host image: Qwen3.8-27B DFlash2 + vision (v6 thin bundle, vLLM 0.30, PyPI ttnn 0.79.0) + Qwen3-VL-Embedding-8B
+# + Qwen3-VL-Reranker-8B. Built by build.sh qwen38.
+#
+# The thin bundle is installed exactly as its install.sh does (its pinned interpreter, venv and wheels) at /opt/q38,
+# and the image reproduces its run.sh environment. The base image only provides the system libraries and the tt
+# user / entrypoint the tt-model container launcher expects; its own tt-metal tree is not used.
+ARG BASE
+FROM ${BASE}
+USER root
+COPY context/uv.q38 /usr/local/bin/uv
+COPY context/q38/ /opt/q38/
+# 1. the bundle's venv (network at build time only)
+RUN cd /opt/q38 && UV_CACHE_DIR=/tmp/uv-cache bash ./install.sh /opt/q38/venv && rm -rf /tmp/uv-cache /opt/q38/.uv-cache
+# 2. SFPI 7.78.0 (the bundle's TTNN declares it; run.sh prefers <ttnn>/runtime/sfpi)
+COPY context/sfpi/ /tmp/sfpi/
+RUN TTNN_DIR=$(/opt/q38/venv/bin/python -I -c 'import importlib.util,pathlib;print(pathlib.Path(importlib.util.find_spec("ttnn").origin).resolve().parent)') \
+ && mkdir -p "$TTNN_DIR/runtime" && mv /tmp/sfpi "$TTNN_DIR/runtime/sfpi" \
+ && test -x "$TTNN_DIR/runtime/sfpi/compiler/bin/riscv-tt-elf-g++" \
+ && ln -sfn "$TTNN_DIR" /opt/q38/ttnn-dir \
+ && LIB=$(ls "$TTNN_DIR"/../*.libs/_ttnncpp*.so 2>/dev/null | head -1; true) \
+ && LIB=${LIB:-$(find "$TTNN_DIR" "$TTNN_DIR/.." -maxdepth 4 -name "_ttnncpp*.so" 2>/dev/null | head -1)} \
+ && echo "_ttnncpp: $LIB" && test "$LIB" = /opt/q38/venv/lib/python3.12/site-packages/ttnn/build/lib/_ttnncpp.so
+# 3. the Qwen3-VL input pipeline's two extra wheels, in the bundle's venv
+RUN uv pip install --python /opt/q38/venv/bin/python --no-cache --no-deps qwen-vl-utils==0.0.14 av==18.1.0 \
+ && rm /usr/local/bin/uv
+# 4. the Qwen3-VL model code under its own `models` package (the PyPI ttnn ships none), the co-host runtime + adapter
+COPY context/cohost-models/ /opt/cohost-models/
+COPY context/tt-cohost/ /opt/tt-cohost/
+RUN chmod -R a+rX /opt/q38 /opt/cohost-models /opt/tt-cohost
+# run.sh's environment, with the tt-model container mounts for the caches
+ENV PATH=/opt/q38/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    VIRTUAL_ENV=/opt/q38/venv \
+    TT_METAL_HOME=/opt/q38/venv/lib/python3.12/site-packages/ttnn \
+    TT_METAL_RUNTIME_ROOT=/opt/q38/venv/lib/python3.12/site-packages/ttnn \
+    LD_PRELOAD=/opt/q38/venv/lib/python3.12/site-packages/ttnn/build/lib/_ttnncpp.so \
+    EXTRA_MODELS_DIR=/opt/q38/vllm_models \
+    TT_VLLM_BUILTIN_MODELS=0 \
+    PYTHONPATH=/opt/tt-cohost:/opt/cohost-models:/opt/q38/extra_code:/opt/q38 \
+    TT_MESH_GRAPH_DESC_PATH=/opt/q38/venv/lib/python3.12/site-packages/ttnn/tt_metal/fabric/mesh_graph_descriptors/p300_x2_mesh_graph_descriptor.textproto \
+    TT_CACHE_HOME=/tensor-cache \
+    TTNN_CONFIG_OVERRIDES='{"cache_path": "/cache/ttnn", "model_cache_path": "/cache/ttnn/models"}' \
+    TORCHDYNAMO_DISABLE=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    TT_MODEL_KIND=cohost
+USER 1000:1000
+WORKDIR /home/tt/work
+RUN python -c "import tt_kernel.cohost.launch, cohost_qwen3vl.member, qwen_vl_utils, av, vllm, vllm_tt_plugin, qwen38; \
+from models.autoports.qwen_qwen3_vl_embedding_8b.inputs import EmbedFormatter; \
+from cohost_qwen3vl import split, engine; import vllm; print('cohost qwen38 image imports ok, vllm', vllm.__version__)"
+CMD ["python", "-m", "tt_kernel.cohost.launch"]

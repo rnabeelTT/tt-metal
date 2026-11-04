@@ -1,5 +1,8 @@
 #!/bin/bash
-# Build the co-host image for one Ornith size:  ./build.sh 122b | 35b
+# Build a co-host image:  ./build.sh 122b | 35b | qwen38
+#   122b / 35b: Ornith-1.5 (FROM its package image) + Qwen3-VL-Embedding-8B + Qwen3-VL-Reranker-8B
+#   qwen38:     Qwen3.8-27B DFlash2 + vision (the v6 thin bundle mando2222/qwen3.8-27b-dflash2-vision-p300x2-q4kv-v6-thin-cp4,
+#               vLLM 0.30, PyPI ttnn 0.79.0) + the same two 8B models
 #
 # Inputs (all local images / checkouts, pinned below):
 #   BASE       the Ornith package image (its tt-metal build, vLLM plugin and model code, unchanged)
@@ -8,12 +11,17 @@
 #   COHOST     a tt-model-manager checkout with mixed co-host groups (branch raahem/cohost-mixed-groups)
 # Output: image tt-model/cohost-ornith-<size>-qwen3vl:<tag>, printed on the last line.
 set -euo pipefail
-SIZE=${1:?usage: build.sh 122b|35b}
+SIZE=${1:?usage: build.sh 122b|35b|qwen38}
 HERE=$(cd "$(dirname "$0")" && pwd)
 case $SIZE in
   122b) BASE=${BASE:-tt-model/ornith-1.5-122b:b98336b9ce62} ;;
   35b)  BASE=${BASE:-tt-model/ornith-1.5-35b-a3b:4ce68d7f2568} ;;
-  *) echo "size must be 122b or 35b" >&2; exit 2 ;;
+  qwen38) BASE=${BASE:-tt-model/ornith-1.5-122b:b98336b9ce62}   # system libraries and the tt user only
+          Q38_REPO=mando2222/qwen3.8-27b-dflash2-vision-p300x2-q4kv-v6-thin-cp4
+          Q38_REV=${Q38_REV:-67af7db5a391635a798c493907ec1515291b4016}
+          SFPI_URL=https://github.com/tenstorrent/sfpi/releases/download/7.78.0/sfpi_7.78.0_x86_64_debian.txz
+          SFPI_SHA=464c64759e441b841d6bc06216dbd470d7a0f188e0ffa9ac8ebb2e404cf244db ;;
+  *) echo "size must be 122b, 35b or qwen38" >&2; exit 2 ;;
 esac
 QWEN3VL=${QWEN3VL:-tt-model/qwen3-vl-embedding-8b:03461ae75cdb}
 COHOST=${COHOST:-$HOME/fork-tt-model-manager}
@@ -51,15 +59,49 @@ for s in 35b 122b; do
   grep -q "No user query" "$CTX/context/tt-cohost/templates/ornith-1.5-$s.jinja" && { echo "template patch failed" >&2; exit 1; }
 done
 
-cp "$HERE/Dockerfile" "$CTX/"
+DOCKERFILE=Dockerfile
+if [ "$SIZE" = qwen38 ]; then
+  DOCKERFILE=Dockerfile.qwen38
+  # the thin bundle at its pinned revision
+  hf download "$Q38_REPO" --revision "$Q38_REV" --local-dir "$CTX/context/q38" >/dev/null
+  rm -rf "$CTX/context/q38/.cache"
+  # SFPI 7.78.0, checked
+  SFPI_CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/cohost-build/$(basename "$SFPI_URL")
+  if ! echo "$SFPI_SHA  $SFPI_CACHE" | sha256sum -c - >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$SFPI_CACHE")"; curl -fsSL -o "$SFPI_CACHE" "$SFPI_URL"
+  fi
+  echo "$SFPI_SHA  $SFPI_CACHE" | sha256sum -c - >/dev/null
+  tar -xJf "$SFPI_CACHE" -C "$CTX/context"     # -> context/sfpi/ (the base image has no xz)
+  # the uv release the bundle was built with (PROVENANCE.json): it knows the pinned interpreter
+  UV_TGZ=${XDG_CACHE_HOME:-$HOME/.cache}/cohost-build/uv-0.12.11-x86_64-unknown-linux-gnu.tar.gz
+  [ -s "$UV_TGZ" ] || curl -fsSL -o "$UV_TGZ" https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-unknown-linux-gnu.tar.gz
+  tar -xzf "$UV_TGZ" -C "$CTX" && mv "$CTX/uv-x86_64-unknown-linux-gnu/uv" "$CTX/context/uv.q38"
+  # a standalone `models` package for the Qwen3-VL code: models/common from the v0.79 Ornith tree, plus the packages
+  # staged above (the PyPI ttnn ships no models/)
+  M="$CTX/context/cohost-models/models"; mkdir -p "$M/autoports"
+  c=$(docker create "$BASE"); docker cp -q "$c:/opt/tt-metal/models/common" "$M/"; docker cp -q "$c:/opt/tt-metal/models/__init__.py" "$M/" 2>/dev/null || touch "$M/__init__.py"; docker rm "$c" >/dev/null
+  cp "$CTX/context/models/common/tt_ccl.py" "$M/common/"
+  cp -r "$CTX/context/models/ttt_compat" "$CTX/context/models/tt_dit" "$M/"
+  cp -r "$CTX/context/models/autoports/qwen_qwen3_vl_reranker_8b" "$CTX/context/models/autoports/qwen_qwen3_vl_embedding_8b" "$M/autoports/"
+  touch "$M/autoports/__init__.py"
+  find "$M" -name __pycache__ -prune -exec rm -rf {} +
+  rm -rf "$CTX/context/models"
+  # Qwen3.8's chat template with the same agent-loop fix
+  src=${HF_HUB:-/opt/tenstorrent/models/hub}/models--Qwen--Qwen3.8-27B/snapshots/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/chat_template.jinja
+  sed -E "s/^( *)\{\{- raise_exception\('No user query found in messages.'\) \}\}/\1{%- set ns.last_query_index = messages|length - 1 %}/" \
+    "$src" > "$CTX/context/tt-cohost/templates/qwen3.8-27b.jinja"
+  grep -q "No user query" "$CTX/context/tt-cohost/templates/qwen3.8-27b.jinja" && { echo "qwen3.8 template patch failed" >&2; exit 1; }
+fi
+cp "$HERE/$DOCKERFILE" "$CTX/Dockerfile"
 cp "$(command -v uv)" "$CTX/context/uv"   # installer for the two wheels (the base image has no pip)
 SRC=$(cd "$HERE" && git rev-parse --short HEAD 2>/dev/null || echo dev)
 RT=$(cd "$COHOST" && git rev-parse --short HEAD)
-TAG=${TAG:-tt-model/cohost-ornith-$SIZE-qwen3vl:$SRC-rt$RT}
+NAME=cohost-ornith-$SIZE-qwen3vl; [ "$SIZE" = qwen38 ] && NAME=cohost-qwen38-27b-qwen3vl
+TAG=${TAG:-tt-model/$NAME:$SRC-rt$RT}
 docker build --build-arg BASE="$BASE" \
-  --label org.tenstorrent.tt-model=cohost-ornith-$SIZE-qwen3vl \
+  --label org.tenstorrent.tt-model=$NAME \
   --label org.tenstorrent.tt-model.kind=cohost \
-  --label org.tenstorrent.tt-model.repo=raahemnabeel/cohost-ornith-$SIZE-qwen3vl \
+  --label org.tenstorrent.tt-model.repo=raahemnabeel/$NAME \
   --label org.tenstorrent.tt-model.profiles=see-manifest \
   --label org.tenstorrent.tt-model.base="$BASE" \
   --label org.tenstorrent.tt-model.qwen3vl-source="$QWEN3VL" \
