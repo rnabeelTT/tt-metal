@@ -171,13 +171,77 @@ card:
 
     Images: up to 4 per request as `image_url` parts, resized to at most 4 MP (two- and four-die profiles). Video input is not accepted.
   performance: |
-    PENDING
+    ### Accuracy
+    Pending. The MIRA authors' scores (MMSearch, MMSearch+, BrowseComp-VL, SimpleVQA, LiveVQA, FVQA, VDR-Bench,
+    MMDeepResearch, under their harness) are on the
+    [original model card](https://huggingface.co/MIRA-MMDeepResearch/MIRA-SFT-35B-A3B); measurements of this package on
+    those benchmarks will be added here.
+
+    ### Performance
+
+    Served as shipped (`tt-model serve --profile <profile>`), vLLM's random-token benchmark with `ignore_eos`, medians; one request per user at a time.
+
+    #### p300x2 (four dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 218 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 115 | 4.6 | 219 | 183 |
+    | 1 | 1,024 / 256 | 227 | 4.7 | 213 | 180 |
+    | 1 | 4,096 / 256 | 652 | 4.8 | 208 | 141 |
+    | 1 | 32,768 / 256 | 2,718 | 5.3 | 189 | 63 |
+    | 8 | 128 / 128 | 1,140 | 9.8 | 102 | 431 |
+    | 8 | 1,024 / 256 | 1,988 | 10.0 | 100 | 454 |
+    | 32 | 1,024 / 256 | 7,265 | 25.5 | 39 | 598 |
+
+    #### p300 (two dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 126 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 132 | 7.9 | 126 | 112 |
+    | 1 | 1,024 / 256 | 271 | 8.0 | 124 | 110 |
+    | 1 | 4,096 / 256 | 802 | 8.2 | 121 | 91 |
+    | 1 | 32,768 / 256 | 3,691 | 8.6 | 116 | 43 |
+    | 8 | 128 / 128 | 1,188 | 17.8 | 56 | 296 |
+    | 8 | 1,024 / 256 | 2,281 | 18.1 | 55 | 300 |
+    | 32 | 1,024 / 256 | 8,605 | 42.1 | 24 | 422 |
+
+    The one-die profile (`p150`) was not measured for this checkpoint at publication; it runs the same code as
+    [raahemnabeel/quest-35b-rl](https://huggingface.co/raahemnabeel/quest-35b-rl)'s measured `p150`.
+
+    ### Presence penalty
+
+    MIRA's runtime sends `presence_penalty: 1.5`. It runs on the device but adds a penalty stage to every decode step. Real
+    text sampled at the defaults (temperature 1.0, top_p 0.95, top_k 20; 12 chat prompts x 384 output tokens; 8 users: two
+    rounds) on `p300`, decode tok/s per user, without / with the penalty: 1 user 126 / 84; 8 users 53 / 43 (411 / 336 for
+    all users).
+
+    ### Prefix caching
+
+    On for the two- and four-die profiles. The same real-text prompt sent twice on `p300` (thinking off), time to first
+    token in seconds; the cached resend's continuation was identical to the first send's in every case.
+
+    | prompt tokens | first send | cached resend |
+    | ---: | ---: | ---: |
+    | 1,563 | 0.42 | 0.42 |
+    | 7,652 | 1.63 | 0.45 |
+    | 24,224 | 5.09 | 0.51 |
+
+    In a four-turn chat over one 7,630-token document, turns 2-4 start in 0.45 s (turn 1: 1.63 s).
+
+    ### Images
+
+    128 image requests, 32 at a time, on `p300`: all answered, in 48 s.
   limitations: |
     - The checkpoint has no MTP head: decoding produces one token per step on every profile.
     - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
       can differ from the bf16 original where two candidate tokens are close.
     - One die (`p150`, `p100`): text only, no prefix caching.
-    - The p150x4, p150x2 and p100 profiles run the same meshes as p300x2 / p300 / p150 but were not run on those boards.
+    - The p150x4, p150x2 and p100 profiles run the same meshes as p300x2 / p300 / p150 but were not run on those boards;
+      `p150` itself was not yet run for this checkpoint at publication.
     - Prefix caching resumes only at 2,048-token boundaries; requests with images are not cached.
     - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
     - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
