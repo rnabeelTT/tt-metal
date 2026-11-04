@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """Hybrid-MoE prototype driver: build the Qwen3.5 autoport with the hybrid overlay and generate greedily (eager).
 
-Env: POC_SKIP_SWEEP + POC_TF_REF (skip_sweep), HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_PROMPT_START, POC_NEW_TOKENS, POC_LAYERS
+Env: POC_PROMPT_SET (train | heldout), POC_SKIP_SWEEP + POC_TF_REF (skip_sweep), HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_PROMPT_START, POC_NEW_TOKENS, POC_LAYERS
 (comma list -> reduced model), POC_MAX_SEQ (default 2048), HYB_RECORD=1 (save decode routing as routing.npz).
 Writes <out_dir>/result.json.
 """
@@ -23,6 +23,12 @@ import torch  # noqa: E402
 
 import ttnn  # noqa: E402
 from capture_routing import PROMPTS  # noqa: E402
+
+if os.environ.get("POC_PROMPT_SET"):  # prompts_v2: "train", "heldout" or "all" (= train then heldout)
+    import prompts_v2  # noqa: E402
+
+    PROMPTS = {"train": prompts_v2.TRAIN, "heldout": prompts_v2.HELDOUT,
+               "all": prompts_v2.TRAIN + prompts_v2.HELDOUT}[os.environ["POC_PROMPT_SET"]]
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import build_generator  # noqa: E402
 
 N_PROMPTS = int(os.environ.get("POC_PROMPTS", "2"))
@@ -99,6 +105,9 @@ def main():
                 "sync_s": round(st.get("t_sync", 0.0), 2),
                 "upload_conv_s": round(st.get("t_up_conv", 0.0), 2),
                 "lib_load_s": round(st.get("t_lib_load", 0.0), 2),
+                "route_s": round(st.get("t_route", 0.0), 2),
+                "craft_s": round(st.get("t_craft", 0.0), 2),
+                "skipped": st.get("skipped", 0),
                 "prefill_rows": st["prefill_rows"],
                 "prefill_miss_pairs": st["prefill_miss_pairs"],
                 "text": text,
@@ -108,11 +117,12 @@ def main():
             print(f"P{i} {json.dumps({k: v for k, v in r.items() if k not in ('text', 'tokens')})}", flush=True)
             print(f"P{i} TEXT {text[:300]!r}", flush=True)
             if HYB.record:
-                layers = sorted({l for l, _ in HYB.record})
+                layers = sorted({rec[0] for rec in HYB.record})
                 nl = len(layers)
                 steps = len(HYB.record) // nl
-                arr = np.stack([v.numpy() for _, v in HYB.record[: steps * nl]]).reshape(steps, nl, -1)
-                rec_arrays[f"p{i}"] = arr
+                recs = HYB.record[: steps * nl]
+                rec_arrays[f"p{i}"] = np.stack([rec[1].numpy() for rec in recs]).reshape(steps, nl, -1)
+                rec_arrays[f"s{i}"] = np.stack([rec[2].numpy() for rec in recs]).reshape(steps, nl, -1).astype(np.float16)
                 np.savez_compressed(os.path.join(out_dir, "routing.npz"), layers=np.array(layers), **rec_arrays)
             res["runs"] = runs
             json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)

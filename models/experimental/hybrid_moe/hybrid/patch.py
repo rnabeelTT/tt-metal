@@ -9,6 +9,7 @@ Env (read at install):
   HYB_FUSED        1 (default): decode through the fused MoE kernels (C slots incl. an all-zero sink slot)
   HYB_BOUNDARY     0 (default; 1 with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
   HYB_SKIP         routing-weight threshold: missed experts below it are dropped (default 0: none)
+  HYB_PLAN_MIN_SCORE  plan counts only picks with routing weight >= this (default HYB_SKIP; needs recorded scores)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -42,7 +43,9 @@ class HybridState:
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
         self.fused = os.environ.get("HYB_FUSED", "1") == "1"
-        self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed  # fused MoE decode kernels (moe_decode/fused.py)
+        self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed
+        # static plan counts only picks with at least this routing weight (default HYB_SKIP: skipped misses are free)
+        self.plan_min_score = float(os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip)))  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -54,7 +57,7 @@ class HybridState:
         self.pending = {}  # (layer, e) -> Future of prepared host tensors
         self.resident = {}
         self._freq = None
-        self.crafted = None  # fused hybrid: the model-wide crafted logits row (L1), see _fused_step1
+        self.crafted_rm = None  # fused hybrid: the model-wide crafted logits row (row-major DRAM), see _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.loader = ThreadPoolExecutor(max_workers=1)
@@ -67,7 +70,7 @@ class HybridState:
     def reset_stats(self):
         self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
                    "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0, "dec_picks": 0, "dec_hits": 0, "skipped": 0,
-                   "skipped_mass": 0.0}
+                   "skipped_mass": 0.0, "t_route": 0.0, "t_craft": 0.0}
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -81,8 +84,12 @@ class HybridState:
             for k in z.files:
                 if k.startswith("p"):
                     a = z[k]
+                    # with scores (s<k>) and a threshold, count only the picks the host would compute on a miss
+                    sk = "s" + k[1:]
+                    w = (z[sk] >= self.plan_min_score).astype(np.float64) if (self.plan_min_score > 0 and sk in z.files) \
+                        else np.ones(a.shape)
                     for li, L in enumerate(layers):
-                        np.add.at(f[L], a[:, li, :].ravel(), 1)
+                        np.add.at(f[L], a[:, li, :].ravel(), w[:, li, :].ravel())
             self._freq = f
         n_real = C - 1 if self.fused else C  # fused: the last slot is the all-zero sink (expert id -1)
         if self._freq is not None and layer < self._freq.shape[0] and self._freq[layer].sum() > 0:
@@ -233,14 +240,6 @@ def install():
                                    f"(QWEN35_MOE_FUSED_DECODE={os.environ.get('QWEN35_MOE_FUSED_DECODE')}, C={HYB.C})")
             if HYB.D:
                 raise RuntimeError("HYB_FUSED=1 does not support dynamic slots (HYB_DYN_SLOTS)")
-            if HYB.crafted is None:  # model-wide: each layer writes it in its host step and its kernel reads it next
-                # L1, like the router output the kernels normally read: they fetch each tile's face-1 row (source
-                # offset 512) into destination offset +32, and Blackhole DRAM reads need source and destination equal
-                # mod 64 (L1: 16), so a DRAM copy garbles logits 16-31 of every tile (full-model text degraded)
-                HYB.crafted = ttnn.from_torch(torch.zeros(1, 1, TILE_W, HYB.C + TILE_W), dtype=ttnn.bfloat16,
-                                              layout=ttnn.TILE_LAYOUT, device=mesh_device,
-                                              mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
-                                              memory_config=ttnn.L1_MEMORY_CONFIG)
             self._hyb_fused = True
         self._static_attrs = None
         self._dyn_attrs = None
@@ -351,7 +350,8 @@ def _add(a, b):
 
 
 def _fused_bufs(self):
-    """The fused hybrid's persistent host-partial buffer (allocated in the eager warm-up, before any capture)."""
+    """The fused hybrid's persistent host-written buffers (allocated in the eager warm-up, before any capture): the host
+    partial as one row-major row [1, 1, 1, H] (tiled on the device), and the model-wide crafted logits row."""
     from .seg import SEG
 
     B = self._hyb_bufs.get("fused")
@@ -359,46 +359,75 @@ def _fused_bufs(self):
         if SEG.capturing:
             raise RuntimeError(f"layer {self.layer_num}: no fused hybrid buffers; run one eager decode step first")
         H = int(self.hidden)
-        B = {"host": ttnn.from_torch(torch.zeros(1, 1, 1, H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-                                     device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-                                     memory_config=ttnn.DRAM_MEMORY_CONFIG),
-             "shapes": {"T": 1, "H": H}}
+        B = {"host_rm": _rm_buffer(self.device, H), "shapes": {"T": 1, "H": H}}
         self._hyb_bufs["fused"] = B
+    if HYB.crafted_rm is None:
+        HYB.crafted_rm = _rm_buffer(self.device, HYB.C + TILE_W)
     return B
 
 
+def _rm_buffer(mesh_device, width):
+    return ttnn.from_torch(torch.zeros(1, 1, 1, width), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
+                           device=mesh_device, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+                           memory_config=ttnn.DRAM_MEMORY_CONFIG)
+
+
 def _fused_step1(self, x, logits, B):
-    """Host step after the router: true routing from the E-wide logits row, then the crafted logits row the fused
-    kernel ranks over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at the all-zero
-    sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernel's top-k + softmax over the
-    selected logits then reproduces the true weights of the resident experts (the sink absorbs the missed mass)."""
-    E, C, k = HYB.E, HYB.C, self.top_k
+    """Host step after the router (one decode row): true routing from the E-wide logits row, then the crafted logits
+    row the fused kernel ranks over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
+    the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernel's top-k +
+    softmax over the selected logits then reproduces the true weights of the resident experts (the sink absorbs the
+    missed mass). x / logits: row-major single rows in DRAM."""
+    E, C, k, L = HYB.E, HYB.C, self.top_k, self.layer_num
     if HYB.profile:
         t0 = time.perf_counter()
         ttnn.synchronize_device(self.device)
         HYB.st["t_sync"] += time.perf_counter() - t0
     t0 = time.perf_counter()
-    lg = ttnn.to_torch(_die0(logits)).reshape(-1, int(logits.shape[-1]))[0].float()
+    lg = ttnn.to_torch(_die0(logits)).reshape(-1).float().numpy()
     HYB.st["t_read"] += time.perf_counter() - t0
-    p = torch.softmax(lg[:E], dim=-1)
-    sch, idh = torch.topk(p, k)
-    sch = (sch / sch.sum())[None]
-    idh = idh[None]
-    dec = _decide_core(self, x, idh, sch, "decode", defer_host=True)
-    row = torch.full((C + TILE_W,), -1000.0)
-    row[C:] = 0.0
-    row[C] = lg[E]  # shared-expert gate logit (router column E)
-    res = dec["sc"][0] > 0
-    row[dec["ids"][0][res]] = torch.log(dec["sc"][0][res])
-    miss_mass = float(sch[0].sum() - dec["sc"][0].sum())
-    if miss_mass > 1e-6:
-        row[C - 1] = math.log(miss_mass)
-    t = torch.zeros(1, 1, TILE_W, C + TILE_W)
-    t[0, 0, 0] = row
     t0 = time.perf_counter()
-    _put(self, HYB.crafted, t.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+    z = lg[:E]
+    ids = np.argpartition(-z, k)[:k]
+    e = np.exp(z[ids] - z[ids].max())
+    sc = e / e.sum()  # softmax over the top-k logits == softmax over all E, top-k, renormalized
+    slot = HYB.slot_of[L][ids]
+    res = slot >= 0
+    miss = ~res
+    st = HYB.st
+    st["picks"] += k
+    st["hits"] += int(res.sum())
+    st["dec_picks"] += k
+    st["dec_hits"] += int(res.sum())
+    st["steps"] += 1
+    if HYB.record is not None:
+        HYB.record.append((L, torch.from_numpy(ids.astype(np.int64)), torch.from_numpy(sc.astype(np.float32))))
+    if HYB.skip > 0:
+        drop = miss & (sc < HYB.skip)
+        st["skipped"] += int(drop.sum())
+        st["skipped_mass"] += float(sc[drop].sum())
+        miss = miss & ~drop
+    HYB.st["t_route"] += time.perf_counter() - t0
+    t0 = time.perf_counter()
+    row = np.full((1, 1, 1, C + TILE_W), -1000.0, dtype=np.float32)
+    row[..., C:] = 0.0
+    row[..., C] = lg[E]  # shared-expert gate logit (router column E)
+    row[0, 0, 0, slot[res]] = np.log(sc[res])
+    miss_mass = float(sc[~res].sum())  # computed and skipped misses: their routing mass goes to the zero sink
+    if miss_mass > 1e-6:
+        row[..., C - 1] = math.log(miss_mass)
+    HYB.st["t_craft"] += time.perf_counter() - t0
+    t0 = time.perf_counter()
+    _put(self, HYB.crafted_rm, torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
     HYB.st["t_up"] += time.perf_counter() - t0
-    B["job"] = dec["job"]
+    if miss.any():
+        t0 = time.perf_counter()
+        xh = ttnn.to_torch(_die0(x)).reshape(1, -1).to(torch.bfloat16)
+        HYB.st["t_read"] += time.perf_counter() - t0
+        it = torch.from_numpy(ids.astype(np.int64))[None]
+        B["job"] = (L, xh, it, torch.from_numpy(sc.astype(np.float32))[None], torch.from_numpy(miss)[None])
+    else:
+        B["job"] = None
 
 
 def _forward_fused(self, x4, orig, partial, logits=None):
@@ -414,25 +443,33 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     if logits is None:
         logits = ttnn.linear(x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc,
                              memory_config=dram)
-    else:  # the boundary's L1 output: the host step reads it at replay, so keep a DRAM copy instead of live L1
-        logits = _to_dram(logits, free=True)
+    # the host step reads one row of each (row-major, DRAM: they stay allocated for the trace's life, no live L1)
+    lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
+    ttnn.deallocate(logits)
+    logits = lg_rm
     B = _fused_bufs(self)
-    h_x = _to_dram(x4, free=False)
+    h_x = ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
     step2 = lambda: _host_step2(self, B)  # noqa: E731
     step1() if not SEG.capturing else SEG.split(step1)
     b = f.buf
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
-    f.gate_up(x4, HYB.crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
+    # the kernels read the crafted row as an L1 BF16 tile (its face reads need L1 alignment: never a DRAM tile)
+    crafted = ttnn.to_layout(HYB.crafted_rm, ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
+    f.gate_up(x4, crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
     f.down_op(b.act, b.route, self.down, sdn, b.out)
+    ttnn.deallocate(crafted)
     step2() if not SEG.capturing else SEG.split(step2)
     if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
         ttnn.deallocate(logits)
-        if h_x is not x4:
-            ttnn.deallocate(h_x)
+        ttnn.deallocate(h_x)
+    host = ttnn.to_layout(B["host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
-        return ttnn.add(b.out, B["host"], output_tensor=b.out)
-    out = ttnn.add(b.out, B["host"], memory_config=dram)
+        out = ttnn.add(b.out, host, output_tensor=b.out)
+        ttnn.deallocate(host)
+        return out
+    out = ttnn.add(b.out, host, memory_config=dram)
+    ttnn.deallocate(host)
     if partial:
         from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 
@@ -616,6 +653,10 @@ def _write_bufs(self, B, dec):
 
 def _put_host(self, B, host, put):
     sh = B["shapes"]
+    if "host_rm" in B:  # fused: one row-major row (decode, one valid row)
+        put(B["host_rm"], (host[:1] / self.num_devices).reshape(1, 1, 1, sh["H"]).to(torch.bfloat16), ttnn.bfloat16,
+            ttnn.ROW_MAJOR_LAYOUT)
+        return
     full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
     full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
     put(B["host"], full.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
@@ -736,7 +777,7 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     else:
         HYB.st["steps"] += 1
         if HYB.record is not None:
-            HYB.record.append((L, idh[0].clone()))
+            HYB.record.append((L, idh[0].clone(), sch[0].clone()))
         if use_dyn:
             lru = HYB.dyn_lru[L]
             for e in idh[:valid][in_d[:valid]].tolist():
