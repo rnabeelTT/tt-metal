@@ -449,8 +449,12 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     logits = lg_rm
     B = _fused_bufs(self)
     h_x = ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
-    step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
-    step2 = lambda: _host_step2(self, B)  # noqa: E731
+    if HYB.overlap:  # host experts in a second step, while the device runs the fused experts
+        step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
+        step2 = lambda: _host_step2(self, B)  # noqa: E731
+    else:  # one host step per layer: routing + host experts, then a single device segment
+        step1 = lambda: (_fused_step1(self, h_x, logits, B), _host_step2(self, B))  # noqa: E731
+        step2 = None
     step1() if not SEG.capturing else SEG.split(step1)
     b = f.buf
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
@@ -459,7 +463,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     f.gate_up(x4, crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
     f.down_op(b.act, b.route, self.down, sdn, b.out)
     ttnn.deallocate(crafted)
-    step2() if not SEG.capturing else SEG.split(step2)
+    if step2 is not None:
+        step2() if not SEG.capturing else SEG.split(step2)
     if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
         ttnn.deallocate(logits)
         ttnn.deallocate(h_x)

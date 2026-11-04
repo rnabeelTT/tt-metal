@@ -34,6 +34,10 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- 2026-11-04 best so far (`runs/full397_v4/`): fused C=256, HYB_SKIP=0.1, plan v4 (59 prompts, `prompts_v2.TRAIN` +
+  old), lean host step (numpy routing, single-row RM transfers). 8 diverse held-out prompts (`prompts_v2.HELDOUT`):
+  decode 46.6 ms/token mean (21.5 tok/s; 39.9-66.4 ms, best 25 tok/s), TTFT 0.9 s, decode hit 78%, coherent in
+  zh/fr/es/code/math/prose. Chinese is the slowest (56% hits).
 - Serving (2026-11-04): `serve/serve_397b.sh runs/plan397_v3.npz` (fused C=256, HYB_SKIP=0.1) -> vLLM chat at
   13-17 tok/s decode, TTFT 1.1-1.3 s, coherent (MoE explainer, Canberra, Python palindrome), no server errors.
 - Skip sweep (2026-11-04, `runs/full397_skip/`, prompts 12-15, one build): HYB_SKIP drops missed experts whose
@@ -111,6 +115,7 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
 
 ## Log
+- 2026-11-04: held-out decode 21.5 tok/s mean (plan v4 + lean host step).
 - 2026-11-04: fused MoE kernels + HYB_SKIP=0.1 served through vLLM at 13-17 tok/s (was 0.58).
 - 2026-11-03: M5 vLLM serving works (0.58 tok/s). Next: speed (host overheads), hit rate.
 - 2026-11-03: M4 full-model traced decode coherent, 1.5 s/token. Next: M5 vLLM serving.
