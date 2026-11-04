@@ -53,6 +53,38 @@ ORNITH = {
     ),
 }
 
+# Measured on a QuietBox 2 (2026-11-04), the package served as staged. Sizes without an entry are not yet validated.
+MEASURED = {
+    "122b": {
+        "performance": (
+            "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-04, profile `ornith122b`, everything warm.\n\n"
+            "| | value |\n| --- | ---: |\n"
+            "| DRAM per chip after boot | 28.21 GiB (Qwen3-VL pair 8.03, Ornith weights 17.01, Ornith KV 2.22, traces 0.14) |\n"
+            "| L1 held per core | 254.3 KiB (Ornith's resident buffers) |\n"
+            "| Ready time, warm caches | about 16 min (Ornith's weight load dominates: about 11 min) |\n"
+            "| Ornith, 1 user, 128 output tokens | TTFT 0.39 s, 31.5 tok/s |\n"
+            "| Ornith, 8 users | TTFT 1.78 s, 21.9 tok/s per user, 134 tok/s total |\n"
+            "| Embedder: 1 query / 64 documents | 0.28 s / 2.40 s |\n"
+            "| Reranker: 30 documents | 1.40 s |\n"
+            "| Embedder / reranker while 8 Ornith streams decode | 0.09 s / 2.57 s (64 docs) / 1.65 s (rerank 30) |\n\n"
+            "Ornith decodes well below its single-model package here (31.5 vs 133 tok/s for one user, card of "
+            "raahemnabeel/ornith-1.5-122b) with the 8B models idle: the per-step overhead of the co-host runtime "
+            "(two Unix-socket round trips per decode step, no async step overlap). Not yet A/B'd against the "
+            "single-model package on the same box."),
+        "status": (
+            "- **Validated on hardware (2026-11-04), with gaps.** Embedder vs the single-model package: cosine mean "
+            "0.9993 (min 0.9984) on 16 texts; reranker: top-1 8/8 and full order 7/8 of 8 queries (its single-model "
+            "package runs LoFi MLPs, this one HiFi2). Ornith: greedy batch-1 output identical 16/16 with the embedder "
+            "and reranker idle and with both busy without pause (no interference); the 8B outputs identical before "
+            "and after that load; 0 programs compiled after trace capture. Not run: Ornith against its own "
+            "single-model package, evals, the soak, the -lean / -vision profiles.\n"
+            "- **Ornith decode is about 4x slower than its single-model package** (see Performance): use this package "
+            "when one box must hold all three models, not for Ornith throughput.\n"
+            "- Ornith's concurrent (batched) greedy output varies run to run by itself (13/16 identical between two "
+            "identical 16-request bursts), with or without the 8B models.\n"),
+    },
+}
+
 TRACE_REGION = 1792 * 2**20          # Ornith's 768 MiB + 1 GiB for the Qwen3-VL text traces (T <= 4096)
 QWEN3VL_GIB = 8.0
 HEADROOM_GIB = 1.25
@@ -166,19 +198,20 @@ def card(size: str, repo: str, image_tag: str) -> dict:
                         f"`/v1/score`), the embedder on +5 (`/v1/embeddings`, 4096-d, Matryoshka `dimensions` from 64), "
                         f"the co-host status on +6. Pairs up to 8,192 tokens; up to 4,096 run in captured traces, "
                         f"longer ones eagerly.",
-        "performance": "| Profile | Members | Ornith KV pool | DRAM per chip (budget) | Measured |\n"
+        "performance": MEASURED.get(size, {}).get("performance") or (
+                       "| Profile | Members | Ornith KV pool | DRAM per chip (budget) | Measured |\n"
                        "| --- | --- | ---: | ---: | --- |\n"
                        f"| `ornith{size}` | Ornith-1.5-{S} (max {o['max_num_seqs']} seqs) + embedder + reranker | "
                        f"{o['kv_tokens']:,} tokens | {b['total']} of {b['allocatable']} GiB | not yet on hardware |\n"
                        f"| `ornith{size}-lean` | the same, 8B MLPs in bfp4 | {o['kv_tokens'] * 2:,} tokens | "
                        f"{bl['total']} of {bl['allocatable']} GiB | not yet on hardware |\n\n"
                        "Budget = Ornith's non-KV footprint at this batch (its context contract) + its KV pool + one "
-                       "Qwen3-VL-8B copy per chip (measured on a mock mesh: 1.16 GiB embedding table + 0.19 GiB per "
-                       "layer) + Ornith's 1.25 GiB prefill headroom. Throughput and latency will be measured against "
-                       "each model served alone (tt-model-cohost-package validation protocol).",
-        "limitations": "- **Not yet validated on hardware.** Built and checked on a mock 4-chip mesh (weight layout per "
-                       "chip, every program shape compiles, both HTTP APIs, combined passes); trace capture, numerics "
-                       "against the single-model packages, DRAM and L1 fit are measured on the first hardware run.\n"
+                       "Qwen3-VL-8B copy per chip (1.16 GiB embedding table + 0.19 GiB per layer) + Ornith's 1.25 GiB "
+                       "prefill headroom."),
+        "limitations": (MEASURED.get(size, {}).get("status") or
+                        "- **Not yet validated on hardware.** Built and checked on a mock 4-chip mesh (weight layout per "
+                        "chip, every program shape compiles, both HTTP APIs, combined passes); trace capture, numerics "
+                        "against the single-model packages, DRAM and L1 fit are measured on the first hardware run.\n") + (
                        "- The models take turns on the chips: a long Ornith prefill delays embedding and rerank "
                        "requests, and the other way round.\n"
                        f"- Ornith serves at most {o['max_num_seqs']} sequences at once with a {o['kv_tokens']:,}-token "
@@ -191,7 +224,7 @@ def card(size: str, repo: str, image_tag: str) -> dict:
                        "single-model reranker serves 32,768).\n"
                        "- Text only for the embedder and reranker by default (an image input gets HTTP 400); the "
                        f"`ornith{size}-vision` profile is experimental. Ornith itself accepts images.\n"
-                       "- Each model keeps its own license: Ornith-1.5 MIT, Qwen3-VL-Embedding/Reranker Apache-2.0.",
+                       "- Each model keeps its own license: Ornith-1.5 MIT, Qwen3-VL-Embedding/Reranker Apache-2.0."),
         "license": {"id": "other", "name": "MIT (Ornith-1.5) and Apache-2.0 (Qwen3-VL-Embedding-8B, Qwen3-VL-Reranker-8B)"},
     }
 
