@@ -209,8 +209,19 @@ card:
     | 8 | 1,024 / 256 | 2,281 | 18.1 | 55 | 300 |
     | 32 | 1,024 / 256 | 8,605 | 42.1 | 24 | 422 |
 
-    The one-die profile (`p150`) was not measured for this checkpoint at publication; it runs the same code as
-    [raahemnabeel/quest-35b-rl](https://huggingface.co/raahemnabeel/quest-35b-rl)'s measured `p150`.
+    #### p150 (one die)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 45 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 159 | 22.2 | 45 | 43 |
+    | 1 | 1,024 / 256 | 364 | 22.3 | 45 | 42 |
+    | 1 | 4,096 / 256 | 1,365 | 22.5 | 44 | 36 |
+    | 1 | 32,768 / 256 | 11,819 | 23.2 | 43 | 14 |
+    | 8 | 128 / 128 | 1,395 | 41.6 | 24 | 153 |
+    | 8 | 1,024 / 256 | 3,023 | 42.0 | 24 | 150 |
+    | 32 | 1,024 / 256 | 11,579 | 98.9 | 10 | 223 |
 
     ### Presence penalty
 
@@ -240,8 +251,7 @@ card:
     - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
       can differ from the bf16 original where two candidate tokens are close.
     - One die (`p150`, `p100`): text only, no prefix caching.
-    - The p150x4, p150x2 and p100 profiles run the same meshes as p300x2 / p300 / p150 but were not run on those boards;
-      `p150` itself was not yet run for this checkpoint at publication.
+    - The p150x4, p150x2 and p100 profiles run the same meshes as p300x2 / p300 / p150 but were not run on those boards.
     - Prefix caching resumes only at 2,048-token boundaries; requests with images are not cached.
     - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
     - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
