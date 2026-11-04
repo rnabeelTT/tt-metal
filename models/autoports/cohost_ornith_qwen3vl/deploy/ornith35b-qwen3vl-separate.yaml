@@ -1,0 +1,16 @@
+# Ornith-1.5-35B on board 0 (chips 0,1) + Qwen3-VL-Embedding-8B on chip 2 + Qwen3-VL-Reranker-8B on chip 3:
+# three separate servers from the published single-model packages (no co-hosting needed: they fit on separate chips).
+# Ports are the ones tt-deep-research's recipe uses. The Ornith args are what `ttdr up` passes today.
+#   tt-model deploy up ornith35b-qwen3vl-separate.yaml --print   # placement only
+#   tt-model deploy up ornith35b-qwen3vl-separate.yaml
+#   tt-model deploy down ornith35b-qwen3vl-separate.yaml
+deployment: ornith35b-qwen3vl
+instances:
+  - name: ornith
+    model: raahemnabeel/ornith-1.5-35b-a3b
+    profile: p300
+    chips: [0, 1]
+    port: 8000
+    args: ["--chat-template", "/hf/ttdr/ornith.jinja", "--max-num-batched-tokens", "262144"]
+  - {name: embed,  model: raahemnabeel/qwen3-vl-embedding-8b, profile: p150, chips: [2], port: 8005}
+  - {name: rerank, model: raahemnabeel/qwen3-vl-reranker-8b,  profile: p150, chips: [3], port: 8004}
