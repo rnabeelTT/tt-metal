@@ -231,12 +231,13 @@ def install():
             if HYB.D:
                 raise RuntimeError("HYB_FUSED=1 does not support dynamic slots (HYB_DYN_SLOTS)")
             if HYB.crafted is None:  # model-wide: each layer writes it in its host step and its kernel reads it next
-                # DRAM: the kernels address it through a TensorAccessor built from the tensor, and a persistent L1
-                # buffer here lowers the L1 floor into later programs' static circular buffers (fabric boundary)
+                # L1, like the router output the kernels normally read: they fetch each tile's face-1 row (source
+                # offset 512) into destination offset +32, and Blackhole DRAM reads need source and destination equal
+                # mod 64 (L1: 16), so a DRAM copy garbles logits 16-31 of every tile (full-model text degraded)
                 HYB.crafted = ttnn.from_torch(torch.zeros(1, 1, TILE_W, HYB.C + TILE_W), dtype=ttnn.bfloat16,
                                               layout=ttnn.TILE_LAYOUT, device=mesh_device,
                                               mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
-                                              memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                                              memory_config=ttnn.L1_MEMORY_CONFIG)
             self._hyb_fused = True
         self._static_attrs = None
         self._dyn_attrs = None

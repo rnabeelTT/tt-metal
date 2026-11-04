@@ -34,6 +34,12 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Fused MoE decode (2026-11-04, HYB_FUSED=1 default): the production fused gate-up/down kernels run on a crafted
+  logits row (see patch._fused_step1) over C=256 slots (255 experts + an all-zero sink). Full 397B, plan v2, held-out
+  prompts 12-15, 128 tokens (`runs/full397_fused3/`): decode 67-134 ms/token (7.5-14.9 tok/s), TTFT 1.8-3.5 s,
+  decode hit 63-85%, coherent. The crafted row MUST stay in L1 (DRAM garbles logits 16-31 of each tile: BH DRAM
+  read alignment). HYB_BOUNDARY (replicated residual + fabric) is off: its full-model test also had the DRAM bug, so
+  re-test; FB_CONSUMER clashes with the prefill norm's L1 at hidden 4096.
 - Held-out evaluation (2026-11-04): earlier hit rates were in-sample (plan from prompts 0-3, tests on 0-2) and
   included prefill padding rows. Decode-only, held-out: 4-prompt plan 53-69%; 15-prompt plan (`runs/plan397_v2.npz`)
   66/76/85/87% on prompts 12-15 (sim predicted 79%). C=272 (29.3 GiB/die), production attention/GDN/sampler fusions
