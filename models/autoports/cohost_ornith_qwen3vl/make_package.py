@@ -83,7 +83,9 @@ def members(size: str) -> list:
                  "--limit-mm-per-prompt", json.dumps({"image": 4, "video": 0}),
                  "--chat-template", f"/opt/tt-cohost/templates/ornith-1.5-{size}.jinja",
                  "--max-num-batched-tokens", "262144"],
-        "env": {**o["env"], "ARCH_NAME": "blackhole", "HF_MODEL": o["hf"], "QWEN35_TRACE_REGION_MIB": "768",
+        # HF_MODEL as the snapshot path: the model config resolves a hub id with snapshot_download(offline), which
+        # needs a refs/main pointer; a path needs nothing
+        "env": {**o["env"], "ARCH_NAME": "blackhole", "HF_MODEL": snap, "QWEN35_TRACE_REGION_MIB": "768",
                 "VLLM_ENGINE_READY_TIMEOUT_S": "7200"},
         "kv_tokens": o["kv_tokens"],
     }
@@ -96,7 +98,8 @@ def members(size: str) -> list:
 
 def profiles(size: str) -> tuple:
     o = ORNITH[size]
-    common = {"HF_MODEL": o["hf"], "QWEN35_MAX_TOKENS_ALL_USERS": str(o["kv_tokens"]), "MESH_DEVICE": "P300x2"}
+    snap = f"{HF}/models--{o['hf'].replace('/', '--')}/snapshots/{o['rev']}"
+    common = {"HF_MODEL": snap, "QWEN35_MAX_TOKENS_ALL_USERS": str(o["kv_tokens"]), "MESH_DEVICE": "P300x2"}
     lean_kv = o["kv_tokens"] * 2
     sp = [
         {"name": f"ornith{size}", "hardware": "p300x2", "mesh_device": "P300x2", "env": dict(common),
@@ -310,7 +313,9 @@ def main():
     if not a.no_image and not (out / "image" / "oci-layout").exists():
         from tt_kernel import oci
         oci.save(a.image, out / "image")
-    digest = "sha256:" + "0" * 64
+    # no OCI export (a local test): the image as docker holds it
+    digest = subprocess.run(["docker", "image", "inspect", a.image, "--format", "{{.Id}}"], capture_output=True,
+                            text=True, check=True).stdout.strip()
     if (out / "image" / "index.json").exists():
         idx = json.loads((out / "image" / "index.json").read_text())
         digest = idx["manifests"][0]["digest"]

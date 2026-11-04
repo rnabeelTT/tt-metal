@@ -106,10 +106,13 @@ def _cat(hbs: List[HostBatch], key: str) -> torch.Tensor:
     return torch.cat([getattr(hb, key) for hb in hbs], dim=0)
 
 
-def build_inputs(scorer: SplitScorer, per_chip: List[List[PairInputs]], T: int, device=None, vis_index=None) -> dict:
-    """Sharded inputs: chip i gets ``per_chip[i]`` (padded with dummy rows to the common B). ``device=None``: host
-    tensors (for ``copy_host_to_device_tensor`` into a slot)."""
-    B = max(len(p) for p in per_chip)
+def build_inputs(scorer: SplitScorer, per_chip: List[List[PairInputs]], T: int, B: Optional[int] = None, device=None,
+                 vis_index=None) -> dict:
+    """Sharded inputs of shape (B, T): chip i gets ``per_chip[i]``, padded with dummy rows to B (a captured slot's B,
+    which can be larger than any chip's pair count). ``device=None``: host tensors (for ``copy_host_to_device_tensor``
+    into a slot)."""
+    B = B or max(len(p) for p in per_chip)
+    assert all(len(p) <= B for p in per_chip), (B, [len(p) for p in per_chip])
     hbs = [HostBatch(scorer, list(p) + [_dummy(1)] * (B - len(p)), T) for p in per_chip]
     mapper = ttnn.ShardTensorToMesh(scorer.device, dim=0)
     kw = dict(mesh_mapper=mapper, device=device)
@@ -219,14 +222,14 @@ class SplitEngine:
         """One text pass of shape (B, T); returns each chip's results for its real pairs."""
         slot = self.slots.get((B, T))
         if slot is not None:
-            host = build_inputs(self.scorer, per_chip, T)
+            host = build_inputs(self.scorer, per_chip, T, B)
             for k, v in host.items():
                 ttnn.copy_host_to_device_tensor(v, slot.inputs[k])
             ttnn.execute_trace(self.device, slot.trace_id, cq_id=0, blocking=False)
             slot.replays += 1
             out, d = slot.output, None
         else:
-            d = build_inputs(self.scorer, per_chip, T, device=self.device)
+            d = build_inputs(self.scorer, per_chip, T, B, device=self.device)
             out = self._forward(d, B, T)
             self.counters["eager_passes"] += 1
         res = [read_lane(out, i, self.lanes[i], len(p)) if p else [] for i, p in enumerate(per_chip)]
@@ -247,7 +250,7 @@ class SplitEngine:
         try:
             vi = visual_index(self.scorer, pair, tables, T)
             n = len(self.lanes)
-            d = build_inputs(self.scorer, [[pair]] * n, T, device=self.device, vis_index=vi)
+            d = build_inputs(self.scorer, [[pair]] * n, T, 1, device=self.device, vis_index=vi)
             out = self._forward(d, 1, T, tables=tables)
             res = read_lane(out, chip, task, 1)[0]
             self._free(out, *d.values())
