@@ -85,6 +85,24 @@ MEASURED = {
     },
 }
 
+MEASURED["35b"] = {
+    "performance": (
+        "Not yet measured on hardware. Device-free boot (mock 4-chip mesh, untraced, 2026-11-04), DRAM per chip as the "
+        "mock allocator counts it:\n\n| | GiB per chip |\n| --- | ---: |\n"
+        "| Qwen3-VL embedder + reranker (one 8B copy per chip) | 8.03 |\n"
+        "| Ornith-1.5-35B-A3B weights, four dies | 9.18 |\n"
+        "| Ornith KV pool (1,048,576 tokens) | 6.32 |\n"
+        "| **total after load** | **23.54** (warmup adds about 1 more on the 122B; about 5 GiB of margin) |\n\n"
+        "L1 held per core by Ornith-35B: 173.1 KiB (the 8B programs fit next to the 122B's 254.3 KiB on hardware). "
+        "Expected speed: Ornith at its single-model p300x2 speed while the 8B models are idle, as measured for the "
+        "122B co-host package (no co-host cost while the others are idle)."),
+    "status": (
+        "- **Not yet validated on hardware.** Checked device-free: the group loads on a mock 4-chip mesh (the 8B pair "
+        "first, then Ornith's weights and KV pool); the mock stops at Ornith's warmup, whose ring all-reduce needs the "
+        "QuietBox 2's board-to-board wraparound link the mock topology lacks. The runtime, the 8B adapter and the "
+        "Ornith serve settings are the ones validated on hardware in raahemnabeel/cohost-ornith-122b-qwen3vl.\n"),
+}
+
 TRACE_REGION = 1792 * 2**20          # Ornith's 768 MiB + 1 GiB for the Qwen3-VL text traces (T <= 4096)
 QWEN3VL_GIB = 8.0
 HEADROOM_GIB = 1.25
