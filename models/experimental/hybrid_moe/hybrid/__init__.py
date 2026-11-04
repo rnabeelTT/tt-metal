@@ -30,10 +30,19 @@ _ENV_OFF = {
     "QWEN35_PREFILL_TRACE": "0",
 }
 
+# Production decode fusions that do not touch the MoE block (serve-default.sh sets them); defaults, env may override.
+_ENV_ON = {
+    "QWEN35_ATTN_DECODE_OPS": "1",  # attention decode head prep / output gate ops
+    "QWEN35_GDN_DECODE_OPS": "1",  # GDN decode conv + head step ops
+    "QWEN35_ROWS_TOPK": "1",  # sampler top-k over the tile rows
+}
+
 
 def install():
     for k, v in _ENV_OFF.items():
         os.environ[k] = v
+    for k, v in _ENV_ON.items():
+        os.environ.setdefault(k, v)
     from . import patch, seg
 
     seg.install()  # segmented decode traces (host step between per-layer segments)

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """Hybrid-MoE prototype driver: build the Qwen3.5 autoport with the hybrid overlay and generate greedily (eager).
 
-Env: HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_NEW_TOKENS, POC_LAYERS
+Env: HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_PROMPT_START, POC_NEW_TOKENS, POC_LAYERS
 (comma list -> reduced model), POC_MAX_SEQ (default 2048), HYB_RECORD=1 (save decode routing as routing.npz).
 Writes <out_dir>/result.json.
 """
@@ -26,6 +26,7 @@ from capture_routing import PROMPTS  # noqa: E402
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import build_generator  # noqa: E402
 
 N_PROMPTS = int(os.environ.get("POC_PROMPTS", "2"))
+PROMPT_START = int(os.environ.get("POC_PROMPT_START", "0"))  # held-out prompts: start past the plan's
 NEW = int(os.environ.get("POC_NEW_TOKENS", "64"))
 
 
@@ -56,7 +57,7 @@ def main():
         tok = gen.tokenizer
         runs = []
         rec_arrays = {}
-        for i, p in enumerate(PROMPTS[:N_PROMPTS]):
+        for i, p in enumerate(PROMPTS[PROMPT_START : PROMPT_START + N_PROMPTS], start=PROMPT_START):
             chat = tok.apply_chat_template(
                 [{"role": "user", "content": p}], add_generation_prompt=True, enable_thinking=False, tokenize=False
             )

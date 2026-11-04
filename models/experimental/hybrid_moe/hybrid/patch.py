@@ -471,13 +471,13 @@ def _host_step2(self, B):
     job, B["job"] = B["job"], None
     if job is False:  # computed (and written) in _host_step
         return
-    t0 = time.perf_counter()
     if job is None:  # no misses: the host partial must still be zeroed once
         if B.get("host_zero"):
             return
         host = torch.zeros(1, B["shapes"]["H"], dtype=torch.float32)
     else:
         host = HYB.host_compute(*job)
+    t0 = time.perf_counter()
     _put_host(self, B, host, lambda d, t, dt, lay: _put(self, d, t, dt, lay))
     B["host_zero"] = job is None
     HYB.st["t_up"] += time.perf_counter() - t0
