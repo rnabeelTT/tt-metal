@@ -6,6 +6,7 @@ Env (read at install):
   HYB_SLOTS        C, static expert slots per MoE layer (bfp4, the model's routed precision; default all E)
   HYB_DYN_SLOTS    D, dynamic expert slots per MoE layer (bfp8: ttnn.fill_cache cannot write bfp4); 0 = off
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
+  HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
@@ -36,6 +37,7 @@ class HybridState:
         self.D = int(os.environ.get("HYB_DYN_SLOTS", "0") or 0)
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
+        self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -343,6 +345,8 @@ def _forward(self, x, mode=None, partial=False, logits=None):
             routed = ttnn.add(routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode),
                               memory_config=ttnn.DRAM_MEMORY_CONFIG)
         out = ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if HYB.overlap:
+            SEG.split(lambda: _host_step2(self, B))  # host experts run while the segment above executes
         out = ttnn.add(out, B["host"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         return _finish(self, out, orig, partial)
 
@@ -428,24 +432,55 @@ def _write_bufs(self, B, dec):
     (idt, ilay), (sdt, slay) = B["dtypes"]["ids"], B["dtypes"]["sc"]
 
     def put(dst, t, dt, lay):
-        t1 = time.perf_counter()
-        h = ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=rep)
-        HYB.st["t_up_conv"] += time.perf_counter() - t1
-        ttnn.copy_host_to_device_tensor(h, dst)
+        _put(self, dst, t, dt, lay)
 
     put(B["ids"], dec["ids"].to(torch.int32).reshape(sh["ids"]), idt, ilay)
     put(B["sc"], dec["sc"].to(torch.bfloat16).reshape(sh["sc"]), sdt, slay)
     if "dids" in B:
         put(B["dids"], dec["dids"].to(torch.int32).reshape(sh["ids"]), idt, ilay)
         put(B["dsc"], dec["dsc"].to(torch.bfloat16).reshape(sh["sc"]), sdt, slay)
-    full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
-    full.view(-1, sh["H"])[: dec["host"].shape[0]] = dec["host"] / self.num_devices  # per-device partial
-    put(B["host"], full.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+    if dec["host"] is not None:
+        _put_host(self, B, dec["host"], put)
+        B["host_zero"] = False
     HYB.st["t_up"] += time.perf_counter() - t0
 
 
+def _put_host(self, B, host, put):
+    sh = B["shapes"]
+    full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
+    full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
+    put(B["host"], full.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+
+
+def _put(self, dst, t, dt, lay):
+    t1 = time.perf_counter()
+    h = ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device))
+    HYB.st["t_up_conv"] += time.perf_counter() - t1
+    ttnn.copy_host_to_device_tensor(h, dst)
+
+
 def _host_step(self, x4, scores, ids, T, mode, B):
-    _write_bufs(self, B, _decide(self, x4, scores, ids, T, mode))
+    """Between segments a and b: routing -> slot buffers. The missed experts' host compute is left in B["job"] for
+    _host_step2, which runs after segment b has been queued (the device computes the resident experts meanwhile)."""
+    dec = _decide(self, x4, scores, ids, T, mode, defer_host=HYB.overlap)
+    _write_bufs(self, B, dec)
+    B["job"] = dec["job"] if dec["host"] is None else False
+
+
+def _host_step2(self, B):
+    job, B["job"] = B["job"], None
+    if job is False:  # computed (and written) in _host_step
+        return
+    t0 = time.perf_counter()
+    if job is None:  # no misses: the host partial must still be zeroed once
+        if B.get("host_zero"):
+            return
+        host = torch.zeros(1, B["shapes"]["H"], dtype=torch.float32)
+    else:
+        host = HYB.host_compute(*job)
+    _put_host(self, B, host, lambda d, t, dt, lay: _put(self, d, t, dt, lay))
+    B["host_zero"] = job is None
+    HYB.st["t_up"] += time.perf_counter() - t0
 
 
 def _apply_promotions(self, L, protect):
@@ -483,7 +518,7 @@ def _apply_promotions(self, L, protect):
     HYB.st["t_promote"] += time.perf_counter() - t0
 
 
-def _decide(self, x4, scores, ids, T, mode):
+def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     """Read back the routing, apply pending promotions (decode), split picks into static / dynamic / host, compute
     the host part. Returns torch tensors: ids, sc (static), dids, dsc (dynamic), host [valid, H] fp32."""
     L = self.layer_num
@@ -532,10 +567,12 @@ def _decide(self, x4, scores, ids, T, mode):
         t1 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t1
-        host = HYB.host_compute(L, xh, idh[:valid], sch[:valid], v_miss)
+        job = (L, xh, idh[:valid], sch[:valid], v_miss)
+        host = None if defer_host else HYB.host_compute(*job)
     else:
+        job = None
         host = torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
     z = torch.zeros_like(s_slot)
     zf = torch.zeros_like(sch)
     return {"ids": torch.where(in_s, s_slot, z), "sc": torch.where(in_s, sch, zf),
-            "dids": torch.where(in_d, d_slot, z), "dsc": torch.where(in_d, sch, zf), "host": host}
+            "dids": torch.where(in_d, d_slot, z), "dsc": torch.where(in_d, sch, zf), "host": host, "job": job}
