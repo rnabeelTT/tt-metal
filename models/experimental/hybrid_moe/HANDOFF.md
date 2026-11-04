@@ -34,6 +34,8 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Serving (2026-11-04): `serve/serve_397b.sh runs/plan397_v3.npz` (fused C=256, HYB_SKIP=0.1) -> vLLM chat at
+  13-17 tok/s decode, TTFT 1.1-1.3 s, coherent (MoE explainer, Canberra, Python palindrome), no server errors.
 - Skip sweep (2026-11-04, `runs/full397_skip/`, prompts 12-15, one build): HYB_SKIP drops missed experts whose
   routing weight is below tau. Mean decode ms/token / TTFT / teacher-forced top-1 vs tau=0 (vs ref):
   0: 83.5 / 2.0 s / 1.000 (0.979); 0.02: 82.5 / 1.8 / 0.986; 0.04: 82.7 / 1.7 / 0.984; 0.06: 75.3 / 1.5 / 0.981;
@@ -109,6 +111,7 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
 
 ## Log
+- 2026-11-04: fused MoE kernels + HYB_SKIP=0.1 served through vLLM at 13-17 tok/s (was 0.58).
 - 2026-11-03: M5 vLLM serving works (0.58 tok/s). Next: speed (host overheads), hit rate.
 - 2026-11-03: M4 full-model traced decode coherent, 1.5 s/token. Next: M5 vLLM serving.
 - 2026-11-03: disk freed to 671 GB; 397B FP8 download done (~1 h); image source extracted to `image_src/`.
