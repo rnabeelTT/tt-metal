@@ -117,41 +117,55 @@ class SplitScorer(TextScorer):
                 )
             )
             memo.clear()
-        self.final_norm = self._split(
-            "final_norm",
-            ttnn.bfloat16,
-            lambda ck: _norm_w(ck.get(ck.text_prefix + "norm.weight")),
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-        )
-
-        def head(ck):
-            # tied embeddings: the head rows are the embedding rows (the embedder's column is computed and unused)
+        # The final RMSNorm and the yes-minus-no score run on the host, in fp32, on the selected rows: on device they
+        # need a whole 4096-wide fp32 row per core in L1, which an LLM's resident L1 leaves no room for. Host fp32
+        # matches the single-chip server's fp32 / HiFi4 device math.
+        self.final_norm_host, self.score_vec = {}, {}
+        for task in dict.fromkeys(self.lanes):
+            ck = self.ckpts[task]
+            self.final_norm_host[task] = ck.get(ck.text_prefix + "norm.weight").float()
             w = ck.get("lm_head.weight") if ck.has("lm_head.weight") else ck.get(ck.text_prefix + "embed_tokens.weight")
-            v = w[YES_TOKEN].float() - w[NO_TOKEN].float()
-            h = torch.zeros(self.hidden, TILE, dtype=torch.float32)
-            h[:, 0] = v.to(torch.bfloat16).float()
-            return h
-
-        self.score_head = self._split("score_head_yes_minus_no", ttnn.float32, head)
+            # the official score_linear holds (w_yes - w_no) in model dtype
+            self.score_vec[task] = (w[YES_TOKEN].float() - w[NO_TOKEN].float()).to(torch.bfloat16).float()
         self.trans_mat = ttnn.from_torch(
             rope_trans_mat(), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=d,
             mesh_mapper=ttnn.ReplicateTensorToMesh(d),
         )
 
-    # ---- head: both tasks' outputs on every chip -----------------------------------------------------------------
+    # ---- matmul: the tuned blocking where it fits, else the default ------------------------------------------------
+    def matmul(self, x, w, ckc, swiglu=False):
+        """The single-chip server's tuned minimal_matmul blocking assumes the whole L1. Next to an LLM that keeps L1
+        resident, some blockings' circular buffers do not fit; those shapes fall back to the tt_dit default blocking
+        (remembered per shape). The clash is a host-side check before dispatch, so the retry is safe."""
+        M, K, N = int(x.shape[-2]), int(w.shape[-2]), int(w.shape[-1])
+        key = (M, K, N, swiglu, ckc is self.ckc_mlp)
+        if key in self._fallback:
+            from models.tt_dit.utils.matmul import get_matmul_config
+
+            cfg = get_matmul_config(M, K, N, self.device.compute_with_storage_grid_size())
+            return ttnn.experimental.minimal_matmul(x, w, config=cfg, compute_kernel_config=ckc,
+                                                     dtype=self.precision.activations, fuse_swiglu=swiglu)
+        try:
+            return super().matmul(x, w, ckc, swiglu)
+        except RuntimeError as e:
+            if "clash" not in str(e) and "circular buffer" not in str(e).lower():
+                raise
+            self._fallback.add(key)
+            return self.matmul(x, w, ckc, swiglu)
+
+    _fallback: set = set()
+
+    # ---- head: the selected rows only (norm and score on the host) ------------------------------------------------
     def head(self, x, select):
         rows = ttnn.matmul(select, x, compute_kernel_config=self.ckc_head, dtype=ttnn.float32)
         ttnn.deallocate(x)
-        n = ttnn.rms_norm(rows, weight=self.final_norm, epsilon=self.eps, compute_kernel_config=self.ckc_norm)
-        ttnn.deallocate(rows)
-        s = ttnn.matmul(n, self.score_head, compute_kernel_config=self.ckc_head, dtype=ttnn.float32)
-        return n, s  # [1, 1, 32, hidden] embeddings, [1, 1, 32, 32] scores (row b, column 0)
+        return rows  # [1, 1, 32, hidden] fp32: row b = pair b's last-token hidden state
 
-
-def read_lane(out, chip: int, task: str, B: int) -> list:
-    """Lane ``chip``'s results from a pass's ``(embeddings, scores)``: rows 0..B-1."""
-    n, s = out
-    t = ttnn.to_torch(ttnn.get_device_tensors(n if task == "embed" else s)[chip]).float()
-    if task == "embed":
-        return [t[0, 0, b].clone().numpy() for b in range(B)]
-    return [float(t[0, 0, b, 0]) for b in range(B)]
+    def read_lane(self, rows, chip: int, B: int) -> list:
+        """Chip ``chip``'s results for rows 0..B-1: the final-normed row (embedder) or its score (reranker)."""
+        task = self.lanes[chip]
+        t = ttnn.to_torch(ttnn.get_device_tensors(rows)[chip]).float()[0, 0, :B]
+        n = t * torch.rsqrt(t.pow(2).mean(-1, keepdim=True) + self.eps) * self.final_norm_host[task]
+        if task == "embed":
+            return [n[b].numpy().copy() for b in range(B)]
+        return [float(v) for v in n @ self.score_vec[task]]

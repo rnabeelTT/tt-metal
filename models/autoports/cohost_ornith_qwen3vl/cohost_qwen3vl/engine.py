@@ -30,7 +30,7 @@ import ttnn
 from models.autoports.qwen_qwen3_vl_reranker_8b.tt.inputs import PairInputs
 from models.autoports.qwen_qwen3_vl_reranker_8b.tt.runner import HostBatch, bucket_for, visual_index
 
-from .split import SplitScorer, read_lane
+from .split import SplitScorer
 
 log = logging.getLogger("qwen3vl_cohost")
 
@@ -133,7 +133,7 @@ class Slot:
     B: int
     T: int
     inputs: dict
-    output: tuple = ()
+    output: object = None
     trace_id: object = None
     replays: int = 0
 
@@ -232,7 +232,7 @@ class SplitEngine:
             d = build_inputs(self.scorer, per_chip, T, B, device=self.device)
             out = self._forward(d, B, T)
             self.counters["eager_passes"] += 1
-        res = [read_lane(out, i, self.lanes[i], len(p)) if p else [] for i, p in enumerate(per_chip)]
+        res = [self.scorer.read_lane(out, i, len(p)) if p else [] for i, p in enumerate(per_chip)]
         if d is not None:
             self._free(out, *d.values())
         self.counters["passes"] += 1
@@ -252,7 +252,7 @@ class SplitEngine:
             n = len(self.lanes)
             d = build_inputs(self.scorer, [[pair]] * n, T, 1, device=self.device, vis_index=vi)
             out = self._forward(d, 1, T, tables=tables)
-            res = read_lane(out, chip, task, 1)[0]
+            res = self.scorer.read_lane(out, chip, 1)[0]
             self._free(out, *d.values())
         finally:
             tables.deallocate()

@@ -85,7 +85,7 @@ def members(size: str) -> list:
                  "--max-num-batched-tokens", "262144"],
         # HF_MODEL as the snapshot path: the model config resolves a hub id with snapshot_download(offline), which
         # needs a refs/main pointer; a path needs nothing
-        "env": {**o["env"], "ARCH_NAME": "blackhole", "HF_MODEL": snap, "QWEN35_TRACE_REGION_MIB": "768",
+        "env": {**o["env"], "ARCH_NAME": "blackhole", "HF_MODEL": snap, "QWEN35_TRACE_REGION_MIB": str(TRACE_REGION // 2**20),  # Ornith checks it equals the region
                 "VLLM_ENGINE_READY_TIMEOUT_S": "7200"},
         "kv_tokens": o["kv_tokens"],
     }
