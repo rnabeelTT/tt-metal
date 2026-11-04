@@ -57,29 +57,29 @@ ORNITH = {
 MEASURED = {
     "122b": {
         "performance": (
-            "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-04, profile `ornith122b`, everything warm.\n\n"
+            "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-04, profile `ornith122b`, all three members "
+            "loaded, warm. Ornith: 128 output tokens per request, streamed, greedy.\n\n"
+            "| | other members idle | while 8 Ornith streams decode |\n| --- | ---: | ---: |\n"
+            "| Ornith-1.5-122B, 1 user | 147.6 tok/s, TTFT 0.18 s | |\n"
+            "| Ornith-1.5-122B, 8 users | 345 tok/s total (87 tok/s per user), TTFT 1.49 s | |\n"
+            "| Embedder, 1 query | 0.067 s | 0.072 s |\n"
+            "| Embedder, 64 documents | 1.46 s | 1.64 s |\n"
+            "| Reranker, 30 documents | 0.49 s | 0.62 s |\n\n"
+            "Ornith alone in the same runtime (profile `ornith122b-solo`): 147.4 tok/s for 1 user, 347 tok/s for 8, so "
+            "co-hosting costs Ornith nothing while the 8B models are idle (its single-model package card: 133 tok/s "
+            "for 1 user). When the embedder or reranker runs, the models take turns: Ornith's decode pauses for each "
+            "8B pass.\n\n"
             "| | value |\n| --- | ---: |\n"
             "| DRAM per chip after boot | 28.21 GiB (Qwen3-VL pair 8.03, Ornith weights 17.01, Ornith KV 2.22, traces 0.14) |\n"
             "| L1 held per core | 254.3 KiB (Ornith's resident buffers) |\n"
-            "| Ready time, warm caches | about 16 min (Ornith's weight load dominates: about 11 min) |\n"
-            "| Ornith, 1 user, 128 output tokens | TTFT 0.39 s, 31.5 tok/s |\n"
-            "| Ornith, 8 users | TTFT 1.78 s, 21.9 tok/s per user, 134 tok/s total |\n"
-            "| Embedder: 1 query / 64 documents | 0.28 s / 2.40 s |\n"
-            "| Reranker: 30 documents | 1.40 s |\n"
-            "| Embedder / reranker while 8 Ornith streams decode | 0.09 s / 2.57 s (64 docs) / 1.65 s (rerank 30) |\n\n"
-            "Ornith decodes well below its single-model package here (31.5 vs 133 tok/s for one user, card of "
-            "raahemnabeel/ornith-1.5-122b) with the 8B models idle: the per-step overhead of the co-host runtime "
-            "(two Unix-socket round trips per decode step, no async step overlap). Not yet A/B'd against the "
-            "single-model package on the same box."),
+            "| Ready time, warm caches | about 14 min (Ornith's weight load: about 11 min) |"),
         "status": (
-            "- **Validated on hardware (2026-11-04), with gaps.** Embedder vs the single-model package: cosine mean "
-            "0.9993 (min 0.9984) on 16 texts; reranker: top-1 8/8 and full order 7/8 of 8 queries (its single-model "
-            "package runs LoFi MLPs, this one HiFi2). Ornith: greedy batch-1 output identical 16/16 with the embedder "
-            "and reranker idle and with both busy without pause (no interference); the 8B outputs identical before "
-            "and after that load; 0 programs compiled after trace capture. Not run: Ornith against its own "
-            "single-model package, evals, the soak, the -lean / -vision profiles.\n"
-            "- **Ornith decode is about 4x slower than its single-model package** (see Performance): use this package "
-            "when one box must hold all three models, not for Ornith throughput.\n"
+            "- **Validated on hardware (2026-11-04).** Embedder vs the single-model package: cosine mean 0.9993 "
+            "(min 0.9984) on 16 texts; reranker: top-1 8/8 and full order 7/8 of 8 queries (its single-model package "
+            "runs LoFi MLPs, this one HiFi2). Ornith: greedy batch-1 output identical 16/16 with the embedder and "
+            "reranker idle and with both busy without pause (no interference); the 8B outputs identical before and "
+            "after that load; 0 programs compiled after trace capture. Not run: evals, the soak, the -lean / -vision "
+            "profiles.\n"
             "- Ornith's concurrent (batched) greedy output varies run to run by itself (13/16 identical between two "
             "identical 16-request bursts), with or without the 8B models.\n"),
     },
