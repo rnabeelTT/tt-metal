@@ -77,7 +77,8 @@ def main():
                 "prompt_tokens": len(ids),
                 "wall_s": round(dt, 1),
                 "ms_per_token_incl_prefill": round(1e3 * dt / NEW, 1),
-                "hit_rate": round(st["hits"] / max(1, st["picks"]), 4),
+                "hit_rate": round(st["hits"] / max(1, st["picks"]), 4),  # incl. prefill (padded bucket rows)
+                "decode_hit_rate": round(st.get("dec_hits", 0) / max(1, st.get("dec_picks", 0)), 4),
                 "decode_steps": st["steps"],
                 "trace_replays": st["seg"]["replays"],
                 "dyn_hits": st["dyn_hits"],

@@ -60,7 +60,7 @@ class HybridState:
 
     def reset_stats(self):
         self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
-                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0}
+                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0, "dec_picks": 0, "dec_hits": 0}
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -548,6 +548,9 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     v_miss = miss[:valid]
     HYB.st["picks"] += int(valid * k)
     HYB.st["hits"] += int(valid * k - v_miss.sum())
+    if mode != "prefill":
+        HYB.st["dec_picks"] += int(valid * k)
+        HYB.st["dec_hits"] += int(valid * k - v_miss.sum())
     HYB.st["dyn_hits"] += int(in_d[:valid].sum())
     if mode == "prefill":
         HYB.st["prefill_rows"] += valid

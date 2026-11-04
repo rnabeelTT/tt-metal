@@ -1,0 +1,18 @@
+{
+ "static": 0.7895,
+ "random-equiv": 0.53125,
+ "C240+D16 promote1": 0.8659,
+ "C240+D16 promote2": 0.8692,
+ "C240+D16 promote10": 0.8714,
+ "C208+D32 promote1": 0.855,
+ "C208+D32 promote2": 0.8629,
+ "C208+D32 promote10": 0.8657,
+ "C144+D64 promote1": 0.8093,
+ "C144+D64 promote2": 0.8311,
+ "C144+D64 promote10": 0.8405,
+ "C80+D96 promote1": 0.7287,
+ "C80+D96 promote2": 0.7796,
+ "C80+D96 promote10": 0.8029,
+ "bfp4-dyn C208+D64 promote2 (if bfp4 slots were writable)": 0.8856,
+ "bfp4-dyn C144+D128 promote2": 0.8575
+}
