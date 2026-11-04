@@ -202,8 +202,25 @@ def _die0(t):
     return ttnn.get_device_tensors(t)[0]
 
 
+def _log_stats(replays):
+    """HYB_LOG_EVERY: the host-step counters accumulated since the last log, per replayed segmented trace."""
+    from .seg import SEG
+
+    st, prev = HYB.st, getattr(HYB, "_log_prev", None) or {}
+    n = SEG.log_every
+    d = {k: st[k] - prev.get(k, 0) for k in st if isinstance(st[k], (int, float))}
+    ms = {k[2:]: round(1e3 * v / n, 2) for k, v in d.items() if k.startswith("t_") and v}
+    print(f"HYB_STATS replays={replays} per replay ms={ms} steps/replay={d.get('steps', 0) / n:.1f} "
+          f"hit={d.get('dec_hits', 0) / max(1, d.get('dec_picks', 0)):.3f} skipped/replay={d.get('skipped', 0) / n:.1f}",
+          flush=True)
+    HYB._log_prev = dict(st)
+
+
 def install():
     torch.set_num_threads(int(os.environ.get("HYB_THREADS", "8")))
+    from .seg import SEG
+
+    SEG.on_log = _log_stats
     from models.autoports.qwen_qwen3_5_122b_a10b.tt import model_config as mc
     from models.autoports.qwen_qwen3_5_122b_a10b.tt import moe as moe_mod
     from models.autoports.qwen_qwen3_5_122b_a10b.tt import optimized_decoder as od

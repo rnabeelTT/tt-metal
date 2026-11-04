@@ -9,6 +9,7 @@ order, calling each callback after its segment (callbacks may read back device t
 segment finished, and write into buffers allocated BEFORE the capture; they must not allocate device memory).
 """
 
+import os
 import time
 
 import ttnn
@@ -34,6 +35,8 @@ class SegTrace:
         self.active = None
         self.traces = {}  # key(first real id) -> [(real id, fn | None)]
         self.stats = {"replays": 0, "segments": 0}
+        self.log_every = int(os.environ.get("HYB_LOG_EVERY", "0"))  # serving diagnostics: host-step stats every N replays
+        self.on_log = None
 
     @property
     def capturing(self):
@@ -74,6 +77,8 @@ class SegTrace:
                 fn()
         self.stats["replays"] += 1
         self.stats["segments"] += len(segs)
+        if self.log_every and self.stats["replays"] % self.log_every == 0 and self.on_log is not None:
+            self.on_log(self.stats["replays"])
         if blocking:
             ttnn.synchronize_device(mesh)
 
