@@ -59,6 +59,21 @@ class _Entry:
         self.transform = transform
 
 
+class _FusedExperts:
+    """Routed experts stored per expert (``mlp.experts.N.{gate,up,down}_proj.weight``, the pre-transformers-5 layout
+    some fine-tunes are saved in) read as the fused tensors the port consumes: ``gate_up_proj`` [E, 2I, H] (gate rows
+    first, then up, as :meth:`StreamingStateDict.mtp_state` fuses the MTP experts) or ``down_proj`` [E, H, I]."""
+
+    __slots__ = ("parts",)
+
+    def __init__(self, parts: list[list[tuple[str, str]]]):
+        self.parts = parts  # per expert: [(shard, hf_key), ...] concatenated along dim 0 (gate, up) or a single down
+
+    @property
+    def shards(self) -> set[str]:
+        return {shard for expert in self.parts for shard, _ in expert}
+
+
 class StreamingStateDict(Mapping):
     """Lazy read-only mapping of internal weight keys to tensors read from safetensors shards.
 
@@ -73,11 +88,12 @@ class StreamingStateDict(Mapping):
         index_path = self.checkpoint_dir / "model.safetensors.index.json"
         with open(index_path, encoding="utf-8") as f:
             weight_map = json.load(f)["weight_map"]
-        self._entries: dict[str, _Entry] = {}
+        self._entries: dict[str, _Entry | _FusedExperts] = {}
         self._visual: dict[str, str] = {}
         self._layer_keys: dict[int, list[str]] = {}
         q, k = linear_q_dim, linear_k_dim
         self._mtp: dict[str, str] = {}
+        per_expert: dict[tuple[int, int, str], tuple[str, str]] = {}  # (layer, expert, proj) -> (shard, hf key)
         for hf_key, shard in weight_map.items():
             if hf_key.startswith("mtp."):
                 self._mtp[hf_key] = shard
@@ -109,10 +125,22 @@ class StreamingStateDict(Mapping):
                     self._add(
                         prefix + "linear_attn.v_conv.weight", _Entry(shard, hf_key, lambda t: t[q + k :]), layer_idx
                     )
+                elif sub.startswith("mlp.experts.") and sub.split(".")[2].isdigit():
+                    _, _, expert, proj, _ = sub.split(".")
+                    per_expert[(layer_idx, int(expert), proj)] = (shard, hf_key)
                 else:
                     self._add(key, _Entry(shard, hf_key), layer_idx)
             else:
                 raise KeyError(f"unexpected language-model key {hf_key!r}")
+        for layer_idx in sorted({li for li, _, _ in per_expert}):
+            experts = sorted({e for li, e, _ in per_expert if li == layer_idx})
+            prefix = f"layers.{layer_idx}.mlp.experts."
+            gate_up = [
+                [per_expert[(layer_idx, e, "gate_proj")], per_expert[(layer_idx, e, "up_proj")]] for e in experts
+            ]
+            down = [[per_expert[(layer_idx, e, "down_proj")]] for e in experts]
+            self._add(prefix + "gate_up_proj", _FusedExperts(gate_up), layer_idx)
+            self._add(prefix + "down_proj", _FusedExperts(down), layer_idx)
         self._open: dict[str, object] = {}
 
     def _add(self, key: str, entry: _Entry, layer_idx: int) -> None:
@@ -129,6 +157,10 @@ class StreamingStateDict(Mapping):
 
     def __getitem__(self, key: str) -> torch.Tensor:
         entry = self._entries[key]
+        if isinstance(entry, _FusedExperts):
+            return torch.stack(
+                [torch.cat([self._shard(s).get_tensor(k) for s, k in expert], dim=0) for expert in entry.parts], dim=0
+            )
         tensor = self._shard(entry.shard).get_tensor(entry.hf_key)
         return entry.transform(tensor) if entry.transform is not None else tensor
 
@@ -154,7 +186,7 @@ class StreamingStateDict(Mapping):
         return {key: self[key] for key in self._layer_keys[layer_idx]}
 
     def shard_names(self) -> set[str]:
-        return {e.shard for e in self._entries.values()}
+        return set().union(*({e.shard} if isinstance(e, _Entry) else e.shards for e in self._entries.values()))
 
     # -- MTP head -----------------------------------------------------------------------------
     def has_mtp(self) -> bool:

@@ -180,6 +180,18 @@ card:
     | IFEval prompt-level strict | 0.76 | 0.82 ±0.038 | not reported | 100 |
     | LiveCodeBench v6 | 0.36 | 0.40 ±0.069 | not reported | 50 |
 
+    With thinking on, at the card's sampling (temperature 1.0 / top_p 0.95 / top_k 20) and 81,920-token answers, on fixed
+    random subsets (seed 1234), one run each (the card averages 5), unfinished answers counted wrong. p300x2 profile, on
+    the previous revision (image 5cb20a8f1905), which differs from this one only in mixed image / text prefill:
+
+    | Eval | this package | reference (Ornith card) | prompts | answers cut at 81,920 |
+    | --- | ---: | ---: | ---: | ---: |
+    | GPQA-Diamond | 0.859 ±0.035 | 0.892 | 99 of 198 | 7 (7%) |
+    | HLE, no tools (images included) | 0.188 ±0.096 | 0.256 | 64 of 2,500 | 20 (31%) |
+
+    Both are within one standard error of the card. HLE answers were judged by Claude agents (the card used Claude 4.6
+    Opus as judge).
+
     Top-1 / top-5 / top-100 token agreement with the Hugging Face bf16 model under teacher forcing (100 greedy tokens;
     measured on v1, whose expert precision this package keeps):
 
@@ -326,7 +338,7 @@ card:
     - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
       can differ from the bf16 original where two candidate tokens are close; see Accuracy.
     - One die (`p150`, `p100`): text only, no prefix caching.
-    - Evals ran with thinking off on the p300 profile only, IFEval and LiveCodeBench on subsets (100 / 50 questions).
+    - Thinking-off evals ran on the p300 profile only, IFEval and LiveCodeBench on subsets (100 / 50 questions); thinking-on evals on p300x2, GPQA-Diamond and HLE on subsets (99 / 64 questions).
       Ornith's own benchmarks (agentic coding and tool use) were not reproduced.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one
