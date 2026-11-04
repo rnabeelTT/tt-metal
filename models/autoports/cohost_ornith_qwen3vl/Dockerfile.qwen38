@@ -20,6 +20,11 @@ RUN TTNN_DIR=$(/opt/q38/venv/bin/python -I -c 'import importlib.util,pathlib;pri
  && LIB=$(ls "$TTNN_DIR"/../*.libs/_ttnncpp*.so 2>/dev/null | head -1; true) \
  && LIB=${LIB:-$(find "$TTNN_DIR" "$TTNN_DIR/.." -maxdepth 4 -name "_ttnncpp*.so" 2>/dev/null | head -1)} \
  && echo "_ttnncpp: $LIB" && test "$LIB" = /opt/q38/venv/lib/python3.12/site-packages/ttnn/build/lib/_ttnncpp.so
+# 3a. the plugin allows block-output (DFlash) models only on the uniproc executor; the co-host RemoteExecutor IS a
+#     UniProcExecutor whose worker runs in the device host, so allow it by name too
+RUN P=/opt/q38/venv/lib/python3.12/site-packages/vllm_tt_plugin/platform.py \
+ && sed -i 's|            allowed_backends = (None, "uni")$|            allowed_backends = (None, "uni", "tt_kernel.cohost.vllm_remote.RemoteExecutor")|' "$P" \
+ && grep -q '"uni", "tt_kernel.cohost.vllm_remote.RemoteExecutor")' "$P"
 # 3. the Qwen3-VL input pipeline's two extra wheels, in the bundle's venv
 RUN uv pip install --python /opt/q38/venv/bin/python --no-cache --no-deps qwen-vl-utils==0.0.14 av==18.1.0 \
  && rm /usr/local/bin/uv

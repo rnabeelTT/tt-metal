@@ -147,7 +147,7 @@ def card() -> dict:
                        "- The models take turns on the chips. The embedder and reranker are text only (image inputs: "
                        "HTTP 400) and use the embedder's precision policy; pairs up to 8,192 tokens.\n"
                        "- Licenses: Qwen3.8-27B and the Qwen3-VL models Apache-2.0; see the drafter's card.",
-        "license": {"id": "apache-2.0"},
+        "license": {"id": "apache-2.0", "name": "Apache-2.0 (Qwen3.8-27B, Qwen3-VL-Embedding-8B, Qwen3-VL-Reranker-8B)"},
     }
 
 
