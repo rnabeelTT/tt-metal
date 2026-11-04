@@ -9,6 +9,8 @@ order, calling each callback after its segment (callbacks may read back device t
 segment finished, and write into buffers allocated BEFORE the capture; they must not allocate device memory).
 """
 
+import time
+
 import ttnn
 
 _orig = {
@@ -64,6 +66,8 @@ class SegTrace:
         segs = self.traces.get(_key(tid))
         if not segs:
             return _orig["exec"](mesh, tid, cq_id=cq_id, blocking=blocking)
+        if self.stats.get("t_first") is None:
+            self.stats["t_first"] = time.time()  # first traced decode step: everything before it is prefill (TTFT)
         for real, fn in segs:
             _orig["exec"](mesh, real, cq_id=cq_id, blocking=False)
             if fn is not None:

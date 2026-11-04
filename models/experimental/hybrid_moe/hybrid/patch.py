@@ -7,7 +7,7 @@ Env (read at install):
   HYB_DYN_SLOTS    D, dynamic expert slots per MoE layer (bfp8: ttnn.fill_cache cannot write bfp4); 0 = off
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
   HYB_FUSED        1 (default): decode through the fused MoE kernels (C slots incl. an all-zero sink slot)
-  HYB_BOUNDARY     1 (default, with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
+  HYB_BOUNDARY     0 (default; 1 with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer

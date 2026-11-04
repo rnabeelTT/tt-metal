@@ -64,6 +64,9 @@ def main():
             ids = tok.encode(chat, add_special_tokens=False)
             HYB.reset_stats()
             HYB.record = [] if os.environ.get("HYB_RECORD") == "1" else None
+            from hybrid.seg import SEG
+
+            SEG.stats.update(replays=0, segments=0, t_first=None)
             t1 = time.time()
             out = gen.generate(list(ids), NEW, enable_trace=os.environ.get("POC_TRACE") == "1")
             dt = time.time() - t1
@@ -77,6 +80,10 @@ def main():
                 "prompt_tokens": len(ids),
                 "wall_s": round(dt, 1),
                 "ms_per_token_incl_prefill": round(1e3 * dt / NEW, 1),
+                # traced decode only: prefill (TTFT) ends at the first trace replay
+                "ttft_s": round(st["seg"]["t_first"] - t1, 2) if st["seg"].get("t_first") else None,
+                "decode_ms_per_token": round(1e3 * (t1 + dt - st["seg"]["t_first"]) / max(1, st["seg"]["replays"]), 1)
+                if st["seg"].get("t_first") else None,
                 "hit_rate": round(st["hits"] / max(1, st["picks"]), 4),  # incl. prefill (padded bucket rows)
                 "decode_hit_rate": round(st.get("dec_hits", 0) / max(1, st.get("dec_picks", 0)), 4),
                 "decode_steps": st["steps"],
