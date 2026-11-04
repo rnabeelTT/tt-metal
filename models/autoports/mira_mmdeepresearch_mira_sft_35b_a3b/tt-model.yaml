@@ -1,0 +1,193 @@
+# tt-model container (v5.1) manifest for MIRA-MMDeepResearch/MIRA-SFT-35B-A3B on Blackhole. MIRA-SFT is a full-parameter
+# SFT of Qwen3.6-35B-A3B (same qwen3_5_moe architecture, tensor names and vision tower as Ornith-1.5-35B-A3B and
+# QUEST-35B-RL: the configs differ only in metadata), so it is served by the Ornith-1.5-35B-A3B autoport unchanged
+# (models/autoports/ornith_ai_ornith_1_5_35b_a3b, fused decode of fusion/HANDOFF.md) with HF_MODEL pointing at this
+# checkpoint, as raahemnabeel/quest-35b-rl is. Differences from the QUEST manifest:
+# - sampling defaults are the checkpoint's generation_config.json (T 1.0 / top_p 0.95 / top_k 20, restated as the
+#   override); MIRA's runtime adds presence_penalty 1.5 per request;
+# - preserve_thinking is on by default (MIRA's card: earlier reasoning stays in context across tool calls).
+# The checkpoint has no MTP head (no mtp.* tensors) either, so MTP is off on every profile.
+# Authoring interface of `tt-model package --container models/autoports/mira_mmdeepresearch_mira_sft_35b_a3b/tt-model.yaml`.
+schema: "5.1"
+
+repo: raahemnabeel/mira-sft-35b-a3b
+name: mira-sft-35b-a3b
+# weights stay a pointer: the exact HF snapshot every check of this port ran against
+weights: {repo: MIRA-MMDeepResearch/MIRA-SFT-35B-A3B, revision: d5eccdf71e1a1d8aefe04d32af26115b5d3e9f2c}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/tt-metal-bringups
+  code:  # the autoport's import closure; runtime files only (not the per-stage doc/ evidence, not tests/)
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/__init__.py
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/tt
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/vllm_metadata.json
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/vllm_bundle
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/context_contract.json                         # read by generator_vllm
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/datatype_sweep/selected_precision_config.json      # 4-die policy
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/datatype_sweep/selected_precision_config_tp2.json  # 2-die policy
+    - models/autoports/ornith_ai_ornith_1_5_35b_a3b/doc/datatype_sweep/selected_precision_config_tp1.json  # 1-die policy
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # the plugin build the v2 bundle shipped (cacf1e7 + its local changes)
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json; registered first, so this bundle's adapter wins
+  # the shared Qwen3_5MoeForConditionalGeneration architecture name
+  extra_models_dir: models/autoports/ornith_ai_ornith_1_5_35b_a3b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 262144
+  capabilities:
+    tool_parser: qwen3_xml        # the model emits Qwen XML tool calls (hermes silently fails on them)
+    reasoning_parser: qwen3
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 805306368
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: MIRA-MMDeepResearch/MIRA-SFT-35B-A3B
+    QWEN35_TRACE_REGION_MIB: "768"   # must match additional_config.tt.trace_region_size (asserted at build)
+    QWEN35_PROGRAM_GUARD: "1"
+    # Vision ON (multi-die profiles): image content parts are served by the checkpoint's ViT on the mesh (bfp8), up to
+    # 4 images per request, every padded-patch bucket up to 4 MP warmed at start-up. Verified on 4 dies: 1080p, 12 MP
+    # and two-image requests answered in 1.6-3.1 s. Set to "0" for a text-only server.
+    QWEN35_VISION: "1"
+    QWEN35_VISION_MAX_IMAGES: "4"
+    QWEN35_VISION_MAX_PIXELS: "4194304"
+    QWEN35_BATCHED_PREFILL: "0"
+    VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+    # the fused decode path (fusion/HANDOFF.md steps 1-3)
+    QWEN35_MOE_FUSED_DECODE: "1"
+    QWEN35_DECODE_REPLICATED: "1"
+    # steps 4-6: GDN decode mixer ops, attention decode ops (each checks its preconditions, keeps the op chain otherwise)
+    QWEN35_GDN_DECODE_OPS: "1"
+    QWEN35_ATTN_DECODE_OPS: "1"
+    # MTP off: the checkpoint has no MTP head
+    QWEN35_MTP: "0"
+    # step 7: the sampler's per-device top-k over the live rows (decode buckets <= 8 rows; the tie-break pass skipped)
+    QWEN35_ROWS_TOPK: "1"
+  # Thinking ON by default (the model's own default); turn it off per request with
+  # "chat_template_kwargs": {"enable_thinking": false}. preserve_thinking keeps earlier turns' reasoning in the prompt.
+  args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true, "preserve_thinking": true}', --limit-mm-per-prompt, '{"image": 4, "video": 0}', --override-generation-config, '{"temperature": 1.0, "top_p": 0.95, "top_k": 20}']
+
+# One image serves every profile; a profile is a launch configuration (env + args merged over `serve`). The mesh size
+# picks the precision policy and the KV budget at build.
+serve_profiles:
+  - name: p300x2
+    description: 'Fastest profile: four dies, text and images.'
+    hardware: p300x2
+    mesh_device: P300x2
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+  - name: p150x4
+    description: '`p300x2` on four p150 boards.'
+    hardware: p150x4
+    mesh_device: P150x4
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+  - name: p300
+    description: 'Default: two dies, text and images, at about 60 % of the four-die single-user speed.'
+    hardware: p300
+    mesh_device: P300
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: '`p300` on two p150 boards.'
+    hardware: p150x2
+    mesh_device: P150x2
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: 'One die: text only, routed experts at bfp4.'
+    hardware: p150
+    mesh_device: P150
+    additional_config: {tt: {fabric_config: DISABLED}}
+    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die); no MTP head;
+    # prefix caching off (Ornith's one-die profile never ran it: MTP kept it off there)
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true, "preserve_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}', --override-generation-config, '{"temperature": 1.0, "top_p": 0.95, "top_k": 20}']
+  - name: p100
+    description: '`p150` on one p100.'
+    hardware: p100
+    mesh_device: P150
+    additional_config: {tt: {fabric_config: DISABLED}}
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0"}
+    args: [--enable-auto-tool-choice, --default-chat-template-kwargs, '{"enable_thinking": true, "preserve_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}', --override-generation-config, '{"temperature": 1.0, "top_p": 0.95, "top_k": 20}']
+# Default = the best balance of hardware and performance: two chips keep the 4-chip accuracy (bfp8 routed experts;
+# teacher forcing 0.96 / 0.91 top-1 vs 0.97 / 0.89) and vision, at ~80 % of the 4-chip throughput (peak 275 vs 351 tok/s,
+# TTFT 4K 0.89 vs 0.72 s) on half the hardware; one chip needs bfp4 experts (book top-1 0.84) and drops vision.
+default_profile: p300
+
+verify:
+  - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
+  - "import models.autoports.ornith_ai_ornith_1_5_35b_a3b.tt.decode_buckets as b; assert b.widths(32) == [1, 2, 4, 8, 16, 32]"
+
+card:
+  attribution: |
+    Derived from [MIRA-MMDeepResearch/MIRA-SFT-35B-A3B](https://huggingface.co/MIRA-MMDeepResearch/MIRA-SFT-35B-A3B), the
+    agent model of *MIRA: A Multimodal Illustrated Deep Research Agent for Controllable Reports* (a full-parameter SFT
+    of Qwen3.6-35B-A3B). The checkpoint is used as published; expert weights are converted to lower precision when the
+    server loads them (see Limitations). See the original model card and [GitHub](https://github.com/MIRA-MMDeepResearch/MIRA)
+    for training and evaluation details.
+  description: |
+    MIRA-SFT-35B-A3B, a multimodal deep-research agent model: Qwen3.6-35B-A3B (35B-parameter mixture of experts, 3B
+    active per token: 256 experts, top-8 plus a shared expert; 40 layers mixing Gated DeltaNet linear attention with
+    gated full attention; vision encoder) trained to search the web, open pages and images, run Python, and write
+    either a short answer or an illustrated, cited report. Served with vLLM: a reasoning model that thinks before it
+    answers by default, with text and image input (text only on one die), tool calling and a 262,144-token context,
+    for up to 32 concurrent users.
+  intended_use: |
+    Multimodal search-and-browse research agents and report writing, plus chat and reasoning over text and images,
+    through an OpenAI-compatible API.
+  usage: |
+    Thinking is on by default, and so is `preserve_thinking` (earlier turns' reasoning stays in the prompt, as MIRA was
+    trained; send each assistant turn's `reasoning_content` back with it). Give thinking requests a large `max_tokens`
+    (thousands): when the budget runs out inside the reasoning, `content` is empty.
+    Turn thinking off per request with `"chat_template_kwargs": {"enable_thinking": false}`.
+
+    A request without sampling parameters uses the checkpoint's defaults (temperature 1.0, top_p 0.95, top_k 20).
+    MIRA's runtime also sends `presence_penalty: 1.5`; the server applies it when a request sets it. Sampling runs on
+    the device; `top_k` is limited to 32.
+
+    Tools: pass them as OpenAI `tools`; the model emits Qwen XML tool calls, parsed into `tool_calls` by the server.
+    MIRA's card recommends its own runtime and system prompt ([MIRA](https://github.com/MIRA-MMDeepResearch/MIRA),
+    `SYS_QWEN36_SFT_S2_MM`) and says other system prompts reduce accuracy; point the runtime's endpoint here. The
+    package serves the model only, bring your own search, browse and code tools.
+
+    Images: up to 4 per request as `image_url` parts, resized to at most 4 MP (two- and four-die profiles). Video input is not accepted.
+  performance: |
+    PENDING
+  limitations: |
+    - The checkpoint has no MTP head: decoding produces one token per step on every profile.
+    - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
+      can differ from the bf16 original where two candidate tokens are close.
+    - One die (`p150`, `p100`): text only, no prefix caching.
+    - The p150x4, p150x2 and p100 profiles run the same meshes as p300x2 / p300 / p150 but were not run on those boards.
+    - Prefix caching resumes only at 2,048-token boundaries; requests with images are not cached.
+    - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently, and MIRA's report gate checks a report's
+      structure, not whether each claim is true. Review generated code and tool calls, or run them in a sandbox, before
+      they act on real systems. No safety evaluation was run on this package beyond the original model's.
+  related: |
+    - [raahemnabeel/quest-35b-rl](https://huggingface.co/raahemnabeel/quest-35b-rl): QUEST-35B-RL, a deep-research
+      model on Qwen3.5-35B-A3B served by the same code.
+    - [raahemnabeel/ornith-1.5-35b-a3b](https://huggingface.co/raahemnabeel/ornith-1.5-35b-a3b): Ornith-1.5-35B-A3B,
+      another model of this architecture served by the same code.
+  license:
+    id: apache-2.0

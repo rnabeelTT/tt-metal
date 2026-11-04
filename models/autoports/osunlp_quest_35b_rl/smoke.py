@@ -55,29 +55,64 @@ def main():
     c = chat([{"role": "user", "content": "What is 17 * 23? Answer with the number only."}])
     m = c["message"]
     reasoning = m.get("reasoning_content") or m.get("reasoning") or ""
-    check("thinking", "391" in (m.get("content") or "") and len(reasoning) > 0,
-          f"content={m.get('content')} reasoning_chars={len(reasoning)} finish={c['finish_reason']}")
+    check(
+        "thinking",
+        "391" in (m.get("content") or "") and len(reasoning) > 0,
+        f"content={m.get('content')} reasoning_chars={len(reasoning)} finish={c['finish_reason']}",
+    )
 
-    c = chat([{"role": "user", "content": "Name the capital of France in one word."}],
-             chat_template_kwargs={"enable_thinking": False}, max_tokens=64)
+    c = chat(
+        [{"role": "user", "content": "Name the capital of France in one word."}],
+        chat_template_kwargs={"enable_thinking": False},
+        max_tokens=64,
+    )
     check("no-thinking", "paris" in (c["message"].get("content") or "").lower(), c["message"].get("content") or "")
 
-    tools = [{"type": "function", "function": {
-        "name": "web_search", "description": "Search the web and return the top results.",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}]
-    c = chat([{"role": "user", "content": "Use the web_search tool to look up the population of Columbus, Ohio."}],
-             tools=tools, tool_choice="auto")
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Search the web and return the top results.",
+                "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+            },
+        }
+    ]
+    c = chat(
+        [{"role": "user", "content": "Use the web_search tool to look up the population of Columbus, Ohio."}],
+        tools=tools,
+        tool_choice="auto",
+    )
     calls = c["message"].get("tool_calls") or []
     args = json.loads(calls[0]["function"]["arguments"]) if calls else {}
-    check("tool-call", calls and calls[0]["function"]["name"] == "web_search" and "columbus" in args.get("query", "").lower(),
-          json.dumps(calls))
+    # Tongyi-DeepResearch was trained on a search tool taking a list of queries and sometimes sends one here
+    query = (
+        " ".join(map(str, args.get("query", ""))) if isinstance(args.get("query"), list) else str(args.get("query", ""))
+    )
+    check(
+        "tool-call",
+        calls and calls[0]["function"]["name"] == "web_search" and "columbus" in query.lower(),
+        json.dumps(calls),
+    )
 
     if "--no-image" not in sys.argv:
-        c = chat([{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": picture()}},
-            {"type": "text", "text": "What text is written in this image, and what colors are the circle and the square? "
-                                     "Answer in one short sentence."}]}],
-            chat_template_kwargs={"enable_thinking": False}, max_tokens=128)
+        c = chat(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": picture()}},
+                        {
+                            "type": "text",
+                            "text": "What text is written in this image, and what colors are the circle and the square? "
+                            "Answer in one short sentence.",
+                        },
+                    ],
+                }
+            ],
+            chat_template_kwargs={"enable_thinking": False},
+            max_tokens=128,
+        )
         a = (c["message"].get("content") or "").lower()
         check("image", "42" in a and "red" in a and "blue" in a, a)
     sys.exit(0 if ok else 1)
