@@ -34,6 +34,12 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- MTP (2026-11-04): `serve/serve_397b.sh runs/plan397_v4.npz` now defaults to HYB_MTP=3 (k=3 drafts, 4-row verify
+  through the fused rows kernels on crafted rows; the MTP head's MoE keeps all 512 experts on device, stock forward).
+  2.5-3.4 tokens/pass, 112-156 ms/pass -> 17-26 tok/s (vs 13-20 without MTP). Per pass (HYB_LOG_EVERY=50):
+  host experts 61 ms (4-row union misses, ~26 GB/s, DRAM-bound), readback incl. device wait 45 ms, uploads 15 ms.
+- Accuracy fix: one-row decode now runs the 2-row fused kernels (`_kernel_rows`); the one-row kernels on crafted
+  logits were PCC 0.93-0.97 per layer vs the sparse-matmul hybrid (test_rows.py), the rows kernels 0.997-0.998.
 - 2026-11-04 best so far (`runs/full397_v4/`): fused C=256, HYB_SKIP=0.1, plan v4 (59 prompts, `prompts_v2.TRAIN` +
   old), lean host step (numpy routing, single-row RM transfers). 8 diverse held-out prompts (`prompts_v2.HELDOUT`):
   decode 46.6 ms/token mean (21.5 tok/s; 39.9-66.4 ms, best 25 tok/s), TTFT 0.9 s, decode hit 78%, coherent in
@@ -115,6 +121,7 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
 
 ## Log
+- 2026-11-04: MTP k=3 served: 17-26 tok/s; one-row decode via 2-row kernels (PCC 0.95 -> 0.998).
 - 2026-11-04: held-out decode 21.5 tok/s mean (plan v4 + lean host step).
 - 2026-11-04: fused MoE kernels + HYB_SKIP=0.1 served through vLLM at 13-17 tok/s (was 0.58).
 - 2026-11-03: M5 vLLM serving works (0.58 tok/s). Next: speed (host overheads), hit rate.
