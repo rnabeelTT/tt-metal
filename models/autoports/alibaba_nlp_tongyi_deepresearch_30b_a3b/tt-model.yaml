@@ -139,7 +139,73 @@ card:
     `<tool_call>` and `<answer>` from `content` itself and stops on `<tool_response>`; point its server URL here and both
     work. The package serves the model only, bring your own search, browse and code tools.
   performance: |
-    PENDING
+    ### Accuracy
+    Pending. Tongyi Lab's own scores (Humanity's Last Exam, BrowseComp, BrowseComp-ZH, GAIA, xbench-DeepSearch,
+    WebWalkerQA, FRAMES) are on the [original model card](https://huggingface.co/Alibaba-NLP/Tongyi-DeepResearch-30B-A3B)
+    and in the [tech report](https://arxiv.org/abs/2510.24701); measurements of this package on those benchmarks will be
+    added here.
+
+    ### Performance
+
+    Served as shipped (`tt-model serve --profile <profile>`), vLLM's random-token benchmark with `ignore_eos`, medians; one request per user at a time.
+
+    #### p300x2 (four dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 99 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 145 | 9.9 | 101 | 88 |
+    | 1 | 1,024 / 256 | 376 | 10.2 | 98 | 82 |
+    | 1 | 4,096 / 256 | 840 | 10.7 | 93 | 68 |
+    | 1 | 32,768 / 256 | 3,596 | 12.7 | 79 | 37 |
+    | 8 | 128 / 128 | 552 | 14.5 | 69 | 435 |
+    | 8 | 1,024 / 256 | 1,358 | 14.9 | 67 | 408 |
+    | 32 | 1,024 / 256 | 5,819 | 28.8 | 35 | 669 |
+
+    #### p300 (two dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 85 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 151 | 10.9 | 92 | 81 |
+    | 1 | 1,024 / 256 | 401 | 11.3 | 89 | 75 |
+    | 1 | 4,096 / 256 | 892 | 12.1 | 82 | 61 |
+    | 1 | 32,768 / 256 | 4,771 | 16.1 | 62 | 29 |
+    | 8 | 128 / 128 | 643 | 18.9 | 53 | 339 |
+    | 8 | 1,024 / 256 | 1,613 | 20.1 | 50 | 311 |
+    | 32 | 1,024 / 256 | 7,188 | 40.6 | 25 | 492 |
+
+    #### p150 (one die)
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 159 | 12.9 | 77 | 71 |
+    | 1 | 1,024 / 256 | 438 | 13.6 | 74 | 64 |
+    | 1 | 4,096 / 256 | 948 | 15.1 | 66 | 51 |
+    | 1 | 32,768 / 256 | 6,655 | 22.2 | 45 | 21 |
+    | 8 | 128 / 128 | 867 | 27.3 | 37 | 239 |
+    | 8 | 1,024 / 256 | 2,076 | 28.0 | 36 | 225 |
+    | 32 | 1,024 / 256 | 9,735 | 62.5 | 16 | 338 |
+
+    ### Presence penalty
+
+    Tongyi's agent sends `presence_penalty: 1.1`. It runs on the device but adds a penalty stage to every decode step. Real
+    text sampled at temperature 0.6 / top_p 0.95 (12 chat prompts x 384 output tokens; 8 users: two rounds), decode tok/s
+    per user, without / with the penalty:
+
+    | profile | 1 user | 8 users (per user / all users) |
+    | ---: | ---: | ---: |
+    | p300x2 | 101 / 80 | 67 / 53 (531 / 420) |
+    | p300 | 92 / 71 | 50 / 42 (400 / 329) |
+
+    ### Prefix caching
+
+    On for every profile (the same code and setting as
+    [raahemnabeel/mirothinker-1.7-mini](https://huggingface.co/raahemnabeel/mirothinker-1.7-mini), where a cached
+    resend of a 22,894-token prompt starts in 1.2-1.4 s instead of 11.8-18.7 s); not measured separately for this
+    checkpoint.
   limitations: |
     - Text only (the checkpoint has no vision tower).
     - Routed expert weights run at bfp4 on every profile (the fused decode reads that layout), so output can differ from
@@ -147,6 +213,8 @@ card:
     - Context: 131,072 tokens on two and four dies (what the checkpoint advertises), 98,304 on one die.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on those boards.
     - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - Tool arguments follow the model's training: it was trained on a search tool that takes a list of queries, and can
+      send a list where a tool's schema asks for a string (seen once in the bring-up smoke tests). Validate arguments.
     - With prefix caching, a cached prompt can continue differently from the same prompt sent cold: the cached path
       computes attention in chunks, so near-tied tokens can flip. `--no-enable-prefix-caching` makes repeats identical.
     - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
