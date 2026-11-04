@@ -930,6 +930,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 elif batched:
                     self.model._reset_gdn_state_for_new_sequence()
                 vis_u = vision[u] if vision is not None else None
+                if mtp is not None and hasattr(mtp, "on_request"):
+                    mtp.on_request(slots[u], s0, E)  # DFlash: the drafter's context follows this request's segments
                 if E > s0:
                     res = self._prefill_single(
                         tokens[u : u + 1, s0:E].to(torch.int32),
