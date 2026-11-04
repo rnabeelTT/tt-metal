@@ -70,6 +70,33 @@ class HybridStateDict(StreamingStateDict):
                 self._layer_keys[li] += [f"layers.{li}.mlp.experts.gate_up_proj", f"layers.{li}.mlp.experts.down_proj"]
         self._down_stash = {}
 
+    def mtp_state(self, fuse_experts: bool = True):
+        """StreamingStateDict.mtp_state with the FP8 checkpoint dequantized (weight_scale_inv blocks) and the scale
+        tensors dropped; per-expert MTP experts fused as [E, 2I, H] (gate rows first) / [E, H, I]."""
+        if not self._mtp:
+            raise KeyError("checkpoint has no mtp.* tensors")
+        out, per_expert = {}, {}
+        for hf_key, shard in self._mtp.items():
+            if hf_key.endswith(".weight_scale_inv"):
+                continue
+            p = hf_key.split(".")
+            if len(p) >= 7 and p[1] == "layers" and p[3] == "mlp" and p[4] == "experts" and p[5].isdigit():
+                per_expert[(int(p[2]), int(p[5]), p[6])] = (shard, hf_key)
+                if fuse_experts:
+                    continue
+            out[hf_key] = self._read(shard, hf_key)
+        if fuse_experts and per_expert:
+            for li in sorted({li for li, _, _ in per_expert}):
+                experts = sorted({e for l2, e, _ in per_expert if l2 == li})
+                gu, dn = [], []
+                for e in experts:
+                    g, u, d = (self._read(*per_expert[(li, e, q)]) for q in ("gate_proj", "up_proj", "down_proj"))
+                    gu.append(torch.cat([g, u], 0))
+                    dn.append(d)
+                out[f"mtp.layers.{li}.mlp.experts.gate_up_proj"] = torch.stack(gu, 0)
+                out[f"mtp.layers.{li}.mlp.experts.down_proj"] = torch.stack(dn, 0)
+        return out
+
     def _drop_layer_key(self, key):
         parts = key.split(".")
         if parts[0] == "layers":

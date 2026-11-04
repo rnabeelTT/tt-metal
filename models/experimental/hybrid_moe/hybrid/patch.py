@@ -10,6 +10,7 @@ Env (read at install):
   HYB_BOUNDARY     0 (default; 1 with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
   HYB_SKIP         routing-weight threshold: missed experts below it are dropped (default 0: none)
   HYB_PLAN_MIN_SCORE  plan counts only picks with routing weight >= this (default HYB_SKIP; needs recorded scores)
+  HYB_SINGLE_ROWS  1 (default): one decode row runs the 2-row fused kernels (accuracy, see _kernel_rows)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -42,6 +43,9 @@ class HybridState:
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
+        self.single_via_rows = os.environ.get("HYB_SINGLE_ROWS", "1") == "1"
+        self.filler = float(os.environ.get("HYB_FILLER", "-1000"))  # crafted logit of unselected slots
+        self.rows_max = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "1") or 1)  # fused multi-row decode width
         self.fused = os.environ.get("HYB_FUSED", "1") == "1"
         self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed
         # static plan counts only picks with at least this routing weight (default HYB_SKIP: skipped misses are free)
@@ -57,7 +61,7 @@ class HybridState:
         self.pending = {}  # (layer, e) -> Future of prepared host tensors
         self.resident = {}
         self._freq = None
-        self.crafted_rm = None  # fused hybrid: the model-wide crafted logits row (row-major DRAM), see _fused_step1
+        self.crafted_rm = {}  # fused hybrid: rows -> the model-wide crafted logits rows (row-major DRAM), _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.loader = ThreadPoolExecutor(max_workers=1)
@@ -191,6 +195,7 @@ class HybridState:
 
 TILE_W = 32
 HYB = HybridState()
+_orig_forward = None  # Qwen35MoE.forward before install() (the MTP head's MoE keeps it)
 
 
 def _die0(t):
@@ -221,6 +226,11 @@ def install():
 
     def init(self, mesh_device, args, state_dict, tensor_cache_path=None, tt_ccl=None, layer_num=None):
         E = int(args.num_experts)
+        if layer_num is not None and layer_num >= int(getattr(args, "n_layers", 1 << 30)):
+            # the MTP head's MoE (virtual layer n_layers): all experts on device, stock forward
+            orig_init(self, mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
+            self._hyb_on = False
+            return
         HYB.plan(layer_num)
         if HYB.lib_dir:
             HYB.lib_layer_async(layer_num)  # load this layer's host library while the rest of the model builds
@@ -297,6 +307,8 @@ def install():
         )
 
     moe_fused.FusedMoEDecode.__init__ = f_init
+    global _orig_forward
+    _orig_forward = moe_mod.Qwen35MoE.forward
     moe_mod.Qwen35MoE.forward = _forward
 
     # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
@@ -349,59 +361,71 @@ def _add(a, b):
     return c
 
 
-def _fused_bufs(self):
-    """The fused hybrid's persistent host-written buffers (allocated in the eager warm-up, before any capture): the host
-    partial as one row-major row [1, 1, 1, H] (tiled on the device), and the model-wide crafted logits row."""
+def _fused_bufs(self, m):
+    """The fused hybrid's persistent host-written buffers for an m-row decode step (allocated in the eager warm-up,
+    before any capture): the host partial as row-major rows [1, 1, m, H] (tiled on the device), and the model-wide
+    crafted logits rows [1, 1, m, C + 32]."""
     from .seg import SEG
 
-    B = self._hyb_bufs.get("fused")
+    B = self._hyb_bufs.get(("fused", m))
     if B is None:
         if SEG.capturing:
-            raise RuntimeError(f"layer {self.layer_num}: no fused hybrid buffers; run one eager decode step first")
+            raise RuntimeError(f"layer {self.layer_num}: no fused hybrid buffers for {m} rows; run an eager step first")
         H = int(self.hidden)
-        B = {"host_rm": _rm_buffer(self.device, H), "shapes": {"T": 1, "H": H}}
-        self._hyb_bufs["fused"] = B
-    if HYB.crafted_rm is None:
-        HYB.crafted_rm = _rm_buffer(self.device, HYB.C + TILE_W)
+        B = {"host_rm": _rm_buffer(self.device, m, H), "shapes": {"T": m, "H": H}}
+        self._hyb_bufs[("fused", m)] = B
+    mk = _kernel_rows(m)
+    if mk not in HYB.crafted_rm:
+        HYB.crafted_rm[mk] = _rm_buffer(self.device, mk, HYB.C + TILE_W)
     return B
 
 
-def _rm_buffer(mesh_device, width):
-    return ttnn.from_torch(torch.zeros(1, 1, 1, width), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
+def _kernel_rows(m):
+    """Rows the fused kernels run for an m-row step: one decode row goes through the 2-row (union) kernels, which match
+    the sparse-matmul path (PCC 0.998 per row, test_rows.py) where the one-row kernels on crafted logits did not
+    (0.93-0.97); HYB_SINGLE_ROWS=0 keeps the one-row kernels."""
+    return 2 if (m == 1 and HYB.single_via_rows) else m
+
+
+def _rm_buffer(mesh_device, rows, width):
+    return ttnn.from_torch(torch.zeros(1, 1, rows, width), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
                            device=mesh_device, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
                            memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
 
 def _fused_step1(self, x, logits, B):
-    """Host step after the router (one decode row): true routing from the E-wide logits row, then the crafted logits
-    row the fused kernel ranks over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
-    the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernel's top-k +
-    softmax over the selected logits then reproduces the true weights of the resident experts (the sink absorbs the
-    missed mass). x / logits: row-major single rows in DRAM."""
+    """Host step after the router (m decode rows): true routing from the E-wide logits rows, then the crafted logits
+    rows the fused kernels rank over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
+    the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernels' top-k +
+    softmax over the selected logits then reproduce the true weights of the resident experts (the sink absorbs the
+    missed mass). x / logits: row-major [1, 1, m, *] in DRAM."""
     E, C, k, L = HYB.E, HYB.C, self.top_k, self.layer_num
+    m = int(B["shapes"]["T"])
     if HYB.profile:
         t0 = time.perf_counter()
         ttnn.synchronize_device(self.device)
         HYB.st["t_sync"] += time.perf_counter() - t0
     t0 = time.perf_counter()
-    lg = ttnn.to_torch(_die0(logits)).reshape(-1).float().numpy()
+    lg = ttnn.to_torch(_die0(logits)).reshape(m, -1).float().numpy()
     HYB.st["t_read"] += time.perf_counter() - t0
     t0 = time.perf_counter()
-    z = lg[:E]
-    ids = np.argpartition(-z, k)[:k]
-    e = np.exp(z[ids] - z[ids].max())
-    sc = e / e.sum()  # softmax over the top-k logits == softmax over all E, top-k, renormalized
+    z = lg[:, :E]
+    ids = np.argpartition(-z, k, axis=1)[:, :k]
+    zs = np.take_along_axis(z, ids, 1)
+    e = np.exp(zs - zs.max(1, keepdims=True))
+    sc = e / e.sum(1, keepdims=True)  # softmax over the top-k logits == softmax over all E, top-k, renormalized
     slot = HYB.slot_of[L][ids]
     res = slot >= 0
     miss = ~res
     st = HYB.st
-    st["picks"] += k
-    st["hits"] += int(res.sum())
-    st["dec_picks"] += k
-    st["dec_hits"] += int(res.sum())
+    nh = int(res.sum())
+    st["picks"] += m * k
+    st["hits"] += nh
+    st["dec_picks"] += m * k
+    st["dec_hits"] += nh
     st["steps"] += 1
     if HYB.record is not None:
-        HYB.record.append((L, torch.from_numpy(ids.astype(np.int64)), torch.from_numpy(sc.astype(np.float32))))
+        HYB.record.append((L, torch.from_numpy(ids[0].astype(np.int64)), torch.from_numpy(sc[0].astype(np.float32))))
     if HYB.skip > 0:
         drop = miss & (sc < HYB.skip)
         st["skipped"] += int(drop.sum())
@@ -409,23 +433,27 @@ def _fused_step1(self, x, logits, B):
         miss = miss & ~drop
     HYB.st["t_route"] += time.perf_counter() - t0
     t0 = time.perf_counter()
-    row = np.full((1, 1, 1, C + TILE_W), -1000.0, dtype=np.float32)
+    row = np.full((1, 1, m, C + TILE_W), HYB.filler, dtype=np.float32)
     row[..., C:] = 0.0
-    row[..., C] = lg[E]  # shared-expert gate logit (router column E)
-    row[0, 0, 0, slot[res]] = np.log(sc[res])
-    miss_mass = float(sc[~res].sum())  # computed and skipped misses: their routing mass goes to the zero sink
-    if miss_mass > 1e-6:
-        row[..., C - 1] = math.log(miss_mass)
+    row[0, 0, :, C] = lg[:, E]  # shared-expert gate logit (router column E)
+    r_i, k_i = np.nonzero(res)
+    row[0, 0, r_i, slot[r_i, k_i]] = np.log(sc[r_i, k_i])
+    miss_mass = (sc * ~res).sum(1)  # computed and skipped misses: their routing mass goes to the zero sink
+    has = miss_mass > 1e-6
+    row[0, 0, has, C - 1] = np.log(miss_mass[has])
     HYB.st["t_craft"] += time.perf_counter() - t0
     t0 = time.perf_counter()
-    _put(self, HYB.crafted_rm, torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
+    mk = _kernel_rows(m)
+    if mk > m:  # one row through the rows kernels: the extra rows repeat it (same experts, no extra weight reads)
+        row = np.repeat(row, mk, axis=2)
+    _put(self, HYB.crafted_rm[mk], torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
     HYB.st["t_up"] += time.perf_counter() - t0
     if miss.any():
         t0 = time.perf_counter()
-        xh = ttnn.to_torch(_die0(x)).reshape(1, -1).to(torch.bfloat16)
+        xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
-        it = torch.from_numpy(ids.astype(np.int64))[None]
-        B["job"] = (L, xh, it, torch.from_numpy(sc.astype(np.float32))[None], torch.from_numpy(miss)[None])
+        B["job"] = (L, xh, torch.from_numpy(ids.astype(np.int64)), torch.from_numpy(sc.astype(np.float32)),
+                    torch.from_numpy(miss))
     else:
         B["job"] = None
 
@@ -447,7 +475,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     ttnn.deallocate(logits)
     logits = lg_rm
-    B = _fused_bufs(self)
+    m = int(x4.shape[-2])
+    B = _fused_bufs(self, m)
     h_x = ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     if HYB.overlap:  # host experts in a second step, while the device runs the fused experts
         step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
@@ -456,12 +485,26 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         step1 = lambda: (_fused_step1(self, h_x, logits, B), _host_step2(self, B))  # noqa: E731
         step2 = None
     step1() if not SEG.capturing else SEG.split(step1)
-    b = f.buf
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
-    # the kernels read the crafted row as an L1 BF16 tile (its face reads need L1 alignment: never a DRAM tile)
-    crafted = ttnn.to_layout(HYB.crafted_rm, ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
-    f.gate_up(x4, crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
-    f.down_op(b.act, b.route, self.down, sdn, b.out)
+    # the kernels read the crafted rows as an L1 BF16 tile (their face reads need L1 alignment: never a DRAM tile)
+    mk = _kernel_rows(m)
+    crafted = ttnn.to_layout(HYB.crafted_rm[mk], ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
+    if mk == 1:
+        b = f.buf
+        f.gate_up(x4, crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
+        f.down_op(b.act, b.route, self.down, sdn, b.out)
+        part = b.out
+    else:  # FusedMoEDecode.rows on the crafted rows (its own router matmul skipped)
+        from models.demos.blackhole.qwen36.tt.moe_decode.union import act_buffer
+
+        route, gu, dn, bb = f.rows_ops(mk)
+        route(crafted, bb.table, bias=f.bias)
+        _H, Il, Ek, kk = f._key[:4]
+        act = act_buffer(f._mesh, Il, Ek, kk, mk)
+        gu(x4, bb.table, bb.identity, self.up_gate, sug, act, ep_offset=f.ep_offset)
+        dn(act, bb.table, self.down, sdn, bb.out, ep_offset=f.ep_offset)
+        ttnn.deallocate(act)
+        part = bb.out if mk == m else ttnn.slice(bb.out, [0, 0, 0, 0], [1, 1, m, int(bb.out.shape[-1])])
     ttnn.deallocate(crafted)
     if step2 is not None:
         step2() if not SEG.capturing else SEG.split(step2)
@@ -470,11 +513,15 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         ttnn.deallocate(h_x)
     host = ttnn.to_layout(B["host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
-        out = ttnn.add(b.out, host, output_tensor=b.out)
+        if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
+            raise NotImplementedError("fused hybrid on the fabric boundary needs the one-row kernels: HYB_SINGLE_ROWS=0")
+        out = ttnn.add(part, host, output_tensor=part)
         ttnn.deallocate(host)
         return out
-    out = ttnn.add(b.out, host, memory_config=dram)
+    out = ttnn.add(part, host, memory_config=dram)
     ttnn.deallocate(host)
+    if mk != m:
+        ttnn.deallocate(part)
     if partial:
         from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 
@@ -524,13 +571,16 @@ def _to_dram(t, free):
 def _forward(self, x, mode=None, partial=False, logits=None):
     from .seg import SEG
 
+    if not getattr(self, "_hyb_on", True):
+        return _orig_forward(self, x, mode=mode, partial=partial, logits=logits)
+
     orig = list(x.shape)
     H = orig[-1]
     T = math.prod(orig[:-1])
     if self.num_devices > 1 and x.is_sharded():
         x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
     x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
-    if getattr(self, "_hyb_fused", False) and mode != "prefill" and T == 1:
+    if getattr(self, "_hyb_fused", False) and mode != "prefill" and (T == 1 or 2 <= T <= HYB.rows_max):
         return _forward_fused(self, x4, orig, partial, logits)
     if partial and HYB.enabled and HYB.C < HYB.E and T == 1:
         raise RuntimeError(f"layer {self.layer_num}: one-row decode boundary (partial={partial!r}) needs HYB_FUSED=1")
@@ -658,9 +708,10 @@ def _write_bufs(self, B, dec):
 
 def _put_host(self, B, host, put):
     sh = B["shapes"]
-    if "host_rm" in B:  # fused: one row-major row (decode, one valid row)
-        put(B["host_rm"], (host[:1] / self.num_devices).reshape(1, 1, 1, sh["H"]).to(torch.bfloat16), ttnn.bfloat16,
-            ttnn.ROW_MAJOR_LAYOUT)
+    if "host_rm" in B:  # fused: row-major rows [1, 1, T, H] (decode)
+        full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
+        full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
+        put(B["host_rm"], full.to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
         return
     full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
     full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
