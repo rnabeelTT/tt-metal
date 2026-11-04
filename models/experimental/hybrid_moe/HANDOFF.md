@@ -34,6 +34,12 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Held-out evaluation (2026-11-04): earlier hit rates were in-sample (plan from prompts 0-3, tests on 0-2) and
+  included prefill padding rows. Decode-only, held-out: 4-prompt plan 53-69%; 15-prompt plan (`runs/plan397_v2.npz`)
+  66/76/85/87% on prompts 12-15 (sim predicted 79%). C=272 (29.3 GiB/die), production attention/GDN/sampler fusions
+  on, HYB_OVERLAP=1: 98-188 ms/token incl. prefill over 128 tokens (5-10 tok/s), coherent. `sim_397.py`: dynamic
+  slots only pay at >=16 promotions/token (prep ~35 ms each), so they stay off; serving plan = `runs/plan397_v3.npz`
+  (19 prompts). Multilingual prompts miss most (translation 66%): add such routing to the plan.
 - Speed (2026-11-03): C=256 static, D=0, RAM-resident int4 library -> 110-143 ms/token incl. prefill (~7-9 tok/s),
   hit rate 73-78%, coherent (`runs/full397_c256/`). The dynamic slots' prep threads (FP8 dequant + bfp8 conversion)
   starved the host step (transfers 50-100x slower than `bench_xfer.py`), so they are off; 16 bfp8 dyn slots = 32 bfp4

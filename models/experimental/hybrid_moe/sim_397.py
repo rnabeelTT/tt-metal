@@ -81,5 +81,49 @@ def main():
     json.dump(out, open("runs/sim_397.json", "w"), indent=1)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1] != "--budget":
     main()
+
+
+def run_budget(a, f, C, D, per_token, seed=0):
+    """Like run(), but at most `per_token` promotions per token across all layers (misses picked at random)."""
+    rng = np.random.default_rng(seed)
+    T, L, _ = a.shape
+    static = [set(np.argsort(-f[li], kind="stable")[:C].tolist()) for li in range(L)]
+    lru = [OrderedDict() for _ in range(L)]
+    hits = tot = 0
+    for t in range(T):
+        misses = []
+        for li in range(L):
+            for e in a[t, li].tolist():
+                tot += 1
+                if e in static[li]:
+                    hits += 1
+                elif e in lru[li]:
+                    hits += 1
+                    lru[li].move_to_end(e)
+                else:
+                    misses.append((li, e))
+        if D and misses:
+            for j in rng.permutation(len(misses))[:per_token]:
+                li, e = misses[j]
+                if e in lru[li]:
+                    continue
+                if len(lru[li]) >= D:
+                    lru[li].popitem(last=False)
+                lru[li][e] = True
+    return hits / tot
+
+
+def main_budget():
+    prompts = load(sys.argv[2:])
+    names = sorted(prompts)
+    L = next(iter(prompts.values())).shape[1]
+    for C, D in ((272, 0), (240, 16), (208, 32)):
+        for b in ((0,) if D == 0 else (2, 4, 8, 16, 32)):
+            rates = [run_budget(prompts[n], freq([prompts[m] for m in names if m != n], L), C, D, b) for n in names]
+            print(f"C{C}+D{D} budget {b}/token  {np.mean(rates):.3f}", flush=True)
+
+
+if __name__ == "__main__" and sys.argv[1] == "--budget":
+    main_budget()
