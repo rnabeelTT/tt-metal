@@ -6,6 +6,7 @@ Env (read at install):
   HYB_SLOTS        C, static expert slots per MoE layer (bfp4, the model's routed precision; default all E)
   HYB_DYN_SLOTS    D, dynamic expert slots per MoE layer (bfp8: ttnn.fill_cache cannot write bfp4); 0 = off
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
+  HYB_FUSED        1 (default): decode through the fused MoE kernels (C slots incl. an all-zero sink slot)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -38,6 +39,7 @@ class HybridState:
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
+        self.fused = os.environ.get("HYB_FUSED", "1") == "1"  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -49,6 +51,7 @@ class HybridState:
         self.pending = {}  # (layer, e) -> Future of prepared host tensors
         self.resident = {}
         self._freq = None
+        self.crafted = None  # fused hybrid: the model-wide crafted logits row (L1), see _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.loader = ThreadPoolExecutor(max_workers=1)
@@ -77,14 +80,15 @@ class HybridState:
                     for li, L in enumerate(layers):
                         np.add.at(f[L], a[:, li, :].ravel(), 1)
             self._freq = f
+        n_real = C - 1 if self.fused else C  # fused: the last slot is the all-zero sink (expert id -1)
         if self._freq is not None and layer < self._freq.shape[0] and self._freq[layer].sum() > 0:
-            ids = list(np.argsort(-self._freq[layer], kind="stable")[:C])
+            ids = list(np.argsort(-self._freq[layer], kind="stable")[:n_real])
         else:
-            ids = list(range(C))
-        ids = [int(i) for i in ids]
+            ids = list(range(n_real))
+        ids = [int(i) for i in ids] + ([-1] if self.fused else [])
         self.resident[layer] = ids
         so = np.full(E, -1, dtype=np.int32)
-        so[ids] = np.arange(len(ids), dtype=np.int32)
+        so[ids[:n_real]] = np.arange(n_real, dtype=np.int32)
         self.slot_of[layer] = so
         self.dyn_of[layer] = np.full(E, -1, dtype=np.int32)
         self.dyn_lru[layer] = OrderedDict()
@@ -174,6 +178,7 @@ class HybridState:
         return h_gu, h_dn
 
 
+TILE_W = 32
 HYB = HybridState()
 
 
@@ -217,6 +222,19 @@ def install():
         self.E_full = E
         if int(self.router_w.shape[-1]) != E:
             raise RuntimeError(f"router width {self.router_w.shape} != E {E}")
+        self._hyb_fused = False
+        if HYB.fused and HYB.C < E:
+            if getattr(self, "_fused", None) is None:
+                raise RuntimeError(f"layer {layer_num}: HYB_FUSED=1 but the fused MoE decode was not built "
+                                   f"(QWEN35_MOE_FUSED_DECODE={os.environ.get('QWEN35_MOE_FUSED_DECODE')}, C={HYB.C})")
+            if HYB.D:
+                raise RuntimeError("HYB_FUSED=1 does not support dynamic slots (HYB_DYN_SLOTS)")
+            if HYB.crafted is None:  # model-wide: each layer writes it in its host step and its kernel reads it next
+                HYB.crafted = ttnn.from_torch(torch.zeros(1, 1, TILE_W, HYB.C + TILE_W), dtype=ttnn.bfloat16,
+                                              layout=ttnn.TILE_LAYOUT, device=mesh_device,
+                                              mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+                                              memory_config=ttnn.L1_MEMORY_CONFIG)
+            self._hyb_fused = True
         self._static_attrs = None
         self._dyn_attrs = None
         self._hyb_bufs = {}  # T -> persistent device buffers the host step writes (allocated before any capture)
@@ -245,6 +263,34 @@ def install():
             self._meta = (tp, Nl, mesh_device)
 
     od.Qwen35MoEOptimized.__init__ = init
+
+    from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
+
+    f_orig = moe_fused.FusedMoEDecode.__init__
+
+    def f_init(fself, mesh_device, args, *, num_experts, router_weight, shared_gate_weight, hidden, **kw):
+        E_true = int(router_weight.shape[0])
+        f_orig(fself, mesh_device, args, num_experts=num_experts, router_weight=router_weight[:num_experts],
+               shared_gate_weight=shared_gate_weight, hidden=hidden, **kw)
+        if E_true == num_experts:
+            return
+        # the kernels rank the C slots; the router (run by _forward_fused, its logits read on the host) stays E-wide
+        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+        ttnn.deallocate(fself.router_w)
+        rw = torch.zeros(hidden, E_true + TILE_W)
+        rw[:, :E_true] = router_weight.T.float()
+        rw[:, E_true] = shared_gate_weight.reshape(-1).float()
+        fself.router_w = ttnn.from_torch(rw, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device,
+                                         mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+                                         memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        fself.router_pc = tpc.create_matmul_1d_decode_progcfg(
+            TILE_W, hidden, E_true + TILE_W, (E_true + TILE_W) // TILE_W, fp32_acc=True,
+            grid_w=mesh_device.compute_with_storage_grid_size().x,
+            in0_block_w=16 if (hidden // TILE_W) % 16 == 0 else None,
+        )
+
+    moe_fused.FusedMoEDecode.__init__ = f_init
     moe_mod.Qwen35MoE.forward = _forward
 
     # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
@@ -297,6 +343,106 @@ def _add(a, b):
     return c
 
 
+def _fused_bufs(self):
+    """The fused hybrid's persistent host-partial buffer (allocated in the eager warm-up, before any capture)."""
+    from .seg import SEG
+
+    B = self._hyb_bufs.get("fused")
+    if B is None:
+        if SEG.capturing:
+            raise RuntimeError(f"layer {self.layer_num}: no fused hybrid buffers; run one eager decode step first")
+        H = int(self.hidden)
+        B = {"host": ttnn.from_torch(torch.zeros(1, 1, 1, H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                     device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+                                     memory_config=ttnn.DRAM_MEMORY_CONFIG),
+             "shapes": {"T": 1, "H": H}}
+        self._hyb_bufs["fused"] = B
+    return B
+
+
+def _fused_step1(self, x, logits, B):
+    """Host step after the router: true routing from the E-wide logits row, then the crafted logits row the fused
+    kernel ranks over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at the all-zero
+    sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernel's top-k + softmax over the
+    selected logits then reproduces the true weights of the resident experts (the sink absorbs the missed mass)."""
+    E, C, k = HYB.E, HYB.C, self.top_k
+    if HYB.profile:
+        t0 = time.perf_counter()
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_sync"] += time.perf_counter() - t0
+    t0 = time.perf_counter()
+    lg = ttnn.to_torch(_die0(logits)).reshape(-1, int(logits.shape[-1]))[0].float()
+    HYB.st["t_read"] += time.perf_counter() - t0
+    p = torch.softmax(lg[:E], dim=-1)
+    sch, idh = torch.topk(p, k)
+    sch = (sch / sch.sum())[None]
+    idh = idh[None]
+    dec = _decide_core(self, x, idh, sch, "decode", defer_host=True)
+    row = torch.full((C + TILE_W,), -1000.0)
+    row[C:] = 0.0
+    row[C] = lg[E]  # shared-expert gate logit (router column E)
+    res = dec["sc"][0] > 0
+    row[dec["ids"][0][res]] = torch.log(dec["sc"][0][res])
+    miss_mass = float(sch[0].sum() - dec["sc"][0].sum())
+    if miss_mass > 1e-6:
+        row[C - 1] = math.log(miss_mass)
+    t = torch.zeros(1, 1, TILE_W, C + TILE_W)
+    t[0, 0, 0] = row
+    t0 = time.perf_counter()
+    _put(self, HYB.crafted, t.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+    HYB.st["t_up"] += time.perf_counter() - t0
+    B["job"] = dec["job"]
+
+
+def _forward_fused(self, x4, orig, partial):
+    """Decode (one row) through the fused MoE kernels with C slots: router (E-wide) | host step 1 | fused gate-up/down
+    on the crafted logits + shared expert | host step 2 (missed experts) | + host partial, reduce-scatter."""
+    from .seg import SEG
+
+    if partial:
+        raise NotImplementedError("fused hybrid decode with the replicated-residual boundary (partial) is not wired")
+    f = self._fused
+    dram = ttnn.DRAM_MEMORY_CONFIG
+    logits = ttnn.linear(x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc,
+                         memory_config=dram)
+    B = _fused_bufs(self)
+    h_x = _to_dram(x4, free=False)
+    step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
+    step2 = lambda: _host_step2(self, B)  # noqa: E731
+    step1() if not SEG.capturing else SEG.split(step1)
+    b = f.buf
+    sug, sdn = f._shared_tensors(self.up_gate, self.down)
+    f.gate_up(x4, HYB.crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
+    f.down_op(b.act, b.route, self.down, sdn, b.out)
+    step2() if not SEG.capturing else SEG.split(step2)
+    out = ttnn.add(b.out, B["host"], memory_config=dram)
+    if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
+        ttnn.deallocate(logits)
+        if h_x is not x4:
+            ttnn.deallocate(h_x)
+    if self.num_devices > 1:
+        red = ttnn.experimental.reduce_scatter_minimal_async(
+            out,
+            persistent_output_buffers=None,
+            dim=3,
+            multi_device_global_semaphore=self.tt_ccl.get_and_cycle_rs_semaphore_handles(),
+            barrier_semaphore=self.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
+            num_links=self.tt_ccl.get_num_links(0),
+            memory_config=dram,
+            intermediate_memory_config=dram,
+            topology=self.args.ccl_topology(),
+            chunks_per_sync=10,
+            num_workers_per_link=2,
+            num_buffers_per_channel=2,
+        )
+        ttnn.deallocate(out)
+        out = red
+        orig = orig[:-1] + [out.shape[-1]]
+    if list(out.shape) != orig:
+        out = ttnn.reshape(out, orig)
+    return out
+
+
 def _host_inputs(x4, scores, ids):
     """DRAM copies of what the host step reads (x, scores, ids); the L1 originals are freed. In a trace these stay
     allocated for the trace's life, and the router leaves scores/ids in L1 at decode: 60 layers of live L1 tensors
@@ -323,6 +469,8 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     if self.num_devices > 1 and x.is_sharded():
         x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
     x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
+    if getattr(self, "_hyb_fused", False) and mode != "prefill" and T == 1:
+        return _forward_fused(self, x4, orig, partial)
     scores, ids = self._route(x4)
     if not (HYB.enabled and HYB.C < HYB.E):
         routed = _routed(self, x4, scores, ids, T, mode)
@@ -530,6 +678,15 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     t0 = time.perf_counter()
     idh = ttnn.to_torch(_die0(ids)).reshape(-1, k).long()
     sch = ttnn.to_torch(_die0(scores)).reshape(-1, k).float()
+    HYB.st["t_read"] += time.perf_counter() - t0
+    return _decide_core(self, x4, idh, sch, mode, defer_host)
+
+
+def _decide_core(self, x4, idh, sch, mode, defer_host=False):
+    """Routing on the host (ids/scores [rows, k]) -> static / dynamic / host split and the host part (see _decide)."""
+    L = self.layer_num
+    k = self.top_k
+    t0 = time.perf_counter()
     rows = idh.shape[0]
     valid = rows if mode == "prefill" else min(rows, HYB.decode_rows)
     HYB.st["t_read"] += time.perf_counter() - t0

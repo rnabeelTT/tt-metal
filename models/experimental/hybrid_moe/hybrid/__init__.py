@@ -16,7 +16,7 @@ import os
 
 # The hybrid path hooks the plain (unfused) MoE block. These must be set before the autoport modules are imported.
 _ENV_OFF = {
-    "QWEN35_MOE_FUSED_DECODE": "0",
+    "QWEN35_MOE_FUSED_DECODE": "0",  # turned back on below when HYB_FUSED=1
     "QWEN35_ROUTER_TOPK_FUSED": "0",
     "QWEN35_ROUTER_DRAM_SHARDED": "0",  # router weight stays interleaved: its width is E while the experts hold C slots
     "QWEN35_ROUTER_GATE_OP": "0",
@@ -41,6 +41,10 @@ _ENV_ON = {
 def install():
     for k, v in _ENV_OFF.items():
         os.environ[k] = v
+    if os.environ.get("HYB_FUSED", "1") == "1":
+        # fused MoE decode kernels on crafted logits (patch._forward_fused); one decode row (no multi-row ops)
+        os.environ["QWEN35_MOE_FUSED_DECODE"] = "1"
+        os.environ["QWEN35_MOE_FUSED_ROWS_MAX"] = "1"
     for k, v in _ENV_ON.items():
         os.environ.setdefault(k, v)
     from . import patch, seg

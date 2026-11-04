@@ -110,18 +110,28 @@ class HybridStateDict(StreamingStateDict):
         return gu, dn
 
     def _resident_fused(self, li, which):
+        """Resident experts stacked in slot order; id -1 is an all-zero expert (the fused hybrid's sink slot)."""
         ids = list(self.resident_fn(li))
         if not self.per_expert:
             ent = self._entries[self._fused[li]["gate_up" if which == "gate_up" else "down"]]
             sl = self._shard(ent.shard).get_slice(ent.hf_key)
-            return torch.stack([sl[e] for e in ids], 0).to(torch.bfloat16)
+            real = [sl[e] for e in ids if e >= 0]
+            return torch.stack([sl[e] if e >= 0 else torch.zeros_like(real[0]) for e in ids], 0).to(torch.bfloat16)
         if which == "down" and li in self._down_stash:
             return self._down_stash.pop(li)
         gus, dns = [], []
         for e in ids:
+            if e < 0:
+                gus.append(None)
+                dns.append(None)
+                continue
             gu, dn = self.expert(li, e)
             gus.append(gu)
             dns.append(dn)
+        z_gu = next(g for g in gus if g is not None)
+        z_dn = next(d for d in dns if d is not None)
+        gus = [torch.zeros_like(z_gu) if g is None else g for g in gus]
+        dns = [torch.zeros_like(z_dn) if d is None else d for d in dns]
         gu_t, dn_t = torch.stack(gus, 0), torch.stack(dns, 0)
         if which == "gate_up":
             self._down_stash[li] = dn_t
