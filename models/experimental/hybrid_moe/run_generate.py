@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """Hybrid-MoE prototype driver: build the Qwen3.5 autoport with the hybrid overlay and generate greedily (eager).
 
-Env: HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_PROMPT_START, POC_NEW_TOKENS, POC_LAYERS
+Env: POC_SKIP_SWEEP + POC_TF_REF (skip_sweep), HF_MODEL (122B or 397B snapshot id), HYB_SLOTS, HYB_PLAN, POC_PROMPTS (count), POC_PROMPT_START, POC_NEW_TOKENS, POC_LAYERS
 (comma list -> reduced model), POC_MAX_SEQ (default 2048), HYB_RECORD=1 (save decode routing as routing.npz).
 Writes <out_dir>/result.json.
 """
@@ -55,6 +55,8 @@ def main():
         res["memory"] = gen._memory_report()
         print("MEMORY " + json.dumps(res["memory"]), flush=True)
         tok = gen.tokenizer
+        if os.environ.get("POC_SKIP_SWEEP"):
+            return skip_sweep(gen, tok, res, out_dir)
         runs = []
         rec_arrays = {}
         for i, p in enumerate(PROMPTS[PROMPT_START : PROMPT_START + N_PROMPTS], start=PROMPT_START):
@@ -117,6 +119,65 @@ def main():
     finally:
         ttnn.close_mesh_device(mesh)
         ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+
+
+def skip_sweep(gen, tok, res, out_dir):
+    """POC_SKIP_SWEEP=t0,t1,...: per threshold HYB_SKIP and prompt, (1) teacher-forced top-1 over the prompt + the
+    reference continuation (POC_TF_REF: a result.json with "tokens"), against the reference tokens and against the
+    first threshold's predictions, (2) a traced decode of POC_NEW_TOKENS for speed. One model build for all."""
+    import torch
+    from hybrid.seg import SEG
+
+    taus = [float(t) for t in os.environ["POC_SKIP_SWEEP"].split(",")]
+    ref = {r["prompt"]: r["tokens"] for r in json.load(open(os.environ["POC_TF_REF"]))["runs"]}
+    base, rows = {}, []
+    for tau in taus:
+        HYB.skip = tau
+        for i, p in enumerate(PROMPTS[PROMPT_START : PROMPT_START + N_PROMPTS], start=PROMPT_START):
+            chat = tok.apply_chat_template(
+                [{"role": "user", "content": p}], add_generation_prompt=True, enable_thinking=False, tokenize=False
+            )
+            ids = tok.encode(chat, add_special_tokens=False)
+            cont = ref[p[:80]]
+            seq = ids + cont
+            HYB.reset_stats()
+            gen.reset()
+            t1 = time.time()
+            logits = gen.prefill_forward(torch.tensor(seq).reshape(1, -1), page_table=gen.page_table[:1],
+                                         prompt_lens=[len(seq)], return_all_logits=True)
+            tf_s = time.time() - t1
+            pred = torch.as_tensor(logits).float()[0, len(ids) - 1 : len(seq) - 1].argmax(-1)
+            st_tf = dict(HYB.st)
+            agree_ref = float((pred == torch.tensor(cont)).float().mean())
+            base.setdefault(i, pred)
+            agree_base = float((pred == base[i]).float().mean())
+            HYB.reset_stats()
+            gen.reset()
+            SEG.stats.update(replays=0, segments=0, t_first=None)
+            t1 = time.time()
+            out = gen.generate(list(ids), NEW, enable_trace=os.environ.get("POC_TRACE") == "1")
+            dt = time.time() - t1
+            st = dict(HYB.st)
+            tf = SEG.stats.get("t_first")
+            r = {
+                "tau": tau,
+                "prompt": i,
+                "tf_tokens": len(cont),
+                "tf_top1_vs_ref": round(agree_ref, 4),
+                "tf_top1_vs_tau0": round(agree_base, 4),
+                "tf_prefill_s": round(tf_s, 2),
+                "tf_skipped_pairs": st_tf["skipped"],
+                "tf_skipped_mass_per_pick": round(st_tf["skipped_mass"] / max(1, st_tf["picks"]), 4),
+                "ttft_s": round(tf - t1, 2) if tf else None,
+                "decode_ms_per_token": round(1e3 * (t1 + dt - tf) / max(1, SEG.stats["replays"]), 1) if tf else None,
+                "decode_hit_rate": round(st["dec_hits"] / max(1, st["dec_picks"]), 4),
+                "decode_skipped_per_token": round(st["skipped"] / max(1, NEW), 2),
+                "text": tok.decode(out)[:200],
+            }
+            rows.append(r)
+            print(f"SWEEP {json.dumps(r)}", flush=True)
+            res["sweep"] = rows
+            json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
 
 
 if __name__ == "__main__":

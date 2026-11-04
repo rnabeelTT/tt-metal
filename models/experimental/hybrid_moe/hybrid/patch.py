@@ -8,6 +8,7 @@ Env (read at install):
   HYB_PROMOTE      max promotions written per layer per decode step (default 2)
   HYB_FUSED        1 (default): decode through the fused MoE kernels (C slots incl. an all-zero sink slot)
   HYB_BOUNDARY     0 (default; 1 with HYB_FUSED): replicated residual + fabric decode boundary (production layout)
+  HYB_SKIP         routing-weight threshold: missed experts below it are dropped (default 0: none)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -40,7 +41,8 @@ class HybridState:
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
-        self.fused = os.environ.get("HYB_FUSED", "1") == "1"  # fused MoE decode kernels (moe_decode/fused.py)
+        self.fused = os.environ.get("HYB_FUSED", "1") == "1"
+        self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -64,7 +66,8 @@ class HybridState:
 
     def reset_stats(self):
         self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
-                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0, "dec_picks": 0, "dec_hits": 0}
+                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0, "dec_picks": 0, "dec_hits": 0, "skipped": 0,
+                   "skipped_mass": 0.0}
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -741,6 +744,11 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
             for e in set(idh[:valid][v_miss].tolist()):
                 if (L, e) not in HYB.pending:
                     HYB.pending[(L, e)] = HYB.pool.submit(HYB.prep, self._meta, L, e)
+    if HYB.skip > 0:  # drop missed experts whose routing weight is below the threshold (their output is lost)
+        drop = v_miss & (sch[:valid] < HYB.skip)
+        HYB.st["skipped"] += int(drop.sum())
+        HYB.st["skipped_mass"] += float(sch[:valid][drop].sum())
+        v_miss = v_miss & ~drop
     if bool(v_miss.any()):
         t1 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
