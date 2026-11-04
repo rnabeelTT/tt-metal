@@ -79,10 +79,6 @@ def profiles() -> tuple:
         {"name": "qwen38", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Qwen3.8-27B DFlash2 + vision + Qwen3-VL-Embedding-8B + Qwen3-VL-Reranker-8B on all four chips "
                         f"(text-only embedder and reranker); {KV_DEFAULT:,}-token shared KV pool."},
-        {"name": "qwen38-fullkv", "hardware": "p300x2", "mesh_device": "P150x4",
-         "env": {**common, "QWEN36_MAX_TOKENS_ALL_USERS": str(KV_FULL)},
-         "description": f"The default with the bundle's own {KV_FULL:,}-token pool (and its larger recurrent-state "
-                        "checkpoint store). Use if DRAM allows."},
         {"name": "qwen38-lean", "hardware": "p300x2", "mesh_device": "P150x4",
          "env": {**common, "QWEN3VL_COHOST_PRECISION": "p3_mlp_bfp4_lofi"},
          "description": "The default with the 8B models' MLP weights in bfp4 (about 2.6 GiB per chip less). Use if the "
@@ -92,7 +88,7 @@ def profiles() -> tuple:
         {"name": "qwen3vl-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Validation baseline: the embedder and reranker alone in the co-host runtime."},
     ]
-    groups = {"qwen38": ["llm", "embed", "rerank"], "qwen38-fullkv": ["llm", "embed", "rerank"],
+    groups = {"qwen38": ["llm", "embed", "rerank"],
               "qwen38-lean": ["llm", "embed", "rerank"], "qwen38-solo": ["llm"], "qwen3vl-solo": ["embed", "rerank"]}
     return sp, groups
 
@@ -130,16 +126,29 @@ def card() -> dict:
         "capabilities": "Ports are the serve port plus an offset: the LLM on +0 (OpenAI chat / completions, tool calls "
                         "(`qwen3_coder`), reasoning, up to 4 images per request, the bundle's opt-in "
                         "`TT_THINK_BUDGET`), the reranker on +4, the embedder on +5, the co-host status on +6.",
-        "performance": "Not yet measured on hardware. Expected: the LLM at its single-model speed while the 8B models "
-                       "are idle (as measured for the Ornith-1.5-122B co-host package: 147 tok/s alone and in the "
-                       "group); the 8B models' latencies as in that package (1 query 0.07 s, 30-document rerank "
-                       "0.5 s).",
-        "limitations": "- **Not yet validated on hardware.** Built and import-checked; the co-host runtime, the 8B "
-                       "adapter and the mixed-group boot are the ones validated in raahemnabeel/cohost-ornith-122b-qwen3vl, "
-                       "plus two runtime changes this model needs (the LLM worker opens the mesh with its model's "
-                       "fabric config; the phased warmup passes the plugin's device-grammar flag).\n"
-                       f"- Shared KV pool {KV_DEFAULT:,} tokens by default (the bundle: {KV_FULL:,}) to leave DRAM for "
-                       "the 8B models; `qwen38-fullkv` restores the bundle's pool.\n"
+        "performance": ("Not yet measured on hardware. Device-free boot (mock 4-chip mesh, untraced, 2026-11-04), DRAM "
+                        "per chip as the mock allocator counts it:\n\n"
+                        "| | GiB per chip |\n| --- | ---: |\n"
+                        "| Qwen3.8-27B weights + DFlash2 drafter + vision | 10.91 |\n"
+                        f"| KV pool ({KV_DEFAULT:,} tokens, 8 slots) incl. 5.10 recurrent-state store (120 x 43.5 MiB) | 7.95 |\n"
+                        "| DFlash serving buffers (warmup) | 2.23 |\n"
+                        "| Qwen3-VL embedder + reranker (one 8B copy per chip) | 8.03 |\n"
+                        "| **total, before request transients** | **29.13** (of about 29.8 allocatable next to a 2 GiB trace region) |\n\n"
+                        "L1 held per core by Qwen3.8: 89.6 KiB (every Qwen3-VL program compiles next to it). Expected speed: "
+                        "the LLM at its single-model speed while the 8B models are idle, as measured for the "
+                        "Ornith-1.5-122B co-host package (147 tok/s alone and in the group)."),
+        "limitations": "- **Not yet validated on hardware.** Checked device-free: the full group boots on a mock "
+                       "4-chip mesh (all members ready; embedder and reranker answer), the 8B engine passes its mock "
+                       "suite on this image's ttnn. Not checked: traced boot, DFlash serving, speed, numerics. The "
+                       "runtime and 8B adapter are the ones validated in raahemnabeel/cohost-ornith-122b-qwen3vl, plus "
+                       "two changes this model needs (the LLM worker opens the mesh with its model's fabric config; the "
+                       "phased warmup passes the plugin's device-grammar flag).\n"
+                       "- **DRAM is tight** (29.13 of about 29.8 GiB per chip before request transients): if the boot "
+                       "or a long prefill runs out of DRAM, use `qwen38-lean`.\n"
+                       f"- Shared KV pool {KV_DEFAULT:,} tokens (the bundle: {KV_FULL:,}, which does not fit next to "
+                       "the 8B models).\n"
+                       "- The image patches the plugin's executor allow-list for block-output (DFlash) models to admit "
+                       "the co-host RemoteExecutor (a UniProcExecutor whose worker runs in the device host).\n"
                        "- Trace region 2 GiB (the bundle: 1 GiB): the 8B text traces share it.\n"
                        "- The chat template is the checkpoint's own with one change: a conversation whose last "
                        "message is not a user turn (agent loops ending on a tool result) no longer raises \"No user "
