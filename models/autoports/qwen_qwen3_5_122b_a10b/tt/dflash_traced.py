@@ -52,6 +52,9 @@ class DFlashTraced(MtpTraced):
         # decode ops; GDN layers in rows mode: per-row state snapshots, so the commit is a copy of the accepted row's
         # snapshot). 0: the MTP rows pass (GDN prefill form) and its scan-replay commit.
         self.fused = os.environ.get("QWEN35_DFLASH_FUSED", "1") == "1"
+        # QWEN35_DFLASH_PRELAUNCH=1 (default): each round ends by enqueueing the next round's draft (no read-back)
+        self.prelaunch = os.environ.get("QWEN35_DFLASH_PRELAUNCH", "1") == "1"
+        self._launched = None
         if self.fused:
             rep = ttnn.ReplicateTensorToMesh(self.mesh)
             # per GDN layer: the pass's per-row state snapshots and its conv history (row i = input i - 3); the next pass
@@ -274,17 +277,33 @@ class DFlashTraced(MtpTraced):
         outs, eager = self._exec("ctx")
         self.timing["ctx"].append(time.perf_counter() - t0)
 
+    def launch_draft(self, anchor: int, start: int):
+        """Enqueue the draft program for (anchor, start) without reading anything back (the serving step queues the
+        next round's draft before returning, so it runs while vLLM processes the step). Traced programs only."""
+        if "draft" not in self.traces:
+            return
+        self.dr.stage_draft(anchor, start, self.bs)
+        ttnn.execute_trace(self.mesh, self.traces["draft"], cq_id=0, blocking=False)
+        ttnn.execute_trace(self.mesh, self.traces["cands_draft"], cq_id=0, blocking=False)
+        self._launched = (int(anchor), int(start))
+
     def draft(self, anchor: int, start: int, sampler=None):
         """bs - 1 drafts after `anchor` at position start - 1 (the block starts at `start`). Returns (drafts, q rows or
         None) - q_i the selector's distribution over the vocab (sampled requests)."""
         t0 = time.perf_counter()
-        self.dr.stage_draft(anchor, start, self.bs)
-        outs, eager = self._exec("draft")
-        if eager:
-            cand_outs = self._cands_body(outs[0])
+        launched = getattr(self, "_launched", None) == (int(anchor), int(start))
+        self._launched = None
+        eager = False
+        if launched:
+            outs, cand_outs = self.outs["draft"], self.outs["cands_draft"]
         else:
-            ttnn.execute_trace(self.mesh, self.traces["cands_draft"], cq_id=0, blocking=False)
-            cand_outs = self.outs["cands_draft"]
+            self.dr.stage_draft(anchor, start, self.bs)
+            outs, eager = self._exec("draft")
+            if eager:
+                cand_outs = self._cands_body(outs[0])
+            else:
+                ttnn.execute_trace(self.mesh, self.traces["cands_draft"], cq_id=0, blocking=False)
+                cand_outs = self.outs["cands_draft"]
         vals, ids = self._read_cands(cand_outs)  # [ROWS, n] each
         hp = ttnn.to_torch(ttnn.get_device_tensors(outs[1])[0]).float().reshape(-1, outs[1].shape[-1])
         if eager:
@@ -342,7 +361,10 @@ class DFlashTraced(MtpTraced):
         elif a < len(drafts):
             self.commit(a + 1)
         self.ctx([pos + i for i in range(a + 1)])
-        return rows[1 : a + 1] + [nxt]
+        out = rows[1 : a + 1] + [nxt]
+        if self.prelaunch:
+            self.launch_draft(nxt, pos + a + 1)  # the next round's draft runs while the caller handles this one
+        return out
 
     def generate(self, tok0: int, pos: int, max_new_tokens: int, sampler=None, log=None):
         out = [tok0]

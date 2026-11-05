@@ -96,6 +96,7 @@ class DFlashServing(MtpServing):
         self.plain_ms = float(os.environ.get("QWEN35_DFLASH_PLAIN_MS", "7.6"))
         self.margin = float(os.environ.get("QWEN35_DFLASH_MARGIN", "1.0"))
         self.guard_rounds = int(os.environ.get("QWEN35_DFLASH_GUARD_ROUNDS", "6"))
+        self.early = float(os.environ.get("QWEN35_DFLASH_EARLY", "0.6"))
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_device import DFlashDevice
 
         self.drafter = DFlashDevice(self.model, drafter_dir())
@@ -264,12 +265,21 @@ class DFlashServing(MtpServing):
         st["tokens"] += len(out)
         st["hist"][len(out)] += 1
         st["wall"] += time.perf_counter() - t0
+        # the served cost of a round = step start to next step start (device work queued ahead of the return - the next
+        # draft - and vLLM's own per-step time included), compared with the plain decode's served ms / token
+        if st.get("t_prev") is not None:
+            st["span"] = st.get("span", 0.0) + (t0 - st["t_prev"])
+            st["span_tokens"] = st.get("span_tokens", 0) + st["prev_n"]
+        st["t_prev"], st["prev_n"] = t0, len(out)
         if st["passes"] % 64 == 0:
             self._log_stats("running")
-        plain_equiv = st["wall"] * 1e3 / self.plain_ms * self.margin  # tokens the plain decode makes in that time
-        if st["passes"] >= self.guard_rounds and (
-            st["tokens"] < self.min_tau * st["passes"] or st["tokens"] < plain_equiv
-        ):
+        span, span_tok = st.get("span", 0.0), st.get("span_tokens", 0)
+        plain_equiv = span * 1e3 / self.plain_ms * self.margin  # tokens the plain decode makes in that time
+        # early exit: from round 2, a request far below the plain decode's pace (QWEN35_DFLASH_EARLY, 0.6 of it)
+        early = st["passes"] >= 3 and span_tok < self.early * plain_equiv
+        if early or (st["passes"] >= self.guard_rounds and (
+            st["tokens"] < self.min_tau * st["passes"] or span_tok < plain_equiv
+        )):
             # not paying: the rest of this request runs the plain decode (the next decode step leaves the phase)
             self._off.add(self._phase_slot)
             self._log_stats("guard: plain decode for the rest of the request")
@@ -279,10 +289,12 @@ class DFlashServing(MtpServing):
         st = self._stats
         if st and st["passes"]:
             ms = st["wall"] / st["passes"] * 1e3
+            span, n = st.get("span", 0.0), st.get("span_tokens", 0)
+            served = f", served {n / span:.1f} tok/s over {st['passes'] - 1} rounds" if span > 0 else ""
             logger.info(
                 f"DFLASH_STATS ({why}): {st['passes']} rounds, {st['tokens']} tokens = "
-                f"{st['tokens'] / st['passes']:.2f} per round, hist {st['hist']}, {ms:.1f} ms per round -> "
-                f"{st['tokens'] / st['wall']:.1f} tok/s (device steps only)"
+                f"{st['tokens'] / st['passes']:.2f} per round, hist {st['hist']}, {ms:.1f} ms per round in the step"
+                f"{served}"
             )
 
     # ------------------------------------------------------------------ prefill side
