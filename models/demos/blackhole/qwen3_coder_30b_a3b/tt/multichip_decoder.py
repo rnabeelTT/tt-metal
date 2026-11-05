@@ -153,7 +153,7 @@ MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN3_MOE_FUSED_ROWS_MAX", "32") or 0)
 _FUSED_ARGS: dict = {}  # per mesh: the namespace the fused ops / buffers are shared through (one set per model)
 # QWEN3_FABRIC_BOUNDARY=1: one-row decode runs each layer boundary as one fabric all-reduce + add + RMSNorm program
 # (decoder_layer_decode_fabric; needs the fused MoE). Wider decode steps keep the RS + AG path.
-FABRIC_BOUNDARY = os.environ.get("QWEN3_FABRIC_BOUNDARY", "0") == "1"
+FABRIC_BOUNDARY = os.environ.get("QWEN3_FABRIC_BOUNDARY", "1") == "1"
 _FABRIC: dict = {}  # per mesh: the FabricBoundary
 from .weight_mapping import hf_to_meta_channels, permute_head_vector_to_meta, permute_wqkv_to_meta
 
@@ -1958,7 +1958,8 @@ def decoder_layer_decode_multichip(
 def fabric_decode_usable(weights: MultichipWeights, ctx: MeshContext, rows: int) -> bool:
     """Whether a decode step may run its layer boundaries on the fabric boundary (QWEN3_FABRIC_BOUNDARY=1): one row,
     a multi-die mesh and the fused expert-parallel MoE (its L1 BF16 partial is the boundary's input)."""
-    return FABRIC_BOUNDARY and rows == 1 and ctx.num_devices > 1 and weights.fused_moe is not None
+    # the (1, 4) mesh only: validated there (2 dies: untested, as the Ornith bundles keep it off on p300)
+    return FABRIC_BOUNDARY and rows == 1 and ctx.num_devices == 4 and weights.fused_moe is not None
 
 
 def fabric_boundary_for(mesh_device, hidden: int, eps: float):
