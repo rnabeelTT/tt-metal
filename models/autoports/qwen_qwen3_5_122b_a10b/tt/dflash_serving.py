@@ -36,18 +36,31 @@ from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 _DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
+DRAFTER_REPO = "incoai/Ornith-1.5-122B-DFlash2"
+
+
 def drafter_dir():
+    """The drafter checkpoint: QWEN35_DFLASH_DRAFTER (a directory or a repo id), else the tt-model bundle's auxiliary
+    weights entry for the drafter repo (TT_AUXILIARY_WEIGHTS=repo@sha,...: prefetched into the host HF cache), else the
+    default repo from the HF cache / hub."""
     d = os.environ.get("QWEN35_DFLASH_DRAFTER")
     if d and os.path.isdir(d):
         return d
-    repo = d or "incoai/Ornith-1.5-122B-DFlash2"
+    repo, rev = d or DRAFTER_REPO, None
+    for entry in filter(None, os.environ.get("TT_AUXILIARY_WEIGHTS", "").split(",")):
+        r, _, sha = entry.partition("@")
+        if r == repo:
+            rev = sha or None
     hub = os.path.join(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub")
-    snaps = glob.glob(os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots", "*"))
+    base = os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots")
+    if rev and os.path.isdir(os.path.join(base, rev)):
+        return os.path.join(base, rev)
+    snaps = glob.glob(os.path.join(base, "*"))
     if snaps:
         return snaps[0]
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo)
+    return snapshot_download(repo, revision=rev)
 
 
 class DFlashServing(MtpServing):
