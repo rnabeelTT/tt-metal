@@ -34,6 +34,14 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- HYB_DEVCRAFT (2026-11-05, default off): crafted rows built on the device (top-k threshold, where, one-hot slot
+  matmul, sink logsumexp; `test_devcraft.py`: PCC 1.0 vs host-crafted, 0.997-0.998 vs the sparse path), non-blocking
+  logits read, experts queued behind it. Served k=3: 25.2 / 25.7 tok/s, 110 ms/pass (vs 95): the ~15 extra small
+  device ops per layer cost more than the host round trip they remove ('read' 44 -> 57 ms/pass). The device's own
+  per-layer work (~0.75 ms/layer, 'read' ~44 ms/pass) is now the floor.
+- Skip sweep 2 (2026-11-05, `runs/full397_skip2/`, standalone no-MTP traced decode with hostk, prompts 12-15): tau /
+  TF top-1 vs ref / vs tau 0.1 / ms per token: 0.1 0.969 / 1 / 37.5 (26.7 tok/s); 0.15 0.959 / 0.977 / 29.2;
+  0.2 0.951 / 0.977 / 27.9; 0.3 0.955 / 0.961 / 27.2. Text coherent at all four.
 - Fused host-expert kernel (2026-11-05, HYB_HOSTK=1 default, `hybrid/hostk/`): one C call per layer (AVX-512, its
   own 4-thread pool, short spin then futex) runs every missed expert on the library's torch CPU int4 pack (decode /
   MTP verify rows <= 16; prefill keeps torch GEMMs). PCC 0.999996 vs the torch path. Host experts per MTP pass

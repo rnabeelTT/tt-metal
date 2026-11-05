@@ -11,6 +11,9 @@ Env (read at install):
   HYB_SKIP         routing-weight threshold: missed experts below it are dropped (default 0: none)
   HYB_PLAN_MIN_SCORE  plan counts only picks with routing weight >= this (default HYB_SKIP; needs recorded scores)
   HYB_SINGLE_ROWS  1 (default): one decode row runs the 2-row fused kernels (accuracy, see _kernel_rows)
+  HYB_DEVCRAFT     1: the fused kernels' crafted logits rows are built on the device (_dc_craft), the host reads the
+                   router logits without blocking and routes / computes the misses while the device runs the experts
+                   (one host round trip per layer on the device's critical path instead of two)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
@@ -49,6 +52,7 @@ class HybridState:
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
+        self.devcraft = os.environ.get("HYB_DEVCRAFT", "0") == "1"
         self.single_via_rows = os.environ.get("HYB_SINGLE_ROWS", "1") == "1"
         self.filler = float(os.environ.get("HYB_FILLER", "-1000"))  # crafted logit of unselected slots
         self.rows_max = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "1") or 1)  # fused multi-row decode width
@@ -527,21 +531,10 @@ def _rm_buffer(mesh_device, rows, width):
     )
 
 
-def _fused_step1(self, x, logits, B):
-    """Host step after the router (m decode rows): true routing from the E-wide logits rows, then the crafted logits
-    rows the fused kernels rank over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
-    the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernels' top-k +
-    softmax over the selected logits then reproduce the true weights of the resident experts (the sink absorbs the
-    missed mass). x / logits: row-major [1, 1, m, *] in DRAM."""
-    E, C, k, L = HYB.E, HYB.C, self.top_k, self.layer_num
-    m = int(B["shapes"]["T"])
-    if HYB.profile:
-        t0 = time.perf_counter()
-        ttnn.synchronize_device(self.device)
-        HYB.st["t_sync"] += time.perf_counter() - t0
-    t0 = time.perf_counter()
-    lg = ttnn.to_torch(_die0(logits)).reshape(m, -1).float().numpy()
-    HYB.st["t_read"] += time.perf_counter() - t0
+def _route_host(self, lg, m):
+    """True top-k routing of m rows from the E-wide logits lg [m, >= E] (numpy): ids / scores [m, k], each pick's
+    static slot, the resident mask and the host-computed misses (not skipped); updates the hit and skip counters."""
+    E, k, L = HYB.E, self.top_k, self.layer_num
     t0 = time.perf_counter()
     z = lg[:, :E]
     ids = np.argpartition(-z, k, axis=1)[:, :k]
@@ -566,6 +559,25 @@ def _fused_step1(self, x, logits, B):
         st["skipped_mass"] += float(sc[drop].sum())
         miss = miss & ~drop
     HYB.st["t_route"] += time.perf_counter() - t0
+    return ids, sc, slot, res, miss
+
+
+def _fused_step1(self, x, logits, B):
+    """Host step after the router (m decode rows): true routing from the E-wide logits rows, then the crafted logits
+    rows the fused kernels rank over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
+    the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernels' top-k +
+    softmax over the selected logits then reproduce the true weights of the resident experts (the sink absorbs the
+    missed mass). x / logits: row-major [1, 1, m, *] in DRAM."""
+    E, C = HYB.E, HYB.C
+    m = int(B["shapes"]["T"])
+    if HYB.profile:
+        t0 = time.perf_counter()
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_sync"] += time.perf_counter() - t0
+    t0 = time.perf_counter()
+    lg = ttnn.to_torch(_die0(logits)).reshape(m, -1).float().numpy()
+    HYB.st["t_read"] += time.perf_counter() - t0
+    ids, sc, slot, res, miss = _route_host(self, lg, m)
     t0 = time.perf_counter()
     row = np.full((1, 1, m, C + TILE_W), HYB.filler, dtype=np.float32)
     row[..., C:] = 0.0
@@ -586,15 +598,153 @@ def _fused_step1(self, x, logits, B):
         t0 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
-        B["job"] = (
-            L,
-            xh,
-            torch.from_numpy(ids.astype(np.int64)),
-            torch.from_numpy(sc.astype(np.float32)),
-            torch.from_numpy(miss),
-        )
+        B["job"] = _job(self, xh, ids, sc, miss)
     else:
         B["job"] = None
+
+
+def _job(self, xh, ids, sc, miss):
+    return (
+        self.layer_num,
+        xh,
+        torch.from_numpy(ids.astype(np.int64)),
+        torch.from_numpy(sc.astype(np.float32)),
+        torch.from_numpy(miss),
+    )
+
+
+def _dc_consts(self):
+    """HYB_DEVCRAFT per-layer constants (replicated, DRAM tiles): P [E+32, C+32] one-hot expert -> static slot and
+    router column E (shared-expert gate) -> column C; bias [1, C+32] = filler at the slots no expert maps to (not the
+    sink); keep [1, E+32] lifts the non-expert columns above any top-k threshold; nonres [1, E] = 1 for experts with
+    no slot; sinkhot [1, C+32] = 1 at the sink slot C-1."""
+    from .seg import SEG
+
+    c = getattr(self, "_dc", None)
+    if c is not None:
+        return c
+    if SEG.capturing:
+        raise RuntimeError(f"layer {self.layer_num}: HYB_DEVCRAFT constants not built; run an eager step first")
+    E, C, L, W = HYB.E, HYB.C, self.layer_num, HYB.E + TILE_W
+    so = HYB.slot_of[L]
+    res = np.flatnonzero(so >= 0)
+    if (so[res] >= C - 1).any():
+        raise RuntimeError(f"layer {L}: a resident expert maps to slot >= C-1 (the sink): {so[res].max()}")
+    P = torch.zeros(W, C + TILE_W)
+    P[torch.from_numpy(res), torch.from_numpy(so[res].astype(np.int64))] = 1.0
+    P[E, C] = 1.0
+    mapped = torch.zeros(C, dtype=torch.bool)
+    mapped[torch.from_numpy(so[res].astype(np.int64))] = True
+    mapped[C - 1] = True
+    bias = torch.zeros(1, C + TILE_W)
+    bias[0, :C][~mapped] = HYB.filler
+    keep = torch.zeros(1, W)
+    keep[0, E:] = 1e4
+    nonres = torch.from_numpy((so < 0).astype(np.float32)).reshape(1, E)
+    sinkhot = torch.zeros(1, C + TILE_W)
+    sinkhot[0, C - 1] = 1.0
+    rep = ttnn.ReplicateTensorToMesh(self.device)
+    c = self._dc = {
+        k: ttnn.from_torch(
+            v.reshape(1, 1, *v.shape).to(torch.bfloat16),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=rep,
+        )
+        for k, v in (("P", P), ("bias", bias), ("keep", keep), ("nonres", nonres), ("sinkhot", sinkhot))
+    }
+    return c
+
+
+def _dc_craft(self, logits, m, mk):
+    """HYB_DEVCRAFT: the crafted rows from the router logits tile [1, 1, m, E+32] on the device. Per row: threshold t
+    = the k-th largest expert logit; resident experts at or above t keep their raw logit at their slot (the kernels'
+    softmax is shift-invariant), every other slot gets the filler, the sink gets mx + ln(sum over the missed top-k of
+    exp(z - mx)) (mx = the largest logit), column C the shared-expert gate logit. Returns the L1 tile [1, 1, mk, C+32].
+    """
+    c = _dc_consts(self)
+    E, k = HYB.E, self.top_k
+    dram = ttnn.DRAM_MEMORY_CONFIG
+    zE = ttnn.slice(logits, [0, 0, 0, 0], [1, 1, m, E])
+    vals, idx = ttnn.topk(zE, k=k, dim=-1, largest=True, sorted=True)
+    ttnn.deallocate(idx)
+    t = ttnn.slice(vals, [0, 0, 0, k - 1], [1, 1, m, k])
+    mx = ttnn.slice(vals, [0, 0, 0, 0], [1, 1, m, 1])
+    ttnn.deallocate(vals)
+    # sink: the missed top-k mass
+    condE = ttnn.ge(zE, t)
+    zmE = ttnn.where(condE, zE, HYB.filler)
+    ttnn.deallocate(condE)
+    ttnn.deallocate(zE)
+    sh = ttnn.sub(zmE, mx)
+    ttnn.deallocate(zmE)
+    ex = ttnn.exp(sh)
+    ttnn.deallocate(sh)
+    exm = ttnn.mul(ex, c["nonres"])
+    ttnn.deallocate(ex)
+    ssum = ttnn.sum(exm, dim=-1, keepdim=True)
+    ttnn.deallocate(exm)
+    lsum = ttnn.log(ttnn.add(ssum, 1e-30))
+    ttnn.deallocate(ssum)
+    sink = ttnn.add(lsum, mx)
+    ttnn.deallocate(lsum)
+    ttnn.deallocate(mx)
+    # resident top-k logits (and the shared gate) to their slots
+    lifted = ttnn.add(logits, c["keep"])
+    cond = ttnn.ge(lifted, t)
+    ttnn.deallocate(lifted)
+    ttnn.deallocate(t)
+    zm = ttnn.where(cond, logits, HYB.filler)
+    ttnn.deallocate(cond)
+    f = self._fused
+    slots = ttnn.matmul(zm, c["P"], compute_kernel_config=f.router_ckc, memory_config=dram)
+    ttnn.deallocate(zm)
+    sb = ttnn.add(slots, c["bias"])
+    ttnn.deallocate(slots)
+    st = ttnn.mul(sink, c["sinkhot"])
+    ttnn.deallocate(sink)
+    l1 = ttnn.L1_MEMORY_CONFIG
+    if mk == m:
+        out = ttnn.add(sb, st, memory_config=l1)
+    else:  # one row through the rows kernels: the extra rows repeat it
+        one = ttnn.add(sb, st, memory_config=dram)
+        out = ttnn.concat([one] * (mk // m), dim=2, memory_config=l1)
+        ttnn.deallocate(one)
+    ttnn.deallocate(sb)
+    ttnn.deallocate(st)
+    return out
+
+
+def _dc_read(self, x, logits, B):
+    """HYB_DEVCRAFT host step 1: queue the reads of the router logits and the MoE input rows (row-major DRAM) and
+    return at once, so the experts are queued right behind them."""
+    t0 = time.perf_counter()
+    B["dc"] = (
+        ttnn.from_device(logits, blocking=False),
+        ttnn.from_device(x, blocking=False),
+        ttnn.record_event(self.device, 0),
+    )
+    HYB.st["t_read"] += time.perf_counter() - t0
+
+
+def _dc_step2(self, B):
+    """HYB_DEVCRAFT host step 2 (the device runs the resident experts meanwhile): wait for the reads, route, compute
+    the misses, write the host partial (_host_step2)."""
+    h_lg, h_x, ev = B.pop("dc")
+    m = int(B["shapes"]["T"])
+    t0 = time.perf_counter()
+    ttnn.event_synchronize(ev)
+    lg = ttnn.to_torch(ttnn.get_device_tensors(h_lg)[0]).reshape(m, -1).float().numpy()
+    HYB.st["t_read"] += time.perf_counter() - t0
+    ids, sc, slot, res, miss = _route_host(self, lg, m)
+    if miss.any():
+        xh = ttnn.to_torch(ttnn.get_device_tensors(h_x)[0]).reshape(m, -1).to(torch.bfloat16)
+        B["job"] = _job(self, xh, ids, sc, miss)
+    else:
+        B["job"] = None
+    _host_step2(self, B)
 
 
 def _forward_fused(self, x4, orig, partial, logits=None):
@@ -611,14 +761,19 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         logits = ttnn.linear(
             x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc, memory_config=dram
         )
+    m = int(x4.shape[-2])
+    mk = _kernel_rows(m)
+    crafted = _dc_craft(self, logits, m, mk) if HYB.devcraft else None
     # the host step reads one row of each (row-major, DRAM: they stay allocated for the trace's life, no live L1)
     lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     ttnn.deallocate(logits)
     logits = lg_rm
-    m = int(x4.shape[-2])
     B = _fused_bufs(self, m)
     h_x = ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
-    if HYB.overlap:  # host experts in a second step, while the device runs the fused experts
+    if HYB.devcraft:  # reads queued behind the router, the experts right behind them; the host routes meanwhile
+        step1 = lambda: _dc_read(self, h_x, logits, B)  # noqa: E731
+        step2 = lambda: _dc_step2(self, B)  # noqa: E731
+    elif HYB.overlap:  # host experts in a second step, while the device runs the fused experts
         step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
         step2 = lambda: _host_step2(self, B)  # noqa: E731
     else:  # one host step per layer: routing + host experts, then a single device segment
@@ -627,8 +782,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     step1() if not SEG.capturing else SEG.split(step1)
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
     # the kernels read the crafted rows as an L1 BF16 tile (their face reads need L1 alignment: never a DRAM tile)
-    mk = _kernel_rows(m)
-    crafted = ttnn.to_layout(HYB.crafted_rm[mk], ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
+    if crafted is None:
+        crafted = ttnn.to_layout(HYB.crafted_rm[mk], ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
     if mk == 1:
         b = f.buf
         f.gate_up(x4, crafted, self.up_gate, sug, b.act, b.route, bias=f.bias, ep_offset=f.ep_offset)
