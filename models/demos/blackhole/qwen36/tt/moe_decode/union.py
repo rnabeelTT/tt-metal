@@ -233,7 +233,7 @@ class ExpertGateUpRows:
         self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
         self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
         assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
-        placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
+        placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)}, rows=True)
         self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
@@ -304,7 +304,7 @@ class ExpertDownRows:
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
         self.max_slots = min(num_experts, rows * k) + 1
         self.weight_dtype = weight_dtype
-        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)}, rows=True)
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
