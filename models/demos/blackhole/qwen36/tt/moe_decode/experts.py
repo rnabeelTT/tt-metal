@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import torch
 
 import ttnn
@@ -92,8 +94,69 @@ def logits_row_bytes(num_experts, router):
     return 64 * (num_experts // TILE + 1)
 
 
+_BANK_WORKERS = {}
+
+
+def _robust_readers():
+    """QWEN35_ROBUST_READERS (default 1): reader placement right for every die of the mesh (see bank_workers)."""
+    return os.environ.get("QWEN35_ROBUST_READERS", "1") == "1"
+
+
+def _device_bank_workers(mesh_device):
+    """Each die's own optimal NOC0 reader core per DRAM bank (logical coordinates), one list per die. The dies are
+    harvested differently: on this QuietBox 2 the east banks' reader column is 6 / 5 / 7 / 5 on dies 0..3."""
+    key = id(mesh_device)
+    cached = _BANK_WORKERS.get(key)
+    if cached is not None and cached[0] is mesh_device:
+        return cached[1]
+    if getattr(mesh_device, "get_num_devices", lambda: 1)() == 1:
+        per = [list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))]
+    else:
+        rows, cols = mesh_device.shape[0], mesh_device.shape[1]
+        per = []
+        for coord in (ttnn.MeshCoordinate(r, c) for r in range(rows) for c in range(cols)):
+            a = mesh_device.get_optimal_dram_bank_to_logical_worker_assignment(ttnn.NOC.NOC_0, coord)
+            per.append([a[b] for b in sorted(a)])
+    _BANK_WORKERS[key] = (mesh_device, per)
+    return per
+
+
+def _dies_agree(per):
+    return all([(c.x, c.y) for c in w] == [(c.x, c.y) for c in per[0]] for w in per)
+
+
 def bank_workers(mesh_device):
-    return list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))
+    """The reader core per DRAM bank used on every die (one program serves the whole mesh). A die's optimal reader for a
+    bank is the first unharvested worker column east of the bank's DRAM column; logical columns skip harvested ones, so
+    one logical column is a different physical column per die, and a reader physically WEST of a die's east DRAM column
+    gets its data the long way round the row (gpt-oss measured 2.85 vs 2.38 ms per token with die 0's placement). Robust
+    (after tt-metal #61548): per bank the largest logical column any die wants, which is at or east of the bank on every
+    die. Dies that agree (and QWEN35_ROBUST_READERS=0) keep die 0's placement exactly."""
+    per = _device_bank_workers(mesh_device)
+    if not _robust_readers() or _dies_agree(per):
+        return list(per[0])
+    out = []
+    for b in range(len(per[0])):
+        ys = {w[b].y for w in per}
+        assert len(ys) == 1, f"bank {b}: optimal reader rows differ across dies: {ys}"
+        out.append(ttnn.CoreCoord(max(w[b].x for w in per), ys.pop()))
+    return out
+
+
+def bank_columns(mesh_device, wx):
+    """Candidate reader columns for a bank whose (bank_workers) reader sits at column wx, nearest first. Dies that agree:
+    +dx before -dx around wx (the original placement). Otherwise readers stay on their bank's side of the DRAM columns on
+    every die: east banks grow east only (x >= wx); west banks stay below the smallest column any die gives an east bank
+    (a west-bank reader at or past it would sit east of the east DRAM column on that die)."""
+    grid_x = mesh_device.compute_with_storage_grid_size().x
+    per = _device_bank_workers(mesh_device)
+    if not _robust_readers() or _dies_agree(per):
+        return [wx + dx for d in range(grid_x) for dx in ((d, -d) if d else (0,)) if 0 <= wx + dx < grid_x]
+    west = min(c.x for w in per for c in w)
+    east = min(c.x for w in per for c in w if c.x > west)
+    if wx >= east:
+        return list(range(wx, grid_x))
+    return sorted(range(0, east), key=lambda x: (abs(x - wx), x < wx))
 
 
 _NOC_COORDS = {}
@@ -150,7 +213,8 @@ def place_along_rows(mesh_device, per_bank, used=None):
     out = {}
     for b, n in per_bank.items():
         w = workers[b]
-        cand = [(w.x + dx, w.y + dy) for dy in (0, -1, 1, -2, 2) for d in range(grid.x) for dx in ((d, -d) if d else (0,))]
+        xs = bank_columns(mesh_device, w.x)
+        cand = [(x, w.y + dy) for dy in (0, -1, 1, -2, 2) for x in xs]
         cores = []
         for x, y in cand:
             if len(cores) == n:
@@ -180,12 +244,10 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
         w = workers[b]
         y = w.y - 1 if w.y > 0 else w.y + 1
         cores = []
-        for d in range(grid.x):
-            for dx in ((d, -d) if d else (0,)):
-                x = w.x + dx
-                if len(cores) < per_bank[b] and 0 <= x < grid.x and (x, y) not in used:
-                    used.add((x, y))
-                    cores.append(ttnn.CoreCoord(x, y))
+        for x in bank_columns(mesh_device, w.x):
+            if len(cores) < per_bank[b] and (x, y) not in used:
+                used.add((x, y))
+                cores.append(ttnn.CoreCoord(x, y))
         assert len(cores) == per_bank[b], f"no room for {per_bank[b]} cores near bank {b}"
         placed[b] = cores
     placed.update(place_along_rows(mesh_device, {b: n for b, n in per_bank.items() if b not in noc1}, used=used))
