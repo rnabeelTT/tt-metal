@@ -25,7 +25,7 @@ import ttnn
 
 from .experts import (
     KERNEL_DIR, RING_BYTES, ROUTERS, TILE, TILE_BYTES, _cb, _ep_defines, _kernels, _page_bytes, _range_set, bank_workers,
-    gu_layout, gu_ring, logits_row_bytes, place_along_rows,
+    bank_columns, gu_layout, gu_ring, logits_row_bytes, place_along_rows,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -258,7 +258,7 @@ class ExpertGateUpRows:
                 if b in self.noc1_banks:
                     w = workers[b]
                     y = w.y - 1 if w.y > 0 else w.y + 1
-                    cand = [(w.x + dx, y) for d in range(grid.x) for dx in ((d, -d) if d else (0,))]
+                    cand = [(x, y) for x in bank_columns(mesh_device, w.x)]
                     cores = []
                     for x, yy in cand:
                         if len(cores) == readers:
