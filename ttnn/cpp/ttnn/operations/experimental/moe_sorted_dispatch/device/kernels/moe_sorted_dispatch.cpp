@@ -88,75 +88,92 @@ void kernel_main() {
     }
     noc.async_read_barrier();
 
-    volatile tt_l1_ptr uint16_t* ids16 = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(ids_l1);
-    volatile tt_l1_ptr uint32_t* ids32 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ids_l1);
-    volatile tt_l1_ptr uint16_t* scores = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(sc_l1);
-    // element offset of (token t, slot j) inside the tiled buffers
-    auto tile_elem = [](uint32_t t, uint32_t j) -> uint32_t {
-        const uint32_t rr = t & 31;
-        const uint32_t face = ((rr >> 4) << 1) | (j >> 4);
-        return (t >> 5) * 1024 + face * 256 + (rr & 15) * 16 + (j & 15);
-    };
-    auto id_at = [&](uint32_t t, uint32_t j) -> uint32_t {
-        const uint32_t o = tile_elem(t, j);
-        return ids_elem_bytes == 2 ? static_cast<uint32_t>(ids16[o]) : ids32[o];
-    };
-    volatile tt_l1_ptr uint32_t* src_tok = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(src_l1);
-    volatile tt_l1_ptr uint16_t* weights = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(w_l1);
-    volatile tt_l1_ptr uint16_t* group_ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(gid_l1);
-    volatile tt_l1_ptr uint32_t* undispatch = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(und_l1);
-    volatile tt_l1_ptr uint32_t* counts = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scratch_l1);
-    volatile tt_l1_ptr uint32_t* offsets = counts + E;
-    volatile tt_l1_ptr uint32_t* ranks = offsets + E;
+    asm volatile("" ::: "memory");  // the L1 inputs are complete; plain (non-volatile) accesses from here on
+    // The pairs are walked in tile order (tile, row, slot) == token-major order (t, j) since k <= 32 fits one tile
+    // column: no per-pair tile-offset arithmetic, and the expert ids are decoded once into the undispatch stick
+    // (token-major, uint32), which the scatter pass then overwrites in place with each pair's destination row.
+    const tt_l1_ptr uint16_t* ids16 = reinterpret_cast<const tt_l1_ptr uint16_t*>(ids_l1);
+    const tt_l1_ptr uint32_t* ids32 = reinterpret_cast<const tt_l1_ptr uint32_t*>(ids_l1);
+    const tt_l1_ptr uint16_t* scores = reinterpret_cast<const tt_l1_ptr uint16_t*>(sc_l1);
+    tt_l1_ptr uint32_t* src_tok = reinterpret_cast<tt_l1_ptr uint32_t*>(src_l1);
+    tt_l1_ptr uint16_t* weights = reinterpret_cast<tt_l1_ptr uint16_t*>(w_l1);
+    tt_l1_ptr uint16_t* group_ids = reinterpret_cast<tt_l1_ptr uint16_t*>(gid_l1);
+    tt_l1_ptr uint32_t* undispatch = reinterpret_cast<tt_l1_ptr uint32_t*>(und_l1);
+    tt_l1_ptr uint32_t* counts = reinterpret_cast<tt_l1_ptr uint32_t*>(scratch_l1);
+    tt_l1_ptr uint32_t* offsets = counts + E;  // padded start row of every expert
+    tt_l1_ptr uint32_t* cursor = offsets + E;  // next free row of every expert
 
     for (uint32_t e = 0; e < E; ++e) {
         counts[e] = 0;
-        ranks[e] = 0;
     }
-    for (uint32_t t = 0; t < T; ++t) {
-        for (uint32_t j = 0; j < K; ++j) {
-            const uint32_t e = id_at(t, j);
-            if (e < E) {
-                counts[e] = counts[e] + 1;
+    // ---- pass 1: decode + count. Element (r, c) of a tile sits at face ((r>>4)<<1 | c>>4), offset (r&15)*16 + (c&15)
+    {
+        uint32_t i = 0;
+        for (uint32_t tile = 0; tile < num_tiles; ++tile) {
+            const uint32_t rows = (tile + 1) * 32 <= T ? 32 : T - tile * 32;
+            for (uint32_t rr = 0; rr < rows; ++rr) {
+                const uint32_t row_base = tile * 1024 + ((rr >> 4) << 9) + ((rr & 15) << 4);
+                for (uint32_t j = 0; j < K; ++j, ++i) {
+                    const uint32_t o = row_base + ((j >> 4) << 8) + (j & 15);
+                    const uint32_t e = ids_elem_bytes == 2 ? static_cast<uint32_t>(ids16[o]) : ids32[o];
+                    undispatch[i] = e;
+                    if (e < E) {
+                        counts[e] += 1;
+                    }
+                }
             }
         }
     }
-    // padded per-expert offsets and the expert of every group (padding groups: 0)
-    for (uint32_t g = 0; g < G; ++g) {
-        group_ids[g] = static_cast<uint16_t>(pad_group_id);
-    }
+    // ---- padded per-expert offsets, the expert of every group, and the padding rows (token 0, weight 0) only
     uint32_t off = 0;
     for (uint32_t e = 0; e < E; ++e) {
         offsets[e] = off;
-        const uint32_t groups_e = (counts[e] + GS - 1) / GS;
+        cursor[e] = off;
+        const uint32_t c = counts[e];
+        const uint32_t groups_e = (c + GS - 1) / GS;
         const uint32_t g0 = off / GS;
         for (uint32_t g = 0; g < groups_e; ++g) {
             group_ids[g0 + g] = static_cast<uint16_t>(e);
         }
-        off += groups_e * GS;
+        const uint32_t end = off + groups_e * GS;
+        for (uint32_t d = off + c; d < end; ++d) {
+            src_tok[d] = 0;
+            weights[d] = 0;
+        }
+        off = end;
     }
-    // padding rows: token 0, weight 0
-    for (uint32_t d = 0; d < RD; ++d) {
+    for (uint32_t g = off / GS; g < G; ++g) {
+        group_ids[g] = static_cast<uint16_t>(pad_group_id);
+    }
+    for (uint32_t d = off; d < RD; ++d) {
         src_tok[d] = 0;
         weights[d] = 0;
     }
-    // scatter every real pair to its row
-    uint32_t i = 0;
-    for (uint32_t t = 0; t < T; ++t) {
-        for (uint32_t j = 0; j < K; ++j, ++i) {
-            const uint32_t e = id_at(t, j);
-            uint32_t d;
-            if (e < E) {
-                d = offsets[e] + ranks[e];
-                ranks[e] = ranks[e] + 1;
-                src_tok[d] = t;
-                weights[d] = scores[tile_elem(t, j)];
-            } else {
-                d = RD - GS;  // sentinel pairs land in the trailing padding group (never read back)
+    // ---- pass 2: scatter every real pair to its row (stable: rows of one expert keep token order)
+    {
+        uint32_t i = 0;
+        for (uint32_t tile = 0; tile < num_tiles; ++tile) {
+            const uint32_t rows = (tile + 1) * 32 <= T ? 32 : T - tile * 32;
+            for (uint32_t rr = 0; rr < rows; ++rr) {
+                const uint32_t t = tile * 32 + rr;
+                const uint32_t row_base = tile * 1024 + ((rr >> 4) << 9) + ((rr & 15) << 4);
+                for (uint32_t j = 0; j < K; ++j, ++i) {
+                    const uint32_t e = undispatch[i];
+                    uint32_t d;
+                    if (e < E) {
+                        d = cursor[e];
+                        cursor[e] = d + 1;
+                        src_tok[d] = t;
+                        weights[d] = scores[row_base + ((j >> 4) << 8) + (j & 15)];
+                    } else {
+                        d = RD - GS;  // sentinel pairs land in the trailing padding group (never read back)
+                    }
+                    undispatch[i] = d;
+                }
             }
-            undispatch[i] = d;
         }
     }
+    asm volatile("" ::: "memory");
 
     // ---- outputs (one stick each)
     noc.async_write(CoreLocalMem<uint32_t>(src_l1), s_src, src_page, {}, {.page_id = 0});
